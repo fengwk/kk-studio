@@ -11,8 +11,8 @@ import java.util.Optional;
  * 一次 Work mailbox target 的持久化当前调度状态。
  *
  * <p>调度跃迁的唯一实现是 {@link WorkState}；本类型只保留 Harness 的 typed target 与 {@link EnvironmentId}
- * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link
- * WorkTargetType#TOOL} 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。
+ * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link WorkTargetType#TOOL}
+ * 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。
  *
  * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
  * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。
@@ -32,7 +32,12 @@ public record Work(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
     // 复用公共状态机的字段不变量，避免 Harness 维护第二份 wake/lease 校验。
-    state();
+    new WorkState(
+        availableAt,
+        wakeVersion,
+        leaseToken,
+        leaseUntil,
+        requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
   }
 
   /** 5 参数便捷构造：无环境亲和性（THREAD/MODEL 或 server-side TOOL）。 */
@@ -90,8 +95,7 @@ public record Work(
         target,
         state()
             .request(
-                now,
-                newRequiredEnvironmentId == null ? null : newRequiredEnvironmentId.value()));
+                now, newRequiredEnvironmentId == null ? null : newRequiredEnvironmentId.value()));
   }
 
   /**
@@ -115,9 +119,7 @@ public record Work(
    * Optional#empty()}）；过期 claim 仅清除 lease，保留行以便更新的 wake 仍可见；未来的 claim 视为非法。保留环境亲和性。
    */
   public Optional<Work> complete(String token, long claimedWakeVersion, Instant now) {
-    return state()
-        .complete(token, claimedWakeVersion, now)
-        .map(next -> from(target, next));
+    return state().complete(token, claimedWakeVersion, now).map(next -> from(target, next));
   }
 
   /**

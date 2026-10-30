@@ -437,28 +437,16 @@ public class IssueReconciler {
     return outcome;
   }
 
-  /**
-   * 权威 Store 在丢失所有权时拒绝写入。这里保持旧队列的布尔结果：成功重排或删除当前 wake 为 true，保留更新 wake 或已失权为 false。
-   */
+  /** 成功重排或删除当前 wake 为 true；保留更新 wake 或已经失权为 false。 */
   private boolean finishClaim(WorkClaim claim, boolean keepPolling, Duration delay) {
-    try {
-      if (keepPolling) {
-        issueWorkQueue.reschedule(claim, delay);
-        return true;
-      }
-      return issueWorkQueue.complete(claim).isEmpty();
-    } catch (IllegalArgumentException | IllegalStateException lost) {
+    if (issueWorkQueue.lockClaimed(claim).isEmpty()) {
       return false;
     }
-  }
-
-  /** 续租未实际延长或已失权都视为不再持有完整租期。 */
-  private boolean renewClaim(WorkClaim claim) {
-    try {
-      return issueWorkQueue.renew(claim, properties.getLeaseDuration());
-    } catch (IllegalArgumentException | IllegalStateException lost) {
-      return false;
+    if (keepPolling) {
+      issueWorkQueue.reschedule(claim, delay);
+      return true;
     }
+    return issueWorkQueue.complete(claim).isEmpty();
   }
 
   private void validateClaim(WorkClaim claim) {
@@ -486,9 +474,10 @@ public class IssueReconciler {
 
   /** 领取即续租：由数据库保证至少剩余一个完整租期且不缩短当前 lease，并持有 work 行锁到 finish。 */
   private void heartbeat(WorkClaim claim) {
-    if (!renewClaim(claim)) {
+    if (issueWorkQueue.lockClaimed(claim).isEmpty()) {
       throw new IllegalStateException("issue work lease is no longer held: " + claim.targetId());
     }
+    issueWorkQueue.renew(claim, properties.getLeaseDuration());
   }
 
   /** 判断本次 Run 的活动执行时长是否已耗尽。 */

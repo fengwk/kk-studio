@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.common.work.WorkState;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -43,10 +42,10 @@ public final class DurableWorkStore {
           new DurableWork(
               resultSet.getObject("target_id", UUID.class),
               new WorkState(
-                  instant(resultSet.getObject("available_at", OffsetDateTime.class)),
+                  instant(resultSet.getTimestamp("available_at")),
                   resultSet.getLong("wake_version"),
                   resultSet.getString("lease_token"),
-                  instant(resultSet.getObject("lease_until", OffsetDateTime.class)),
+                  instant(resultSet.getTimestamp("lease_until")),
                   resultSet.getObject("required_environment_id", UUID.class)));
 
   private static final RowMapper<Row> ROW_MAPPER =
@@ -55,12 +54,12 @@ public final class DurableWorkStore {
               new DurableWork(
                   resultSet.getObject("target_id", UUID.class),
                   new WorkState(
-                      instant(resultSet.getObject("available_at", OffsetDateTime.class)),
+                      instant(resultSet.getTimestamp("available_at")),
                       resultSet.getLong("wake_version"),
                       resultSet.getString("lease_token"),
-                      instant(resultSet.getObject("lease_until", OffsetDateTime.class)),
+                      instant(resultSet.getTimestamp("lease_until")),
                       resultSet.getObject("required_environment_id", UUID.class))),
-              instant(resultSet.getObject("database_now", OffsetDateTime.class)));
+              instant(resultSet.getTimestamp("database_now")));
 
   private static final String SELECT_WORK =
       "select " + COLUMNS + " from durable_work where target_type = ? and target_id = ?";
@@ -159,16 +158,12 @@ public final class DurableWorkStore {
     return request(targetId, Duration.ZERO, null);
   }
 
-  /**
-   * 请求一次可延迟的 wake。新行 due 为数据库此刻加 {@code delay}；已有行递增 wakeVersion，due 取更早值并保留当前租约。
-   */
+  /** 请求一次可延迟的 wake。新行 due 为数据库此刻加 {@code delay}；已有行递增 wakeVersion，due 取更早值并保留当前租约。 */
   public DurableWork request(UUID targetId, Duration delay) {
     return request(targetId, delay, null);
   }
 
-  /**
-   * 请求一次立即 wake，并可选携带环境亲和性；已冻结的亲和性只允许传 null（不改变）或相同值。
-   */
+  /** 请求一次立即 wake，并可选携带环境亲和性；已冻结的亲和性只允许传 null（不改变）或相同值。 */
   public DurableWork request(UUID targetId, UUID requiredEnvironmentId) {
     return request(targetId, Duration.ZERO, requiredEnvironmentId);
   }
@@ -383,26 +378,6 @@ public final class DurableWorkStore {
         arguments);
   }
 
-  /**
-   * 删除某个 Canvas 下全部 CANVAS_RUN 调度行。
-   *
-   * <p>这是 Canvas 级联删除使用的唯一 {@code durable_work} 写语句；其它 target type 没有对应的领域父表。
-   */
-  public int deleteByCanvas(UUID canvasId) {
-    if (!"CANVAS_RUN".equals(targetType)) {
-      throw new IllegalStateException("deleteByCanvas requires target type CANVAS_RUN");
-    }
-    return jdbc.update(
-        """
-        delete from durable_work w
-        using canvas_function_run r, canvas_node n
-        where w.target_type = ? and w.target_id = r.node_id
-          and r.node_id = n.id and n.canvas_id = ?
-        """,
-        targetType,
-        Objects.requireNonNull(canvasId, "canvasId"));
-  }
-
   private Row lockRow(UUID targetId) {
     return jdbc.queryOne(SELECT_ROW_FOR_UPDATE, ROW_MAPPER, targetType, targetId)
         .orElseThrow(
@@ -414,8 +389,7 @@ public final class DurableWorkStore {
   private Instant databaseNow() {
     return jdbc.queryOne(
             "select " + NOW + " as database_now",
-            (resultSet, rowNumber) ->
-                instant(resultSet.getObject("database_now", OffsetDateTime.class)))
+            (resultSet, rowNumber) -> instant(resultSet.getTimestamp("database_now")))
         .orElseThrow(() -> new IllegalStateException("statement_timestamp returned no row"));
   }
 
@@ -435,15 +409,14 @@ public final class DurableWorkStore {
     }
   }
 
-  /** 行在数据库时钟下已到期且无有效租约时才发提示；未来 due 或仍被租约持有的行不发。 */
+  /** due 已到时发送提示；新 wake 即使到达有效租约期间也必须可见，未来 due 留给轮询。 */
   private void notifyIfClaimable(UUID targetId) {
     jdbc.queryOne(
         "select pg_notify('"
             + CHANNEL
             + "', target_type) as ignored, true as sent from durable_work"
             + " where target_type = ? and target_id = ?"
-            + " and available_at <= clock_timestamp()"
-            + " and (lease_until is null or lease_until <= clock_timestamp())",
+            + " and available_at <= clock_timestamp()",
         (resultSet, rowNumber) -> resultSet.getBoolean("sent"),
         targetType,
         targetId);
@@ -475,7 +448,7 @@ public final class DurableWorkStore {
     return duration;
   }
 
-  private static Instant instant(OffsetDateTime value) {
+  private static Instant instant(Timestamp value) {
     return value == null ? null : value.toInstant();
   }
 

@@ -32,7 +32,7 @@ import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
@@ -59,7 +59,7 @@ import java.util.UUID;
 class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueReconciler reconciler;
-  @Autowired private DurableWorkQueue issueWorkQueue;
+  @Autowired private DurableWorkStore issueWorkQueue;
   @Autowired private IssueEvidenceService evidenceService;
   @Autowired private StorageUploadService uploadService;
   @Autowired private StorageBlobManager blobManager;
