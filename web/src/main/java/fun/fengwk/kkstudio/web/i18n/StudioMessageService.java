@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.Objects;
 import java.util.ResourceBundle;
+import java.util.ResourceBundle.Control;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -142,7 +143,8 @@ public class StudioMessageService {
   }
 
   private static ResourceBundle createBundle(Locale locale, ClassLoader classLoader) {
-    return ResourceBundle.getBundle(BASE_NAME, locale, classLoader);
+    return ResourceBundle.getBundle(
+        BASE_NAME, locale, classLoader, Control.getNoFallbackControl(Control.FORMAT_PROPERTIES));
   }
 
   private static String resolve(ResourceBundle bundle, String key, Map<String, ?> context) {

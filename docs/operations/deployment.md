@@ -494,8 +494,9 @@ tag 不同：
 镜像自身的 `chown` 也不代替挂载卷的初始化。该卷不与任何其它 Studio 实例共享，保存退出确认 journal
 供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。
 
-镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志配置由 Platform 引入的 convention4j
-Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
+镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志由 Platform 的
+[`logback-spring.xml`](../../platform/runtime/src/main/resources/logback-spring.xml) 与运行环境共同配置。
+排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
 控制台只有 JVM 或启动横幅不代表没有应用错误。若日志写文件，按运行配置定位文件，再读取并脱敏。
 需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限，
 宿主权限按部署策略收紧；首次挂载不会自动迁移旧容器里的文件，需在替换前另行保存。

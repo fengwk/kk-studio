@@ -155,6 +155,8 @@ class TracingContextPropagationTest {
           assertEquals(child.context().spanId(), taskContext[1]);
           assertEquals(child.context().spanId(), tracer.currentSpan().context().spanId());
           assertEquals(child.context().spanId(), MDC.get("spanId"));
+        } finally {
+          child.end();
         }
         assertEquals(root.context().spanId(), tracer.currentSpan().context().spanId());
         assertEquals(root.context().spanId(), MDC.get("spanId"));
