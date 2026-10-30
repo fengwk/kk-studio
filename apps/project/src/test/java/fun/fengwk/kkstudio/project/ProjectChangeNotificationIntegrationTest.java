@@ -11,7 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.project.repo.impl.PostgresqlProjectChangeNotifier;
+import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 
 import javax.sql.DataSource;
 
@@ -24,7 +24,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
-  @Autowired private PostgresqlProjectChangeNotifier notifier;
+  @Autowired private ProjectChangeNotifier notifier;
 
   /** Issue 及其活动写入可合并为一次提交后的定向提示；未提交和回滚均不可见。 */
   @Test

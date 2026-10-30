@@ -1,24 +1,68 @@
 package fun.fengwk.kkstudio.project.repo;
 
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code project_issue_agent_thread} 稳定归属的持久化端口。
+ * {@code project_issue_agent_thread} 稳定归属持久化。
  *
  * <p>绑定只保存 {@code (issueId, agentName) -> threadId}，Session 由 Thread
  * 解析；绑定不可重绑，插入冲突必须显式失败而不是静默复用别的绑定。 删除必须显式进行：Run 对绑定的复合 FK 是 RESTRICT，因此存在 Run 时删除会失败，绝不绕过业务清理硬删已绑定的
  * Thread 与 Session。
  */
-public interface IssueAgentThreadRepository {
+@Repository
+public class IssueAgentThreadRepository {
+
+  private static final String COLUMNS = "issue_id, agent_name, thread_id";
+
+  private static final RowMapper<IssueAgentThread> ROW_MAPPER =
+      (resultSet, rowNumber) ->
+          new IssueAgentThread(
+              ProjectRows.uuid(resultSet, "issue_id"),
+              resultSet.getString("agent_name"),
+              ProjectRows.uuid(resultSet, "thread_id"));
+
+  private final JdbcClient jdbc;
+  private final ProjectChangeNotifier notifier;
+
+  public IssueAgentThreadRepository(JdbcClient jdbc, ProjectChangeNotifier notifier) {
+    this.jdbc = jdbc;
+    this.notifier = notifier;
+  }
 
   /** 读取稳定绑定；不存在返回 {@code null}。 */
-  IssueAgentThread findByIssueIdAndAgentName(UUID issueId, String agentName);
+  public IssueAgentThread findByIssueIdAndAgentName(UUID issueId, String agentName) {
+    return jdbc.sql(
+            "select "
+                + COLUMNS
+                + " from project_issue_agent_thread"
+                + " where issue_id = :issueId and agent_name = :agentName")
+        .param("issueId", issueId)
+        .param("agentName", agentName)
+        .query(ROW_MAPPER)
+        .optional()
+        .orElse(null);
+  }
 
   /** 读取该 Issue 的全部稳定绑定：Thread 查询面按 Agent 名称顺序返回，不泄漏别的 Issue。 */
-  List<IssueAgentThread> listByIssueId(UUID issueId);
+  public List<IssueAgentThread> listByIssueId(UUID issueId) {
+    Objects.requireNonNull(issueId, "issueId");
+    return jdbc.sql(
+            "select "
+                + COLUMNS
+                + " from project_issue_agent_thread where issue_id = :issueId"
+                + " order by agent_name asc")
+        .param("issueId", issueId)
+        .query(ROW_MAPPER)
+        .list();
+  }
 
   /**
    * 按 Harness Thread 反向读取稳定绑定；该 Thread 未绑定时返回 {@code null}。
@@ -26,7 +70,15 @@ public interface IssueAgentThreadRepository {
    * <p>Thread 身份全局唯一（{@code uk_project_issue_agent_thread_thread}），因此这是产品控制面（Turn 规划与交接）把 Harness
    * Thread 解析回唯一 Issue+Agent 归属的唯一入口；不能靠 Session 或阶段字符串推断归属。
    */
-  IssueAgentThread findByThreadId(UUID threadId);
+  public IssueAgentThread findByThreadId(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return jdbc.sql(
+            "select " + COLUMNS + " from project_issue_agent_thread where thread_id = :threadId")
+        .param("threadId", threadId)
+        .query(ROW_MAPPER)
+        .optional()
+        .orElse(null);
+  }
 
   /**
    * 插入稳定绑定；同一 {@code (issueId, agentName)} 或同一 Thread 已被绑定时抛 {@code
@@ -35,10 +87,39 @@ public interface IssueAgentThreadRepository {
    * <p>该写入由 Issue+Agent 的产品接受路径在 Harness NEW_SESSION 接受返回后、同一物理事务内执行（设计 §7.1）：此时 {@code
    * harness_thread} 行已存在，行内复合 FK 立即成立，因此不需要延迟 FK 或预创建空会话。
    */
-  boolean insert(IssueAgentThread binding);
+  public boolean insert(IssueAgentThread binding) {
+    Objects.requireNonNull(binding, "binding");
+    ProjectChangeNotifier.requireTransaction();
+    boolean changed =
+        jdbc.sql(
+                    "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
+                        + " values (:issueId, :agentName, :threadId)")
+                .param("issueId", binding.issueId())
+                .param("agentName", binding.agentName())
+                .param("threadId", binding.threadId())
+                .update()
+            == 1;
+    if (changed) {
+      notifier.issueChanged(binding.issueId());
+    }
+    return changed;
+  }
 
   /** 删除稳定绑定并返回删除行数（深删除时必须先于 harness_thread 行删除）。 */
-  int deleteByIssueIdAndAgentName(UUID issueId, String agentName);
+  public int deleteByIssueIdAndAgentName(UUID issueId, String agentName) {
+    ProjectChangeNotifier.requireTransaction();
+    int changed =
+        jdbc.sql(
+                "delete from project_issue_agent_thread"
+                    + " where issue_id = :issueId and agent_name = :agentName")
+            .param("issueId", issueId)
+            .param("agentName", agentName)
+            .update();
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
+  }
 
   /**
    * 判定一个 Harness Thread 是否属于任何 Issue+Agent 稳定归属：包含同一 Session 的兄弟分支。
@@ -46,5 +127,18 @@ public interface IssueAgentThreadRepository {
    * <p>只读取持久化归属事实（{@code project_issue_agent_thread} 与其 Harness Session 归属），不触达运行中的 Runtime；Thread
    * 不存在或没有任何归属都返回 false，绝不猜成别的 owner。
    */
-  boolean isIssueAgentBranch(UUID threadId);
+  public boolean isIssueAgentBranch(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return jdbc.sql(
+            "select exists("
+                + " select 1"
+                + " from project_issue_agent_thread binding"
+                + " join harness_thread thread on thread.id = binding.thread_id"
+                + " where binding.thread_id = :threadId"
+                + " or thread.session_id ="
+                + " (select session_id from harness_thread where id = :threadId))")
+        .param("threadId", threadId)
+        .query((resultSet, rowNumber) -> resultSet.getBoolean(1))
+        .single();
+  }
 }
