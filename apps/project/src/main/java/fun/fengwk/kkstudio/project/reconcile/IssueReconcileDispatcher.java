@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.controller;
+package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -13,7 +13,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
 /**
- * Issue Controller 的有界 Work 调度器。
+ * Issue Reconcile 的有界 Work 调度器。
  *
  * <p>职责边界：dispatcher 只负责 {@code durable_work} 中 ISSUE 行的 claim、bounded handoff、合并 wake、periodic
  * poll 与 stop 生命周期，绝不读取 Issue/Project 业务状态；业务状态由 {@link IssueReconciler} 在行锁与租约 fencing 保护下推进。
@@ -23,22 +23,22 @@ import java.util.function.Function;
  * 提供；本类只注入 Issue 专有的 claim、reconciler handoff 与 lease 围栏归还。
  */
 @Slf4j
-public final class IssueControllerDispatcher implements AutoCloseable {
+public final class IssueReconcileDispatcher implements AutoCloseable {
 
-  /** Issue Controller 在 {@code durable_work} 上的 target type。 */
+  /** Issue Reconcile 在 {@code durable_work} 上的 target type。 */
   public static final String TARGET_TYPE = "ISSUE";
 
-  private static final String NAME = "issue controller dispatcher";
+  private static final String NAME = "issue reconcile dispatcher";
 
   private final DurableWorkQueue workQueue;
   private final Function<WorkClaim, IssueReconcileOutcome> reconciler;
-  private final IssueControllerProperties properties;
+  private final IssueReconcileProperties properties;
   private final BoundedWorkDispatcher<WorkClaim> dispatcher;
 
-  public IssueControllerDispatcher(
+  public IssueReconcileDispatcher(
       DurableWorkQueue workQueue,
       IssueReconciler reconciler,
-      IssueControllerProperties properties,
+      IssueReconcileProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
@@ -51,10 +51,10 @@ public final class IssueControllerDispatcher implements AutoCloseable {
         pollScheduler);
   }
 
-  IssueControllerDispatcher(
+  IssueReconcileDispatcher(
       DurableWorkQueue workQueue,
       Function<WorkClaim, IssueReconcileOutcome> reconciler,
-      IssueControllerProperties properties,
+      IssueReconcileProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {

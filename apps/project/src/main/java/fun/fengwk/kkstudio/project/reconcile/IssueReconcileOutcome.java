@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.controller;
+package fun.fengwk.kkstudio.project.reconcile;
 
 /** Reconcile 单次确定性动作的结果类型。 */
 public enum IssueReconcileOutcome {

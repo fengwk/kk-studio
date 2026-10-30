@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.controller;
+package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -7,10 +7,10 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Duration;
 
-/** Issue Controller 的容量、租约与调度控制部署级配置。 */
+/** Issue Reconcile 的容量、租约与调度控制部署级配置。 */
 @Data
-@ConfigurationProperties(prefix = "kk-studio.project.controller")
-public class IssueControllerProperties {
+@ConfigurationProperties(prefix = "kk-studio.project.reconcile")
+public class IssueReconcileProperties {
 
   public static final Duration DEFAULT_LEASE_DURATION = Duration.ofSeconds(30);
   public static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(1);
@@ -43,7 +43,7 @@ public class IssueControllerProperties {
     public int getConcurrency() {
       if (concurrency < 1) {
         throw new IllegalArgumentException(
-            "kk-studio.project.controller.worker.concurrency must be at least 1");
+            "kk-studio.project.reconcile.worker.concurrency must be at least 1");
       }
       return concurrency;
     }
@@ -51,7 +51,7 @@ public class IssueControllerProperties {
     public void setConcurrency(int concurrency) {
       if (concurrency < 1) {
         throw new IllegalArgumentException(
-            "kk-studio.project.controller.worker.concurrency must be at least 1");
+            "kk-studio.project.reconcile.worker.concurrency must be at least 1");
       }
       this.concurrency = concurrency;
     }
@@ -59,7 +59,7 @@ public class IssueControllerProperties {
     public int getQueueCapacity() {
       if (queueCapacity < 1) {
         throw new IllegalArgumentException(
-            "kk-studio.project.controller.worker.queue-capacity must be at least 1");
+            "kk-studio.project.reconcile.worker.queue-capacity must be at least 1");
       }
       return queueCapacity;
     }
@@ -67,76 +67,74 @@ public class IssueControllerProperties {
     public void setQueueCapacity(int queueCapacity) {
       if (queueCapacity < 1) {
         throw new IllegalArgumentException(
-            "kk-studio.project.controller.worker.queue-capacity must be at least 1");
+            "kk-studio.project.reconcile.worker.queue-capacity must be at least 1");
       }
       this.queueCapacity = queueCapacity;
     }
   }
 
   public Duration getLeaseDuration() {
-    return validateDuration(leaseDuration, "kk-studio.project.controller.lease-duration");
+    return validateDuration(leaseDuration, "kk-studio.project.reconcile.lease-duration");
   }
 
   public void setLeaseDuration(Duration leaseDuration) {
     this.leaseDuration =
-        validateDuration(leaseDuration, "kk-studio.project.controller.lease-duration");
+        validateDuration(leaseDuration, "kk-studio.project.reconcile.lease-duration");
   }
 
   public Duration getPollInterval() {
-    return validateDuration(pollInterval, "kk-studio.project.controller.poll-interval");
+    return validateDuration(pollInterval, "kk-studio.project.reconcile.poll-interval");
   }
 
   public void setPollInterval(Duration pollInterval) {
-    this.pollInterval =
-        validateDuration(pollInterval, "kk-studio.project.controller.poll-interval");
+    this.pollInterval = validateDuration(pollInterval, "kk-studio.project.reconcile.poll-interval");
   }
 
   public Duration getRejectionDelay() {
-    return validateDuration(rejectionDelay, "kk-studio.project.controller.rejection-delay");
+    return validateDuration(rejectionDelay, "kk-studio.project.reconcile.rejection-delay");
   }
 
   public void setRejectionDelay(Duration rejectionDelay) {
     this.rejectionDelay =
-        validateDuration(rejectionDelay, "kk-studio.project.controller.rejection-delay");
+        validateDuration(rejectionDelay, "kk-studio.project.reconcile.rejection-delay");
   }
 
   public Duration getRetryDelay() {
-    return validateDuration(retryDelay, "kk-studio.project.controller.retry-delay");
+    return validateDuration(retryDelay, "kk-studio.project.reconcile.retry-delay");
   }
 
   public void setRetryDelay(Duration retryDelay) {
-    this.retryDelay = validateDuration(retryDelay, "kk-studio.project.controller.retry-delay");
+    this.retryDelay = validateDuration(retryDelay, "kk-studio.project.reconcile.retry-delay");
   }
 
   public Duration getActiveDelay() {
-    return validateDuration(activeDelay, "kk-studio.project.controller.active-delay");
+    return validateDuration(activeDelay, "kk-studio.project.reconcile.active-delay");
   }
 
   public void setActiveDelay(Duration activeDelay) {
-    this.activeDelay = validateDuration(activeDelay, "kk-studio.project.controller.active-delay");
+    this.activeDelay = validateDuration(activeDelay, "kk-studio.project.reconcile.active-delay");
   }
 
   public Duration getBlockedDelay() {
-    return validateDuration(blockedDelay, "kk-studio.project.controller.blocked-delay");
+    return validateDuration(blockedDelay, "kk-studio.project.reconcile.blocked-delay");
   }
 
   public void setBlockedDelay(Duration blockedDelay) {
-    this.blockedDelay =
-        validateDuration(blockedDelay, "kk-studio.project.controller.blocked-delay");
+    this.blockedDelay = validateDuration(blockedDelay, "kk-studio.project.reconcile.blocked-delay");
   }
 
   public Duration getRunTimeout() {
-    return validateDuration(runTimeout, "kk-studio.project.controller.run-timeout");
+    return validateDuration(runTimeout, "kk-studio.project.reconcile.run-timeout");
   }
 
   public void setRunTimeout(Duration runTimeout) {
-    this.runTimeout = validateDuration(runTimeout, "kk-studio.project.controller.run-timeout");
+    this.runTimeout = validateDuration(runTimeout, "kk-studio.project.reconcile.run-timeout");
   }
 
   public int getMaxContinuations() {
     if (maxContinuations < 0) {
       throw new IllegalArgumentException(
-          "kk-studio.project.controller.max-continuations must be non-negative");
+          "kk-studio.project.reconcile.max-continuations must be non-negative");
     }
     return maxContinuations;
   }
@@ -144,7 +142,7 @@ public class IssueControllerProperties {
   public void setMaxContinuations(int maxContinuations) {
     if (maxContinuations < 0) {
       throw new IllegalArgumentException(
-          "kk-studio.project.controller.max-continuations must be non-negative");
+          "kk-studio.project.reconcile.max-continuations must be non-negative");
     }
     this.maxContinuations = maxContinuations;
   }
@@ -152,7 +150,7 @@ public class IssueControllerProperties {
   public int getMaxDispatchTasks() {
     if (maxDispatchTasks <= 0) {
       throw new IllegalArgumentException(
-          "kk-studio.project.controller.max-dispatch-tasks must be positive");
+          "kk-studio.project.reconcile.max-dispatch-tasks must be positive");
     }
     return maxDispatchTasks;
   }
@@ -160,7 +158,7 @@ public class IssueControllerProperties {
   public void setMaxDispatchTasks(int maxDispatchTasks) {
     if (maxDispatchTasks <= 0) {
       throw new IllegalArgumentException(
-          "kk-studio.project.controller.max-dispatch-tasks must be positive");
+          "kk-studio.project.reconcile.max-dispatch-tasks must be positive");
     }
     this.maxDispatchTasks = maxDispatchTasks;
   }

@@ -2,27 +2,27 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.context.SmartLifecycle;
 
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 
 import java.util.Objects;
 
 /**
- * Issue Controller dispatcher 生命周期。
+ * Issue Reconcile dispatcher 生命周期。
  *
  * <p>{@code workersEnabled=false} 时不启动 dispatcher；重复 start / stop 幂等。 start 失败会尝试回滚 dispatcher，且
  * running 状态在任何失败路径都正确复位。stop 只有在底层 dispatcher 成功关闭后才标记为 stopped；异常时保持 running，允许再次停止。 start 与 stop
  * 串行，避免并发交错。
  *
- * <p>当前 {@link IssueControllerDispatcher#stop()} 在置位后不会抛出；本类仍按“抛出即尚未可靠关闭”处理，以便故障注入和未来实现变化 都能重试。
+ * <p>当前 {@link IssueReconcileDispatcher#stop()} 在置位后不会抛出；本类仍按“抛出即尚未可靠关闭”处理，以便故障注入和未来实现变化 都能重试。
  */
-final class IssueControllerRuntimeLifecycle implements SmartLifecycle {
+final class IssueReconcileRuntimeLifecycle implements SmartLifecycle {
 
   private final boolean workersEnabled;
-  private final IssueControllerDispatcher dispatcher;
+  private final IssueReconcileDispatcher dispatcher;
   private final Object lifecycleLock = new Object();
   private boolean running;
 
-  IssueControllerRuntimeLifecycle(boolean workersEnabled, IssueControllerDispatcher dispatcher) {
+  IssueReconcileRuntimeLifecycle(boolean workersEnabled, IssueReconcileDispatcher dispatcher) {
     this.workersEnabled = workersEnabled;
     this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
   }

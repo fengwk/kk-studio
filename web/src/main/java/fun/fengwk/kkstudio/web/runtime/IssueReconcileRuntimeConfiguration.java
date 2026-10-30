@@ -7,9 +7,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
-import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.util.concurrent.Executor;
@@ -21,7 +21,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Issue Controller 运行时装配：drain executor、worker executor、poll scheduler、dispatcher 与 SmartLifecycle。
+ * Issue Reconcile 运行时装配：drain executor、worker executor、poll scheduler、dispatcher 与 SmartLifecycle。
  *
  * <p>进程内 dispatcher 受 {@code HarnessRuntimeProperties.isWorkersEnabled()} 控制； false
  * 时不启动调度。PostgreSQL notification loop 为独立应用级生命周期，不受 worker 开关影响。
@@ -31,19 +31,19 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
-public class IssueControllerRuntimeConfiguration {
+public class IssueReconcileRuntimeConfiguration {
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */
-  @Bean(name = "issueControllerDispatcherDrainExecutor", destroyMethod = "shutdown")
-  public ExecutorService issueControllerDispatcherDrainExecutor() {
+  @Bean(name = "issueReconcileDispatcherDrainExecutor", destroyMethod = "shutdown")
+  public ExecutorService issueReconcileDispatcherDrainExecutor() {
     return Executors.newSingleThreadExecutor(
         Thread.ofPlatform().name("issue-dispatch-drain-", 0L).daemon(true).factory());
   }
 
   /** bounded worker executor：固定并发 + 有界队列 + AbortPolicy（fail-fast，绝不静默丢弃 handoff task）。 */
-  @Bean(name = "issueControllerDispatcherWorkerExecutor", destroyMethod = "shutdown")
-  public ExecutorService issueControllerDispatcherWorkerExecutor(
-      IssueControllerProperties properties) {
+  @Bean(name = "issueReconcileDispatcherWorkerExecutor", destroyMethod = "shutdown")
+  public ExecutorService issueReconcileDispatcherWorkerExecutor(
+      IssueReconcileProperties properties) {
     int concurrency = properties.getWorker().getConcurrency();
     int queueCapacity = properties.getWorker().getQueueCapacity();
     return new ThreadPoolExecutor(
@@ -56,27 +56,27 @@ public class IssueControllerRuntimeConfiguration {
         new ThreadPoolExecutor.AbortPolicy());
   }
 
-  @Bean(name = "issueControllerDispatcherPollScheduler", destroyMethod = "shutdown")
-  public ScheduledExecutorService issueControllerDispatcherPollScheduler() {
+  @Bean(name = "issueReconcileDispatcherPollScheduler", destroyMethod = "shutdown")
+  public ScheduledExecutorService issueReconcileDispatcherPollScheduler() {
     return Executors.newSingleThreadScheduledExecutor(
         Thread.ofPlatform().name("issue-dispatch-poll-", 0L).daemon(true).factory());
   }
 
   @Bean
-  public IssueControllerDispatcher issueControllerDispatcher(
+  public IssueReconcileDispatcher issueReconcileDispatcher(
       DurableWorkQueue issueWorkQueue,
       IssueReconciler reconciler,
-      IssueControllerProperties properties,
-      @Qualifier("issueControllerDispatcherDrainExecutor") Executor drainExecutor,
-      @Qualifier("issueControllerDispatcherWorkerExecutor") Executor workerExecutor,
-      @Qualifier("issueControllerDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
-    return new IssueControllerDispatcher(
+      IssueReconcileProperties properties,
+      @Qualifier("issueReconcileDispatcherDrainExecutor") Executor drainExecutor,
+      @Qualifier("issueReconcileDispatcherWorkerExecutor") Executor workerExecutor,
+      @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
+    return new IssueReconcileDispatcher(
         issueWorkQueue, reconciler, properties, drainExecutor, workerExecutor, pollScheduler);
   }
 
   @Bean
-  public SmartLifecycle issueControllerRuntimeLifecycle(
-      HarnessRuntimeProperties properties, IssueControllerDispatcher dispatcher) {
-    return new IssueControllerRuntimeLifecycle(properties.isWorkersEnabled(), dispatcher);
+  public SmartLifecycle issueReconcileRuntimeLifecycle(
+      HarnessRuntimeProperties properties, IssueReconcileDispatcher dispatcher) {
+    return new IssueReconcileRuntimeLifecycle(properties.isWorkersEnabled(), dispatcher);
   }
 }

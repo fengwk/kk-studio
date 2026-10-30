@@ -12,24 +12,24 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * {@link IssueControllerRuntimeLifecycle} 单元测试：
+ * {@link IssueReconcileRuntimeLifecycle} 单元测试：
  *
  * <p>验证 worker 开关控制（workersEnabled=false 时不启动）、start/stop 幂等性、 stop callback 触发、start 异常时的回滚与
  * suppressed 异常包装、以及生命周期 phase 顺序。
  */
-class IssueControllerRuntimeLifecycleTest {
+class IssueReconcileRuntimeLifecycleTest {
 
   /** 测试意图：验证 workersEnabled=false 时，调用 start 不会启动 dispatcher， running 状态保持 false。 */
   @Test
   void workersDisabledDoesNotStartDispatcher() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(false, dispatcher);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
+    IssueReconcileRuntimeLifecycle lifecycle =
+        new IssueReconcileRuntimeLifecycle(false, dispatcher);
 
     assertFalse(lifecycle.isRunning(), "lifecycle must not be running initially");
     lifecycle.start();
@@ -43,9 +43,8 @@ class IssueControllerRuntimeLifecycleTest {
   /** 测试意图：验证 workersEnabled=true 时，start 和 stop 正确委托给 dispatcher， 并且重复调用具备幂等性。 */
   @Test
   void workersEnabledStartsAndStopsDispatcherIdempotently() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     lifecycle.start();
     lifecycle.start();
@@ -59,16 +58,15 @@ class IssueControllerRuntimeLifecycleTest {
   }
 
   /**
-   * 测试意图：底层 {@code IssueControllerDispatcher.stop()} 当前在置位后不会抛出；这里注入异常以固定契约—— stop 抛异常时不得假装已停止，必须保留
+   * 测试意图：底层 {@code IssueReconcileDispatcher.stop()} 当前在置位后不会抛出；这里注入异常以固定契约—— stop 抛异常时不得假装已停止，必须保留
    * running 以允许重试，且重试会真正再次调用 stop。
    */
   @Test
   void stopFailureKeepsRunningSoCleanupCanBeRetried() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
     doThrow(new RuntimeException("stop failed")).doNothing().when(dispatcher).stop();
 
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     lifecycle.start();
     assertThrows(RuntimeException.class, lifecycle::stop);
@@ -84,9 +82,8 @@ class IssueControllerRuntimeLifecycleTest {
   /** 测试意图：验证 stop(Runnable callback) 始终在 finally 块中调用 callback。 */
   @Test
   void stopWithCallbackInvokesCallback() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     lifecycle.start();
     AtomicBoolean callbackRun = new AtomicBoolean(false);
@@ -99,11 +96,10 @@ class IssueControllerRuntimeLifecycleTest {
   /** 测试意图：验证 start() 抛出异常时，lifecycle 触发回滚 stop 并正确复位 running 状态。 */
   @Test
   void startFailureRollsBackDispatcherAndResetsRunning() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
     doThrow(new RuntimeException("startup error")).when(dispatcher).start();
 
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     RuntimeException error = assertThrows(RuntimeException.class, lifecycle::start);
     assertEquals("startup error", error.getMessage());
@@ -114,12 +110,11 @@ class IssueControllerRuntimeLifecycleTest {
   /** 测试意图：验证 start() 失败且回滚 stop() 也失败时，回滚异常被作为 suppressed 异常附加在原异常上。 */
   @Test
   void startFailureWithRollbackFailureSuppressesRollbackException() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
     doThrow(new RuntimeException("startup error")).when(dispatcher).start();
     doThrow(new RuntimeException("rollback error")).when(dispatcher).stop();
 
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     RuntimeException error = assertThrows(RuntimeException.class, lifecycle::start);
     assertEquals("startup error", error.getMessage());
@@ -134,9 +129,8 @@ class IssueControllerRuntimeLifecycleTest {
    */
   @Test
   void phaseIsMaxMinusOneAndAutoStartupIsTrue() {
-    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
-    IssueControllerRuntimeLifecycle lifecycle =
-        new IssueControllerRuntimeLifecycle(true, dispatcher);
+    IssueReconcileDispatcher dispatcher = mock(IssueReconcileDispatcher.class);
+    IssueReconcileRuntimeLifecycle lifecycle = new IssueReconcileRuntimeLifecycle(true, dispatcher);
 
     assertEquals(Integer.MAX_VALUE - 1, lifecycle.getPhase());
     assertTrue(lifecycle.isAutoStartup());
