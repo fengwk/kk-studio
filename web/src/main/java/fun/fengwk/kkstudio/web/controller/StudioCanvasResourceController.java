@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,6 +12,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.Objects;
@@ -39,20 +38,20 @@ public class StudioCanvasResourceController {
   }
 
   @PostMapping("/{resourceId}/download-url")
-  public Result<CanvasPresignedUrlDTO> originalUrl(
+  public ApiResponse<CanvasPresignedUrlDTO> originalUrl(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("resourceId") String resourceIdText) {
     return sign(canvasIdText, resourceIdText, true);
   }
 
   @PostMapping("/{resourceId}/preview-url")
-  public Result<CanvasPresignedUrlDTO> previewUrl(
+  public ApiResponse<CanvasPresignedUrlDTO> previewUrl(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("resourceId") String resourceIdText) {
     return sign(canvasIdText, resourceIdText, false);
   }
 
-  private Result<CanvasPresignedUrlDTO> sign(
+  private ApiResponse<CanvasPresignedUrlDTO> sign(
       String canvasIdText, String resourceIdText, boolean original) {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
@@ -62,7 +61,7 @@ public class StudioCanvasResourceController {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST, "TEXT resource has no blob content");
       }
-      return Results.ok(
+      return ApiResponse.ok(
           WebDtoMapper.toPresignedUrlDto(
               original
                   ? blobManager.presignOriginalUrl(resource.blobId())

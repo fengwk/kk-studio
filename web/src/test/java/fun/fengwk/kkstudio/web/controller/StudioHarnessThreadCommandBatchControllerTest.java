@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -73,7 +73,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenReturn(

@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.code.ImmutableResolvedConventionErrorCode;
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +21,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasPatchDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.LinkedHashMap;
@@ -33,7 +31,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Canvas 产品的持久化 HTTP 边界，统一返回 convention {@link Result}。
+ * Canvas 产品的持久化 HTTP 边界，统一返回 {@link ApiResponse}。
  *
  * <p>Canvas 不拥有 Session：工作上下文属于 Harness 的 Thread/Invocation，本控制器只提供画布列表、快照与 typed command。 所有实体 id
  * 都以 canonical UUID 字符串跨 HTTP 边界；{@code revision} 是 long（{@code canvas_document.revision} 的公共坐标系）在
@@ -59,31 +57,31 @@ public class StudioCanvasController {
   }
 
   @GetMapping
-  public Result<List<CanvasDocumentDTO>> list() {
-    return Results.ok(canvasQueryService.listDocuments().stream().map(mapper::toDto).toList());
+  public ApiResponse<List<CanvasDocumentDTO>> list() {
+    return ApiResponse.ok(canvasQueryService.listDocuments().stream().map(mapper::toDto).toList());
   }
 
   @PostMapping
-  public Result<CanvasDocumentDTO> create(
+  public ApiResponse<CanvasDocumentDTO> create(
       @RequestBody(required = false) CreateCanvasRequestDTO request) {
     String title = request == null ? null : request.getTitle();
     if (title == null || title.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title is required");
     }
     try {
-      return Results.created(mapper.toDto(canvasCommandService.createCanvas(title)));
+      return ApiResponse.created(mapper.toDto(canvasCommandService.createCanvas(title)));
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     }
   }
 
   @GetMapping("/{canvasId}")
-  public Result<CanvasSnapshotDTO> get(@PathVariable("canvasId") String canvasIdText) {
+  public ApiResponse<CanvasSnapshotDTO> get(@PathVariable("canvasId") String canvasIdText) {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       return canvasQueryService
           .findSnapshot(canvasId)
-          .map(snapshot -> Results.ok(mapper.toDto(snapshot)))
+          .map(snapshot -> ApiResponse.ok(mapper.toDto(snapshot)))
           .orElseThrow(
               () ->
                   new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown canvas: " + canvasId));
@@ -99,7 +97,7 @@ public class StudioCanvasController {
    * 与全部受影响对象及服务端权威值，供客户端合并、另存或放弃草稿。
    */
   @PostMapping("/{canvasId}/commands")
-  public ResponseEntity<Result<CanvasPatchDTO>> applyCommands(
+  public ResponseEntity<ApiResponse<CanvasPatchDTO>> applyCommands(
       @PathVariable("canvasId") String canvasIdText,
       @RequestBody(required = false) ApplyCanvasCommandsRequestDTO request) {
     if (request == null) {
@@ -113,7 +111,7 @@ public class StudioCanvasController {
               canvasId, idempotencyKey, mapper.toCommands(request.getCommands()));
       return switch (result) {
         case CanvasCommandResult.Accepted accepted -> ResponseEntity.ok(
-            Results.ok(mapper.toDto(accepted.patch())));
+            ApiResponse.ok(mapper.toDto(accepted.patch())));
         case CanvasCommandResult.Conflicted conflicted -> ResponseEntity.status(HttpStatus.CONFLICT)
             .body(conflict(mapper.toDto(conflicted.conflicts())));
       };
@@ -129,30 +127,25 @@ public class StudioCanvasController {
   }
 
   @DeleteMapping("/{canvasId}")
-  public Result<Void> delete(@PathVariable("canvasId") String canvasIdText) {
+  public ApiResponse<Void> delete(@PathVariable("canvasId") String canvasIdText) {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       canvasCommandService.deleteCanvas(canvasId);
-      return Results.noContent();
+      return ApiResponse.noContent();
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
     }
   }
 
   /** 冲突响应只透出受影响对象、语义组与服务端权威值，不携带新的编辑基线。 */
-  private static Result<CanvasPatchDTO> conflict(List<CanvasConflictDTO> conflicts) {
+  private static ApiResponse<CanvasPatchDTO> conflict(List<CanvasConflictDTO> conflicts) {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("type", "about:blank");
     errorContext.put("title", "Canvas command conflict");
     errorContext.put("detail", "command prerequisites are stale; no write was applied");
     // 数组保留元素的静态类型，判别值 kind 才会随类型信息写出；List 在无类型上下文里会丢失它。
     errorContext.put("conflicts", conflicts.toArray(CanvasConflictDTO[]::new));
-    ImmutableResolvedConventionErrorCode errorCode =
-        new ImmutableResolvedConventionErrorCode(
-            HttpStatus.CONFLICT.value(),
-            "CANVAS_COMMAND_CONFLICT",
-            "Canvas command conflict",
-            errorContext);
-    return Results.error(errorCode);
+    return ApiResponse.error(
+        HttpStatus.CONFLICT, "CANVAS_COMMAND_CONFLICT", "Canvas command conflict", errorContext);
   }
 }

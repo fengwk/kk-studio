@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +21,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -54,9 +53,9 @@ public class StudioHarnessSessionController {
 
   /** 重命名 Session（name 由 Core 权威规范化；同名 no-op），返回最新权威 Session DTO。 */
   @PutMapping("/{sessionId}/name")
-  public Result<HarnessSessionDTO> rename(
+  public ApiResponse<HarnessSessionDTO> rename(
       @PathVariable String sessionId, @RequestBody HarnessNameUpdateDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               Session renamed =
@@ -68,8 +67,8 @@ public class StudioHarnessSessionController {
 
   /** 返回 Session 下按 Runtime 确定性顺序排列的 Thread 摘要。 */
   @GetMapping("/{sessionId}/threads")
-  public Result<List<HarnessThreadSummaryDTO>> listThreads(@PathVariable String sessionId) {
-    return Results.ok(
+  public ApiResponse<List<HarnessThreadSummaryDTO>> listThreads(@PathVariable String sessionId) {
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
@@ -79,8 +78,8 @@ public class StudioHarnessSessionController {
 
   /** 返回 Session 的完整 Entry tree；每个 Entry 通过 parentEntryId 连接到父节点，并带上读取时费用投影。 */
   @GetMapping("/{sessionId}/entries")
-  public Result<List<HarnessSessionEntryDTO>> listEntries(@PathVariable String sessionId) {
-    return Results.ok(
+  public ApiResponse<List<HarnessSessionEntryDTO>> listEntries(@PathVariable String sessionId) {
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");

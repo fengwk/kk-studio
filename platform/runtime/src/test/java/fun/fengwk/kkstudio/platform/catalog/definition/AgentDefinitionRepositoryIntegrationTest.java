@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +9,7 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
+import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 

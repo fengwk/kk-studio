@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,6 +19,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionUnknownResolutionDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.List;
@@ -50,9 +49,9 @@ public class StudioCanvasFunctionController {
   }
 
   @GetMapping("/canvas-functions")
-  public Result<List<CanvasFunctionDefinitionDTO>> listFunctions() {
+  public ApiResponse<List<CanvasFunctionDefinitionDTO>> listFunctions() {
     try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquire()) {
-      return Results.ok(
+      return ApiResponse.ok(
           lease.catalog().list().stream()
               .map(
                   registered ->
@@ -65,7 +64,7 @@ public class StudioCanvasFunctionController {
   }
 
   @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run")
-  public Result<CanvasFunctionRunDTO> start(
+  public ApiResponse<CanvasFunctionRunDTO> start(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,
       @RequestBody CanvasFunctionRunRequestDTO request) {
@@ -77,7 +76,7 @@ public class StudioCanvasFunctionController {
       UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
       CanvasFunctionVersion expectedVersion =
           WebDtoMapper.parseVersion(request.getExpectedVersion(), "expectedVersion");
-      return Results.accepted(
+      return ApiResponse.accepted(
           mapper.toDto(
               runtimeService.start(canvasId, nodeId, request.getRequestId(), expectedVersion)));
     } catch (CanvasFunctionRunException exception) {
@@ -88,12 +87,12 @@ public class StudioCanvasFunctionController {
   }
 
   @GetMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run")
-  public Result<CanvasFunctionRunDTO> get(
+  public ApiResponse<CanvasFunctionRunDTO> get(
       @PathVariable("canvasId") String canvasIdText, @PathVariable("nodeId") String nodeIdText) {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
-      return Results.ok(mapper.toDto(runtimeService.get(canvasId, nodeId)));
+      return ApiResponse.ok(mapper.toDto(runtimeService.get(canvasId, nodeId)));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
     } catch (IllegalArgumentException exception) {
@@ -102,7 +101,7 @@ public class StudioCanvasFunctionController {
   }
 
   @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run/cancel")
-  public Result<CanvasFunctionRunDTO> cancel(
+  public ApiResponse<CanvasFunctionRunDTO> cancel(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,
       @RequestBody CanvasFunctionCancelRequestDTO request) {
@@ -112,7 +111,7 @@ public class StudioCanvasFunctionController {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
-      return Results.ok(
+      return ApiResponse.ok(
           mapper.toDto(runtimeService.cancel(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
@@ -122,7 +121,7 @@ public class StudioCanvasFunctionController {
   }
 
   @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve")
-  public Result<CanvasFunctionRunDTO> resolve(
+  public ApiResponse<CanvasFunctionRunDTO> resolve(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,
       @RequestBody CanvasFunctionUnknownResolutionDTO request) {
@@ -132,7 +131,7 @@ public class StudioCanvasFunctionController {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
-      return Results.ok(
+      return ApiResponse.ok(
           mapper.toDto(
               runtimeService.resolve(
                   canvasId,

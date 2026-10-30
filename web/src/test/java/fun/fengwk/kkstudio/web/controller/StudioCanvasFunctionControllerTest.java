@@ -14,7 +14,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -42,6 +41,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.time.Instant;
@@ -84,7 +84,7 @@ class StudioCanvasFunctionControllerTest {
                     catalogSource,
                     runtimeService,
                     new WebDtoMapper(mock(StorageBlobManager.class))))
-            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .setControllerAdvice(new ApiResponseStatusAdvice())
             .setMessageConverters(strictJsonConverter())
             .build();
   }
