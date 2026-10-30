@@ -5,6 +5,7 @@ import { lstat, readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DaemonConfig } from './contracts.js'
+import { updateScriptOs } from './native/host.js'
 import { acquireFileLock, ensurePrivateDirectory, writePrivateFile, type DirectoryLock } from './native/index.js'
 
 /**
@@ -512,7 +513,7 @@ export async function runUpdater(options: UpdaterOptions, dependencies?: Partial
   const runService =
     deps.runService ??
     ((action, scriptPath, directories) =>
-      runUpdateScript(process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux', action, scriptPath, directories))
+      runUpdateScript(updateScriptOs(), action, scriptPath, directories))
 
   const existing = await readResult(operationDir)
   if (existing !== null) {

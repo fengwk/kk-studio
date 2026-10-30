@@ -10,10 +10,10 @@ import {
   lockDirectory,
   releaseDirectoryLock,
   verifyPrivateFile,
-  writeAllSync,
   writePrivateFile,
   type WindowsNativeBindings,
 } from '../../src/native/win32.js'
+import { writeAllSync } from '../../src/native/write-all.js'
 
 const actualFs = await vi.importActual<typeof import('node:fs')>('node:fs')
 
@@ -238,7 +238,9 @@ describe('windows job scope (mocked native bindings)', () => {
         return 0
       },
     }
-    expect(() => writeAllSync(zero, 1, Buffer.from('abc'))).toThrow(/could not be written completely/)
+    expect(() => writeAllSync(zero, 1, Buffer.from('abc'), 'the private file could not be written completely')).toThrow(
+      /could not be written completely/,
+    )
 
     // 部分写入后补满：必须逐次推进 offset，而不是重写开头。
     const offsets: number[] = []
@@ -248,7 +250,7 @@ describe('windows job scope (mocked native bindings)', () => {
         return Math.min(2, length)
       },
     }
-    writeAllSync(partial, 1, Buffer.from('abcde'))
+    writeAllSync(partial, 1, Buffer.from('abcde'), 'the private file could not be written completely')
     expect(offsets).toEqual([0, 2, 4])
   })
 

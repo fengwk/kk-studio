@@ -37,7 +37,9 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`DATA_BIND` 承载复用数据连接，`IDE_LEASE` 承载使用证明）。
 
-运行时 [`Runtime`](../../daemon/src/runtime.ts) 通过 WebSocket 保持控制连接：
+运行时 [`Runtime`](../../daemon/src/runtime.ts) 只负责控制连接、会话与消息分发。受管更新的准入与回执在 [`runtime-update.ts`](../../daemon/src/runtime-update.ts)，IDE 命令准入与租约新鲜度在 [`runtime-ide.ts`](../../daemon/src/runtime-ide.ts)，资源上传客户端在 [`runtime-resources.ts`](../../daemon/src/runtime-resources.ts)，停机释放与安全诊断在 [`runtime-shutdown.ts`](../../daemon/src/runtime-shutdown.ts)，宿主环境事实在 [`runtime-environment.ts`](../../daemon/src/runtime-environment.ts)。公开构造、入口与 v7 wire 不变。短写补齐、取消判定、supervisor 预算和业务侧宿主平台事实分别只有一份：[`write-all.ts`](../../daemon/src/native/write-all.ts)、[`abort.ts`](../../daemon/src/native/abort.ts)、[`supervisor-limits.ts`](../../daemon/src/native/supervisor-limits.ts)、[`host.ts`](../../daemon/src/native/host.ts)。
+
+[`Runtime`](../../daemon/src/runtime.ts) 通过 WebSocket 保持控制连接：
 - 连接握手强制协商 `permessage-deflate`，缺失时以 1010 关闭；仅传输文本帧，超阈值单帧以 1008 关闭。
 - `daemonInstanceId` 在构造时随机生成，同进程所有 HELLO 复用。连接断开指数退避重连，上限为 30 秒；重连不改变进程内已有执行事实。
 - 注册被拒（REJECTED）进入 FAILED 状态、停止重连并退出进程；临时不可用（RETRY_LATER）退避重连。
