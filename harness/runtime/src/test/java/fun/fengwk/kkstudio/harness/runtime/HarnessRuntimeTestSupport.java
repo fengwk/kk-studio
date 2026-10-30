@@ -330,6 +330,17 @@ public final class HarnessRuntimeTestSupport {
         });
   }
 
+  /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_INPUT（人工问卷等待）。 */
+  static ToolInvocation setWaitingInput(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation waiting = tool.requestInput(T3);
+          tx.updateToolInvocations(List.of(waiting));
+          return waiting;
+        });
+  }
+
   /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
   static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
     return setWaitingApproval(store, baseline.toolId());
@@ -874,7 +885,7 @@ public final class HarnessRuntimeTestSupport {
         "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
-  private static ToolBinding hostBinding() {
+  static ToolBinding hostBinding() {
     return new ToolBinding(
         toolDefinition("bash"),
         new ContributorBinding("core", "bash", List.of()),

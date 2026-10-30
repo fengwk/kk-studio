@@ -1,17 +1,24 @@
-package fun.fengwk.kkstudio.harness.runtime.thread;
+package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -29,7 +36,7 @@ class ThreadContextProbeTest {
   @Test
   void probeWithoutExplicitPathLoadsTheLockedThreadHead() {
     // 两参数入口必须从同一 transaction 加载 head path，再交给共享分类器。
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     ThreadState thread =
         new ThreadState(
             THREAD_ID,
@@ -66,11 +73,24 @@ class ThreadContextProbeTest {
     ThreadContext context =
         store.transaction(
             tx ->
-                new ThreadContextProbe(
-                        new BuiltinAgentDriver(
-                            store, (threadId, candidatePath, preparation) -> null))
+                new ThreadContextProbe(new FakeAgentDriver())
                     .probe(tx, tx.lockThread(THREAD_ID).orElseThrow()));
 
     assertInstanceOf(ThreadContext.IdleOrHistorical.class, context);
+  }
+
+  @Test
+  void probeLoadsOwnedToolSiblingsOnlyForAssistantHead() {
+    // assistant head 必须只装载同 Thread、同 turn、同 assistant 的 sibling，才能进入 ToolActive 分类。
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+
+    ThreadContext context =
+        store.transaction(
+            tx ->
+                new ThreadContextProbe(new FakeAgentDriver())
+                    .probe(tx, tx.lockThread(baseline.threadId()).orElseThrow()));
+
+    assertInstanceOf(ThreadContext.ToolActive.class, context);
   }
 }

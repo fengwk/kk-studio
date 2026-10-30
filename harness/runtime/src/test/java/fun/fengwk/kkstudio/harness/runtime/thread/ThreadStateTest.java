@@ -805,6 +805,141 @@ class ThreadStateTest {
     assertEquals(root.nextCommandSequence(), enabled.nextCommandSequence());
   }
 
+  @Test
+  void rejectsRootOnlyYoloAndInvalidInitialSequenceBounds() {
+    // 子线程携带 yolo、负输入水位、非法 nextCommandSequence 都必须在构造期 fail closed。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(8),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(8),
+                true,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                -1L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+  }
+
+  @Test
+  void sequenceAdvanceMethodsPreserveMonotonicBounds() {
+    // 所有 cursor/输入水位推进都必须严格 +1 version，并拒绝 count=0 或水位回退。
+    ThreadState stored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    ThreadState reserved =
+        stored.reserveCommandSequencesAndSetControl(2, ThreadExecutionControl.RUNNABLE, CREATED);
+    assertEquals(5L, reserved.nextCommandSequence());
+    assertEquals(6L, reserved.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            stored.reserveCommandSequencesAndSetControl(
+                0, ThreadExecutionControl.RUNNABLE, CREATED));
+
+    ThreadState advanced = stored.advanceHeadAndInputThroughSequence(id(43), 1L, CREATED);
+    assertEquals(id(43), advanced.headEntryId());
+    assertEquals(1L, advanced.inputThroughSequence());
+    assertEquals(6L, advanced.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.advanceHeadAndInputThroughSequence(id(43), -1L, CREATED));
+
+    ThreadState inputAdvanced = stored.advanceInputThroughSequence(2L, CREATED);
+    assertEquals(2L, inputAdvanced.inputThroughSequence());
+    assertEquals(6L, inputAdvanced.version());
+    assertThrows(
+        IllegalArgumentException.class, () -> stored.advanceInputThroughSequence(-1L, CREATED));
+
+    ThreadState reservedHeadAndInput =
+        stored.reserveCommandSequencesAdvanceHeadAndInput(1, id(43), 1L, CREATED);
+    assertEquals(4L, reservedHeadAndInput.nextCommandSequence());
+    assertEquals(id(43), reservedHeadAndInput.headEntryId());
+    assertEquals(1L, reservedHeadAndInput.inputThroughSequence());
+    assertEquals(6L, reservedHeadAndInput.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.reserveCommandSequencesAdvanceHeadAndInput(0, id(43), 0L, CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.reserveCommandSequencesAdvanceHeadAndInput(1, id(43), -1L, CREATED));
+  }
+
+  @Test
+  void transitionRejectsInputWatermarkRegression() {
+    ThreadState stored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED)
+            .advanceInputThroughSequence(2L, CREATED);
+    ThreadState regressed =
+        new ThreadState(
+            stored.id(),
+            stored.sessionId(),
+            stored.parentThreadId(),
+            stored.headEntryId(),
+            stored.creationRequestHash(),
+            stored.name(),
+            stored.rootThreadId(),
+            stored.yoloEnabled(),
+            stored.spawnTrigger(),
+            stored.constraints(),
+            stored.executionControl(),
+            1L,
+            stored.nextCommandSequence(),
+            stored.version() + 1,
+            stored.createdAt(),
+            stored.updatedAt());
+    ThreadState next =
+        new ThreadState(
+            stored.id(),
+            stored.sessionId(),
+            stored.parentThreadId(),
+            stored.headEntryId(),
+            stored.creationRequestHash(),
+            stored.name(),
+            stored.rootThreadId(),
+            stored.yoloEnabled(),
+            stored.spawnTrigger(),
+            stored.constraints(),
+            stored.executionControl(),
+            2L,
+            stored.nextCommandSequence(),
+            stored.version() + 1,
+            stored.createdAt(),
+            stored.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class, () -> ThreadState.validateTransition(stored, regressed));
+    ThreadState.validateTransition(stored, next);
+  }
+
   private static ThreadState state(
       UUID id,
       UUID headEntryId,

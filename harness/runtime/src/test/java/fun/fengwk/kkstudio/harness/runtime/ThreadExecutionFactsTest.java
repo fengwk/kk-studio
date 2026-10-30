@@ -6,17 +6,15 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.appr
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.parkForInput;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.rootEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedAskUserBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedTerminalModel;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedOpenTurn;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.session;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingInput;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnEndEntry;
@@ -29,11 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver.FakeLockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
@@ -53,12 +53,12 @@ import java.util.UUID;
  */
 class ThreadExecutionFactsTest {
 
-  private InMemoryBuiltinHarnessStore store;
+  private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryBuiltinHarnessStore();
+    store = new InMemoryHarnessStore();
     runtime = runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
@@ -83,23 +83,23 @@ class ThreadExecutionFactsTest {
   }
 
   @Test
-  void liveModelStatusesConstituteWork() {
-    // 测试意图：本 Thread 合法的 READY/RUNNING Model 都是工作，且不引入等待或 UNKNOWN。
-    for (ModelInvocationStatus status :
-        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
-      HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
-      assertEquals(
-          new ThreadExecutionFacts(true, false, false),
-          facts(baseline.threadId()),
-          "status=" + status);
-    }
+  void activeDriverStateConstitutesWork() {
+    // 测试意图：本 Thread 的 Driver generation 活动都是工作，且不引入等待或 UNKNOWN。
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    HarnessRuntime active = runtimeWithActivity(baseline, DriverActivity.ACTIVE);
+    assertEquals(
+        new ThreadExecutionFacts(true, false, false),
+        active.getThreadSnapshot(baseline.threadId()).executionFacts());
   }
 
   @Test
-  void terminalModelAwaitingApplyIsNotWork() {
-    // 测试意图：终态但结果尚未物化的 Model 属于正常待 apply 状态，不再构成工作。
-    HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
-    assertEquals(new ThreadExecutionFacts(false, false, false), facts(baseline.threadId()));
+  void responsePendingDriverStateIsNotWork() {
+    // 测试意图：终态但结果尚未物化的 Driver generation 属于正常待 apply 状态，不再构成工作。
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    HarnessRuntime pending = runtimeWithActivity(baseline, DriverActivity.RESPONSE_PENDING);
+    assertEquals(
+        new ThreadExecutionFacts(false, false, false),
+        pending.getThreadSnapshot(baseline.threadId()).executionFacts());
   }
 
   @Test
@@ -129,8 +129,8 @@ class ThreadExecutionFactsTest {
   @Test
   void waitingInputToolIsHumanWaitNotWork() {
     // 测试意图：ask_user 冻结等待用户回答同样只表达人工等待，不构成推进工作。
-    HarnessRuntimeTestSupport.ToolBaseline baseline = seedAskUserBaseline(store);
-    parkForInput(store, baseline, T3);
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    setWaitingInput(store, baseline.toolId());
     assertEquals(new ThreadExecutionFacts(false, true, false), facts(baseline.threadId()));
   }
 
@@ -164,11 +164,14 @@ class ThreadExecutionFactsTest {
   @Test
   void stoppedControlDoesNotHideInFlightModelOrTool() {
     // 测试意图：持久 STOPPED 与 status 正交；外部 Model/Tool 仍在途时 status 为 RUNNING，且工作事实仍为 true，停止方据此判断未收敛。
-    HarnessRuntimeTestSupport.ModelBaseline model = seedModel(store, ModelInvocationStatus.RUNNING);
+    HarnessRuntimeTestSupport.TurnBaseline model = seedOpenTurn(store);
     markControl(model.threadId(), ThreadExecutionControl.STOPPED);
+    HarnessRuntime active = runtimeWithActivity(model, DriverActivity.ACTIVE);
     assertEquals(
-        ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(model.threadId()).runtimeStatus());
-    assertEquals(new ThreadExecutionFacts(true, false, false), facts(model.threadId()));
+        ThreadRuntimeStatus.RUNNING, active.getThreadSnapshot(model.threadId()).runtimeStatus());
+    assertEquals(
+        new ThreadExecutionFacts(true, false, false),
+        active.getThreadSnapshot(model.threadId()).executionFacts());
 
     HarnessRuntimeTestSupport.ToolBaseline tool = seedToolBaseline(store);
     approveTool(store, tool.toolId());
@@ -208,6 +211,20 @@ class ThreadExecutionFactsTest {
 
   private ThreadExecutionFacts facts(UUID threadId) {
     return runtime.getThreadSnapshot(threadId).executionFacts();
+  }
+
+  /** 以固定 Driver 活动投影读取当前 open turn。 */
+  private HarnessRuntime runtimeWithActivity(
+      HarnessRuntimeTestSupport.TurnBaseline baseline, DriverActivity activity) {
+    FakeAgentDriver driver =
+        new FakeAgentDriver()
+            .withState(
+                new FakeLockedDriverState(activity, baseline.turnStartEntryId(), null, null, null));
+    return runtime(
+        store,
+        Clock.fixed(T5, ZoneOffset.UTC),
+        driver,
+        HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER);
   }
 
   /** 在真实 Session 上种一条 owner 属于另一 Thread 的 continueModel continuation，本 Thread head 指向该 TURN_END。 */

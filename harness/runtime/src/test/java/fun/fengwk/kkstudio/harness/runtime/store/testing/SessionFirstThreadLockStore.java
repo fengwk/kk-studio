@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -28,7 +27,7 @@ public final class SessionFirstThreadLockStore {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
-            new Class<?>[] {HarnessStore.class, BuiltinStore.class},
+            new Class<?>[] {HarnessStore.class},
             (storeProxy, storeMethod, storeArguments) -> {
               if (!storeMethod.getName().equals("transaction")) {
                 return invoke(storeMethod, delegate, storeArguments);
@@ -46,7 +45,7 @@ public final class SessionFirstThreadLockStore {
     return (HarnessStore.Transaction)
         Proxy.newProxyInstance(
             HarnessStore.Transaction.class.getClassLoader(),
-            new Class<?>[] {BuiltinStore.Transaction.class},
+            transaction.getClass().getInterfaces(),
             (transactionProxy, method, arguments) -> {
               if (method.getName().equals("lockSessionForKeyShare")
                   || method.getName().equals("lockSessionForUpdate")) {

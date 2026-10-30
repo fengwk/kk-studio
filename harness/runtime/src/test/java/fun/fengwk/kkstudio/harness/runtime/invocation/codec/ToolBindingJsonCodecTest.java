@@ -1,20 +1,34 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
-import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.ENVIRONMENT_ID;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.binding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** 严格的 ToolBinding wire JSON 编解码测试。 */
 class ToolBindingJsonCodecTest {
+
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
 
   private final ToolBindingJsonCodec codec = new ToolBindingJsonCodec();
   private final AgentToolDefinitionJsonCodec definitionCodec = new AgentToolDefinitionJsonCodec();
@@ -383,6 +397,40 @@ class ToolBindingJsonCodecTest {
                     + environmentJson(ENVIRONMENT_ID)
                     + ",\"environmentName\":\"   \""
                     + suffix));
+  }
+
+  private static ToolBinding binding(EnvironmentSupport environmentSupport) {
+    return binding(environmentSupport, false);
+  }
+
+  private static ToolBinding binding(
+      EnvironmentSupport environmentSupport, boolean withStateAccesses) {
+    ContributorBinding contributor =
+        withStateAccesses
+            ? new ContributorBinding(
+                "goal",
+                "create",
+                List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
+            : new ContributorBinding("core", "bash", List.of());
+    boolean hasEnv = environmentSupport == EnvironmentSupport.REQUIRED;
+    return new ToolBinding(
+        definition(hasEnv ? "fs" : "bash"),
+        contributor,
+        environmentSupport,
+        hasEnv ? ENVIRONMENT_ID : null,
+        hasEnv ? "dev" : null);
+  }
+
+  private static AgentToolDefinition definition(String name) {
+    return new AgentToolDefinition(
+        new ToolDescriptor(
+            name,
+            "Run " + name,
+            name,
+            new InputSchema("arguments", Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30)),
+        ToolVisibility.SELECTABLE);
   }
 
   private static String environmentJson(EnvironmentId environmentId) {

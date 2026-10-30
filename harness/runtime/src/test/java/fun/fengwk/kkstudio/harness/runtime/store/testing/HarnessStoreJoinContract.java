@@ -60,7 +60,7 @@ public abstract class HarnessStoreJoinContract {
     baseline = seedThreadBaseline(store);
   }
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   private UUID createChildThread(UUID parentThreadId, UUID sessionId, UUID rootEntryId) {
     return store.transaction(

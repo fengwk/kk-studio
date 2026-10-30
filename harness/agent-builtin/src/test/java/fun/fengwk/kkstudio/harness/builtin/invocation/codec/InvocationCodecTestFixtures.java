@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
+package fun.fengwk.kkstudio.harness.builtin.invocation.codec;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
