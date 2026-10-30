@@ -15,6 +15,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,9 +32,12 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -502,6 +506,104 @@ public abstract class HarnessStoreEntryTreeContract {
           assertEquals(deepHeadId, path.head().id());
           return null;
         });
+  }
+
+  /** 测试意图：祖先游标返回其后的连续子链且不含游标；游标即 head 时为空增量；null 游标返回完整链。 */
+  @Test
+  void loadSliceReturnsStrictSuffixAfterAncestorAndEmptySliceAtHead() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID turnEnd =
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T1, branchSettings());
+    UUID fork =
+        insertChildEntry(
+            store, baseline.sessionId(), turnEnd, ForkPayload.branch(baseline.rootEntryId()));
+
+    store.transaction(
+        tx -> {
+          EntrySlice afterRoot = tx.entries().loadSlice(fork, baseline.rootEntryId());
+          List<UUID> full = tx.entries().loadPath(fork).entries().stream().map(Entry::id).toList();
+          assertEquals(baseline.rootEntryId(), afterRoot.baseEntryId());
+          assertEquals(
+              full.subList(1, full.size()), afterRoot.entries().stream().map(Entry::id).toList());
+
+          EntrySlice atHead = tx.entries().loadSlice(fork, fork);
+          assertEquals(fork, atHead.baseEntryId());
+          assertTrue(atHead.entries().isEmpty());
+
+          EntrySlice complete = tx.entries().loadSlice(fork, null);
+          assertNull(complete.baseEntryId());
+          assertEquals(full, complete.entries().stream().map(Entry::id).toList());
+          return null;
+        });
+  }
+
+  /** 测试意图：压缩节点仍留在增量链中，且只从压缩 TURN_START 之后截取。 */
+  @Test
+  void loadSliceKeepsCompactionNodesAfterTheRequestedAncestor() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID inputTurnEnd =
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T1, branchSettings());
+    UUID compactionEnd = insertClosedCompactionTurn(baseline.sessionId(), inputTurnEnd, T2);
+
+    store.transaction(
+        tx -> {
+          EntrySlice slice = tx.entries().loadSlice(compactionEnd, inputTurnEnd);
+          assertEquals(inputTurnEnd, slice.baseEntryId());
+          assertEquals(3, slice.entries().size());
+          assertInstanceOf(TurnStartPayload.class, slice.entries().get(0).payload());
+          assertEquals(
+              TurnStartReason.COMPACTION,
+              ((TurnStartPayload) slice.entries().get(0).payload()).reason());
+          assertInstanceOf(CompactionPayload.class, slice.entries().get(1).payload());
+          assertEquals(compactionEnd, slice.entries().get(2).id());
+          return null;
+        });
+  }
+
+  /** 测试意图：旁支、另一 Session 与未知游标都退回完整链，不把无关节点当成 base。 */
+  @Test
+  void loadSliceReturnsFullPathForNonAncestorOtherSessionAndUnknownCursor() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID branchA =
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T1, branchSettings());
+    UUID branchB =
+        insertClosedInputTurn(baseline.sessionId(), baseline.rootEntryId(), T2, branchSettings());
+    UUID otherHead =
+        store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootId = tx.nextId();
+              tx.sessions().insert(session(sessionId));
+              tx.entries().insert(rootEntry(rootId, sessionId));
+              return rootId;
+            });
+
+    store.transaction(
+        tx -> {
+          List<UUID> full =
+              tx.entries().loadPath(branchA).entries().stream().map(Entry::id).toList();
+          EntrySlice sibling = tx.entries().loadSlice(branchA, branchB);
+          EntrySlice otherSession = tx.entries().loadSlice(branchA, otherHead);
+          EntrySlice unknown = tx.entries().loadSlice(branchA, TestIds.id(4242));
+          assertNull(sibling.baseEntryId());
+          assertNull(otherSession.baseEntryId());
+          assertNull(unknown.baseEntryId());
+          assertEquals(full, sibling.entries().stream().map(Entry::id).toList());
+          assertEquals(full, otherSession.entries().stream().map(Entry::id).toList());
+          assertEquals(full, unknown.entries().stream().map(Entry::id).toList());
+          return null;
+        });
+  }
+
+  /** 测试意图：缺失 head 与空 head 参数沿 loadPath 失败，不返回空增量。 */
+  @Test
+  void loadSliceRejectsMissingHead() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> store.transaction(tx -> tx.entries().loadSlice(TestIds.id(42), null)));
+    assertThrows(
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.entries().loadSlice(null, TestIds.id(1))));
   }
 
   @Test
@@ -1235,6 +1337,49 @@ public abstract class HarnessStoreEntryTreeContract {
     assertThrows(
         NullPointerException.class,
         () -> store.transaction(tx -> tx.entries().loadBranchSettings(null)));
+  }
+
+  /** 插入一个已关闭的 COMPACTION turn，返回其 TURN_END Entry id。 */
+  private UUID insertClosedCompactionTurn(UUID sessionId, UUID parentId, Instant createdAt) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          UUID summaryId = tx.nextId();
+          UUID turnEndId = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      parentId,
+                      new TurnStartPayload(
+                          TurnStartReason.COMPACTION,
+                          branchSettings(),
+                          StoreTestSupport.OWNER_THREAD_ID,
+                          StoreTestSupport.CONTEXT_WINDOW,
+                          StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          CompactionStart.pending(
+                              CompactionPhase.FULL, CompactionTrigger.MANUAL, parentId, null, null),
+                          null),
+                      createdAt));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      summaryId,
+                      sessionId,
+                      turnStartId,
+                      new CompactionPayload("compacted history", null),
+                      createdAt));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      sessionId,
+                      summaryId,
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      createdAt));
+          return turnEndId;
+        });
   }
 
   /** 插入一个已关闭的 INPUT turn（TURN_START -> USER -> ASSISTANT -> TURN_END），返回其 TURN_END Entry id。 */

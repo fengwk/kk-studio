@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -99,6 +100,29 @@ final class InMemoryEntryStore implements EntryStore {
     }
     Collections.reverse(path);
     return new EntryPath(path);
+  }
+
+  /** 内存增量读取与 PostgreSQL 同语义：从 head 回溯，命中祖先即停且不含游标；非祖先、另一 Session 或未知游标回到完整链。 */
+  @Override
+  public EntrySlice loadSlice(UUID headEntryId, UUID afterEntryId) {
+    tx.checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    if (afterEntryId == null) {
+      return new EntrySlice(null, loadPath(headEntryId).entries());
+    }
+    List<Entry> suffix = new ArrayList<>();
+    UUID cursor = headEntryId;
+    while (cursor != null) {
+      Entry entry = tx.requireExistingEntry(cursor);
+      if (entry.id().equals(afterEntryId)) {
+        Collections.reverse(suffix);
+        return new EntrySlice(afterEntryId, suffix);
+      }
+      suffix.add(entry);
+      cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+    }
+    Collections.reverse(suffix);
+    return new EntrySlice(null, suffix);
   }
 
   @Override

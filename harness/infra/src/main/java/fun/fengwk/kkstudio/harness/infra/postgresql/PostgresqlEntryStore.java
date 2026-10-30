@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -43,6 +44,34 @@ final class PostgresqlEntryStore implements EntryStore {
       )
       select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from entry_path
+      order by depth desc
+      """;
+
+  /**
+   * 单次增量回溯 CTE：从 head 沿父链向上，遇到游标或 ROOT 即停。
+   *
+   * <p>命中游标时只返回其后的节点，不含游标与 ROOT；走到 ROOT 时返回完整链。结果不回填完整路径缓存。
+   */
+  private static final String LOAD_ENTRY_SLICE =
+      """
+      with recursive entry_slice as (
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 1 as depth
+          from harness_entry
+          where id = ?
+          union all
+          select parent.id, parent.session_id, parent.parent_entry_id, parent.entry_type, parent.payload,
+                 parent.created_at, parent.provider_replay_state, es.depth + 1
+          from entry_slice es
+          join lateral (
+              select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+              from harness_entry
+              where id = es.parent_entry_id
+          ) parent on true
+          where es.id is distinct from ?::uuid
+            and es.entry_type <> 'ROOT'
+      )
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+      from entry_slice
       order by depth desc
       """;
 
@@ -218,6 +247,44 @@ final class PostgresqlEntryStore implements EntryStore {
     EntryPath path = new EntryPath(entries);
     tx.entryPathCache().put(headEntryId, path);
     return path;
+  }
+
+  /**
+   * 读取 head 相对游标的增量链。
+   *
+   * <p>完整路径已在本事务缓存中时直接截取，不查询。冷缓存只执行一条在游标处停止的递归 CTE，不先 {@link #loadPath(UUID)}，也不把部分结果写入完整路径缓存。
+   */
+  @Override
+  public EntrySlice loadSlice(UUID headEntryId, UUID afterEntryId) {
+    tx.checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    EntryPath cached = tx.entryPathCache().get(headEntryId);
+    if (cached != null) {
+      return slice(cached.entries(), afterEntryId);
+    }
+    if (afterEntryId == null) {
+      return new EntrySlice(null, loadPath(headEntryId).entries());
+    }
+    List<Entry> rows =
+        tx.queryList(LOAD_ENTRY_SLICE, PostgresqlHarnessRows.ENTRY, headEntryId, afterEntryId);
+    if (rows.isEmpty()) {
+      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
+    }
+    boolean ancestor = rows.get(0).id().equals(afterEntryId);
+    List<Entry> entries = ancestor ? rows.subList(1, rows.size()) : rows;
+    return new EntrySlice(ancestor ? afterEntryId : null, entries);
+  }
+
+  private static EntrySlice slice(List<Entry> rootToHead, UUID afterEntryId) {
+    if (afterEntryId == null) {
+      return new EntrySlice(null, rootToHead);
+    }
+    for (int i = 0; i < rootToHead.size(); i++) {
+      if (rootToHead.get(i).id().equals(afterEntryId)) {
+        return new EntrySlice(afterEntryId, rootToHead.subList(i + 1, rootToHead.size()));
+      }
+    }
+    return new EntrySlice(null, rootToHead);
   }
 
   /**
