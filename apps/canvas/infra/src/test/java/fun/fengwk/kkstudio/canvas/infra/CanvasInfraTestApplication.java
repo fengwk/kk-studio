@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra;
 
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.TestComponent;
@@ -70,5 +72,18 @@ public class CanvasInfraTestApplication {
   @Bean
   Clock canvasTestClock() {
     return Clock.systemUTC();
+  }
+
+  /**
+   * Function worker executor 依赖的上下文快照工厂。
+   *
+   * <p>生产 Bean 由 web 组合根提供。模块测试使用官方工厂和隔离注册表，不改写进程级 ContextRegistry。
+   */
+  @Bean
+  ContextSnapshotFactory canvasTestContextSnapshotFactory() {
+    return ContextSnapshotFactory.builder()
+        .contextRegistry(new ContextRegistry())
+        .clearMissing(true)
+        .build();
   }
 }
