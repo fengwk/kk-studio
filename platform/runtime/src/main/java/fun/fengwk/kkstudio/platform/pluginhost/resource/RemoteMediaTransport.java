@@ -21,7 +21,8 @@ interface RemoteMediaTransport extends AutoCloseable {
   /**
    * 发起一次 GET：实现必须让地址准入作用于真正建连使用的地址（校验通过的那批地址必须就是连接使用的地址），禁止自动重定向（3xx 必须作为普通响应返回给调用方判定）， 并使用给定的整体期限。
    *
-   * @throws PluginResourceUnavailableException 地址不可用、连接失败、超时或响应无法读取
+   * @throws fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException
+   *     地址不可用、连接失败、超时或响应无法读取
    */
   MediaResponse get(URI uri, Duration timeout);
 
@@ -31,7 +32,8 @@ interface RemoteMediaTransport extends AutoCloseable {
    * <p>目标地址由本部署签发，属于可信路径，因此实现不得对上传目标施加公网地址准入。
    *
    * @return HTTP 状态码；2xx 之外由调用方判定失败
-   * @throws PluginResourceUnavailableException 连接失败、超时或上传无法完成
+   * @throws fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException
+   *     连接失败、超时或上传无法完成
    */
   int put(URI uri, Map<String, String> headers, Path file, Duration timeout);
 

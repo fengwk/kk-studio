@@ -5,8 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,14 +135,17 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         DEV.value(),
         REGISTRATION_TOKEN);
 
-    this.environmentRepository = mock(EnvironmentRepository.class);
-    Environment registered = new Environment();
-    registered.setId(DEV.value());
-    registered.setName("dev-env");
-    registered.setRegistrationTokenHash(RegistrationTokens.hash(REGISTRATION_TOKEN));
-    when(environmentRepository.getByRegistrationTokenHash(
-            RegistrationTokens.hash(REGISTRATION_TOKEN)))
-        .thenReturn(registered);
+    // 路由只允许按注册令牌读取；误用其它仓库操作必须立即失败。
+    this.environmentRepository =
+        mock(
+            EnvironmentRepository.class,
+            invocation -> {
+              throw new UnsupportedOperationException("routing test only reads registration");
+            });
+    EnvironmentRepository reads = new EnvironmentRepository(jdbcClient, notifier);
+    doAnswer(invocation -> reads.getByRegistrationTokenHash(invocation.getArgument(0)))
+        .when(environmentRepository)
+        .getByRegistrationTokenHash(anyString());
 
     this.node1 = UUID.randomUUID();
     this.node2 = UUID.randomUUID();
