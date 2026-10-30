@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.platform;
 
+import io.micrometer.context.ContextRegistry;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -48,5 +50,18 @@ public class CanvasPlatformTestConfiguration {
           @Override
           public void close() {}
         };
+  }
+
+  /**
+   * Function worker executor 依赖的上下文快照工厂。
+   *
+   * <p>生产 Bean 由 web 组合根提供。Platform 测试宿主不含 web，这里用官方工厂和隔离注册表补齐。
+   */
+  @Bean
+  public ContextSnapshotFactory canvasTestContextSnapshotFactory() {
+    return ContextSnapshotFactory.builder()
+        .contextRegistry(new ContextRegistry())
+        .clearMissing(true)
+        .build();
   }
 }
