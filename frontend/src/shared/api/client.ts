@@ -1,6 +1,10 @@
 import axios from 'axios'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
 import { getLocale, translate } from '@/shared/i18n'
+import {
+  parseJsonPreservingPathEqualsNumbers,
+  stringifyJsonPreservingNumbers,
+} from '@/shared/lib/lossless-json-number'
 
 export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }): Promise<T>
@@ -41,9 +45,44 @@ export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
 }
 
+/**
+ * 解析响应时保留 request-body 定价条件中 JSON number 的原文。
+ *
+ * <p>只处理对象/数组 JSON 文本；其它响应形态原样交给调用方。命中数字条件但运行时缺少 `JSON.parse` source access 时显式失败，
+ * 不把已舍入的 number 交给 draft。
+ */
+function parseJsonResponse(data: unknown): unknown {
+  if (typeof data !== 'string') {
+    return data
+  }
+  const head = data.trimStart().charAt(0)
+  if (head !== '{' && head !== '[') {
+    return data
+  }
+  return parseJsonPreservingPathEqualsNumbers(data)
+}
+
+/** 只接管 JSON 对象/数组；FormData、Blob、字符串等保持 Axios 原有传输形态。 */
+function serializeJsonRequest(
+  data: unknown,
+  headers?: { setContentType?: (value: string, rewrite?: boolean) => void },
+): unknown {
+  if (data === null || typeof data !== 'object') {
+    return data
+  }
+  const prototype = Object.getPrototypeOf(data)
+  if (!Array.isArray(data) && prototype !== Object.prototype && prototype !== null) {
+    return data
+  }
+  headers?.setContentType?.('application/json', false)
+  return stringifyJsonPreservingNumbers(data)
+}
+
 const axiosClient = axios.create({
   baseURL: apiBaseUrl,
   timeout: 60000,
+  transformRequest: [serializeJsonRequest],
+  transformResponse: [parseJsonResponse],
 })
 
 axiosClient.interceptors.request.use((config) => {

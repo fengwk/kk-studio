@@ -6,6 +6,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -36,9 +37,14 @@ final class HistoryValueCodecs {
   private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
 
-  /** 可选的 assistantMetadata 字段：缺失或 null 表示无可信流计时（含旧历史记录）。 */
+  /** 可选的 assistantMetadata 字段：缺失或 null 表示没有对应事实（含旧历史记录）。 */
   private static final Set<String> METADATA_OPTIONAL_FIELDS =
-      orderedSet("decodeDurationMillis", "model", "requestedAt", "responseServiceTier");
+      orderedSet(
+          "decodeDurationMillis",
+          "model",
+          "requestedAt",
+          "responseServiceTier",
+          "requestBodyPricing");
 
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
@@ -174,6 +180,12 @@ final class HistoryValueCodecs {
     if (metadata.responseServiceTier() != null) {
       node.put("responseServiceTier", metadata.responseServiceTier());
     }
+    if (metadata.requestBodyPricing() != null) {
+      ObjectNode pricing = node.putObject("requestBodyPricing");
+      for (Map.Entry<String, Boolean> entry : metadata.requestBodyPricing().matches().entrySet()) {
+        pricing.put(entry.getKey(), entry.getValue());
+      }
+    }
     return node;
   }
 
@@ -206,8 +218,33 @@ final class HistoryValueCodecs {
     String requestedAtText = nullableText(node, "requestedAt");
     Instant requestedAt = requestedAtText == null ? null : Instant.parse(requestedAtText);
     String responseServiceTier = nullableText(node, "responseServiceTier");
+    RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
     return new AssistantMessageMetadata(
-        stopReason, usage, decodeDurationMillis, model, requestedAt, responseServiceTier);
+        stopReason,
+        usage,
+        decodeDurationMillis,
+        model,
+        requestedAt,
+        responseServiceTier,
+        requestBodyPricing);
+  }
+
+  private static RequestBodyPricingSnapshot decodeRequestBodyPricing(ObjectNode node) {
+    JsonNode value = node.get("requestBodyPricing");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    ObjectNode pricing = requireObject(value, "assistantMetadata.requestBodyPricing");
+    Map<String, Boolean> matches = new LinkedHashMap<>();
+    for (String fingerprint : pricing.propertyNames()) {
+      JsonNode matched = pricing.get(fingerprint);
+      if (matched == null || !matched.isBoolean()) {
+        throw new IllegalArgumentException(
+            "assistantMetadata.requestBodyPricing values must be boolean");
+      }
+      matches.put(fingerprint, matched.booleanValue());
+    }
+    return new RequestBodyPricingSnapshot(matches);
   }
 
   // ---------- 通用 JSON 工具方法 ----------

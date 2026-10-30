@@ -88,7 +88,8 @@ public final class BuiltinHistoryPayloadMapper {
             response.decodeDurationMillis(),
             model,
             requestedAt,
-            response.serviceTier()),
+            response.serviceTier(),
+            response.requestBodyPricing()),
         null);
   }
 

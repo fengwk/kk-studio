@@ -14,8 +14,12 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
+import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -40,7 +44,11 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRequestBodyConditionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
@@ -417,6 +425,80 @@ class UsageCostProjectionServiceTest {
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> service.project(entries));
     assertTrue(error.getMessage().startsWith("invalid agent model"), error.getMessage());
+  }
+
+  /** 测试意图：同一 request-body 条件在价格变化后仍按记录的指纹重新计价；旧记录缺快照或条件已变时保持未知。 */
+  @Test
+  void projectsRequestBodyPricingFromDurableFingerprintOnly() {
+    AgentModelPricingDTO pricing = pricing(new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO);
+    AgentModelPricingOverrideDTO override = new AgentModelPricingOverrideDTO();
+    override.setId("fast");
+    AgentModelPricingConditionDTO when = new AgentModelPricingConditionDTO();
+    AgentModelPricingRequestBodyConditionDTO requestBody =
+        new AgentModelPricingRequestBodyConditionDTO();
+    requestBody.setPath("/speed");
+    requestBody.setEquals(JsonNodeFactory.instance.textNode("fast"));
+    when.setRequestBody(requestBody);
+    override.setWhen(when);
+    AgentModelRatePatchDTO rates = new AgentModelRatePatchDTO();
+    rates.setInput(new BigDecimal("2"));
+    override.setRates(rates);
+    pricing.setOverrides(List.of(override));
+    stubModel("provider-a", "model-a", pricing);
+
+    ModelPricingCondition.RequestBody condition =
+        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
+    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+    ModelUsage usage = new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null);
+
+    Entry matched =
+        assistantWithPricing(
+            new UUID(0L, 20L),
+            USER_A_ID,
+            usage,
+            new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+    Entry notMatched =
+        assistantWithPricing(
+            new UUID(0L, 21L),
+            USER_A_ID,
+            usage,
+            new RequestBodyPricingSnapshot(Map.of(fingerprint, false)));
+    Entry legacy = assistantWithPricing(new UUID(0L, 22L), USER_A_ID, usage, null);
+    Entry changedPredicate =
+        assistantWithPricing(
+            new UUID(0L, 23L),
+            USER_A_ID,
+            usage,
+            new RequestBodyPricingSnapshot(
+                Map.of(
+                    ModelRequestBodyPricing.fingerprint(
+                        ModelPricingCondition.RequestBody.stringValue("/speed", "slow")),
+                    true)));
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(List.of(matched, notMatched, legacy, changedPredicate));
+
+    assertEquals("2", costs.get(matched.id()).getAmount());
+    assertEquals("1", costs.get(notMatched.id()).getAmount());
+    assertFalse(costs.containsKey(legacy.id()));
+    assertFalse(costs.containsKey(changedPredicate.id()));
+  }
+
+  private static Entry assistantWithPricing(
+      UUID id,
+      UUID parentEntryId,
+      ModelUsage usage,
+      RequestBodyPricingSnapshot requestBodyPricing) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentEntryId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
+            new AssistantMessageMetadata(
+                GenerationStopReason.COMPLETE, usage, null, MODEL_A, NOW, null, requestBodyPricing),
+            null),
+        NOW);
   }
 
   private void stubModel(String providerName, String modelName, AgentModelPricingDTO pricing) {
