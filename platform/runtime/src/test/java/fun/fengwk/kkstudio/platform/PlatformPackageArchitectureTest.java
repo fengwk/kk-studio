@@ -30,7 +30,7 @@ class PlatformPackageArchitectureTest {
             "interaction",
             "orchestration",
             "persistence",
-            "plugin",
+            "pluginhost",
             "settings",
             "storage"),
         directDirectoryNames(platformRoot));
