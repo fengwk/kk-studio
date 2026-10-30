@@ -341,7 +341,7 @@ Environment 管理面展示宿主事实与有界运维事件窗口，并提供�
 ### tab 全局 IDE 面板
 
 IDE 是 tab 全局面板，不在工作区内嵌视图：[`IdePanelProvider`](../../frontend/src/features/environment/ide/IdePanelProvider.tsx)
-由应用外壳装配，一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
+由应用外壳装配，负责 Context 提供、顶层状态组装与浮层渲染；内部职责明确拆分为纯 Claim 状态机（[`ide-claim-reducer`](../../frontend/src/features/environment/ide/ide-claim-reducer.ts)）、单点存储适配（[`ide-tab-state`](../../frontend/src/features/environment/ide/ide-tab-state.ts)）与连接身份对账（[`use-ide-claim-reconciliation`](../../frontend/src/features/environment/ide/use-ide-claim-reconciliation.ts)）。一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
 切换环境只改变可见性，已打开的 iframe 保持挂载。入口只表达“打开这个环境的工作台”：
 Chat 入口经 [`ide-panel-context`](../../frontend/src/features/environment/ide/ide-panel-context.ts)
 请求面板聚焦已有视图，不预创建 iframe，也不在入口处声明目录。
