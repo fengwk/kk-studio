@@ -29,18 +29,19 @@ class ResolvedSecurityDependenciesTest {
     assertFamily(versions, "io.netty:", "4.2.18.Final");
     assertFamily(versions, "org.apache.httpcomponents.core5:", "5.4.4");
     assertFamily(versions, "org.apache.httpcomponents.client5:", "5.6.4");
-    assertFamily(versions, "org.apache.opennlp:", "2.5.12");
     assertFamily(versions, "tools.jackson.", "3.1.7");
+    assertFalse(
+        versions.keySet().stream()
+            .anyMatch(coordinate -> coordinate.startsWith("org.apache.opennlp:")),
+        "removed MCP NLP dependencies must not return to the runtime classpath");
     for (String coordinate : versions.keySet()) {
       if (coordinate.startsWith("com.fasterxml.jackson.")) {
-        // Jackson 2/3 BOM 共享 annotations；该构件从 2.20 起使用无 patch 的发布版本。
+        // Jackson 3 只共享 annotations；Jackson 2 的 JSON 实现不得重新进入 classpath。
         assertEquals(
-            Set.of(
-                coordinate.equals("com.fasterxml.jackson.core:jackson-annotations")
-                    ? "2.22"
-                    : "2.22.3"),
-            versions.get(coordinate),
-            coordinate);
+            "com.fasterxml.jackson.core:jackson-annotations",
+            coordinate,
+            "Jackson 2 JSON implementations must not enter the runtime classpath");
+        assertEquals(Set.of("2.22"), versions.get(coordinate), coordinate);
       }
     }
     for (String required :
@@ -51,9 +52,7 @@ class ResolvedSecurityDependenciesTest {
             "org.apache.httpcomponents.core5:httpcore5",
             "org.apache.httpcomponents.core5:httpcore5-h2",
             "org.apache.httpcomponents.client5:httpclient5",
-            "org.apache.opennlp:opennlp-tools",
-            "com.fasterxml.jackson.core:jackson-core",
-            "com.fasterxml.jackson.core:jackson-databind",
+            "com.fasterxml.jackson.core:jackson-annotations",
             "tools.jackson.core:jackson-core",
             "tools.jackson.core:jackson-databind")) {
       assertTrue(versions.containsKey(required), "missing resolved dependency: " + required);

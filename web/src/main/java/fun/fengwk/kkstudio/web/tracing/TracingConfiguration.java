@@ -20,7 +20,7 @@ public class TracingConfiguration {
   @Bean
   public ContextSnapshotFactory contextSnapshotFactory(Tracer tracer) {
     ContextRegistry registry = ContextRegistry.getInstance();
-    // ObservationThreadLocalAccessor 由 micrometer-observation 通过 ServiceLoader 先行注册；
+    // ObservationThreadLocalAccessor 由 micrometer-observation 在注册表初始化时先行注册；
     // span accessor 必须在其后，只有手工 span 没有 observation 时才接管。
     registry.registerThreadLocalAccessor(new Slf4jThreadLocalAccessor("traceId", "spanId"));
     registry.registerThreadLocalAccessor(new ObservationAwareSpanThreadLocalAccessor(tracer));
