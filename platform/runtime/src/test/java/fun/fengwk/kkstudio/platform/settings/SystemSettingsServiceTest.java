@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 import java.time.Instant;
 
 /** System settings service 的条件更新竞争、单行缺失语义与 live 快照 afterCommit/rollback 契约。 */
-class SystemSettingsServiceImplTest {
+class SystemSettingsServiceTest {
 
   private static final Instant CREATED_AT = Instant.parse("2026-08-01T00:00:00Z");
   private static final Instant UPDATED_AT = Instant.parse("2026-08-01T00:00:01Z");
@@ -51,8 +51,8 @@ class SystemSettingsServiceImplTest {
       new SystemSettingsSnapshot(SystemSettings.DEFAULT);
   private final SystemSettingsChangeHandler changeHandler =
       new SystemSettingsChangeHandler(repository, snapshot);
-  private final SystemSettingsServiceImpl service =
-      new SystemSettingsServiceImpl(repository, codec, changeHandler);
+  private final SystemSettingsService service =
+      new SystemSettingsService(repository, codec, changeHandler);
 
   @AfterEach
   void clearSynchronization() {

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -13,21 +13,25 @@ import java.util.Objects;
  * Connection：PostgreSQL 只在提交时投递，未提交不可见、回滚静默。
  */
 @Component
-public class PostgresqlSystemSettingsChangeNotifier {
+public class SystemSettingsChangeNotifier {
 
-  private final JdbcTemplate jdbc;
+  private final JdbcClient jdbcClient;
 
-  public PostgresqlSystemSettingsChangeNotifier(JdbcTemplate jdbc) {
-    this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+  public SystemSettingsChangeNotifier(JdbcClient jdbcClient) {
+    this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
   /** 以写后 version 的十进制字符串发布一次失效提示；调用方必须已处于真实事务中。 */
   public void versionChanged(long version) {
     requireTransaction();
-    jdbc.queryForObject(
-        "select pg_notify('system_settings_changed', ?)", String.class, Long.toString(version));
+    jdbcClient
+        .sql("select pg_notify('system_settings_changed', :version)")
+        .param("version", Long.toString(version))
+        .query(String.class)
+        .optional();
   }
 
+  /** 校验当前线程处于真实写事务中；调用方必须在执行 SQL 之前检查，autocommit 下的写会被先行提交。 */
   static void requireTransaction() {
     if (!TransactionSynchronizationManager.isActualTransactionActive()) {
       throw new IllegalStateException(
