@@ -94,6 +94,7 @@ public class IssueEditingService {
     return issueRepository.listByProjectIdAndArchived(projectId, archived);
   }
 
+  /** 编辑 Issue 需求事实（标题与描述）；当前阶段与执行事实不由本操作改变。 */
   @Transactional
   public Issue updateIssue(UUID issueId, long expectedVersion, String title, String description) {
     Objects.requireNonNull(issueId, "issueId");
@@ -113,6 +114,7 @@ public class IssueEditingService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 追加普通评论：只留痕，不自动唤醒 Agent。 */
   @Transactional
   public Issue appendComment(UUID issueId, long expectedVersion, String requestKey, String body) {
     Objects.requireNonNull(issueId, "issueId");
@@ -144,6 +146,7 @@ public class IssueEditingService {
     return mutationSupport.currentIssue(issueId);
   }
 
+  /** 追加定向指示：必须投递给明确的当前 Run；没有活动 Run 时先明确启动或恢复，绝不构造隐藏的未来阶段队列。 */
   @Transactional
   public Issue appendInstruction(
       UUID issueId, long expectedVersion, String requestKey, String body) {
@@ -185,6 +188,7 @@ public class IssueEditingService {
     return mutationSupport.currentIssue(issueId);
   }
 
+  /** 读取 Issue 事实流的有界窗口，按序号升序。 */
   public List<IssueActivity> listActivities(UUID issueId, long afterSequence, int limit) {
     Objects.requireNonNull(issueId, "issueId");
     getIssue(issueId);
@@ -194,6 +198,7 @@ public class IssueEditingService {
     return issueActivityRepository.listPage(issueId, afterSequence, clampLimit(limit));
   }
 
+  /** 读取 Issue 的稳定 Agent Thread 归属；绑定不可重绑，因此只需返回事实。 */
   public List<IssueAgentThread> listAgentThreads(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
     getIssue(issueId);

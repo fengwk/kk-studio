@@ -57,6 +57,7 @@ public class IssueLifecycleService {
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final IssueMutationSupport mutationSupport;
 
+  /** 归档：要求没有活动 Run；归档后禁止执行，不删除历史与资源。 */
   @Transactional
   public Issue archiveIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
@@ -79,6 +80,7 @@ public class IssueLifecycleService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 恢复归档：只回到可编辑状态，不自动新建 Run。 */
   @Transactional
   public Issue unarchiveIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
@@ -91,6 +93,7 @@ public class IssueLifecycleService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 业务阻塞：原子记录 BLOCKED、原阶段与原因。 */
   @Transactional
   public Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason) {
     Objects.requireNonNull(issueId, "issueId");
@@ -130,6 +133,7 @@ public class IssueLifecycleService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 恢复业务阻塞：显式回到阻塞前阶段。 */
   @Transactional
   public Issue recoverIssue(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
@@ -170,6 +174,7 @@ public class IssueLifecycleService {
     return persisted;
   }
 
+  /** 控制暂停：阻止新派发并记录原因与详情（USER/ERROR/UNKNOWN）。 */
   @Transactional
   public Issue pauseIssue(
       UUID issueId, long expectedVersion, String requestKey, PauseReason reason, String detail) {
@@ -201,6 +206,7 @@ public class IssueLifecycleService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 显式解除控制暂停门禁。 */
   @Transactional
   public Issue resumeIssue(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
@@ -233,6 +239,7 @@ public class IssueLifecycleService {
     return persisted;
   }
 
+  /** 人工终止 Issue 执行：活动 Run 收尾为 CANCELLED 并保留 USER 暂停门禁；在途副作用不明则进入 UNKNOWN。 */
   @Transactional
   public Issue stopIssue(UUID issueId, long expectedVersion, String requestKey, String detail) {
     Objects.requireNonNull(issueId, "issueId");
@@ -280,6 +287,7 @@ public class IssueLifecycleService {
     return mutationSupport.currentIssue(issueId);
   }
 
+  /** 记录人工核查依据并解除 UNKNOWN 门禁（转为 USER 暂停门禁，需显式 resumeIssue 唤醒）。 */
   @Transactional
   public Issue resolveUnknown(
       UUID issueId, long expectedVersion, String requestKey, String verification) {
@@ -314,6 +322,7 @@ public class IssueLifecycleService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
+  /** 深删除 Issue：严格要求无活动 Run 且无未核查的 UNKNOWN，按依赖顺序清理各表与 Harness Session。 */
   @Transactional
   public void deleteIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
@@ -342,6 +351,7 @@ public class IssueLifecycleService {
     }
   }
 
+  /** 正常转移：目标是当前阶段 workflow {@code next} 白名单成员且处于启用状态。 */
   @Transactional
   public Issue transition(UUID issueId, long expectedVersion, String requestKey, String toState) {
     Objects.requireNonNull(issueId, "issueId");
@@ -386,6 +396,7 @@ public class IssueLifecycleService {
     return persisted;
   }
 
+  /** DONE 重开：显式回到 INIT。 */
   @Transactional
   public Issue reopen(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
