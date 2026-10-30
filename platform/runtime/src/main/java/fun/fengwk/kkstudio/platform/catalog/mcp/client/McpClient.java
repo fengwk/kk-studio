@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 跨 Platform/Daemon 复用的 MCP client 接口。
  *
- * <p>屏蔽底层 LangChain4j 类型，提供工具发现、工具调用及生命周期关闭。
+ * <p>屏蔽底层 MCP SDK 类型，提供工具发现、工具调用及生命周期关闭。
  *
  * <p>所有操作都要求调用方显式提供总预算 deadline 与调用级取消令牌：库不提供无预算的隐式默认，避免出现无法限时的生产调用。
  */

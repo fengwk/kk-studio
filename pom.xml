@@ -39,7 +39,7 @@
         <aws.sdk.version>2.29.52</aws.sdk.version>
         <convention4j.version>1.2.2</convention4j.version>
         <json-path.version>2.9.0</json-path.version>
-        <langchain4j.version>1.19.0</langchain4j.version>
+        <mcp-sdk.version>2.1.0</mcp-sdk.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <jgit.version>7.7.1.202607240634-r</jgit.version>
         <okhttp.version>4.12.0</okhttp.version>
@@ -276,11 +276,14 @@
                 <version>${json-path.version}</version>
             </dependency>
             <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-bom</artifactId>
-                <version>${langchain4j.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-core</artifactId>
+                <version>${mcp-sdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-json-jackson3</artifactId>
+                <version>${mcp-sdk.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jgit</groupId>
