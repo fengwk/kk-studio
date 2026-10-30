@@ -18,12 +18,14 @@ import {
   type ThreadDraftRecord,
 } from '@/features/chat/runtime/thread-draft-store'
 import { boundPendingStorageKey } from '@/features/chat/runtime/pending-request-store'
+import type { CommandBatchPlan } from '@/features/chat/command-batch-plan'
+import type { ComposerPart } from '@/features/chat/composer/composer-parts'
 
 function useTestController(
   threadId: string,
-  initialParts: any = [],
-  buildBatch: any = null,
-  buildGoalBatch: any = null,
+  initialParts: ComposerPart[] = [],
+  buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
+  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
 ) {
   const projection = useThreadProjection(threadId)
   return useAgentThreadController(projection, initialParts, buildBatch, buildGoalBatch)
