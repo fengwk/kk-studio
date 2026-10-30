@@ -78,7 +78,7 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
 
   private ModelHttpErrorPolicy policyFor(String providerName) {
     ModelHttpErrorPolicyProvider provider =
-        new HarnessRuntimeConfiguration()
+        new HarnessProcessorConfiguration()
             .modelHttpErrorPolicyProvider(
                 new SystemSettingsSnapshot(settingsWithRetryList(List.of(429))),
                 repository(),

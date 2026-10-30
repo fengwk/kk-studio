@@ -57,12 +57,17 @@ class WebModuleArchitectureTest {
           WEB_SOURCE_ROOT + "runtime/HarnessRuntimeConfiguration.java",
           List.of(
               BUILTIN_PREFIX + "driver.BuiltinAgentDriver",
-              BUILTIN_PREFIX + "port.ModelGateway",
               BUILTIN_PREFIX + "port.TurnResolver",
               BUILTIN_PREFIX + "processor.ModelProcessor",
+              BUILTIN_PREFIX + "query.BuiltinRequestQuery"),
+          WEB_SOURCE_ROOT + "runtime/HarnessProcessorConfiguration.java",
+          List.of(
+              BUILTIN_PREFIX + "port.ModelGateway",
+              BUILTIN_PREFIX + "processor.ModelProcessor",
               BUILTIN_PREFIX + "processor.ModelProcessorConfig",
-              BUILTIN_PREFIX + "processor.ModelStreamConfig",
-              BUILTIN_PREFIX + "query.BuiltinRequestQuery"));
+              BUILTIN_PREFIX + "processor.ModelStreamConfig"),
+          WEB_SOURCE_ROOT + "runtime/HarnessRealtimeConfiguration.java",
+          List.of(BUILTIN_PREFIX + "processor.ModelProcessor"));
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
@@ -125,10 +130,20 @@ class WebModuleArchitectureTest {
   @Test
   void driverCompositionPermissionsDoNotEscapeTheirDeclaredSourceFiles() {
     String composition = WEB_SOURCE_ROOT + "runtime/HarnessRuntimeConfiguration.java";
+    String processor = WEB_SOURCE_ROOT + "runtime/HarnessProcessorConfiguration.java";
+    String realtime = WEB_SOURCE_ROOT + "runtime/HarnessRealtimeConfiguration.java";
     String controller = WEB_SOURCE_ROOT + "controller/StudioHarnessThreadController.java";
     assertFalse(
         isForbiddenHarnessImport(composition, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
+    assertFalse(
+        isForbiddenHarnessImport(processor, BUILTIN_PREFIX + "processor.ModelProcessorConfig"));
+    assertFalse(isForbiddenHarnessImport(realtime, BUILTIN_PREFIX + "processor.ModelProcessor"));
     assertTrue(isForbiddenHarnessImport(controller, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
+    assertTrue(
+        isForbiddenHarnessImport(composition, BUILTIN_PREFIX + "processor.ModelProcessorConfig"));
+    assertTrue(isForbiddenHarnessImport(processor, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
+    assertTrue(
+        isForbiddenHarnessImport(realtime, BUILTIN_PREFIX + "processor.ModelProcessorConfig"));
     assertTrue(
         isForbiddenHarnessImport(composition, HARNESS_MODEL_PREFIX + "provider.ProviderResponse"));
   }

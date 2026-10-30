@@ -28,10 +28,22 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 该函数已移除或定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
-将 datasource/transaction manager 接入 PostgresqlHarnessStore，
-装配 realtime source/sink、三个 Processor 与 Work dispatcher。
-timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 执行 checkpoint 提交。
-该组合根还装配 Skill 同步和 PluginResourceGateway，因为它们需要 Harness 会话能力。
+是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlHarnessStore，
+装配唯一的 Builtin Driver、资源工具目录、PluginResourceGateway、HarnessRuntime、
+请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
+Processor、realtime 与 Environment 会话由它显式导入，不在核心类里再声明一遍。
+
+[`HarnessProcessorConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java)
+装配重试与模型 HTTP 策略、lease/processor 配置、三个 Processor、
+processor scheduler、heartbeat worker、model executor，以及退出确认 journal、confirmer 与 retry。
+timer 只唤醒和分派，heartbeat worker 执行续租事务，model executor 执行 checkpoint 提交。
+
+[`HarnessRealtimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRealtimeConfiguration.java)
+装配通知 codec、超限 payload 缓冲、本地优先 realtime 总线，以及流式追帧 codec 与应用服务。
+
+[`HarnessEnvironmentConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java)
+装配 Skill 同步执行器与编排器，并把 dispatcher 唤醒、Skill 同步、IDE 租约心跳和换代清理收进同一个会话监听器。
+Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需要 Harness 会话或 store。
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
