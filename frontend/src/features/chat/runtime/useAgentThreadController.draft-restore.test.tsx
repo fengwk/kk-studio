@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createTextPart, partsToText } from '@/features/chat/composer/composer-parts'
 import { useAgentThreadController } from '@/features/chat/runtime/useAgentThreadController'
+import { useThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import {
   applyStopReceipt,
   loadThreadDraft,
@@ -16,7 +17,19 @@ import {
   type StopReceiptMergeResult,
   type ThreadDraftRecord,
 } from '@/features/chat/runtime/thread-draft-store'
-import { boundPendingStorageKey } from '@/features/chat/runtime/agent-pane/pane-target'
+import { boundPendingStorageKey } from '@/features/chat/runtime/pending-request-store'
+import type { CommandBatchPlan } from '@/features/chat/command-batch-plan'
+import type { ComposerPart } from '@/features/chat/composer/composer-parts'
+
+function useTestController(
+  threadId: string,
+  initialParts: ComposerPart[] = [],
+  buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
+  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
+) {
+  const projection = useThreadProjection(threadId)
+  return useAgentThreadController(projection, initialParts, buildBatch, buildGoalBatch)
+}
 import { loadPendingStop } from '@/features/chat/runtime/pending-stop-sidecar'
 import { translate as t } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -332,7 +345,7 @@ describe('useAgentThreadController draft restore', () => {
     } as HarnessThreadStopResultDTO)
 
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      ({ threadId }: { threadId: string }) => useTestController(threadId),
       { initialProps: { threadId: THREAD_ID }, wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -377,7 +390,7 @@ describe('useAgentThreadController draft restore', () => {
       .mockRejectedValueOnce(new Error('network connection lost'))
 
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      ({ threadId }: { threadId: string }) => useTestController(threadId),
       { initialProps: { threadId: THREAD_ID }, wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -421,7 +434,7 @@ describe('useAgentThreadController draft restore', () => {
       stoppedThreads: [stopReceipt(THREAD_ID, 'stop-edit', [cancelledUserMessage(1, 'cancelled')])],
     } as HarnessThreadStopResultDTO)
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft([createTextPart('draft before stop')]))
 
@@ -455,7 +468,7 @@ describe('useAgentThreadController draft restore', () => {
       snapshotOf(threadFixture(), { stopReceipts: [receipt] }),
     )
 
-    const { result, rerender } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result, rerender } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(partsToText(result.current.draft)).toBe('cancelled once\n\nother tab draft')
 
@@ -489,7 +502,7 @@ describe('useAgentThreadController draft restore', () => {
       // 快照通道：重复投递（在途）。
       .mockReturnValueOnce(secondDelivery.promise)
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft([createTextPart('draft before stop')]))
 
@@ -527,7 +540,7 @@ describe('useAgentThreadController draft restore', () => {
       ],
     } as HarnessThreadStopResultDTO)
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft([createTextPart('draft before stop')]))
 
@@ -559,7 +572,7 @@ describe('useAgentThreadController draft restore', () => {
       snapshotOf(threadFixture(), { stopReceipts: [receipt] }),
     )
 
-    const { result, rerender } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result, rerender } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() =>
       expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftRestoreFailed')))
     expect(applyStopReceiptMock).toHaveBeenCalledTimes(1)
@@ -588,7 +601,7 @@ describe('useAgentThreadController draft restore', () => {
     saveThreadDraftPartsMock.mockReturnValueOnce(gate.promise)
 
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      ({ threadId }: { threadId: string }) => useTestController(threadId),
       { initialProps: { threadId: THREAD_ID }, wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -625,7 +638,7 @@ describe('useAgentThreadController draft restore', () => {
     } as HarnessThreadStopResultDTO)
 
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      ({ threadId }: { threadId: string }) => useTestController(threadId),
       { initialProps: { threadId: THREAD_ID }, wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -658,7 +671,7 @@ describe('useAgentThreadController draft restore', () => {
     restoreThreadGoalTextMock.mockReturnValueOnce(gate.promise)
 
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      ({ threadId }: { threadId: string }) => useTestController(threadId),
       { initialProps: { threadId: THREAD_ID }, wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -688,7 +701,7 @@ describe('useAgentThreadController draft restore', () => {
     const gate = deferred<ThreadDraftRecord | null>()
     loadThreadDraftMock.mockReturnValueOnce(gate.promise)
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     act(() => result.current.setDraft([createTextPart('typed before load')]))
 
     await act(async () => {
@@ -711,7 +724,7 @@ describe('useAgentThreadController draft restore', () => {
     const olderSave = deferred<DraftSaveOutcome>()
     const client = testClient()
     const receipt = stopReceipt(THREAD_ID, 'stop-older', [cancelledUserMessage(1, 'cancelled')])
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -741,7 +754,7 @@ describe('useAgentThreadController draft restore', () => {
     // 两个字段各自独立：goal 写入成功不得清掉 composer 尚未落盘的编辑标记。
     const client = testClient()
     const receipt = stopReceipt(THREAD_ID, 'stop-cross-field', [cancelledUserMessage(1, 'cancelled')])
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -774,7 +787,7 @@ describe('useAgentThreadController draft restore', () => {
       recordOf(THREAD_ID, [createTextPart('loaded draft')], ['stop-loaded']),
     )
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     act(() => result.current.setDraft([createTextPart('edited draft')]))
@@ -803,7 +816,7 @@ describe('useAgentThreadController draft restore', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -837,7 +850,7 @@ describe('useAgentThreadController draft restore', () => {
       record: recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-elsewhere']),
     })
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     act(() => result.current.setDraft([createTextPart('local edit')]))
@@ -859,7 +872,7 @@ describe('useAgentThreadController draft restore', () => {
   it('reports a draft save failure instead of pretending the draft is persisted', async () => {
     saveThreadDraftPartsMock.mockRejectedValueOnce(new Error('quota exceeded'))
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     act(() => result.current.setDraft([createTextPart('unsaved edit')]))
@@ -869,7 +882,7 @@ describe('useAgentThreadController draft restore', () => {
   it('reports a draft load failure instead of showing a possibly stale editor', async () => {
     loadThreadDraftMock.mockRejectedValueOnce(new Error('IndexedDB open failed'))
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.actionError).toBe(t('ai.runtime.action.draftLoadFailed')))
   })
 })

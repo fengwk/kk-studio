@@ -5373,4 +5373,5 @@ describe('AgentPane root control mounting', () => {
     })
     expect(openEnvironment).toHaveBeenCalledTimes(1)
   })
+
 })

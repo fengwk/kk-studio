@@ -1,5 +1,6 @@
 import type { ComposerPart } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
+import type { PendingAcceptance } from '@/features/chat/runtime/pending-request-store'
 import { isCanonicalThreadName } from '@/features/chat/thread-name'
 import type {
   AgentCommandTargetDTO,
@@ -23,38 +24,17 @@ export type PaneTarget =
 
 export type PaneTargetKind = PaneTarget['kind']
 
-/**
- * 容器创建（NEW_SESSION / NEW_THREAD）的未决接受：只有创建才需要产品 owner。
- * 既有 Thread 的发送、Goal、设置、预览等一律走 per-thread 的
- * {@link BoundPendingMessage}，不再伪造 owner。
- */
-export interface PendingAcceptance {
-  owner: AgentRuntimeOwnerDTO
-  target: PaneTarget
-  request: HarnessCommandBatchDTO
-  branchDraft: BranchDraft
-  composerParts: ComposerPart[]
-  generation: number
-  unknownOutcome: boolean
-}
-
-const PENDING_STORAGE_PREFIX = 'kk-studio.agent-pane-acceptance.'
-
 export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
   return owner.type === 'CHAT'
     ? `CHAT:${owner.chatId}`
     : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
 }
 
-function pendingStorageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
-  return `${PENDING_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function nonBlank(value: unknown): value is string {
+export function nonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
@@ -286,7 +266,7 @@ function isComposerPart(value: unknown): value is ComposerPart {
     && (value.imageTier === undefined || isImageTier(value.imageTier))
 }
 
-function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {
+export function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {
   return isRecord(value)
     && isOwner(value.owner)
     && isPaneTarget(value.target)
@@ -298,6 +278,13 @@ function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {
     && Number.isInteger(value.generation)
     && value.generation >= 0
     && typeof value.unknownOutcome === 'boolean'
+}
+
+export {
+  isCommandBatchRequest,
+  isThreadCommandBatchRequest,
+  isBranchDraft,
+  isComposerPart,
 }
 
 export function isPaneTarget(value: unknown): value is PaneTarget {
@@ -429,332 +416,3 @@ export function targetIdentity(target: PaneTarget): string {
   return `thread:${target.threadId}`
 }
 
-export function samePendingAcceptanceIdentity(
-  left: PendingAcceptance,
-  right: PendingAcceptance,
-): boolean {
-  // 请求身份以命令幂等键 + owner + 展示目标为准；generation/unknownOutcome 是同一
-  // 请求的本地对账状态，更新它们不能生成新的请求身份。
-  return left.owner.type === right.owner.type
-    && ownerIdentity(left.owner) === ownerIdentity(right.owner)
-    && ownerIdentity(left.request.owner) === ownerIdentity(right.request.owner)
-    && samePaneTarget(left.target, right.target)
-    && sameBatchRequestIdentity(left.request, right.request)
-}
-
-export type PendingAcceptanceSlot =
-  | { status: 'empty' }
-  | { status: 'occupied'; pending: PendingAcceptance }
-  | { status: 'invalid' }
-  | { status: 'unavailable' }
-
-/**
- * 按 owner/pane 槽位读取原始 pending，不按当前展示目标过滤。
- *
- * 槽位被损坏/不可读取时也不能当成“从未执行”：调用方必须阻塞新提交，避免覆盖
- * 仍可能属于原操作的记录。
- */
-export function inspectPendingAcceptanceSlot(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage?: Pick<Storage, 'getItem'>,
-): PendingAcceptanceSlot {
-  const resolved = resolveStorage(storage)
-  if (resolved == null) {
-    return { status: 'unavailable' }
-  }
-  try {
-    const raw = resolved.getItem(pendingStorageKey(owner, paneId))
-    if (!raw) {
-      return { status: 'empty' }
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      return { status: 'invalid' }
-    }
-    if (
-      !isPendingAcceptanceValue(parsed)
-      || parsed.owner.type !== owner.type
-      || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
-      || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
-    ) {
-      return { status: 'invalid' }
-    }
-    return { status: 'occupied', pending: parsed }
-  } catch {
-    return { status: 'unavailable' }
-  }
-}
-
-export function loadPendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage?: Pick<Storage, 'getItem'>,
-  expectedTarget?: PaneTarget,
-): PendingAcceptance | null {
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, storage)
-  if (slot.status !== 'occupied') {
-    return null
-  }
-  // paneId 只定位记录槽位；恢复应用还必须核对记录自己的展示目标。目标不匹配时
-  // 保留原记录供原操作对账，既不删除也不改写成当前 UI 的请求。
-  if (expectedTarget != null && !samePaneTarget(slot.pending.target, expectedTarget)) {
-    return null
-  }
-  return slot.pending
-}
-
-/**
- * 写入 pending 使用 best-effort 槽位 compare-and-set：先读后写，不是跨 tab 原子
- * 操作。它用于阻止常规路径覆盖已存在的不同目标/不同幂等键记录；同时并发写入
- * 仍可能由浏览器最后写入者获胜。已有异目标记录必须保留，由原目标切回后对账。
- */
-export function savePendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  pending: PendingAcceptance,
-  storage: Pick<Storage, 'getItem' | 'setItem'> = globalThis.localStorage,
-): boolean {
-  const resolved = resolveStorage(storage)
-  if (
-    resolved == null
-    || ownerIdentity(pending.owner) !== ownerIdentity(owner)
-    || ownerIdentity(pending.request.owner) !== ownerIdentity(owner)
-  ) {
-    return false
-  }
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
-  if (slot.status === 'invalid' || slot.status === 'unavailable') {
-    return false
-  }
-  if (slot.status === 'occupied' && !samePendingAcceptanceIdentity(slot.pending, pending)) {
-    return false
-  }
-  try {
-    resolved.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * best-effort 只清除与 expected 同一原始请求的记录；槽位被其他请求占用、损坏或
- * 不可读时保留原记录，避免迟到的成功/取消清掉别人的对账资料。先读后删不是跨 tab
- * 原子操作，这里只覆盖常规路径。
- */
-export function clearPendingAcceptance(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  expected: PendingAcceptance,
-  storage: Pick<Storage, 'getItem' | 'removeItem'> = globalThis.localStorage,
-): boolean {
-  const resolved = resolveStorage(storage)
-  if (resolved == null) {
-    return false
-  }
-  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
-  if (slot.status !== 'occupied' || !samePendingAcceptanceIdentity(slot.pending, expected)) {
-    return false
-  }
-  try {
-    resolved.removeItem(pendingStorageKey(owner, paneId))
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * 既有 Thread 的一次未决写入（普通消息或 Goal）。它只依赖 Thread 的 CAS 游标，
- * 不携带 owner；发送前持久化，未知结果后保留，刷新/重绑后按 thread 恢复精确重试，
- * 并按 kind 把内容恢复到对应编辑区（消息 → composer，目标 → Goal 编辑区）。
- */
-export interface BoundPendingMessage {
-  threadId: string
-  request: HarnessThreadCommandBatchDTO
-  targetDraft: BranchDraft
-  kind: 'MESSAGE' | 'GOAL'
-  localDraft: ComposerPart[]
-  goalText: string | null
-  unknownOutcome: boolean
-}
-
-const BOUND_PENDING_STORAGE_PREFIX = 'kk-studio.agent-thread-pending.'
-
-export function boundPendingStorageKey(threadId: string): string {
-  return `${BOUND_PENDING_STORAGE_PREFIX}${threadId}`
-}
-
-function resolveStorage(
-  injected?: Partial<Storage>,
-): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
-  if (injected) {
-    return injected as Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
-  }
-  try {
-    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
-      return globalThis.localStorage
-    }
-  } catch {
-    return null
-  }
-  return null
-}
-
-export function isBoundPendingMessageValue(value: unknown): value is BoundPendingMessage {
-  return isRecord(value)
-    && hasExactKeys(value, [
-      'threadId',
-      'request',
-      'targetDraft',
-      'kind',
-      'localDraft',
-      'goalText',
-      'unknownOutcome',
-    ])
-    && nonBlank(value.threadId)
-    && (value.kind === 'MESSAGE' || value.kind === 'GOAL')
-    && typeof value.unknownOutcome === 'boolean'
-    && isThreadCommandBatchRequest(value.request)
-    && isBranchDraft(value.targetDraft)
-    && Array.isArray(value.localDraft)
-    && value.localDraft.every(isComposerPart)
-    && (value.goalText === null || typeof value.goalText === 'string')
-}
-
-export function sameBatchRequestIdentity(
-  left: HarnessThreadCommandBatchDTO,
-  right: HarnessThreadCommandBatchDTO,
-): boolean {
-  if (left === right) {
-    return true
-  }
-  if (left.commands.length !== right.commands.length) {
-    return false
-  }
-  return left.commands.every(
-    (cmd, index) => cmd.idempotencyKey === right.commands[index]?.idempotencyKey,
-  )
-}
-
-export function loadBoundPendingMessage(
-  threadId: string,
-  storage?: Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>,
-): BoundPendingMessage | null {
-  const resolved = resolveStorage(storage)
-  if (!resolved || !nonBlank(threadId)) {
-    return null
-  }
-  const key = boundPendingStorageKey(threadId)
-  try {
-    const raw = resolved.getItem(key)
-    if (!raw) {
-      return null
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!isBoundPendingMessageValue(parsed) || parsed.threadId !== threadId) {
-      try {
-        resolved.removeItem(key)
-      } catch {
-        // Ignore storage errors.
-      }
-      return null
-    }
-    // 重点：刷新发生 POST 已发但还没有 catch 标 unknown 时，load 必须按未知可重试恢复，
-    // 避免因为 unknownOutcome=false 造成界面永远无重试按钮而死锁。
-    if (!parsed.unknownOutcome) {
-      const normalized: BoundPendingMessage = {
-        ...parsed,
-        unknownOutcome: true,
-      }
-      try {
-        resolved.setItem(key, JSON.stringify(normalized))
-      } catch {
-        // best-effort writeback
-      }
-      return normalized
-    }
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-export function saveBoundPendingMessage(
-  threadId: string,
-  pending: BoundPendingMessage,
-  storage?: Pick<Storage, 'setItem' | 'getItem'>,
-): void {
-  const resolved = resolveStorage(storage)
-  if (!resolved) {
-    throw new Error('Storage is unavailable')
-  }
-  if (!nonBlank(threadId)) {
-    throw new Error('threadId is required to persist bound pending message')
-  }
-  if (!isBoundPendingMessageValue(pending) || pending.threadId !== threadId) {
-    throw new Error('Invalid bound pending message shape')
-  }
-  const key = boundPendingStorageKey(threadId)
-  // 检查已有未决状态：若同 thread 已有不同 request 身份的未决记录，拒绝覆盖以保护多 pane / 交错场景
-  const existingRaw = resolved.getItem(key)
-  if (existingRaw) {
-    try {
-      const existing = JSON.parse(existingRaw)
-      if (isBoundPendingMessageValue(existing)) {
-        if (!sameBatchRequestIdentity(existing.request, pending.request)) {
-          throw new Error('Conflict: another pending message exists for this thread')
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Conflict:')) {
-        throw err
-      }
-      // 损坏数据允许覆写修复
-    }
-  }
-  const serialized = JSON.stringify(pending)
-  resolved.setItem(key, serialized)
-  const stored = resolved.getItem(key)
-  if (stored !== serialized) {
-    throw new Error('Persistence verification failed for bound pending message')
-  }
-}
-
-export function clearBoundPendingMessage(
-  threadId: string,
-  matchingRequest?: HarnessThreadCommandBatchDTO,
-  storage?: Pick<Storage, 'getItem' | 'removeItem'>,
-): boolean {
-  const resolved = resolveStorage(storage)
-  if (!resolved || !nonBlank(threadId)) {
-    return true
-  }
-  const key = boundPendingStorageKey(threadId)
-  try {
-    if (matchingRequest != null) {
-      const raw = resolved.getItem(key)
-      if (!raw) {
-        return true
-      }
-      try {
-        const parsed = JSON.parse(raw) as { request?: unknown }
-        if (parsed && isThreadCommandBatchRequest(parsed.request)) {
-          if (!sameBatchRequestIdentity(parsed.request, matchingRequest)) {
-            // multi-pane 同 thread pending：避免清理属于另一个请求身份的 pending
-            return false
-          }
-        }
-      } catch {
-        // 如果 JSON 解析失败则为损坏数据，允许删除
-      }
-    }
-    resolved.removeItem(key)
-    return true
-  } catch {
-    return false
-  }
-}

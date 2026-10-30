@@ -159,7 +159,6 @@ export function useRootThreadControl({
   // 身份变化即重置该 Pane 的本地视图状态（Debug 模式/滚动/检查器选中）。
   const targetViewKey = paneTargetViewKey(target)
   const branchPanel = useBoundBranchPanel({
-    threadId: boundThreadId,
     projection,
   })
   const controller = branchPanel.controller
