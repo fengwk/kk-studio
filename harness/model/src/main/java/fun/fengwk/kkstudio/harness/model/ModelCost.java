@@ -63,8 +63,8 @@ public record ModelCost(
   /**
    * 使用实际请求时间、最终 service tier 与 durable request-body 条件快照解析规则并计算费用。
    *
-   * <p>{@code requestBodyPricing} 为 null 或缺少某个条件指纹时，该 request-body 叶子保持未知。若完成规则判定必须依赖该事实，
-   * 则返回 null，而不是跳过规则后采用基础价格；绝不用当前配置反推旧请求的匹配结果。
+   * <p>{@code requestBodyPricing} 为 null 或缺少某个条件指纹时，该 request-body 叶子保持未知。若完成规则判定必须依赖该事实， 则返回
+   * null，而不是跳过规则后采用基础价格；绝不用当前配置反推旧请求的匹配结果。
    */
   public static ModelCost calculate(
       ModelPricing pricing,
