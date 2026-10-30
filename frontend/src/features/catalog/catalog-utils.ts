@@ -1,7 +1,7 @@
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import type { ResourceModal } from '@/features/catalog/ai-console-types'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function resourceTitle(modal: ResourceModal): string {
@@ -40,4 +40,21 @@ export function filterProviders(
   return providers
     .filter((provider) => includesSearch(provider.name, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))
+}
+
+/**
+ * 将已知英文支持诊断映射为本地化提示；未知诊断原样保留。
+ */
+export function formatCatalogSupportIssue(
+  issue: string,
+  t?: (key: TranslationKey) => string,
+): string {
+  const translator = t ?? translate
+  if (issue === 'ignored region multiplier') {
+    return translator('ai.catalog.catalog.issue.ignoredRegionMultiplier')
+  }
+  if (issue === 'non-token cost is not included: web_search') {
+    return translator('ai.catalog.catalog.issue.nonTokenCostWebSearch')
+  }
+  return issue
 }
