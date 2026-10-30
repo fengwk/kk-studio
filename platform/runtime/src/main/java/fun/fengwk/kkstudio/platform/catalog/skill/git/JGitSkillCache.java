@@ -146,182 +146,228 @@ public class JGitSkillCache implements SkillGitCache {
 
     Object lock = packageLocks.computeIfAbsent(packageName, k -> new Object());
     synchronized (lock) {
-      Path publishedDir = resolvePublishedDir(packageName);
-      Path workRoot = cacheRoot.resolve(".work").normalize();
+      ensureCommitLocked(packageName, repositoryUrl, commit, token);
+    }
+  }
 
-      Path commitMarker = publishedDir.resolve(".kkstudio-commit");
-      if (Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
-        try {
-          String cachedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
-          if (commit.equals(cachedCommit)) {
-            return;
-          }
-        } catch (IOException ignored) {
-          // If reading fails, proceed to clone and publish
-        }
+  /**
+   * 持目录锁发布缓存：marker 命中直接返回；否则在 work 目录 clone、把精确 commit 物化到 staging，再以原子替换发布。
+   *
+   * <p>任何失败都不改动已发布目录；clone/staging 残留在 finally 中尽力删除。
+   */
+  private void ensureCommitLocked(
+      String packageName, String repositoryUrl, String commit, String token) {
+    Path publishedDir = resolvePublishedDir(packageName);
+    if (isCommitPublished(publishedDir, commit)) {
+      return;
+    }
+
+    Path workRoot = cacheRoot.resolve(".work").normalize();
+    try {
+      Files.createDirectories(workRoot);
+    } catch (IOException e) {
+      throw new SkillGitException("Failed to create work directory: " + workRoot, e);
+    }
+
+    String uuid = UUID.randomUUID().toString();
+    Path cloneDir = workRoot.resolve(packageName + "." + uuid + ".clone");
+    Path stagingDir = workRoot.resolve(packageName + "." + uuid + ".staging");
+    Path oldDir = workRoot.resolve(packageName + "." + uuid + ".old");
+
+    try {
+      materializeCommit(repositoryUrl, commit, packageName, token, cloneDir, stagingDir);
+      publishStaging(stagingDir, publishedDir, oldDir, packageName);
+    } catch (SkillGitException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new SkillGitException(
+          "Failed to ensure commit "
+              + commit
+              + " for package "
+              + packageName
+              + ": "
+              + e.getMessage(),
+          e);
+    } finally {
+      deleteRecursively(cloneDir);
+      deleteRecursively(stagingDir);
+    }
+  }
+
+  /** marker 与请求 commit 一致即命中缓存；读取失败按未命中处理，继续 clone。 */
+  private static boolean isCommitPublished(Path publishedDir, String commit) {
+    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
+    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
+      return false;
+    }
+    try {
+      return commit.equals(Files.readString(commitMarker, StandardCharsets.UTF_8).trim());
+    } catch (IOException ignored) {
+      return false;
+    }
+  }
+
+  /** clone 后在 staging 物化精确 commit，再校验 manifest 并写入 commit marker；发布前的内容全部是私有副本。 */
+  private void materializeCommit(
+      String repositoryUrl,
+      String commit,
+      String packageName,
+      String token,
+      Path cloneDir,
+      Path stagingDir)
+      throws IOException {
+    try (Git git = cloneRepository(repositoryUrl, token, cloneDir)) {
+      Repository repo = git.getRepository();
+      ObjectId commitId = ObjectId.fromString(commit);
+      if (!repo.getObjectDatabase().has(commitId)) {
+        throw new SkillGitException("Commit " + commit + " does not exist in repository");
       }
+      materializeTree(repo, parseCommit(repo, commitId, commit), stagingDir, commit);
+    }
 
-      try {
-        Files.createDirectories(workRoot);
-      } catch (IOException e) {
-        throw new SkillGitException("Failed to create work directory: " + workRoot, e);
+    SkillManifestScanner.scan(stagingDir, packageName);
+
+    try {
+      Files.writeString(
+          stagingDir.resolve(".kkstudio-commit"), commit + "\n", StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new SkillGitException("Failed to write commit marker file in staging directory", e);
+    }
+  }
+
+  /** 每次操作独立的 HTTP 保护：连接/读取超时与关闭断连由 factory 绑定的 transport 生效。 */
+  private Git cloneRepository(String repositoryUrl, String token, Path cloneDir) {
+    CredentialsProvider credentials = credentialsProvider(token);
+    try (GitHttpConnectionFactory network =
+        new GitHttpConnectionFactory(connectMillis, readMillis)) {
+      CloneCommand cloneCommand =
+          Git.cloneRepository()
+              .setURI(repositoryUrl)
+              .setDirectory(cloneDir.toFile())
+              .setCloneAllBranches(true)
+              .setTransportConfigCallback(network.callback());
+      if (credentials != null) {
+        cloneCommand.setCredentialsProvider(credentials);
       }
-
-      String uuid = UUID.randomUUID().toString();
-      Path cloneDir = workRoot.resolve(packageName + "." + uuid + ".clone");
-      Path stagingDir = workRoot.resolve(packageName + "." + uuid + ".staging");
-      Path oldDir = workRoot.resolve(packageName + "." + uuid + ".old");
-
       try {
-        CredentialsProvider credentials = credentialsProvider(token);
-        Git git;
-        try (GitHttpConnectionFactory network =
-            new GitHttpConnectionFactory(connectMillis, readMillis)) {
-          CloneCommand cloneCommand =
-              Git.cloneRepository()
-                  .setURI(repositoryUrl)
-                  .setDirectory(cloneDir.toFile())
-                  .setCloneAllBranches(true)
-                  .setTransportConfigCallback(network.callback());
-          if (credentials != null) {
-            cloneCommand.setCredentialsProvider(credentials);
-          }
-          try {
-            git = cloneCommand.call();
-          } catch (Exception e) {
-            if (GitHttpConnectionFactory.isAuthenticationFailure(e)) {
-              throw authenticationFailed(e);
-            }
-            throw new SkillGitException(
-                GitHttpConnectionFactory.failureCode(e) + ": Failed to clone repository", e);
-          }
-        }
-
-        try (git) {
-          Repository repo = git.getRepository();
-          ObjectId commitId = ObjectId.fromString(commit);
-          if (!repo.getObjectDatabase().has(commitId)) {
-            throw new SkillGitException("Commit " + commit + " does not exist in repository");
-          }
-
-          RevCommit revCommit;
-          try (RevWalk revWalk = new RevWalk(repo)) {
-            revCommit = revWalk.parseCommit(commitId);
-          } catch (Exception e) {
-            throw new SkillGitException(
-                "Invalid commit object " + commit + " in repository: " + e.getMessage(), e);
-          }
-
-          try {
-            Files.createDirectories(stagingDir);
-          } catch (IOException e) {
-            throw new SkillGitException("Failed to create staging directory: " + stagingDir, e);
-          }
-
-          try (TreeWalk treeWalk = new TreeWalk(repo)) {
-            treeWalk.addTree(revCommit.getTree());
-            treeWalk.setRecursive(false);
-            while (treeWalk.next()) {
-              String name = treeWalk.getNameString();
-              SkillManifestScanner.validateEntrySegment(name);
-
-              String pathString = treeWalk.getPathString();
-              Path target = stagingDir.resolve(pathString).normalize();
-              if (!target.startsWith(stagingDir) || target.equals(stagingDir)) {
-                throw new SkillGitException("Path escapes staging directory: " + pathString);
-              }
-
-              FileMode fileMode = treeWalk.getFileMode(0);
-              if (fileMode == FileMode.TREE) {
-                try {
-                  Files.createDirectories(target);
-                } catch (IOException e) {
-                  throw new SkillGitException("Failed to create directory: " + pathString, e);
-                }
-                treeWalk.enterSubtree();
-              } else if (fileMode == FileMode.REGULAR_FILE
-                  || fileMode == FileMode.EXECUTABLE_FILE) {
-                Path parent = target.getParent();
-                if (parent != null) {
-                  try {
-                    Files.createDirectories(parent);
-                  } catch (IOException e) {
-                    throw new SkillGitException(
-                        "Failed to create parent directory for: " + pathString, e);
-                  }
-                }
-                ObjectId blobId = treeWalk.getObjectId(0);
-                try {
-                  ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
-                  Files.write(target, loader.getBytes());
-                } catch (IOException e) {
-                  throw new SkillGitException("Failed to write blob for: " + pathString, e);
-                }
-              } else {
-                throw new SkillGitException(
-                    "Forbidden file mode " + fileMode + " for entry: " + pathString);
-              }
-            }
-          } catch (SkillGitException e) {
-            throw e;
-          } catch (Exception e) {
-            throw new SkillGitException(
-                "Failed to materialize commit tree for " + commit + ": " + e.getMessage(), e);
-          }
-        }
-
-        SkillManifestScanner.scan(stagingDir, packageName);
-
-        try {
-          Files.writeString(
-              stagingDir.resolve(".kkstudio-commit"), commit + "\n", StandardCharsets.UTF_8);
-        } catch (IOException e) {
-          throw new SkillGitException("Failed to write commit marker file in staging directory", e);
-        }
-
-        boolean backedUp = false;
-        if (Files.exists(publishedDir, LinkOption.NOFOLLOW_LINKS)) {
-          try {
-            Files.move(publishedDir, oldDir, StandardCopyOption.ATOMIC_MOVE);
-            backedUp = true;
-          } catch (IOException e) {
-            throw new SkillGitException(
-                "Failed to backup existing package directory: " + publishedDir, e);
-          }
-        }
-
-        try {
-          Files.move(stagingDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
-        } catch (Exception moveError) {
-          if (backedUp) {
-            try {
-              Files.move(oldDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
-            } catch (Exception restoreError) {
-              moveError.addSuppressed(restoreError);
-            }
-          }
-          throw new SkillGitException(
-              "Failed to publish skill cache directory for package " + packageName, moveError);
-        }
-
-        if (backedUp) {
-          deleteRecursively(oldDir);
-        }
-      } catch (SkillGitException e) {
-        throw e;
+        return cloneCommand.call();
       } catch (Exception e) {
+        if (GitHttpConnectionFactory.isAuthenticationFailure(e)) {
+          throw authenticationFailed(e);
+        }
         throw new SkillGitException(
-            "Failed to ensure commit "
-                + commit
-                + " for package "
-                + packageName
-                + ": "
-                + e.getMessage(),
-            e);
-      } finally {
-        deleteRecursively(cloneDir);
-        deleteRecursively(stagingDir);
+            GitHttpConnectionFactory.failureCode(e) + ": Failed to clone repository", e);
       }
+    }
+  }
+
+  private static RevCommit parseCommit(Repository repo, ObjectId commitId, String commit) {
+    try (RevWalk revWalk = new RevWalk(repo)) {
+      return revWalk.parseCommit(commitId);
+    } catch (Exception e) {
+      throw new SkillGitException(
+          "Invalid commit object " + commit + " in repository: " + e.getMessage(), e);
+    }
+  }
+
+  /** 按 tree 逐项物化到 staging：只接受目录、普通文件与可执行文件，路径必须留在 staging 内。 */
+  private static void materializeTree(
+      Repository repo, RevCommit revCommit, Path stagingDir, String commit) {
+    try {
+      Files.createDirectories(stagingDir);
+    } catch (IOException e) {
+      throw new SkillGitException("Failed to create staging directory: " + stagingDir, e);
+    }
+
+    try (TreeWalk treeWalk = new TreeWalk(repo)) {
+      treeWalk.addTree(revCommit.getTree());
+      treeWalk.setRecursive(false);
+      while (treeWalk.next()) {
+        materializeTreeEntry(repo, treeWalk, stagingDir);
+      }
+    } catch (SkillGitException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new SkillGitException(
+          "Failed to materialize commit tree for " + commit + ": " + e.getMessage(), e);
+    }
+  }
+
+  private static void materializeTreeEntry(Repository repo, TreeWalk treeWalk, Path stagingDir)
+      throws IOException {
+    String name = treeWalk.getNameString();
+    SkillManifestScanner.validateEntrySegment(name);
+
+    String pathString = treeWalk.getPathString();
+    Path target = stagingDir.resolve(pathString).normalize();
+    if (!target.startsWith(stagingDir) || target.equals(stagingDir)) {
+      throw new SkillGitException("Path escapes staging directory: " + pathString);
+    }
+
+    FileMode fileMode = treeWalk.getFileMode(0);
+    if (fileMode == FileMode.TREE) {
+      createDirectories(target, "Failed to create directory: " + pathString);
+      treeWalk.enterSubtree();
+    } else if (fileMode == FileMode.REGULAR_FILE || fileMode == FileMode.EXECUTABLE_FILE) {
+      writeBlob(repo, treeWalk, target, pathString);
+    } else {
+      throw new SkillGitException("Forbidden file mode " + fileMode + " for entry: " + pathString);
+    }
+  }
+
+  private static void writeBlob(
+      Repository repo, TreeWalk treeWalk, Path target, String pathString) {
+    Path parent = target.getParent();
+    if (parent != null) {
+      createDirectories(parent, "Failed to create parent directory for: " + pathString);
+    }
+    ObjectId blobId = treeWalk.getObjectId(0);
+    try {
+      ObjectLoader loader = repo.open(blobId, Constants.OBJ_BLOB);
+      Files.write(target, loader.getBytes());
+    } catch (IOException e) {
+      throw new SkillGitException("Failed to write blob for: " + pathString, e);
+    }
+  }
+
+  private static void createDirectories(Path directory, String failureMessage) {
+    try {
+      Files.createDirectories(directory);
+    } catch (IOException e) {
+      throw new SkillGitException(failureMessage, e);
+    }
+  }
+
+  /** 原子替换发布目录：先备份旧目录，移动失败时回滚，成功后删除备份。 */
+  private static void publishStaging(
+      Path stagingDir, Path publishedDir, Path oldDir, String packageName) {
+    boolean backedUp = false;
+    if (Files.exists(publishedDir, LinkOption.NOFOLLOW_LINKS)) {
+      try {
+        Files.move(publishedDir, oldDir, StandardCopyOption.ATOMIC_MOVE);
+        backedUp = true;
+      } catch (IOException e) {
+        throw new SkillGitException(
+            "Failed to backup existing package directory: " + publishedDir, e);
+      }
+    }
+
+    try {
+      Files.move(stagingDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
+    } catch (Exception moveError) {
+      if (backedUp) {
+        try {
+          Files.move(oldDir, publishedDir, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception restoreError) {
+          moveError.addSuppressed(restoreError);
+        }
+      }
+      throw new SkillGitException(
+          "Failed to publish skill cache directory for package " + packageName, moveError);
+    }
+
+    if (backedUp) {
+      deleteRecursively(oldDir);
     }
   }
 
@@ -345,25 +391,7 @@ public class JGitSkillCache implements SkillGitCache {
     validatePackageName(packageName);
 
     Path publishedDir = resolvePublishedDir(packageName);
-    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
-    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
-      throw new SkillGitException(
-          "Commit " + commit + " is not published for package " + packageName);
-    }
-
-    String publishedCommit;
-    try {
-      publishedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
-    } catch (IOException e) {
-      throw new SkillGitException(
-          "Failed to read commit marker for package " + packageName + ": " + e.getMessage(), e);
-    }
-
-    if (!commit.equals(publishedCommit)) {
-      throw new SkillGitException(
-          "Commit " + commit + " is not published for package " + packageName);
-    }
-
+    requirePublishedCommit(publishedDir, packageName, commit);
     return SkillManifestScanner.scan(publishedDir, packageName);
   }
 
@@ -374,24 +402,7 @@ public class JGitSkillCache implements SkillGitCache {
     validatePath(path);
 
     Path publishedDir = resolvePublishedDir(packageName);
-    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
-    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
-      throw new SkillGitException(
-          "Commit " + commit + " is not published for package " + packageName);
-    }
-
-    String publishedCommit;
-    try {
-      publishedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
-    } catch (IOException e) {
-      throw new SkillGitException(
-          "Failed to read commit marker for package " + packageName + ": " + e.getMessage(), e);
-    }
-
-    if (!commit.equals(publishedCommit)) {
-      throw new SkillGitException(
-          "Commit " + commit + " is not published for package " + packageName);
-    }
+    requirePublishedCommit(publishedDir, packageName, commit);
 
     Path target = publishedDir.resolve(path).normalize();
     if (!target.startsWith(publishedDir) || target.equals(publishedDir)) {
@@ -426,6 +437,28 @@ public class JGitSkillCache implements SkillGitCache {
               + ": "
               + e.getMessage(),
           e);
+    }
+  }
+
+  /** 直接读取入口只承认 marker 与请求 commit 一致的已发布目录；marker 缺失或读取失败都 fail-closed。 */
+  private static void requirePublishedCommit(Path publishedDir, String packageName, String commit) {
+    Path commitMarker = publishedDir.resolve(".kkstudio-commit");
+    if (!Files.isRegularFile(commitMarker, LinkOption.NOFOLLOW_LINKS)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
+    }
+
+    String publishedCommit;
+    try {
+      publishedCommit = Files.readString(commitMarker, StandardCharsets.UTF_8).trim();
+    } catch (IOException e) {
+      throw new SkillGitException(
+          "Failed to read commit marker for package " + packageName + ": " + e.getMessage(), e);
+    }
+
+    if (!commit.equals(publishedCommit)) {
+      throw new SkillGitException(
+          "Commit " + commit + " is not published for package " + packageName);
     }
   }
 
