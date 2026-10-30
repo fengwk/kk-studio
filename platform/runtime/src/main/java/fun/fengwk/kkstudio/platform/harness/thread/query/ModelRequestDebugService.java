@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.thread.query;
 
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestView;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
@@ -8,8 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
