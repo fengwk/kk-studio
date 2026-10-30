@@ -492,8 +492,9 @@ class HarnessRuntimeApiRecordsTest {
   void threadSnapshotDefensiveCopiesAndValidates() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(thread.headEntryId()));
     List<ThreadCommand> queued =
         List.of(
             new ThreadCommand(
@@ -617,13 +618,14 @@ class HarnessRuntimeApiRecordsTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     return store.transaction(
         tx -> {
-          tx.insertSession(
-              new Session(TestIds.id(1), "session-00000000000000000000000000000001", T0));
-          tx.insertEntry(
-              new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0));
+          tx.sessions()
+              .insert(new Session(TestIds.id(1), "session-00000000000000000000000000000001", T0));
+          tx.entries()
+              .insert(
+                  new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0));
           ThreadState thread =
               HarnessRuntimeTestSupport.thread(TestIds.id(3), TestIds.id(1), TestIds.id(2));
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           return thread;
         });
   }

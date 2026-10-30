@@ -30,8 +30,8 @@ public class DatabaseContributorBranchViewLoader implements ContributorBranchVie
     return store.transaction(
         tx ->
             new ScopedBranchView(
-                tx.loadContributorCustomEntriesOnPath(assistantEntryId, contributorId),
+                tx.entries().loadContributorCustom(assistantEntryId, contributorId),
                 contributorId,
-                tx.loadBranchSettings(assistantEntryId).goal()));
+                tx.entries().loadBranchSettings(assistantEntryId).goal()));
   }
 }

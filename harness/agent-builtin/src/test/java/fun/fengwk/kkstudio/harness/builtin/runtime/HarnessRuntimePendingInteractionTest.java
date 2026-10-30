@@ -80,17 +80,17 @@ class HarnessRuntimePendingInteractionTest {
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
     store.transaction(
         tx -> {
-          tx.lockThread(seeded.threadId()).orElseThrow();
-          tx.requestWork(target, environment);
+          tx.threads().lock(seeded.threadId()).orElseThrow();
+          tx.work().request(target, environment);
           return null;
         });
     Instant future = T5.plusSeconds(60);
     store.forceAvailableAt(target, future);
-    var before = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    var before = store.transaction(tx -> tx.work().find(target)).orElseThrow();
     assertEquals(
         List.of(new EnvironmentToolWait(seeded.toolId(), environment, false, "frozen-env", future)),
         runtime.listEnvironmentToolWaits(List.of(seeded.toolId(), UUID.randomUUID())));
-    assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow());
+    assertEquals(before, store.transaction(tx -> tx.work().find(target)).orElseThrow());
     store.forceAvailableAt(target, T5);
     assertEquals(
         List.of(new EnvironmentToolWait(seeded.toolId(), environment, true, "frozen-env", null)),
@@ -129,48 +129,52 @@ class HarnessRuntimePendingInteractionTest {
           UUID rootEntryId = tx.nextId();
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(
-              turnStartEntry(turnStartEntryId, sessionId, rootEntryId, createdAt, threadId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(
+                  turnStartEntry(turnStartEntryId, sessionId, rootEntryId, createdAt, threadId));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, createdAt));
+          tx.entries()
+              .insert(userMessageEntry(userEntryId, sessionId, turnStartEntryId, createdAt));
           ModelRequestSpec requestSpec = tooledModelRequest(List.of("bash"));
           ProviderResponse response = responseWithToolCalls("call-1");
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(
-              mappedAssistantEntry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  createdAt,
-                  requestSpec,
-                  response,
-                  createdAt));
+          tx.entries()
+              .insert(
+                  mappedAssistantEntry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      createdAt,
+                      requestSpec,
+                      response,
+                      createdAt));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, createdAt);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ModelInvocation succeeded = model.markRunning(createdAt).succeed(response, createdAt);
-          builtin(tx).updateModelInvocation(model.markRunning(createdAt));
-          builtin(tx).updateModelInvocation(succeeded);
-          builtin(tx)
+          builtin(store, tx).updateModelInvocation(model.markRunning(createdAt));
+          builtin(store, tx).updateModelInvocation(succeeded);
+          builtin(store, tx)
               .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, createdAt));
           UUID toolId = tx.nextId();
-          tx.insertToolInvocations(
-              List.of(
-                  toolInvocation(
-                      toolId,
-                      threadId,
-                      turnStartEntryId,
-                      assistantEntryId,
-                      0,
-                      "call-1",
-                      createdAt)));
-          tx.updateThread(thread.advanceHead(assistantEntryId, createdAt));
+          tx.tools()
+              .insert(
+                  List.of(
+                      toolInvocation(
+                          toolId,
+                          threadId,
+                          turnStartEntryId,
+                          assistantEntryId,
+                          0,
+                          "call-1",
+                          createdAt)));
+          tx.threads().update(thread.advanceHead(assistantEntryId, createdAt));
           return new ToolBaseline(
               sessionId,
               rootEntryId,

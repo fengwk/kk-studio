@@ -59,11 +59,11 @@ final class ToolInputControl {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
+          ThreadState thread = tx.threads().lock(command.threadId()).orElse(null);
           if (thread == null) {
             throw notApplicable("thread " + command.threadId() + " does not exist");
           }
-          ToolInvocation probe = tx.findToolInvocation(command.toolInvocationId()).orElse(null);
+          ToolInvocation probe = tx.tools().find(command.toolInvocationId()).orElse(null);
           if (probe == null) {
             return replayMaterialized(tx, thread, command);
           }
@@ -153,7 +153,8 @@ final class ToolInputControl {
   private static HumanInputQuestionnaire materializedQuestionnaire(
       HarnessStore.Transaction tx, UUID assistantEntryId, String toolCallId) {
     Entry assistant =
-        tx.findEntry(assistantEntryId)
+        tx.entries()
+            .find(assistantEntryId)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
@@ -211,9 +212,9 @@ final class ToolInputControl {
             tool.call().id(), List.of(new JsonResultContent(canonical)), false, canonical);
     ToolInputReceipt receipt = new ToolInputReceipt(command.submissionId(), command.actor(), now);
     ToolInvocation accepted = tool.acceptInput(result, receipt, now);
-    tx.updateToolInvocations(List.of(accepted));
-    tx.updateThread(thread.touchVersion(now));
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    tx.tools().update(List.of(accepted));
+    tx.threads().update(thread.touchVersion(now));
+    tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return new ToolInputAcceptance(thread.id(), accepted.id(), receipt, false);
   }
 

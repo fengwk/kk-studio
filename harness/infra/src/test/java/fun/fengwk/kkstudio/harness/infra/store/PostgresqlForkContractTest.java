@@ -86,7 +86,8 @@ class PostgresqlForkContractTest {
     assertFalse(accepted.replayed());
     assertEquals(newSessionId, accepted.session().id());
 
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     assertEquals(2, path.entries().size());
     ForkPayload payload = assertInstanceOf(ForkPayload.class, path.head().payload());
     assertEquals(ForkMode.SESSION, payload.mode());
@@ -96,9 +97,9 @@ class PostgresqlForkContractTest {
     assertEquals(path.root().id(), path.head().parentEntryId());
     // 新 Session 的 ROOT settings 从来源切点（ROOT）推导，经真实 SQL 读回一致。
     BranchSettings sourceSettings =
-        store.transaction(tx -> tx.loadBranchSettings(baseline.rootEntryId()));
+        store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId()));
     BranchSettings forkedSettings =
-        store.transaction(tx -> tx.loadBranchSettings(accepted.thread().headEntryId()));
+        store.transaction(tx -> tx.entries().loadBranchSettings(accepted.thread().headEntryId()));
     assertEquals(sourceSettings, forkedSettings);
 
     AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
@@ -107,7 +108,7 @@ class PostgresqlForkContractTest {
     assertEquals(
         2,
         store
-            .transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()))
+            .transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()))
             .entries()
             .size());
   }
@@ -128,7 +129,8 @@ class PostgresqlForkContractTest {
             AcceptancePreflight.IDENTITY);
     assertFalse(accepted.replayed());
 
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     assertEquals(2, path.entries().size());
     Entry fork = path.head();
     ForkPayload payload = assertInstanceOf(ForkPayload.class, fork.payload());

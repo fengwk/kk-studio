@@ -43,27 +43,30 @@ class HarnessRuntimeSessionEntriesTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
     UUID inactiveTurnStartId =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
     UUID activeUserId =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(userMessageEntry(id, baseline.sessionId(), activeTurnStartId, T2));
+              tx.entries()
+                  .insert(userMessageEntry(id, baseline.sessionId(), activeTurnStartId, T2));
               return id;
             });
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(activeUserId, T5));
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(thread.advanceHead(activeUserId, T5));
           return null;
         });
 
@@ -78,7 +81,8 @@ class HarnessRuntimeSessionEntriesTest {
         entries.stream().map(Entry::id).toList());
     assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
     assertEquals(
-        1L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version());
+        1L,
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()).version());
   }
 
   @Test
@@ -92,7 +96,8 @@ class HarnessRuntimeSessionEntriesTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.getSessionEntries(baseline.sessionId());
     runtime.getSessionEntries(baseline.sessionId());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.version());
   }
 }

@@ -157,7 +157,7 @@ public final class WorkHeartbeat {
         try {
           store.transaction(
               tx -> {
-                tx.renewWork(claim, config.leaseDuration());
+                tx.work().renew(claim, config.leaseDuration());
                 return null;
               });
         } catch (RuntimeException failure) {

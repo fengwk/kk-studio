@@ -81,8 +81,8 @@ class HarnessRuntimeStopToolTest {
     inTransaction(
         store,
         tx -> {
-          ToolInvocation waiting = tx.lockToolInvocation(ids.get(0)).orElseThrow();
-          tx.updateToolInvocations(List.of(waiting.requestApproval("approval needed", T5)));
+          ToolInvocation waiting = tx.tools().lock(ids.get(0)).orElseThrow();
+          tx.tools().update(List.of(waiting.requestApproval("approval needed", T5)));
         });
     approveTool(store, ids.get(2));
     markRunningTool(store, ids.get(2));
@@ -108,8 +108,9 @@ class HarnessRuntimeStopToolTest {
     assertEquals(0, targetReceipt(result).cancelledCommandCount());
     assertEquals(2L, result.thread().version());
 
-    ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(13, path.entries().size());
     assertEquals(
         new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}"),
@@ -155,19 +156,19 @@ class HarnessRuntimeStopToolTest {
 
     // 每个 sibling Tool 行已被 Stop 物理删除。
     for (UUID id : ids) {
-      assertTrue(store.transaction(tx -> tx.findToolInvocation(id)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.tools().find(id)).isEmpty());
     }
 
     // 全部 Work 删除：THREAD 与每个 sibling TOOL（没有 Model 父行，也就没有 MODEL Work）。
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
     for (UUID id : ids) {
       assertFalse(
           store
-              .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, id)))
+              .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, id)))
               .isPresent());
     }
   }
@@ -198,11 +199,12 @@ class HarnessRuntimeStopToolTest {
                 baseline.threadId(),
                 TestIds.id(2),
                 store
-                    .transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow())
+                    .transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow())
                     .version()));
     assertStopped(result);
-    ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     Entry toolResult =
         path.entries().stream()
             .filter(
@@ -221,7 +223,7 @@ class HarnessRuntimeStopToolTest {
     assertEquals(TurnEndOutcome.STOPPED, turnEnd.outcome());
     assertEquals(TurnEndReason.USER_STOP, turnEnd.reason());
     assertEquals(baseline.turnStartEntryId(), turnEnd.turnStartEntryId());
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
   }
 
   @Test
@@ -235,8 +237,9 @@ class HarnessRuntimeStopToolTest {
     // 提交先于 Stop：Stop 不 409，而是把已 terminal 的 tool sibling 结果物化进历史后正常停止。
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
     assertStopped(result);
-    ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     // ToolResult 已物化（TOOL 角色），并保留 batch 关闭的 COMPLETED TURN_END；head 为 STOP 边界。
     assertTrue(
         path.entries().stream()
@@ -251,21 +254,22 @@ class HarnessRuntimeStopToolTest {
                         && end.outcome() == TurnEndOutcome.COMPLETED));
     assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
     // 全部 Invocation 行与 Work 删除（没有 Model 父行，也就没有 MODEL 行与 MODEL Work）。
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
     assertFalse(
         store
-            .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
+            .transaction(
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
             .isPresent());
   }
 
   /** Stop 前读取 ToolInvocation 的 durable call id：ToolResult Entry 必须挂载同一个 call。 */
   private static String toolCallId(InMemoryHarnessStore store, UUID toolId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow()).call().id();
+    return store.transaction(tx -> tx.tools().find(toolId).orElseThrow()).call().id();
   }
 
   /** invocation 追加的 ToolResult MESSAGE entry 中唯一的文本块。 */

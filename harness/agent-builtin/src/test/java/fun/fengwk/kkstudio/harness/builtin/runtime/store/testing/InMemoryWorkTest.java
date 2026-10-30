@@ -91,8 +91,8 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(seeded.threadId()).orElseThrow();
-          tx.requestWork(target, environment);
+          tx.threads().lock(seeded.threadId()).orElseThrow();
+          tx.work().request(target, environment);
         });
     seedReadyEnvironmentLease(environment);
     var online = toolWait(seeded);
@@ -113,8 +113,12 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.TOOL, "projection-lease", CLAIM_LEASE, UUID.randomUUID()))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.TOOL,
+                            "projection-lease",
+                            CLAIM_LEASE,
+                            UUID.randomUUID()))
             .orElseThrow();
     expireReadyEnvironmentLease(environment);
     Instant nextDue = due.plusSeconds(120);
@@ -132,7 +136,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
 
   private EnvironmentToolWaitRow toolWait(SeededTool seeded) {
     return store
-        .transaction(tx -> tx.listEnvironmentToolWaits(List.of(seeded.toolId())))
+        .transaction(tx -> tx.tools().listEnvironmentWaits(List.of(seeded.toolId())))
         .getFirst();
   }
 
@@ -151,30 +155,30 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().request(target);
         });
 
     memory.setNow(T1);
     ClaimedWork claim =
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token", claimLease))
+            .transaction(tx -> tx.work().claimNext(WorkTargetType.THREAD, "token", claimLease))
             .orElseThrow();
     assertEquals(T1.plus(claimLease), claim.leaseUntil());
 
     // 现有 lease（T1+5min）已覆盖 T2 之后 1 秒的目标时点：不缩短、返回 false
     memory.setNow(T2);
-    boolean shortened = store.transaction(tx -> tx.renewWork(claim, Duration.ofSeconds(1)));
+    boolean shortened = store.transaction(tx -> tx.work().renew(claim, Duration.ofSeconds(1)));
     assertFalse(shortened);
     assertEquals(
         T1.plus(claimLease),
-        store.transaction(tx -> tx.findWork(target)).orElseThrow().leaseUntil());
+        store.transaction(tx -> tx.work().find(target)).orElseThrow().leaseUntil());
 
     // 目标时点更晚：延展到 now + duration
-    boolean extended = store.transaction(tx -> tx.renewWork(claim, renewLease));
+    boolean extended = store.transaction(tx -> tx.work().renew(claim, renewLease));
     assertTrue(extended);
     assertEquals(
         T2.plus(renewLease),
-        store.transaction(tx -> tx.findWork(target)).orElseThrow().leaseUntil());
+        store.transaction(tx -> tx.work().find(target)).orElseThrow().leaseUntil());
   }
 }

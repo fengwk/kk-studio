@@ -74,8 +74,8 @@ class HarnessRuntimeStopContinuationTest {
     assertEquals(3L, result.thread().version());
     assertTrue(result.thread().yoloEnabled());
 
-    ThreadState stored = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    ThreadState stored = store.transaction(tx -> tx.threads().lock(threadId).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(8, path.entries().size());
     Entry turnStart = path.entries().get(5);
     Entry barrier = path.entries().get(6);
@@ -101,12 +101,12 @@ class HarnessRuntimeStopContinuationTest {
 
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByIdempotencyKey(threadId, TestIds.id(1)).orElseThrow());
+            tx -> tx.commands().findByIdempotencyKey(threadId, TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
     assertNull(command.appliedEntryId());
     assertFalse(
         store
-            .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)))
+            .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)))
             .isPresent());
   }
 
@@ -116,9 +116,9 @@ class HarnessRuntimeStopContinuationTest {
     StopResult result = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
     assertStopped(result);
     assertEquals(0, targetReceipt(result).cancelledCommandCount());
-    ThreadState stored = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
+    ThreadState stored = store.transaction(tx -> tx.threads().lock(chain.threadId()).orElseThrow());
     assertEquals(2L, stored.version());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(8, path.entries().size());
   }
 
@@ -138,22 +138,28 @@ class HarnessRuntimeStopContinuationTest {
               UUID historyResultId = tx.nextId();
               UUID historyEndId = tx.nextId();
               UUID threadId = tx.nextId();
-              tx.insertSession(HarnessRuntimeTestSupport.session(sessionId));
-              tx.insertEntry(HarnessRuntimeTestSupport.rootEntry(rootId, sessionId));
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.turnStartEntry(
-                      inputStartId, sessionId, rootId, T5, threadId));
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.userMessageEntry(userId, sessionId, inputStartId, T5));
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.assistantEntry(assistantId, sessionId, userId, T5));
-              tx.insertEntry(
-                  new Entry(
-                      inputEndId,
-                      sessionId,
-                      assistantId,
-                      new TurnEndPayload(inputStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                      T5));
+              tx.sessions().insert(HarnessRuntimeTestSupport.session(sessionId));
+              tx.entries().insert(HarnessRuntimeTestSupport.rootEntry(rootId, sessionId));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          inputStartId, sessionId, rootId, T5, threadId));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.userMessageEntry(
+                          userId, sessionId, inputStartId, T5));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.assistantEntry(assistantId, sessionId, userId, T5));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          inputEndId,
+                          sessionId,
+                          assistantId,
+                          new TurnEndPayload(
+                              inputStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                          T5));
               CompactionStart history =
                   CompactionStart.pending(
                       CompactionPhase.HISTORY,
@@ -161,44 +167,48 @@ class HarnessRuntimeStopContinuationTest {
                       assistantId,
                       userId,
                       null);
-              tx.insertEntry(
-                  new Entry(
-                      historyStartId,
-                      sessionId,
-                      inputEndId,
-                      new TurnStartPayload(
-                          TurnStartReason.COMPACTION,
-                          settings(),
-                          threadId,
-                          100_000,
-                          16_384,
-                          history,
-                          null),
-                      T5));
-              tx.insertEntry(
-                  new Entry(
-                      historyResultId,
-                      sessionId,
-                      historyStartId,
-                      new CompactionPayload("history summary", null),
-                      T5));
-              tx.insertEntry(
-                  new Entry(
-                      historyEndId,
-                      sessionId,
-                      historyResultId,
-                      new TurnEndPayload(
-                          historyStartId, TurnEndOutcome.COMPLETED, true, null, null),
-                      T5));
-              tx.insertThread(HarnessRuntimeTestSupport.thread(threadId, sessionId, historyEndId));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          historyStartId,
+                          sessionId,
+                          inputEndId,
+                          new TurnStartPayload(
+                              TurnStartReason.COMPACTION,
+                              settings(),
+                              threadId,
+                              100_000,
+                              16_384,
+                              history,
+                              null),
+                          T5));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          historyResultId,
+                          sessionId,
+                          historyStartId,
+                          new CompactionPayload("history summary", null),
+                          T5));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          historyEndId,
+                          sessionId,
+                          historyResultId,
+                          new TurnEndPayload(
+                              historyStartId, TurnEndOutcome.COMPLETED, true, null, null),
+                          T5));
+              tx.threads()
+                  .insert(HarnessRuntimeTestSupport.thread(threadId, sessionId, historyEndId));
               return new UUID[] {threadId, historyEndId, historyResultId, assistantId, userId};
             });
 
     UUID stopRequestId = TestIds.id(99);
     StopResult first = runtime.stop(new StopCommand(ids[0], stopRequestId, 0));
     assertStopped(first);
-    ThreadState stored = store.transaction(tx -> tx.lockThread(ids[0]).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    ThreadState stored = store.transaction(tx -> tx.threads().lock(ids[0]).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(11, path.entries().size());
     TurnStartPayload barrierStart = (TurnStartPayload) path.entries().get(8).payload();
     assertEquals(TurnStartReason.COMPACTION, barrierStart.reason());

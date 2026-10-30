@@ -158,7 +158,8 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       ExecutionExitFact remote =
           store.transaction(
               tx -> {
-                if (tx.lockThread(threadId).isEmpty() || tx.lockClaimedWork(claim).isEmpty()) {
+                if (tx.threads().lock(threadId).isEmpty()
+                    || tx.work().lockClaimed(claim).isEmpty()) {
                   return null;
                 }
                 if (abandoned.get()) {
@@ -496,19 +497,19 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
+              ThreadState thread = tx.threads().lock(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
-              ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
+              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt - 1) {
                 return false;
               }
-              tx.updateToolInvocations(List.of(tool.markRunning(now)));
-              tx.updateThread(thread.touchVersion(now));
+              tx.tools().update(List.of(tool.markRunning(now)));
+              tx.threads().update(thread.touchVersion(now));
               registered =
                   ExecutionExitLedger.register(
                       tx,
@@ -529,20 +530,20 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
+              ThreadState thread = tx.threads().lock(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
-              ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
+              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
                 return false;
               }
-              tx.updateToolInvocations(List.of(tool.retryReady(now)));
-              tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, delay);
+              tx.tools().update(List.of(tool.retryReady(now)));
+              tx.threads().update(thread.touchVersion(now));
+              tx.work().reschedule(claim, delay);
               return true;
             }));
   }
@@ -557,19 +558,19 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                ThreadState thread = tx.threads().lock(threadId).orElse(null);
                 if (thread == null) {
                   return false;
                 }
-                ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
+                ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
                 if (tool == null) {
                   return false;
                 }
                 if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 ToolResult stable =
@@ -583,9 +584,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
                           + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
                           + " bytes");
                 }
-                tx.updateToolInvocations(List.of(tool.succeed(stable, effects, now)));
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
+                tx.tools().update(List.of(tool.succeed(stable, effects, now)));
+                tx.threads().update(thread.touchVersion(now));
+                tx.work().complete(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
@@ -633,19 +634,19 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                ThreadState thread = tx.threads().lock(threadId).orElse(null);
                 if (thread == null) {
                   return false;
                 }
-                ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
+                ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
                 if (tool == null) {
                   return false;
                 }
                 if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 ToolInvocation next =
@@ -654,9 +655,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
                       case CANCELLED -> tool.cancel(error, now);
                       case UNKNOWN -> tool.unknown(error, now);
                     };
-                tx.updateToolInvocations(List.of(next));
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
+                tx.tools().update(List.of(next));
+                tx.threads().update(thread.touchVersion(now));
+                tx.work().complete(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

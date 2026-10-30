@@ -40,44 +40,46 @@ final class TurnPlanTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(settings()), NOW));
-          tx.insertThread(threadState(threadId, sessionId, rootEntryId));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(settings()), NOW));
+          tx.threads().insert(threadState(threadId, sessionId, rootEntryId));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
 
   static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
+        tx -> tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId()));
   }
 
   static UUID seedCommand(InMemoryHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           UUID idempotencyKey = tx.nextId();
           long sequence = thread.nextCommandSequence();
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId,
-                      sequence,
-                      payload,
-                      idempotencyKey,
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      NOW)));
-          tx.updateThread(thread.reserveCommandSequences(1, NOW));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          sequence,
+                          payload,
+                          idempotencyKey,
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          NOW)));
+          tx.threads().update(thread.reserveCommandSequences(1, NOW));
           return idempotencyKey;
         });
   }
 
   static ThreadCommand command(HarnessStore store, UUID threadId, UUID idempotencyKey) {
     return store
-        .transaction(tx -> tx.findCommandByIdempotencyKey(threadId, idempotencyKey))
+        .transaction(tx -> tx.commands().findByIdempotencyKey(threadId, idempotencyKey))
         .orElseThrow();
   }
 

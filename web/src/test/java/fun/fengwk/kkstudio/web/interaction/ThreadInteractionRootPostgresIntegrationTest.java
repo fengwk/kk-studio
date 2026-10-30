@@ -642,7 +642,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 store
                     .transaction(
                         tx ->
-                            tx.findWork(new WorkTarget(WorkTargetType.TOOL, future.invocationId())))
+                            tx.work()
+                                .find(new WorkTarget(WorkTargetType.TOOL, future.invocationId())))
                     .orElseThrow()
                     .availableAt())
             .asDouble(),
@@ -655,7 +656,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 store
                     .transaction(
                         tx ->
-                            tx.findWork(new WorkTarget(WorkTargetType.TOOL, leased.invocationId())))
+                            tx.work()
+                                .find(new WorkTarget(WorkTargetType.TOOL, leased.invocationId())))
                     .orElseThrow()
                     .leaseUntil())
             .asDouble(),
@@ -700,7 +702,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             (rs, row) -> rs.getTimestamp(1).toInstant(),
             environmentId);
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seed.invocationId());
-    var before = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    var before = store.transaction(tx -> tx.work().find(target)).orElseThrow();
     var online = snapshotHttp(mvc, seed.threadId());
     assertEquals(version, online.path("version").asText());
     var onlineTool = online.path("toolInvocations").get(0);
@@ -722,7 +724,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(version, expired.path("version").asText());
     assertTrue(expired.path("toolInvocations").get(0).path("waitingForEnvironment").asBoolean());
     assertTrue(expired.path("toolInvocations").get(0).path("environmentWaitFreshnessAt").isNull());
-    assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow());
+    assertEquals(before, store.transaction(tx -> tx.work().find(target)).orElseThrow());
     assertEquals(ToolInvocationStatus.READY, toolInvocation(seed.invocationId()).status());
   }
 
@@ -765,7 +767,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private UUID attachEnvironmentWait(UUID threadId, EnvironmentId environmentId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           return attachWaiting(tx, thread, false, "{}", false, true, nextTime(), environmentId);
         });
   }
@@ -831,11 +833,12 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.TOOL,
-                        "lease-" + invocationId,
-                        Duration.ofMinutes(30),
-                        ownerNodeId))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.TOOL,
+                            "lease-" + invocationId,
+                            Duration.ofMinutes(30),
+                            ownerNodeId))
             .orElseThrow();
     assertEquals(invocationId, claimed.target().id());
   }
@@ -942,7 +945,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
       UUID threadId, boolean humanInput, String argumentsJson, boolean freeze) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           return attachWaiting(tx, thread, humanInput, argumentsJson, freeze);
         });
   }
@@ -973,9 +976,10 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         tx -> {
           Instant now = nextTime();
           UUID sessionId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
           UUID rootEntryId = tx.nextId();
-          tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), now));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), now));
           UUID threadId = tx.nextId();
           ThreadState thread =
               new ThreadState(
@@ -995,7 +999,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                   0L,
                   now,
                   now);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           UUID invocationId =
               attachWaiting(
                   tx,
@@ -1042,19 +1046,20 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     UUID threadId = thread.id();
     UUID sessionId = thread.sessionId();
     UUID turnStartEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnStartEntryId,
-            sessionId,
-            thread.headEntryId(),
-            new TurnStartPayload(
-                TurnStartReason.INPUT, SETTINGS, threadId, 100_000, 16_384, null, null),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnStartEntryId,
+                sessionId,
+                thread.headEntryId(),
+                new TurnStartPayload(
+                    TurnStartReason.INPUT, SETTINGS, threadId, 100_000, 16_384, null, null),
+                now));
     ThreadState afterTurnStart = thread.advanceHead(turnStartEntryId, now);
-    tx.updateThread(afterTurnStart);
+    tx.threads().update(afterTurnStart);
 
     UUID userEntryId = tx.nextId();
-    tx.insertEntry(new Entry(userEntryId, sessionId, turnStartEntryId, userMessage(), now));
+    tx.entries().insert(new Entry(userEntryId, sessionId, turnStartEntryId, userMessage(), now));
 
     ToolBinding binding = humanInput ? askUserBinding() : bashBinding();
     String toolName = binding.descriptor().name();
@@ -1081,23 +1086,24 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     ModelInvocation running = model.markRunning(now);
     // 结果 Entry 必须精确等于按执行事实重放的 assistant payload：实际型号与请求起始时间来自 RUNNING 调用。
     UUID assistantEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            assistantEntryId,
-            sessionId,
-            userEntryId,
-            new BuiltinHistoryPayloadMapper()
-                .assistantPayload(
-                    response,
-                    requestSpec.toolBindings(),
-                    running.actualSelection(),
-                    running.requestedAt()),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                assistantEntryId,
+                sessionId,
+                userEntryId,
+                new BuiltinHistoryPayloadMapper()
+                    .assistantPayload(
+                        response,
+                        requestSpec.toolBindings(),
+                        running.actualSelection(),
+                        running.requestedAt()),
+                now));
 
-    builtin(tx).insertModelInvocation(model);
-    builtin(tx).updateModelInvocation(running);
-    builtin(tx).updateModelInvocation(running.succeed(response, now));
-    builtin(tx)
+    builtin(store, tx).insertModelInvocation(model);
+    builtin(store, tx).updateModelInvocation(running);
+    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx)
         .updateModelInvocation(
             running.succeed(response, now).attachResultEntry(assistantEntryId, now));
 
@@ -1118,17 +1124,17 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             null,
             now,
             now);
-    tx.insertToolInvocations(List.of(ready));
+    tx.tools().insert(List.of(ready));
     if (freeze) {
       ToolInvocation waiting =
           humanInput
               ? ready.requestInput(now)
               : ready.requestApproval("tool approval requested", now);
-      tx.updateToolInvocations(List.of(waiting));
+      tx.tools().update(List.of(waiting));
     }
-    tx.updateThread(afterTurnStart.advanceHead(assistantEntryId, now));
+    tx.threads().update(afterTurnStart.advanceHead(assistantEntryId, now));
     if (requestToolWork) {
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), requiredEnvironmentId);
+      tx.work().request(new WorkTarget(WorkTargetType.TOOL, toolId), requiredEnvironmentId);
     }
     return toolId;
   }
@@ -1238,11 +1244,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private ThreadState threadState(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 
   private ToolInvocation toolInvocation(UUID invocationId) {
-    return store.transaction(tx -> tx.findToolInvocation(invocationId).orElseThrow());
+    return store.transaction(tx -> tx.tools().find(invocationId).orElseThrow());
   }
 
   private UUID headEntryId(UUID threadId) {
@@ -1253,7 +1259,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private UUID joinParentOf(UUID childThreadId) {
     return store.transaction(
         tx ->
-            tx.loadIncompleteJoins(childThreadId).stream()
+            tx.joins().loadIncomplete(childThreadId).stream()
                 .filter(join -> join.parentThreadId() != null)
                 .map(join -> join.parentThreadId())
                 .findFirst()
@@ -1261,7 +1267,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private boolean hasWork(WorkTargetType type, UUID targetId) {
-    return store.transaction(tx -> tx.findWork(new WorkTarget(type, targetId)).isPresent());
+    return store.transaction(tx -> tx.work().find(new WorkTarget(type, targetId)).isPresent());
   }
 
   /** 单调、毫秒精度且不回退的时间源：满足 Store 的毫秒与 notBefore 约束。 */

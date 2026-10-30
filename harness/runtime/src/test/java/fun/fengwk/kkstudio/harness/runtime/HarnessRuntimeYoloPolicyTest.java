@@ -138,6 +138,6 @@ class HarnessRuntimeYoloPolicyTest {
   }
 
   private ThreadState thread(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 }

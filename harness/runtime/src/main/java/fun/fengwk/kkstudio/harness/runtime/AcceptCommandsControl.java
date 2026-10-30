@@ -151,9 +151,10 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight) {
     Instant now = tx.now();
     Session session = new Session(sessionId, initialSessionName(commands, sessionId), now);
-    tx.insertSession(session);
+    tx.sessions().insert(session);
     UUID rootEntryId = tx.nextId();
-    tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(rootSettings), now));
+    tx.entries()
+        .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(rootSettings), now));
     ThreadState thread =
         new ThreadState(
             threadId,
@@ -172,7 +173,7 @@ final class AcceptCommandsControl {
             0,
             now,
             now);
-    tx.insertThread(thread);
+    tx.threads().insert(thread);
     return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
   }
 
@@ -207,13 +208,15 @@ final class AcceptCommandsControl {
                 tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
           }
           // NEW_THREAD 新建路径用 KEY SHARE：不串行化同 Session 的 sibling 初始创建。
-          tx.lockSessionForKeyShare(target.sessionId())
+          tx.sessions()
+              .lockForKeyShare(target.sessionId())
               .orElseThrow(
                   () ->
                       new HarnessRuntimeNotFoundException(
                           "session " + target.sessionId() + " does not exist"));
           Entry startEntry =
-              tx.findEntry(target.startEntryId())
+              tx.entries()
+                  .find(target.startEntryId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -237,13 +240,14 @@ final class AcceptCommandsControl {
           Instant now = tx.now();
           // fork 事实节点：作为新 Thread head 的第一个 Entry，只记录模式与切点，不复制共享前缀、不移动源 Thread。
           UUID forkEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  forkEntryId,
-                  target.sessionId(),
-                  target.startEntryId(),
-                  ForkPayload.branch(target.startEntryId()),
-                  now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      forkEntryId,
+                      target.sessionId(),
+                      target.startEntryId(),
+                      ForkPayload.branch(target.startEntryId()),
+                      now));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
@@ -262,7 +266,7 @@ final class AcceptCommandsControl {
                   0,
                   now,
                   now);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
   }
@@ -318,7 +322,8 @@ final class AcceptCommandsControl {
           }
           // 来源事实与切点校验先于任何写入：来源必须是执行根，cut 必须在其当前 head 路径上且是合法边界。
           ThreadState sourceThread =
-              tx.findThread(target.sourceThreadId())
+              tx.threads()
+                  .find(target.sourceThreadId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -328,13 +333,15 @@ final class AcceptCommandsControl {
                 "fork source thread " + target.sourceThreadId() + " must be an execution root");
           }
           UUID sourceSessionId = sourceThread.sessionId();
-          tx.lockSessionForKeyShare(sourceSessionId)
+          tx.sessions()
+              .lockForKeyShare(sourceSessionId)
               .orElseThrow(
                   () ->
                       new HarnessRuntimeNotFoundException(
                           "source session " + sourceSessionId + " does not exist"));
           Entry startEntry =
-              tx.findEntry(target.startEntryId())
+              tx.entries()
+                  .find(target.startEntryId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -347,35 +354,38 @@ final class AcceptCommandsControl {
                     + sourceSessionId);
           }
           requireLegalForkBoundary(startEntry, "NEW_FORKED_SESSION");
-          EntryPath sourceCutPath = tx.loadEntryPath(target.startEntryId());
+          EntryPath sourceCutPath = tx.entries().loadPath(target.startEntryId());
           boolean onSourcePath =
-              tx.loadEntryPath(sourceThread.headEntryId()).entries().stream()
+              tx.entries().loadPath(sourceThread.headEntryId()).entries().stream()
                   .anyMatch(entry -> entry.id().equals(target.startEntryId()));
           if (!onSourcePath) {
             throw new IllegalArgumentException(
                 "start entry " + target.startEntryId() + " is not on the source thread path");
           }
-          BranchSettings rootSettings = tx.loadBranchSettings(target.startEntryId());
+          BranchSettings rootSettings = tx.entries().loadBranchSettings(target.startEntryId());
           Instant now = tx.now();
           Session session =
               new Session(
                   target.sessionId(), initialSessionName(commands, target.sessionId()), now);
-          tx.insertSession(session);
+          tx.sessions().insert(session);
           UUID rootEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(rootEntryId, target.sessionId(), null, new RootPayload(rootSettings), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId, target.sessionId(), null, new RootPayload(rootSettings), now));
           Entry lastCopied =
               SessionForkCopy.copyEffectiveContext(
                   tx, target.sessionId(), rootEntryId, sourceCutPath, now);
           UUID forkParentId = lastCopied == null ? rootEntryId : lastCopied.id();
           UUID forkEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  forkEntryId,
-                  target.sessionId(),
-                  forkParentId,
-                  ForkPayload.session(target.sourceThreadId(), target.startEntryId()),
-                  now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      forkEntryId,
+                      target.sessionId(),
+                      forkParentId,
+                      ForkPayload.session(target.sourceThreadId(), target.startEntryId()),
+                      now));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
@@ -394,7 +404,7 @@ final class AcceptCommandsControl {
                   0,
                   now,
                   now);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
   }
@@ -438,7 +448,7 @@ final class AcceptCommandsControl {
     // exact replay 查找必须先于 cursor/preflight admission；纯消息 replay 也不依赖 head 变化。
     List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
     for (NewThreadCommand request : commands) {
-      existing.add(tx.findCommandByIdempotencyKey(target.threadId(), request.idempotencyKey()));
+      existing.add(tx.commands().findByIdempotencyKey(target.threadId(), request.idempotencyKey()));
     }
     long present = existing.stream().filter(Optional::isPresent).count();
     if (present > 0 && present < existing.size()) {
@@ -466,7 +476,7 @@ final class AcceptCommandsControl {
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
-    Session session = tx.findSession(thread.sessionId()).orElseThrow();
+    Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
     requirePreflightShape(commands, prepared);
     long nextSeq = thread.nextCommandSequence();
@@ -487,21 +497,21 @@ final class AcceptCommandsControl {
               now));
     }
 
-    tx.insertCommands(allInserted);
+    tx.commands().insert(allInserted);
 
     ThreadState advanced =
         resumeStoppedTarget(thread, genuineUserInput)
             ? thread.reserveCommandSequencesAndSetControl(
                 allInserted.size(), ThreadExecutionControl.RUNNABLE, now)
             : thread.reserveCommandSequences(allInserted.size(), now);
-    tx.updateThread(advanced);
+    tx.threads().update(advanced);
 
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return SpawnTickets.attach(
         tx,
         new AcceptedCommands(
             session,
-            tx.findRootEntry(session.id()).orElseThrow(),
+            tx.entries().findRoot(session.id()).orElseThrow(),
             advanced,
             List.copyOf(allInserted),
             false,
@@ -514,19 +524,19 @@ final class AcceptCommandsControl {
       UUID anchorThreadId,
       boolean anchorIsParent,
       Set<UUID> additionalThreadIds) {
-    ThreadState anchor = tx.findThread(anchorThreadId).orElse(null);
+    ThreadState anchor = tx.threads().find(anchorThreadId).orElse(null);
     if (anchorIsParent && anchor == null) {
       throw new IllegalArgumentException("join parent does not exist");
     }
-    tx.lockTree(anchor == null ? anchorThreadId : anchor.rootThreadId());
-    List<UUID> chain = tx.findAncestorChain(anchorThreadId);
+    tx.threads().lockTree(anchor == null ? anchorThreadId : anchor.rootThreadId());
+    List<UUID> chain = tx.threads().findAncestorChain(anchorThreadId);
     if (anchorIsParent && chain.isEmpty()) {
       throw new HarnessRuntimeNotFoundException("join parent no longer exists");
     }
     Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
     if (additionalThreadIds != null) {
       for (UUID id : additionalThreadIds) {
-        ThreadState existing = tx.findThread(id).orElse(null);
+        ThreadState existing = tx.threads().find(id).orElse(null);
         if (existing != null) {
           if (!Objects.equals(existing.parentThreadId(), anchorThreadId)) {
             throw conflict(
@@ -541,7 +551,8 @@ final class AcceptCommandsControl {
     Set<UUID> sessionIds = new LinkedHashSet<>();
     for (UUID id : allThreadIds) {
       ThreadState state =
-          tx.findThread(id)
+          tx.threads()
+              .find(id)
               .orElseThrow(
                   () ->
                       anchorIsParent && chain.contains(id)
@@ -552,13 +563,14 @@ final class AcceptCommandsControl {
     }
     List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sortedSessionIds) {
-      tx.lockSessionForKeyShare(sessionId).orElseThrow();
+      tx.sessions().lockForKeyShare(sessionId).orElseThrow();
     }
     List<UUID> sortedThreadIds = allThreadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
     for (UUID id : sortedThreadIds) {
       ThreadState locked =
-          tx.lockThread(id)
+          tx.threads()
+              .lock(id)
               .orElseThrow(
                   () ->
                       anchorIsParent && chain.contains(id)
@@ -577,7 +589,7 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now) {
-    Session session = tx.findSession(thread.sessionId()).orElseThrow();
+    Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(tx, session, requests);
     requirePreflightShape(requests, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
@@ -596,13 +608,13 @@ final class AcceptCommandsControl {
               null,
               now));
     }
-    tx.insertCommands(inserted);
+    tx.commands().insert(inserted);
     ThreadState advanced = thread.reserveCommandSequences(prepared.size(), now);
-    tx.updateThread(advanced);
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    tx.threads().update(advanced);
+    tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return new AcceptedCommands(
         session,
-        tx.findRootEntry(session.id()).orElseThrow(),
+        tx.entries().findRoot(session.id()).orElseThrow(),
         advanced,
         List.copyOf(inserted),
         false,
@@ -634,9 +646,10 @@ final class AcceptCommandsControl {
               + immutable.sessionId()
               + ")");
     }
-    tx.lockSessionForKeyShare(immutable.sessionId()).orElseThrow();
+    tx.sessions().lockForKeyShare(immutable.sessionId()).orElseThrow();
     ThreadState thread =
-        tx.lockThread(threadId)
+        tx.threads()
+            .lock(threadId)
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
@@ -653,7 +666,8 @@ final class AcceptCommandsControl {
     List<ThreadCommand> ordered = new ArrayList<>(requests.size());
     for (NewThreadCommand request : requests) {
       ThreadCommand existing =
-          tx.findCommandByIdempotencyKey(threadId, request.idempotencyKey())
+          tx.commands()
+              .findByIdempotencyKey(threadId, request.idempotencyKey())
               .orElseThrow(
                   () ->
                       conflict(
@@ -681,10 +695,10 @@ final class AcceptCommandsControl {
                 + " must start at sequence 1 and be contiguous in the request order");
       }
     }
-    Session session = tx.findSession(sessionId).orElseThrow();
+    Session session = tx.sessions().find(sessionId).orElseThrow();
     return new AcceptedCommands(
         session,
-        tx.findRootEntry(sessionId).orElseThrow(),
+        tx.entries().findRoot(sessionId).orElseThrow(),
         thread,
         List.copyOf(ordered),
         true,
@@ -736,10 +750,10 @@ final class AcceptCommandsControl {
                 + " are not contiguous in the request order");
       }
     }
-    Session session = tx.findSession(thread.sessionId()).orElseThrow();
+    Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
     return new AcceptedCommands(
         session,
-        tx.findRootEntry(thread.sessionId()).orElseThrow(),
+        tx.entries().findRoot(thread.sessionId()).orElseThrow(),
         thread,
         List.copyOf(ordered),
         true,
@@ -749,8 +763,8 @@ final class AcceptCommandsControl {
   /** 恢复输入要求本 Thread 已无未确认执行，且直接子 Join（含 owner 压缩结算义务）已收敛。SET 等维护输入不恢复，因此不受此限制。 */
   private static boolean resumeConverged(HarnessStore.Transaction tx, ThreadState thread) {
     return !ExecutionExitLedger.hasUnconfirmed(tx, thread.id())
-        && tx.countIncompleteChildJoins(thread.id()) == 0
-        && !tx.hasIncompleteOwnerChildJoin(thread.id());
+        && tx.joins().countIncompleteChildren(thread.id()) == 0
+        && !tx.joins().hasIncompleteOwnerChild(thread.id());
   }
 
   /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */

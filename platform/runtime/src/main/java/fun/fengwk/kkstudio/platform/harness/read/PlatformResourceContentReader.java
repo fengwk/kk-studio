@@ -173,7 +173,7 @@ public class PlatformResourceContentReader {
 
   /** Thread 存在且当前 Session 已引用该 Blob；否则以无法区分的错误拒绝。 */
   private void authorize(HarnessStore store, UUID threadId, UUID blobId) {
-    Optional<ThreadState> threadState = store.transaction(tx -> tx.findThread(threadId));
+    Optional<ThreadState> threadState = store.transaction(tx -> tx.threads().find(threadId));
     if (threadState.isEmpty()) {
       throw new PlatformReadException("thread not found: " + threadId);
     }
@@ -192,7 +192,7 @@ public class PlatformResourceContentReader {
     }
     return store.transaction(
         tx -> {
-          ToolInvocation invocation = tx.findToolInvocation(invocationId).orElse(null);
+          ToolInvocation invocation = tx.tools().find(invocationId).orElse(null);
           if (invocation == null) {
             throw new PlatformReadException("calling tool invocation not found: " + invocationId);
           }
@@ -203,7 +203,7 @@ public class PlatformResourceContentReader {
           if (!invocation.threadId().equals(threadId)) {
             throw new PlatformReadException("calling tool invocation is not bound to this thread");
           }
-          if (!(tx.loadEntryPath(invocation.turnStartEntryId()).head().payload()
+          if (!(tx.entries().loadPath(invocation.turnStartEntryId()).head().payload()
               instanceof TurnStartPayload start)) {
             throw new PlatformReadException("calling tool turn start is invalid");
           }

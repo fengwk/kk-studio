@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -34,6 +35,7 @@ class ClaimedExecutionSupportTest {
 
   private final HarnessStore store = mock(HarnessStore.class);
   private final HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
+  private final WorkStore work = mock(WorkStore.class);
   private final ClaimedWork claim =
       new ClaimedWork(
           new WorkTarget(WorkTargetType.TOOL, UUID.randomUUID()), 1, "token", NOW.plusSeconds(60));
@@ -41,6 +43,7 @@ class ClaimedExecutionSupportTest {
       new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL, LEASE);
 
   private void transactions() {
+    when(tx.work()).thenReturn(work);
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -53,17 +56,17 @@ class ClaimedExecutionSupportTest {
   void rechecksOwnershipBeforeRegisteringAnExecution() {
     // 第一次校验通过但原子准入复核失权时，不得登记 execution。
     transactions();
-    when(tx.lockClaimedWork(claim)).thenReturn(Optional.of(ownedWork()), Optional.empty());
+    when(work.lockClaimed(claim)).thenReturn(Optional.of(ownedWork()), Optional.empty());
     assertNull(support.admit(claim));
     assertFalse(support.hasActiveExecution());
-    verify(tx, times(2)).lockClaimedWork(claim);
+    verify(work, times(2)).lockClaimed(claim);
   }
 
   @Test
   void registeredExecutionCanBeReleasedOrCancelledAndCloseRejectsNewClaims() {
     // 只由注册的 execution 决定 active，取消与关闭委托 abandon，绝不写 invocation 状态。
     transactions();
-    when(tx.lockClaimedWork(claim)).thenReturn(Optional.of(ownedWork()));
+    when(work.lockClaimed(claim)).thenReturn(Optional.of(ownedWork()));
     ClaimAdmissionGuard.GuardedExecution execution =
         mock(ClaimAdmissionGuard.GuardedExecution.class);
     when(execution.claim()).thenReturn(claim);
@@ -88,8 +91,9 @@ class ClaimedExecutionSupportTest {
   @Test
   void leaseMarginUsesTheCallerTransaction() {
     // 续租直接委托传入事务，不读取 JVM 时钟，也不另开事务。
+    transactions();
     support.ensureLeaseMargin(tx, claim);
-    verify(tx).renewWork(claim, LEASE.leaseDuration());
+    verify(work).renew(claim, LEASE.leaseDuration());
   }
 
   private Work ownedWork() {

@@ -15,6 +15,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.deriveChildStopRequestId;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,13 +105,15 @@ class HarnessRuntimeStopSubtreeTest {
 
     assertEquals(
         ThreadExecutionControl.STOPPED,
-        store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).executionControl());
+        store
+            .transaction(tx -> tx.threads().find(root.threadId()).orElseThrow())
+            .executionControl());
     assertEquals(
         ThreadExecutionControl.STOPPED,
-        store.transaction(tx -> tx.findThread(child).orElseThrow()).executionControl());
+        store.transaction(tx -> tx.threads().find(child).orElseThrow()).executionControl());
     assertEquals(
         ThreadExecutionControl.STOPPED,
-        store.transaction(tx -> tx.findThread(grandChild).orElseThrow()).executionControl());
+        store.transaction(tx -> tx.threads().find(grandChild).orElseThrow()).executionControl());
 
     // 每个节点恰好递增一次 version，并各有一条自己的停止边界。
     assertEquals(1L, version(root.threadId()));
@@ -148,7 +151,9 @@ class HarnessRuntimeStopSubtreeTest {
     assertEquals(1L, version(grandChild));
     assertEquals(
         ThreadExecutionControl.RUNNABLE,
-        store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).executionControl());
+        store
+            .transaction(tx -> tx.threads().find(root.threadId()).orElseThrow())
+            .executionControl());
     assertEquals(0L, version(root.threadId()));
   }
 
@@ -167,10 +172,11 @@ class HarnessRuntimeStopSubtreeTest {
 
     recording.stop(new StopCommand(child, TestIds.id(16), 0L));
 
-    assertTrue(locks.contains("lockTree:" + root.threadId()), "structural Stop keeps tree lock");
-    assertTrue(locks.contains("lockThread:" + child), "Stop locks the stopped subtree");
-    assertTrue(locks.contains("lockThread:" + root.threadId()), "Stop locks joined ancestors");
-    assertFalse(locks.contains("lockThread:" + sibling), "Stop must not lock unrelated siblings");
+    assertTrue(
+        locks.contains("threads.lockTree:" + root.threadId()), "structural Stop keeps tree lock");
+    assertTrue(locks.contains("threads.lock:" + child), "Stop locks the stopped subtree");
+    assertTrue(locks.contains("threads.lock:" + root.threadId()), "Stop locks joined ancestors");
+    assertFalse(locks.contains("threads.lock:" + sibling), "Stop must not lock unrelated siblings");
   }
 
   @Test
@@ -190,9 +196,10 @@ class HarnessRuntimeStopSubtreeTest {
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, target, 1L, userMessagePayload("delegated-task"), TestIds.id(50));
     insertJoin(joinId, parent, target);
-    ThreadState rootBefore = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    ThreadState rootBefore =
+        store.transaction(tx -> tx.threads().find(root.threadId()).orElseThrow());
     UUID parentHeadBefore =
-        store.transaction(tx -> tx.findThread(parent).orElseThrow()).headEntryId();
+        store.transaction(tx -> tx.threads().find(parent).orElseThrow()).headEntryId();
 
     List<String> locks = new ArrayList<>();
     HarnessRuntime recording =
@@ -208,23 +215,23 @@ class HarnessRuntimeStopSubtreeTest {
             .sorted(UuidOrder.COMPARATOR)
             .toList());
     List<String> expectedLocks = new ArrayList<>();
-    expectedLocks.add("lockTree:" + root.threadId());
-    expectedLocks.add("lockSessionForKeyShare:" + root.sessionId());
+    expectedLocks.add("threads.lockTree:" + root.threadId());
+    expectedLocks.add("sessions.lockForKeyShare:" + root.sessionId());
     for (UUID threadId :
         List.of(parent, target, descendant).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-      expectedLocks.add("lockThread:" + threadId);
+      expectedLocks.add("threads.lock:" + threadId);
     }
     assertEquals(
         expectedLocks,
         locks.stream()
             .filter(
                 op ->
-                    op.startsWith("lockTree:")
-                        || op.startsWith("lockSessionForKeyShare:")
-                        || op.startsWith("lockThread:"))
+                    op.startsWith("threads.lockTree:")
+                        || op.startsWith("sessions.lockForKeyShare:")
+                        || op.startsWith("threads.lock:"))
             .toList());
 
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
     List<ThreadCommand> parentCommands = store.transaction(tx -> loadCommandsByThread(tx, parent));
@@ -233,14 +240,15 @@ class HarnessRuntimeStopSubtreeTest {
     assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());
     assertNotNull(
         store.transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
     assertEquals(1L, version(target));
     assertEquals(1L, version(descendant));
     assertEquals(1L, version(parent));
     assertEquals(
         parentHeadBefore,
-        store.transaction(tx -> tx.findThread(parent).orElseThrow()).headEntryId());
-    ThreadState rootAfter = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(parent).orElseThrow()).headEntryId());
+    ThreadState rootAfter =
+        store.transaction(tx -> tx.threads().find(root.threadId()).orElseThrow());
     assertEquals(rootBefore.headEntryId(), rootAfter.headEntryId());
     assertEquals(0L, rootAfter.version());
     assertEquals(0L, version(relatedSibling));
@@ -284,31 +292,33 @@ class HarnessRuntimeStopSubtreeTest {
             .map(StoppedThreadReceipt::threadId)
             .sorted(UuidOrder.COMPARATOR)
             .toList());
-    assertTrue(locks.contains("lockTree:" + root.threadId()));
-    assertTrue(locks.contains("lockThread:" + parent));
-    assertTrue(locks.contains("lockThread:" + child));
-    assertTrue(locks.contains("lockThread:" + sibling));
+    assertTrue(locks.contains("threads.lockTree:" + root.threadId()));
+    assertTrue(locks.contains("threads.lock:" + parent));
+    assertTrue(locks.contains("threads.lock:" + child));
+    assertTrue(locks.contains("threads.lock:" + sibling));
     assertTrue(
-        locks.contains("lockThread:" + root.threadId()), "direct parent of target is locked");
+        locks.contains("threads.lock:" + root.threadId()), "direct parent of target is locked");
     assertFalse(
-        locks.contains("lockThread:" + rootSibling), "unrelated sibling must not be locked");
+        locks.contains("threads.lock:" + rootSibling), "unrelated sibling must not be locked");
 
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
     assertEquals(1, notifications(parent).size());
     assertTrue(
         store.<Boolean>transaction(
             tx -> {
-              tx.lockThread(parent);
-              return tx.loadQueuedCommands(parent).isEmpty();
+              tx.threads().lock(parent);
+              return tx.commands().loadQueued(parent).isEmpty();
             }));
     assertNull(
         store.transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
     assertEquals(
         ThreadExecutionControl.RUNNABLE,
-        store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).executionControl());
+        store
+            .transaction(tx -> tx.threads().find(root.threadId()).orElseThrow())
+            .executionControl());
     assertEquals(0L, version(root.threadId()));
     assertEquals(0L, version(rootSibling));
   }
@@ -340,7 +350,7 @@ class HarnessRuntimeStopSubtreeTest {
     assertTrue(replayAgain.replayed());
     assertEquals(
         ThreadExecutionControl.RUNNABLE,
-        store.transaction(tx -> tx.findThread(newChild).orElseThrow()).executionControl());
+        store.transaction(tx -> tx.threads().find(newChild).orElseThrow()).executionControl());
   }
 
   @Test
@@ -354,7 +364,7 @@ class HarnessRuntimeStopSubtreeTest {
 
     StopResult result = runtime.stop(new StopCommand(child, TestIds.id(14), 0L));
 
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertEquals(targetReceipt(result).stoppedTurnEndEntryId(), join.terminalEntryId());
     assertNotNull(join.deliveryCommandSequence());
@@ -378,7 +388,7 @@ class HarnessRuntimeStopSubtreeTest {
 
     StopResult result = runtime.stop(new StopCommand(root.threadId(), TestIds.id(15), 0L));
 
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
     assertNotEquals(0L, join.deliveryCommandSequence());
@@ -388,8 +398,8 @@ class HarnessRuntimeStopSubtreeTest {
     boolean noQueuedCommands =
         store.transaction(
             tx -> {
-              tx.lockThread(root.threadId());
-              return tx.loadQueuedCommands(root.threadId()).isEmpty();
+              tx.threads().lock(root.threadId());
+              return tx.commands().loadQueued(root.threadId()).isEmpty();
             });
     assertTrue(noQueuedCommands);
     assertEquals(ThreadExecutionControl.STOPPED, result.thread().executionControl());
@@ -406,20 +416,20 @@ class HarnessRuntimeStopSubtreeTest {
 
     runtime.stop(new StopCommand(child, TestIds.id(16), 0L));
 
-    assertTrue(store.transaction(tx -> tx.findJoin(joinId).orElseThrow()).matched());
+    assertTrue(store.transaction(tx -> tx.joins().find(joinId).orElseThrow()).matched());
     assertEquals(
         ThreadJoinOutcome.CANCELLED, runtime.projectJoinReceipt(joinId).orElseThrow().outcome());
   }
 
   private long version(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow()).version();
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow()).version();
   }
 
   private boolean rootPathContainsNotification(UUID threadId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.findThread(threadId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().find(threadId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           for (Entry entry : path.entries()) {
             if (entry.payload() instanceof NotificationPayload) {
               return true;
@@ -450,8 +460,8 @@ class HarnessRuntimeStopSubtreeTest {
     // 手工种入的 QUEUED notification 也须预留序列，保持 nextCommandSequence 领先于已用 sequence。
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(root.threadId()).orElseThrow();
-          tx.updateThread(thread.reserveCommandSequences(1, T1));
+          ThreadState thread = tx.threads().lock(root.threadId()).orElseThrow();
+          tx.threads().update(thread.reserveCommandSequences(1, T1));
           return null;
         });
 
@@ -459,11 +469,11 @@ class HarnessRuntimeStopSubtreeTest {
         new StopCommand(
             root.threadId(),
             TestIds.id(16),
-            store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).version()));
+            store.transaction(tx -> tx.threads().find(root.threadId()).orElseThrow()).version()));
 
     // 通知命令保留为 APPLIED，且恰指向一条物化 NOTIFICATION Entry。
     ThreadCommand command =
-        store.transaction(tx -> tx.findCommand(root.threadId(), 1L).orElseThrow());
+        store.transaction(tx -> tx.commands().find(root.threadId(), 1L).orElseThrow());
     assertEquals(ThreadCommandState.APPLIED, command.state());
     assertNotNull(command.appliedEntryId());
     List<Entry> notifications = notifications(root.threadId());
@@ -476,8 +486,8 @@ class HarnessRuntimeStopSubtreeTest {
     assertTrue(
         store.<Boolean>transaction(
             tx -> {
-              tx.lockThread(root.threadId());
-              return tx.loadQueuedCommands(root.threadId()).isEmpty();
+              tx.threads().lock(root.threadId());
+              return tx.commands().loadQueued(root.threadId()).isEmpty();
             }));
   }
 
@@ -496,7 +506,7 @@ class HarnessRuntimeStopSubtreeTest {
     StopResult result = runtime.stop(new StopCommand(root.threadId(), TestIds.id(17), 0L));
 
     assertTrue(result.stoppedThreads().stream().anyMatch(r -> r.threadId().equals(child)));
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.finalAnswerEntryId());
     assertNotNull(join.deliveryCommandSequence());
@@ -513,28 +523,30 @@ class HarnessRuntimeStopSubtreeTest {
     assertTrue(
         store.<Boolean>transaction(
             tx -> {
-              tx.lockThread(root.threadId());
-              return tx.loadQueuedCommands(root.threadId()).isEmpty();
+              tx.threads().lock(root.threadId());
+              return tx.commands().loadQueued(root.threadId()).isEmpty();
             }));
 
     // 零遗留 Work：child THREAD、child MODEL 与父 THREAD 的 Work 全部删除。
     assertNull(
         store.transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, child)).orElse(null)));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, child)).orElse(null)));
     assertNull(
         store.transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, modelId)).orElse(null)));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).orElse(null)));
     assertNull(
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).orElse(null)));
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
+                    .orElse(null)));
   }
 
   private List<Entry> notifications(UUID threadId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.findThread(threadId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().find(threadId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           return path.entries().stream()
               .filter(entry -> entry.payload() instanceof NotificationPayload)
               .toList();
@@ -547,14 +559,18 @@ class HarnessRuntimeStopSubtreeTest {
     return store.transaction(
         tx -> {
           UUID turnStartEntryId = tx.nextId();
-          tx.insertEntry(
-              turnStartEntry(turnStartEntryId, root.sessionId(), root.rootEntryId(), T1, childId));
+          tx.entries()
+              .insert(
+                  turnStartEntry(
+                      turnStartEntryId, root.sessionId(), root.rootEntryId(), T1, childId));
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, root.sessionId(), turnStartEntryId, T1));
-          ThreadState child = tx.lockThread(childId).orElseThrow();
-          tx.updateThread(
-              child.reserveCommandSequencesAdvanceHeadAndInput(
-                  1, userEntryId, child.inputThroughSequence(), T1));
+          tx.entries()
+              .insert(userMessageEntry(userEntryId, root.sessionId(), turnStartEntryId, T1));
+          ThreadState child = tx.threads().lock(childId).orElseThrow();
+          tx.threads()
+              .update(
+                  child.reserveCommandSequencesAdvanceHeadAndInput(
+                      1, userEntryId, child.inputThroughSequence(), T1));
 
           ThreadCommandPayload payload = userMessagePayload("delegated-task");
           ThreadCommand source =
@@ -568,35 +584,36 @@ class HarnessRuntimeStopSubtreeTest {
                   null,
                   null,
                   T1);
-          tx.insertCommands(List.of(source));
-          tx.updateCommands(List.of(source.markApplied(turnStartEntryId)));
+          tx.commands().insert(List.of(source));
+          tx.commands().update(List.of(source.markApplied(turnStartEntryId)));
 
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, childId, turnStartEntryId, userEntryId, modelRequest(), T1);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ProviderResponse response = responseWithToolCalls();
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
-          builtin(tx).updateModelInvocation(model.markRunning(T2).succeed(response, T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2).succeed(response, T2));
 
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  root.threadId(),
-                  childId,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      root.threadId(),
+                      childId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return modelId;
         });
   }
@@ -606,24 +623,25 @@ class HarnessRuntimeStopSubtreeTest {
     UUID childId = UUID.randomUUID();
     store.transaction(
         tx -> {
-          tx.insertThread(
-              new ThreadState(
-                  childId,
-                  sessionId,
-                  parentThreadId,
-                  headEntryId,
-                  CREATION_REQUEST_HASH,
-                  "child-branch",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childId,
+                      sessionId,
+                      parentThreadId,
+                      headEntryId,
+                      CREATION_REQUEST_HASH,
+                      "child-branch",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return null;
         });
     return childId;
@@ -645,19 +663,17 @@ class HarnessRuntimeStopSubtreeTest {
               return delegate.transaction(
                   tx -> {
                     HarnessStore.Transaction wrapped =
-                        (HarnessStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (transactionProxy, transactionMethod, transactionArgs) -> {
-                                  String name = transactionMethod.getName();
-                                  if (name.equals("lockTree")
-                                      || name.equals("lockSessionForKeyShare")
-                                      || name.equals("lockThread")) {
-                                    lockCalls.add(name + ":" + transactionArgs[0]);
-                                  }
-                                  return transactionMethod.invoke(tx, transactionArgs);
-                                });
+                        wrap(
+                            tx,
+                            (call, next) -> {
+                              String name = call.operation();
+                              if (name.equals("threads.lockTree")
+                                  || name.equals("sessions.lockForKeyShare")
+                                  || name.equals("threads.lock")) {
+                                lockCalls.add(name + ":" + call.argument(0));
+                              }
+                              return next.invoke();
+                            });
                     return callback.apply(wrapped);
                   });
             });
@@ -666,24 +682,25 @@ class HarnessRuntimeStopSubtreeTest {
   private void insertJoin(UUID joinId, UUID parentThreadId, UUID childThreadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(childThreadId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  parentThreadId,
-                  childThreadId,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childThreadId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      parentThreadId,
+                      childThreadId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }

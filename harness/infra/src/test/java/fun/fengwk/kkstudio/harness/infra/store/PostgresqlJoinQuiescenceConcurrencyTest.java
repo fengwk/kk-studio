@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
@@ -133,8 +134,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         tx -> {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
 
           UUID threadA = tx.nextId();
           UUID threadB = tx.nextId();
@@ -145,126 +146,136 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           UUID bUser = tx.nextId();
           UUID bAssistant = tx.nextId();
           UUID bEnd = tx.nextId();
-          tx.insertEntry(
-              new Entry(bStart, sessionId, rootEntryId, resolvedTurnStartPayload(threadB), now));
-          tx.insertEntry(new Entry(bUser, sessionId, bStart, userMessagePayload(), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      bStart, sessionId, rootEntryId, resolvedTurnStartPayload(threadB), now));
+          tx.entries().insert(new Entry(bUser, sessionId, bStart, userMessagePayload(), now));
           if (!bTerminalPending) {
-            tx.insertEntry(new Entry(bAssistant, sessionId, bUser, assistantPayload(), now));
-            tx.insertEntry(
-                new Entry(
-                    bEnd,
-                    sessionId,
-                    bAssistant,
-                    new TurnEndPayload(bStart, TurnEndOutcome.COMPLETED, false, null, null),
-                    now));
+            tx.entries().insert(new Entry(bAssistant, sessionId, bUser, assistantPayload(), now));
+            tx.entries()
+                .insert(
+                    new Entry(
+                        bEnd,
+                        sessionId,
+                        bAssistant,
+                        new TurnEndPayload(bStart, TurnEndOutcome.COMPLETED, false, null, null),
+                        now));
           }
 
           // C：打开的 turn，terminal Model 已提交（ModelTerminalPending）。
           UUID cStart = tx.nextId();
           UUID cUser = tx.nextId();
-          tx.insertEntry(
-              new Entry(cStart, sessionId, rootEntryId, resolvedTurnStartPayload(threadC), now));
-          tx.insertEntry(new Entry(cUser, sessionId, cStart, userMessagePayload(), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      cStart, sessionId, rootEntryId, resolvedTurnStartPayload(threadC), now));
+          tx.entries().insert(new Entry(cUser, sessionId, cStart, userMessagePayload(), now));
 
           // 锁序 SESSION -> THREAD：所有 Thread 必须先于任何 COMMAND 建立。
-          tx.insertThread(
-              new ThreadState(
-                  threadA,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  REQUEST_HASH,
-                  "root-A",
-                  threadA,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  now,
-                  now));
-          tx.insertThread(
-              new ThreadState(
-                  threadB,
-                  sessionId,
-                  threadA,
-                  bTerminalPending ? bUser : bEnd,
-                  REQUEST_HASH,
-                  "child-B",
-                  threadA,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  1L,
-                  2L,
-                  0L,
-                  now,
-                  now));
-          tx.insertThread(
-              new ThreadState(
-                  threadC,
-                  sessionId,
-                  threadB,
-                  cUser,
-                  REQUEST_HASH,
-                  "child-C",
-                  threadA,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  1L,
-                  2L,
-                  0L,
-                  now,
-                  now));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadA,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      REQUEST_HASH,
+                      "root-A",
+                      threadA,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadB,
+                      sessionId,
+                      threadA,
+                      bTerminalPending ? bUser : bEnd,
+                      REQUEST_HASH,
+                      "child-B",
+                      threadA,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      1L,
+                      2L,
+                      0L,
+                      now,
+                      now));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadC,
+                      sessionId,
+                      threadB,
+                      cUser,
+                      REQUEST_HASH,
+                      "child-C",
+                      threadA,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      1L,
+                      2L,
+                      0L,
+                      now,
+                      now));
 
           ThreadCommand bCommand = command(threadB, 1L, tx.nextId());
-          tx.insertCommands(List.of(bCommand));
-          tx.updateCommands(List.of(withConsumedTurnStart(bCommand, bStart)));
+          tx.commands().insert(List.of(bCommand));
+          tx.commands().update(List.of(withConsumedTurnStart(bCommand, bStart)));
           ThreadCommand cCommand = command(threadC, 1L, tx.nextId());
-          tx.insertCommands(List.of(cCommand));
-          tx.updateCommands(List.of(withConsumedTurnStart(cCommand, cStart)));
+          tx.commands().insert(List.of(cCommand));
+          tx.commands().update(List.of(withConsumedTurnStart(cCommand, cStart)));
 
           UUID joinAB = tx.nextId();
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinAB,
-                  REQUEST_HASH,
-                  threadA,
-                  threadB,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  now,
-                  now,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinAB,
+                      REQUEST_HASH,
+                      threadA,
+                      threadB,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      now,
+                      now,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           UUID joinBC = tx.nextId();
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinBC,
-                  REQUEST_HASH,
-                  threadB,
-                  threadC,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  now,
-                  now,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinBC,
+                      REQUEST_HASH,
+                      threadB,
+                      threadC,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      now,
+                      now,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
 
           if (bTerminalPending) {
             insertSucceededModel(tx, threadB, bStart, bUser, now);
@@ -272,9 +283,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           insertSucceededModel(tx, threadC, cStart, cUser, now);
 
           if (bTerminalPending) {
-            tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadB));
+            tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadB));
           }
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadC));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadC));
           return new Tree(sessionId, rootEntryId, threadA, threadB, threadC, joinAB, joinBC);
         });
   }
@@ -299,7 +310,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
-  private static void insertSucceededModel(
+  private void insertSucceededModel(
       HarnessStore.Transaction tx, UUID threadId, UUID turnStart, UUID requestHead, Instant now) {
     ModelInvocation model =
         new ModelInvocation(
@@ -317,15 +328,15 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
             List.of(),
             now,
             now);
-    builtin(tx).insertModelInvocation(model);
+    builtin(store, tx).insertModelInvocation(model);
     succeedModel(tx, model, assistantResponse(), now);
   }
 
-  private static void succeedModel(
+  private void succeedModel(
       HarnessStore.Transaction tx, ModelInvocation model, ProviderResponse response, Instant now) {
     ModelInvocation running = model.markRunning(now);
-    builtin(tx).updateModelInvocation(running);
-    builtin(tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx).updateModelInvocation(running);
+    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
   }
 
   /** 不调用外部 Gateway，沿真实模型状态转换提交响应，再让 Processor 应用终态。 */
@@ -333,12 +344,13 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
-          UUID start = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
+          UUID start =
+              tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
-              builtin(tx).findModelInvocationByTurn(threadId, start).orElseThrow();
-          builtin(tx).lockModelInvocation(model.id());
+              builtin(store, tx).findModelInvocationByTurn(threadId, start).orElseThrow();
+          builtin(store, tx).lockModelInvocation(model.id());
           succeedModel(tx, model, assistantResponse(), now);
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -435,16 +447,14 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   (Function<HarnessStore.Transaction, Object>) args[0];
               return delegate.transaction(
                   tx -> {
-                    ((BuiltinStore) delegate).in(tx);
                     AtomicBoolean paused = new AtomicBoolean(false);
                     BuiltinStore.Transaction wrapped =
                         (BuiltinStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (txProxy, txMethod, txArgs) -> {
-                                  Object result = invokeUnwrapped(txMethod, tx, txArgs);
-                                  if (txMethod.getName().equals("updateJoin")
+                            wrap(
+                                ((BuiltinStore) delegate).in(tx),
+                                (call, next) -> {
+                                  Object result = next.invoke();
+                                  if ("joins.update".equals(call.operation())
                                       && paused.compareAndSet(false, true)) {
                                     matched.countDown();
                                     if (failInsteadOfBlock) {
@@ -581,8 +591,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     ThreadState bBefore = runtime.getThreadSnapshot(tree.threadB()).thread();
     ThreadJoin bcBefore = join(tree.joinBC());
     List<Entry> entriesBefore =
-        store.transaction(tx -> tx.loadEntriesBySessionId(tree.sessionId()));
-    var workBefore = store.transaction(tx -> tx.findWork(childClaim.target()).orElseThrow());
+        store.transaction(tx -> tx.entries().loadBySession(tree.sessionId()));
+    var workBefore = store.transaction(tx -> tx.work().find(childClaim.target()).orElseThrow());
 
     CountDownLatch matched = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -605,9 +615,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       assertEquals(cBefore, runtime.getThreadSnapshot(tree.threadC()));
       assertEquals(bBefore, runtime.getThreadSnapshot(tree.threadB()).thread());
       assertEquals(
-          entriesBefore, store.transaction(tx -> tx.loadEntriesBySessionId(tree.sessionId())));
+          entriesBefore, store.transaction(tx -> tx.entries().loadBySession(tree.sessionId())));
       assertEquals(
-          workBefore, store.transaction(tx -> tx.findWork(childClaim.target()).orElseThrow()));
+          workBefore, store.transaction(tx -> tx.work().find(childClaim.target()).orElseThrow()));
       assertTrue(queuedOf(tree.threadB()).isEmpty(), "no parent notification may survive rollback");
       assertFalse(hasThreadWork(tree.threadB()), "no parent wake may survive rollback");
       assertTrue(commandsOf(tree.threadA()).isEmpty());
@@ -640,7 +650,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
 
   private ClaimedWork claim(String leaseId, Instant now) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, leaseId, Duration.ofSeconds(30)))
+        .transaction(
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, leaseId, Duration.ofSeconds(30)))
         .orElseThrow();
   }
 
@@ -651,7 +662,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   }
 
   private ThreadJoin join(UUID invocationId) {
-    return store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+    return store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
   }
 
   private List<ThreadCommand> commandsOf(UUID threadId) {
@@ -661,14 +672,14 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   private List<ThreadCommand> queuedOf(UUID threadId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.loadQueuedCommands(threadId);
+          tx.threads().lock(threadId);
+          return tx.commands().loadQueued(threadId);
         });
   }
 
   private boolean hasThreadWork(UUID threadId) {
     return store.<Boolean>transaction(
-        tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent());
+        tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent());
   }
 
   private int count(String table, String column, UUID value) {

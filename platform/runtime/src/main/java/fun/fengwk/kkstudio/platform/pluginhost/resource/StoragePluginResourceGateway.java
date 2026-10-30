@@ -333,7 +333,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   private UUID resolveSessionId(UUID threadId) {
     Optional<ThreadState> thread;
     try {
-      thread = harnessStore.transaction(tx -> tx.findThread(threadId));
+      thread = harnessStore.transaction(tx -> tx.threads().find(threadId));
     } catch (RuntimeException error) {
       throw new PluginResourceUnavailableException("cannot read the invocation thread", error);
     }

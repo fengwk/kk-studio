@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
@@ -130,59 +131,63 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
           UUID rootEntryId = tx.nextId();
           UUID parentThreadId = tx.nextId();
 
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(
-              new ThreadState(
-                  parentThreadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  REQUEST_HASH,
-                  "parent-thread",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  now,
-                  now));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      parentThreadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      REQUEST_HASH,
+                      "parent-thread",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
 
           UUID childThreadId = tx.nextId();
           UUID turnStartId = tx.nextId();
           UUID userMsgId = tx.nextId();
 
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  sessionId,
-                  rootEntryId,
-                  resolvedTurnStartPayload(childThreadId),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  userMsgId, sessionId, turnStartId, userMessagePayload("calculate 1+1"), now));
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  sessionId,
-                  parentThreadId,
-                  userMsgId,
-                  REQUEST_HASH,
-                  "child-thread",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  2L,
-                  0L,
-                  now,
-                  now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedTurnStartPayload(childThreadId),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userMsgId, sessionId, turnStartId, userMessagePayload("calculate 1+1"), now));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      sessionId,
+                      parentThreadId,
+                      userMsgId,
+                      REQUEST_HASH,
+                      "child-thread",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      2L,
+                      0L,
+                      now,
+                      now));
 
           UUID childCommandKey = tx.nextId();
           UserMessageCommandPayload cmdPayload =
@@ -198,8 +203,9 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   null,
                   null,
                   now);
-          tx.insertCommands(List.of(childCmd));
-          tx.updateCommands(List.of(StoreTestSupport.withConsumedTurnStart(childCmd, turnStartId)));
+          tx.commands().insert(List.of(childCmd));
+          tx.commands()
+              .update(List.of(StoreTestSupport.withConsumedTurnStart(childCmd, turnStartId)));
 
           UUID modelId = tx.nextId();
           ModelRequestSpec request = succeededRequest();
@@ -220,34 +226,35 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   List.of(),
                   now,
                   now);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           var running = model.markRunning(now);
-          builtin(tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running);
           if (modelSucceeded) {
             var succeeded = running.succeed(response, now);
-            builtin(tx).updateModelInvocation(succeeded);
+            builtin(store, tx).updateModelInvocation(succeeded);
           }
 
           UUID joinInvocationId = tx.nextId();
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinInvocationId,
-                  REQUEST_HASH,
-                  parentThreadId,
-                  childThreadId,
-                  1L,
-                  "subagent-calculator",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  now,
-                  now,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinInvocationId,
+                      REQUEST_HASH,
+                      parentThreadId,
+                      childThreadId,
+                      1L,
+                      "subagent-calculator",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      now,
+                      now,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
 
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, childThreadId));
 
           return new ExecutionTreeFixture(
               sessionId,
@@ -296,18 +303,14 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                     (Function<HarnessStore.Transaction, Object>) args[0];
                 return delegate.transaction(
                     tx -> {
-                      ((BuiltinStore) delegate).in(tx);
                       BuiltinStore.Transaction wrapped =
                           (BuiltinStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (txProxy, txMethod, txArgs) -> {
-                                    Object res = txMethod.invoke(tx, txArgs);
-                                    if (txMethod.getName().equals("lockTree")
-                                        && txArgs != null
-                                        && txArgs.length > 0
-                                        && targetRoot.equals(txArgs[0])) {
+                              wrap(
+                                  ((BuiltinStore) delegate).in(tx),
+                                  (call, next) -> {
+                                    Object res = next.invoke();
+                                    if ("threads.lockTree".equals(call.operation())
+                                        && targetRoot.equals(call.argument(0))) {
                                       treeLockedLatch.countDown();
                                       try {
                                         if (!canCommitLatch.await(10, TimeUnit.SECONDS)) {
@@ -347,7 +350,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     CountDownLatch parentTreeLocked = new CountDownLatch(1);
@@ -411,9 +415,10 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       // 验证 PostgreSQL 中的最终状态：父线程 STOPPED，已停止父级收到的交付通知按 authoritative 语义直接物化为
       // 历史 NOTIFICATION Entry（不唤醒模型、不进入活跃队列），显式停止边界作为其祖先保留在路径上。
       ThreadState parentState =
-          store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
       assertEquals(ThreadExecutionControl.STOPPED, parentState.executionControl());
-      EntryPath parentPath = store.transaction(tx -> tx.loadEntryPath(parentState.headEntryId()));
+      EntryPath parentPath =
+          store.transaction(tx -> tx.entries().loadPath(parentState.headEntryId()));
       NotificationPayload parentNotification =
           assertInstanceOf(NotificationPayload.class, parentPath.head().payload());
       assertEquals(fixture.childThreadId(), parentNotification.sourceThreadId());
@@ -422,8 +427,9 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
       // 子线程同样被递归 Stop
       ThreadState childState =
-          store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
-      EntryPath childPath = store.transaction(tx -> tx.loadEntryPath(childState.headEntryId()));
+          store.transaction(tx -> tx.threads().find(fixture.childThreadId()).orElseThrow());
+      EntryPath childPath =
+          store.transaction(tx -> tx.entries().loadPath(childState.headEntryId()));
       TurnEndPayload childEnd = assertInstanceOf(TurnEndPayload.class, childPath.head().payload());
       assertEquals(TurnEndOutcome.STOPPED, childEnd.outcome());
 
@@ -431,8 +437,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       List<ThreadCommand> parentCommands =
           store.transaction(
               tx -> {
-                tx.lockThread(fixture.parentThreadId());
-                return tx.loadQueuedCommands(fixture.parentThreadId());
+                tx.threads().lock(fixture.parentThreadId());
+                return tx.commands().loadQueued(fixture.parentThreadId());
               });
       assertTrue(
           parentCommands.isEmpty()
@@ -441,7 +447,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
       // Join 凭据恰好交付一次并物化为已停止父级历史；不产生可唤醒模型的活跃命令
       ThreadJoin join =
-          store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
+          store.transaction(tx -> tx.joins().find(fixture.joinInvocationId()).orElseThrow());
       assertEquals(1L, join.deliveryCommandSequence());
       assertEquals(
           1L,
@@ -467,7 +473,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -480,25 +487,25 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
       // 验证 PostgreSQL 数据库中的中间状态：Join 已匹配，父线程已有 1 条入队 NOTIFICATION
       ThreadState childState =
-          store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().find(fixture.childThreadId()).orElseThrow());
       assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
 
       ThreadJoin matchedJoin =
-          store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
+          store.transaction(tx -> tx.joins().find(fixture.joinInvocationId()).orElseThrow());
       assertTrue(matchedJoin.matched());
       assertNotNull(matchedJoin.terminalEntryId());
       assertEquals(1L, matchedJoin.deliveryCommandSequence());
 
       ThreadState parentState =
-          store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
       assertEquals(ThreadExecutionControl.RUNNABLE, parentState.executionControl());
       assertEquals(2L, parentState.nextCommandSequence());
 
       List<ThreadCommand> parentQueued =
           store.transaction(
               tx -> {
-                tx.lockThread(fixture.parentThreadId());
-                return tx.loadQueuedCommands(fixture.parentThreadId());
+                tx.threads().lock(fixture.parentThreadId());
+                return tx.commands().loadQueued(fixture.parentThreadId());
               });
       assertEquals(1, parentQueued.size());
       ThreadCommand queuedCmd = parentQueued.get(0);
@@ -522,9 +529,10 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       // 验证 PostgreSQL 数据库中的最终状态：父线程 STOPPED，已入队的系统通知在 Stop 事务内被物化为历史
       // NOTIFICATION Entry 并标记 APPLIED（保留通知、不唤醒模型），停止边界保留在通知之前。
       ThreadState stoppedParent =
-          store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
       assertEquals(ThreadExecutionControl.STOPPED, stoppedParent.executionControl());
-      EntryPath parentPath = store.transaction(tx -> tx.loadEntryPath(stoppedParent.headEntryId()));
+      EntryPath parentPath =
+          store.transaction(tx -> tx.entries().loadPath(stoppedParent.headEntryId()));
       NotificationPayload parentNotification =
           assertInstanceOf(NotificationPayload.class, parentPath.head().payload());
       assertEquals(fixture.childThreadId(), parentNotification.sourceThreadId());
@@ -534,8 +542,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       ThreadCommand appliedCmd =
           store.transaction(
               tx ->
-                  tx.findCommandByIdempotencyKey(
-                          fixture.parentThreadId(), fixture.joinInvocationId())
+                  tx.commands()
+                      .findByIdempotencyKey(fixture.parentThreadId(), fixture.joinInvocationId())
                       .orElseThrow());
       assertEquals(ThreadCommandState.APPLIED, appliedCmd.state());
       assertEquals(parentPath.head().id(), appliedCmd.appliedEntryId());
@@ -543,7 +551,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
       // Join 凭据交付序列号依然是 1（精确一次交付，没有二次修改）
       ThreadJoin finalJoin =
-          store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
+          store.transaction(tx -> tx.joins().find(fixture.joinInvocationId()).orElseThrow());
       assertEquals(1L, finalJoin.deliveryCommandSequence());
     } finally {
       scheduler.shutdownNow();
@@ -562,7 +570,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -598,7 +607,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             assertInstanceOf(HarnessRuntimeConflictException.class, e.getCause());
         assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, conflict.reason());
         ThreadState current =
-            store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+            store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
         assertNotNull(
             runtime.stop(
                 new StopCommand(fixture.parentThreadId(), stopRequestId, current.version())));
@@ -611,8 +620,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       List<ThreadCommand> allParentCommands =
           store.transaction(
               tx -> {
-                tx.lockThread(fixture.parentThreadId());
-                return tx.loadQueuedCommands(fixture.parentThreadId());
+                tx.threads().lock(fixture.parentThreadId());
+                return tx.commands().loadQueued(fixture.parentThreadId());
               });
       assertTrue(allParentCommands.isEmpty(), "Stopped parent must not retain queued commands");
 
@@ -620,14 +629,14 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       ThreadCommand notification =
           store.transaction(
               tx ->
-                  tx.findCommandByIdempotencyKey(
-                          fixture.parentThreadId(), fixture.joinInvocationId())
+                  tx.commands()
+                      .findByIdempotencyKey(fixture.parentThreadId(), fixture.joinInvocationId())
                       .orElseThrow());
       assertEquals(ThreadCommandState.APPLIED, notification.state());
       ThreadState finalParent =
-          store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
       EntryPath finalParentPath =
-          store.transaction(tx -> tx.loadEntryPath(finalParent.headEntryId()));
+          store.transaction(tx -> tx.entries().loadPath(finalParent.headEntryId()));
       assertEquals(
           1L,
           finalParentPath.entries().stream()
@@ -654,21 +663,22 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             store.transaction(
                 tx -> {
                   // 1. 拿树锁与行锁
-                  tx.lockTree(fixture.parentThreadId());
-                  tx.lockSessionForKeyShare(fixture.sessionId()).orElseThrow();
-                  tx.lockThread(fixture.parentThreadId()).orElseThrow();
-                  ThreadState child = tx.lockThread(fixture.childThreadId()).orElseThrow();
+                  tx.threads().lockTree(fixture.parentThreadId());
+                  tx.sessions().lockForKeyShare(fixture.sessionId()).orElseThrow();
+                  tx.threads().lock(fixture.parentThreadId()).orElseThrow();
+                  ThreadState child = tx.threads().lock(fixture.childThreadId()).orElseThrow();
 
                   // 2. 插入部分 Entry
                   UUID partialEntryId = tx.nextId();
-                  tx.insertEntry(
-                      new Entry(
-                          partialEntryId,
-                          fixture.sessionId(),
-                          child.headEntryId(),
-                          userMessagePayload("partial text"),
-                          now));
-                  tx.updateThread(child.advanceHead(partialEntryId, now));
+                  tx.entries()
+                      .insert(
+                          new Entry(
+                              partialEntryId,
+                              fixture.sessionId(),
+                              child.headEntryId(),
+                              userMessagePayload("partial text"),
+                              now));
+                  tx.threads().update(child.advanceHead(partialEntryId, now));
 
                   // 3. 故意抛出异常中断事务
                   throw new RuntimeException("simulated database crash during terminal apply");
@@ -676,20 +686,20 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
     // 验证 PostgreSQL 中所有数据完整回滚，毫无残留
     ThreadState childAfterRollback =
-        store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(fixture.childThreadId()).orElseThrow());
     assertEquals(fixture.userMsgId(), childAfterRollback.headEntryId());
     assertEquals(0L, childAfterRollback.version());
 
     ThreadJoin joinAfterRollback =
-        store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
+        store.transaction(tx -> tx.joins().find(fixture.joinInvocationId()).orElseThrow());
     assertFalse(joinAfterRollback.matched());
     assertNull(joinAfterRollback.deliveryCommandSequence());
 
     List<ThreadCommand> parentCommands =
         store.transaction(
             tx -> {
-              tx.lockThread(fixture.parentThreadId());
-              return tx.loadQueuedCommands(fixture.parentThreadId());
+              tx.threads().lock(fixture.parentThreadId());
+              return tx.commands().loadQueued(fixture.parentThreadId());
             });
     assertTrue(parentCommands.isEmpty());
 
@@ -698,7 +708,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -707,7 +718,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childClaim));
 
       ThreadJoin finalJoin =
-          store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
+          store.transaction(tx -> tx.joins().find(fixture.joinInvocationId()).orElseThrow());
       assertTrue(finalJoin.matched());
       assertEquals(1L, finalJoin.deliveryCommandSequence());
     } finally {
@@ -725,8 +736,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     // 外部并发修改推进父版本
     store.transaction(
         tx -> {
-          ThreadState parent = tx.lockThread(fixture.parentThreadId()).orElseThrow();
-          tx.updateThread(parent.touchVersion(T3));
+          ThreadState parent = tx.threads().lock(fixture.parentThreadId()).orElseThrow();
+          tx.threads().update(parent.touchVersion(T3));
           return null;
         });
 
@@ -737,12 +748,12 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
 
     // 验证 PostgreSQL 中父子线程状态未被 Stop 破坏
     ThreadState parent =
-        store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(fixture.parentThreadId()).orElseThrow());
     assertEquals(1L, parent.version());
     assertEquals(fixture.rootEntryId(), parent.headEntryId());
 
     ThreadState child =
-        store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(fixture.childThreadId()).orElseThrow());
     assertEquals(0L, child.version());
     assertEquals(fixture.userMsgId(), child.headEntryId());
   }

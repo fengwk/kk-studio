@@ -10,6 +10,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -127,8 +128,8 @@ class HarnessRuntimeSnapshotTest {
     // head 移到 ROOT 后模型/工具仍存在但不 applicable：快照按分类器投影为空。
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), T5));
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(thread.advanceHead(baseline.rootEntryId(), T5));
           return null;
         });
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
@@ -200,7 +201,8 @@ class HarnessRuntimeSnapshotTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.getThreadSnapshot(baseline.threadId());
     runtime.getThreadSnapshot(baseline.threadId());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.version());
   }
 
@@ -272,16 +274,14 @@ class HarnessRuntimeSnapshotTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    if (transactionMethod.getName().equals("lockModelInvocation")) {
-                                      return Optional.empty();
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                if (call.operation().equals("lockModelInvocation")) {
+                                  return Optional.empty();
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }

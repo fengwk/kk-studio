@@ -64,6 +64,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadClient;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
@@ -195,7 +196,7 @@ public class HarnessRuntimeConfiguration {
       DataSource dataSource,
       RealtimeNotificationCodec notificationCodec,
       @Qualifier("nodeInstanceId") UUID nodeInstanceId,
-      ClusterNodePresence clusterNodePresence,
+      RealtimeSubscriptionService realtimeSubscriptions,
       ClusterNodeRegistry clusterNodeRegistry,
       ClusterInternalAuthentication clusterInternalAuthentication,
       @Qualifier("clusterInternalHttpClient") HttpClient clusterInternalHttpClient,
@@ -210,7 +211,7 @@ public class HarnessRuntimeConfiguration {
         new PostgresqlRealtimeEventSource(notificationCodec),
         new PostgresqlRealtimeEventSink(
             jdbcTemplate, notificationCodec, nodeInstanceId, realtimePayloadBuffer),
-        clusterNodePresence::hasOtherActiveNodes,
+        realtimeSubscriptions::hasRemoteSubscription,
         payloadClient::fetch,
         realtimePayloadBuffer,
         Executors.newVirtualThreadPerTaskExecutor());

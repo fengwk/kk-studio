@@ -17,7 +17,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
+import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -73,6 +77,10 @@ class SessionDeletionOrchestratorTest {
   private ObjectProvider<HarnessStore> stores;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
+  private SessionStore sessionStore;
+  private EntryStore entryStore;
+  private ThreadStore threadStore;
+  private JoinStore joinStore;
   private SessionBlobRefManager refManager;
   private SessionDeletionOrchestrator service;
 
@@ -93,8 +101,16 @@ class SessionDeletionOrchestratorTest {
     stores = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
+    sessionStore = mock(SessionStore.class);
+    entryStore = mock(EntryStore.class);
+    threadStore = mock(ThreadStore.class);
+    joinStore = mock(JoinStore.class);
     refManager = mock(SessionBlobRefManager.class);
 
+    when(transaction.sessions()).thenReturn(sessionStore);
+    when(transaction.entries()).thenReturn(entryStore);
+    when(transaction.threads()).thenReturn(threadStore);
+    when(transaction.joins()).thenReturn(joinStore);
     when(stores.getIfAvailable()).thenReturn(store);
     when(store.transaction(any()))
         .thenAnswer(
@@ -102,25 +118,24 @@ class SessionDeletionOrchestratorTest {
               Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
               return callback.apply(transaction);
             });
-    when(transaction.listThreadsBySession(any()))
+    when(threadStore.listBySession(any()))
         .thenAnswer(
             inv -> new ArrayList<>(sessionThreads.getOrDefault(inv.getArgument(0), List.of())));
-    when(transaction.listChildren(any()))
+    when(threadStore.listChildren(any()))
         .thenAnswer(inv -> new ArrayList<>(children.getOrDefault(inv.getArgument(0), List.of())));
-    when(transaction.findAncestorChain(any())).thenAnswer(inv -> ancestorChain(inv.getArgument(0)));
-    when(transaction.lockSessionForUpdate(any()))
+    when(threadStore.findAncestorChain(any())).thenAnswer(inv -> ancestorChain(inv.getArgument(0)));
+    when(sessionStore.lockForUpdate(any()))
         .thenAnswer(
             inv ->
                 presentSessions.contains(inv.getArgument(0))
                     ? Optional.of(new Session(inv.getArgument(0), "session", NOW))
                     : Optional.empty());
-    when(transaction.lockThread(any()))
+    when(threadStore.lock(any()))
         .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
-    when(transaction.findThread(any()))
+    when(threadStore.find(any()))
         .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
-    when(transaction.deleteThreads(any()))
-        .thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
-    when(transaction.deleteSession(any())).thenReturn(true);
+    when(threadStore.delete(any())).thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
+    when(sessionStore.delete(any())).thenReturn(true);
 
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
 
@@ -142,19 +157,19 @@ class SessionDeletionOrchestratorTest {
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
-    InOrder storeOrder = inOrder(transaction);
-    storeOrder.verify(transaction).lockTree(THREAD_1);
-    storeOrder.verify(transaction).lockTree(THREAD_2);
-    storeOrder.verify(transaction).lockSessionForUpdate(SESSION_1);
-    storeOrder.verify(transaction).lockSessionForUpdate(SESSION_2);
-    storeOrder.verify(transaction).lockThread(THREAD_1);
-    storeOrder.verify(transaction).lockThread(THREAD_2);
-    storeOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2));
-    storeOrder.verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2));
-    storeOrder.verify(transaction).deleteEntries(SESSION_1);
-    storeOrder.verify(transaction).deleteSession(SESSION_1);
-    storeOrder.verify(transaction).deleteEntries(SESSION_2);
-    storeOrder.verify(transaction).deleteSession(SESSION_2);
+    InOrder storeOrder = inOrder(threadStore, sessionStore, joinStore, entryStore);
+    storeOrder.verify(threadStore).lockTree(THREAD_1);
+    storeOrder.verify(threadStore).lockTree(THREAD_2);
+    storeOrder.verify(sessionStore).lockForUpdate(SESSION_1);
+    storeOrder.verify(sessionStore).lockForUpdate(SESSION_2);
+    storeOrder.verify(threadStore).lock(THREAD_1);
+    storeOrder.verify(threadStore).lock(THREAD_2);
+    storeOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1, THREAD_2));
+    storeOrder.verify(threadStore).delete(List.of(THREAD_1, THREAD_2));
+    storeOrder.verify(entryStore).delete(SESSION_1);
+    storeOrder.verify(sessionStore).delete(SESSION_1);
+    storeOrder.verify(entryStore).delete(SESSION_2);
+    storeOrder.verify(sessionStore).delete(SESSION_2);
 
     InOrder blobOrder = inOrder(refManager);
     blobOrder.verify(refManager).listBlobIds(SESSION_1);
@@ -174,15 +189,22 @@ class SessionDeletionOrchestratorTest {
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
 
     InOrder deleteOrder =
-        inOrder(issueAgentOwnership, transaction, refManager, chatSessionRepository);
+        inOrder(
+            issueAgentOwnership,
+            threadStore,
+            joinStore,
+            sessionStore,
+            entryStore,
+            refManager,
+            chatSessionRepository);
     deleteOrder.verify(issueAgentOwnership).lockForDeletion(ISSUE_AGENT);
     deleteOrder.verify(issueAgentOwnership).deleteBinding(ISSUE_AGENT);
-    deleteOrder.verify(transaction).lockThread(THREAD_1);
-    deleteOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1));
-    deleteOrder.verify(transaction).deleteThreads(List.of(THREAD_1));
+    deleteOrder.verify(threadStore).lock(THREAD_1);
+    deleteOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1));
+    deleteOrder.verify(threadStore).delete(List.of(THREAD_1));
     deleteOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
-    deleteOrder.verify(transaction).deleteEntries(SESSION_1);
-    deleteOrder.verify(transaction).deleteSession(SESSION_1);
+    deleteOrder.verify(entryStore).delete(SESSION_1);
+    deleteOrder.verify(sessionStore).delete(SESSION_1);
     verifyNoInteractions(chatSessionRepository);
   }
 
@@ -196,9 +218,9 @@ class SessionDeletionOrchestratorTest {
 
     verify(chatSessionRepository, never()).deleteBySessionId(SESSION_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_2);
-    verify(transaction, never()).deleteEntries(SESSION_1);
-    verify(transaction).deleteEntries(SESSION_2);
-    verify(transaction).deleteSession(SESSION_2);
+    verify(entryStore, never()).delete(SESSION_1);
+    verify(entryStore).delete(SESSION_2);
+    verify(sessionStore).delete(SESSION_2);
     verifyNoInteractions(issueAgentOwnership);
   }
 
@@ -216,13 +238,13 @@ class SessionDeletionOrchestratorTest {
     service.deleteSessionsByOwner(CHAT_OWNER);
 
     // 子 Session 与其 fork 都被删除，且 fork 自己的执行树 root 也被锁定（否则并发可加入未锁的树）。
-    verify(transaction).lockTree(THREAD_1);
-    verify(transaction).lockTree(THREAD_FORK);
-    verify(transaction).lockSessionForUpdate(SESSION_1);
-    verify(transaction).lockSessionForUpdate(SESSION_2);
-    verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
-    verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
-    verify(transaction).deleteSession(SESSION_2);
+    verify(threadStore).lockTree(THREAD_1);
+    verify(threadStore).lockTree(THREAD_FORK);
+    verify(sessionStore).lockForUpdate(SESSION_1);
+    verify(sessionStore).lockForUpdate(SESSION_2);
+    verify(threadStore).delete(List.of(THREAD_1, THREAD_2, THREAD_FORK));
+    verify(joinStore).deleteForThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
+    verify(sessionStore).delete(SESSION_2);
   }
 
   @Test
@@ -230,7 +252,7 @@ class SessionDeletionOrchestratorTest {
     // 测试意图：fork 创建由 Session 锁排除；若在发现与加锁之间出现新 Session，必须整体回滚而不是删掉漏后代的集合。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
     putSession(SESSION_1, thread(THREAD_1, SESSION_1));
-    when(transaction.lockSessionForUpdate(SESSION_1))
+    when(sessionStore.lockForUpdate(SESSION_1))
         .thenAnswer(
             inv -> {
               // 模拟并发 fork：加锁期间在另一个 Session 中出现 THREAD_1 的新子线程。
@@ -240,10 +262,10 @@ class SessionDeletionOrchestratorTest {
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
-    verify(transaction, never()).deleteThreads(any());
-    verify(transaction, never()).deleteJoinsForThreads(any());
-    verify(transaction, never()).deleteEntries(any());
-    verify(transaction, never()).deleteSession(any());
+    verify(threadStore, never()).delete(any());
+    verify(joinStore, never()).deleteForThreads(any());
+    verify(entryStore, never()).delete(any());
+    verify(sessionStore, never()).delete(any());
   }
 
   @Test
@@ -292,10 +314,10 @@ class SessionDeletionOrchestratorTest {
         DataIntegrityViolationException.class,
         () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
 
-    verify(transaction, never()).deleteThreads(any());
-    verify(transaction, never()).deleteJoinsForThreads(any());
-    verify(transaction, never()).deleteEntries(any());
-    verify(transaction, never()).deleteSession(any());
+    verify(threadStore, never()).delete(any());
+    verify(joinStore, never()).deleteForThreads(any());
+    verify(entryStore, never()).delete(any());
+    verify(sessionStore, never()).delete(any());
     verifyNoInteractions(refManager);
     verify(chatSessionRepository, never()).deleteBySessionId(any());
   }

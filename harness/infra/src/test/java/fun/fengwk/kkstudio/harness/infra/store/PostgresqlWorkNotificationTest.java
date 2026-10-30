@@ -70,12 +70,12 @@ class PostgresqlWorkNotificationTest {
           () ->
               store.transaction(
                   tx -> {
-                    tx.lockThread(baseline.threadId()).orElseThrow();
-                    tx.requestWork(target);
+                    tx.threads().lock(baseline.threadId()).orElseThrow();
+                    tx.work().request(target);
                     throw new IllegalStateException("rollback");
                   }));
       assertNoNotification(notifications);
-      assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
 
       requestWork(baseline.threadId(), target, T0);
       assertNotification(notifications);
@@ -84,34 +84,37 @@ class PostgresqlWorkNotificationTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.between(T1, T5)))
+                      tx.work()
+                          .claimNext(WorkTargetType.THREAD, "lease-1", Duration.between(T1, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.renewWork(first, Duration.ofSeconds(5)));
+      inTransaction(store, tx -> tx.work().renew(first, Duration.ofSeconds(5)));
       assertNoNotification(notifications);
 
       requestWork(baseline.threadId(), target, T1);
       assertNotification(notifications);
-      assertTrue(store.transaction(tx -> tx.completeWork(first)).isPresent());
+      assertTrue(store.transaction(tx -> tx.work().complete(first)).isPresent());
       assertNotification(notifications);
 
       ClaimedWork second =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(WorkTargetType.THREAD, "lease-2", Duration.between(T2, T5)))
+                      tx.work()
+                          .claimNext(WorkTargetType.THREAD, "lease-2", Duration.between(T2, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.rescheduleWork(second, Duration.ZERO));
+      inTransaction(store, tx -> tx.work().reschedule(second, Duration.ZERO));
       assertNotification(notifications);
 
       ClaimedWork third =
           store
               .transaction(
-                  tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-3", Duration.ofSeconds(60)))
+                  tx ->
+                      tx.work().claimNext(WorkTargetType.THREAD, "lease-3", Duration.ofSeconds(60)))
               .orElseThrow();
       assertNoNotification(notifications);
-      assertTrue(store.transaction(tx -> tx.completeWork(third)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().complete(third)).isEmpty());
       assertNoNotification(notifications);
 
       requestWork(baseline.threadId(), target, T4);
@@ -119,8 +122,8 @@ class PostgresqlWorkNotificationTest {
       boolean deleted =
           store.transaction(
               tx -> {
-                tx.lockThread(baseline.threadId()).orElseThrow();
-                return tx.deleteWork(target);
+                tx.threads().lock(baseline.threadId()).orElseThrow();
+                return tx.work().delete(target);
               });
       assertTrue(deleted);
       assertNoNotification(notifications);
@@ -138,8 +141,8 @@ class PostgresqlWorkNotificationTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(target);
         });
   }
 
@@ -156,9 +159,9 @@ class PostgresqlWorkNotificationTest {
             () ->
                 failing.transaction(
                     tx -> {
-                      tx.lockThread(baseline.threadId()).orElseThrow();
+                      tx.threads().lock(baseline.threadId()).orElseThrow();
                       try {
-                        tx.requestWork(target);
+                        tx.work().request(target);
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }
@@ -166,7 +169,7 @@ class PostgresqlWorkNotificationTest {
                     }));
 
     assertSame(caught.get(), thrown);
-    assertTrue(durable.transaction(tx -> tx.findWork(target)).isEmpty());
+    assertTrue(durable.transaction(tx -> tx.work().find(target)).isEmpty());
   }
 
   private static void assertCaughtNotifyFailureRollsBackReschedule() {
@@ -176,15 +179,15 @@ class PostgresqlWorkNotificationTest {
     inTransaction(
         durable,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().request(target);
         });
     ClaimedWork claim =
         durable
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
+                tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
-    Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
+    Work beforeFailure = durable.transaction(tx -> tx.work().find(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
     AtomicReference<DataAccessException> caught = new AtomicReference<>();
 
@@ -195,7 +198,7 @@ class PostgresqlWorkNotificationTest {
                 failing.transaction(
                     tx -> {
                       try {
-                        tx.rescheduleWork(claim, Duration.ofSeconds(1));
+                        tx.work().reschedule(claim, Duration.ofSeconds(1));
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }
@@ -203,7 +206,7 @@ class PostgresqlWorkNotificationTest {
                     }));
 
     assertSame(caught.get(), thrown);
-    assertEquals(beforeFailure, durable.transaction(tx -> tx.findWork(target)).orElseThrow());
+    assertEquals(beforeFailure, durable.transaction(tx -> tx.work().find(target)).orElseThrow());
   }
 
   private static void assertCaughtNotifyFailureRollsBackStaleCompletion() {
@@ -213,21 +216,21 @@ class PostgresqlWorkNotificationTest {
     inTransaction(
         durable,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().request(target);
         });
     ClaimedWork claim =
         durable
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
+                tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
     inTransaction(
         durable,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().request(target);
         });
-    Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
+    Work beforeFailure = durable.transaction(tx -> tx.work().find(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
     AtomicReference<DataAccessException> caught = new AtomicReference<>();
 
@@ -238,7 +241,7 @@ class PostgresqlWorkNotificationTest {
                 failing.transaction(
                     tx -> {
                       try {
-                        tx.completeWork(claim);
+                        tx.work().complete(claim);
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }
@@ -246,7 +249,7 @@ class PostgresqlWorkNotificationTest {
                     }));
 
     assertSame(caught.get(), thrown);
-    assertEquals(beforeFailure, durable.transaction(tx -> tx.findWork(target)).orElseThrow());
+    assertEquals(beforeFailure, durable.transaction(tx -> tx.work().find(target)).orElseThrow());
   }
 
   private static HarnessStore notifyFailingStore() {

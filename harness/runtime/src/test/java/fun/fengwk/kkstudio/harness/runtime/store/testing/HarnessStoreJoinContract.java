@@ -70,25 +70,26 @@ public abstract class HarnessStoreJoinContract {
           UUID rootThreadId =
               parentThreadId == null
                   ? childId
-                  : tx.findThread(parentThreadId).orElseThrow().rootThreadId();
-          tx.insertThread(
-              new ThreadState(
-                  childId,
-                  sessionId,
-                  parentThreadId,
-                  rootEntryId,
-                  CREATION_REQUEST_HASH,
-                  "child-thread",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+                  : tx.threads().find(parentThreadId).orElseThrow().rootThreadId();
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childId,
+                      sessionId,
+                      parentThreadId,
+                      rootEntryId,
+                      CREATION_REQUEST_HASH,
+                      "child-thread",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return childId;
         });
   }
@@ -97,13 +98,14 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.insertCommands(List.of(command(threadId, sequence, idempotencyKey)));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.commands().insert(List.of(command(threadId, sequence, idempotencyKey)));
           // 测试种子必须保持 nextCommandSequence 领先于已写 sequence，测试辅助才能仅凭已分配区间读取历史。
           if (thread.nextCommandSequence() <= sequence) {
-            tx.updateThread(
-                thread.reserveCommandSequences(
-                    Math.toIntExact(sequence + 1 - thread.nextCommandSequence()), T0));
+            tx.threads()
+                .update(
+                    thread.reserveCommandSequences(
+                        Math.toIntExact(sequence + 1 - thread.nextCommandSequence()), T0));
           }
         });
   }
@@ -194,11 +196,11 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
-    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.findJoin(invocationId));
+    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.joins().find(invocationId));
     assertTrue(loaded.isPresent());
     assertEquals(join, loaded.get());
     assertFalse(loaded.get().matched());
@@ -214,11 +216,11 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.insertJoin(join);
+          tx.threads().lock(baseline.threadId());
+          tx.joins().insert(join);
         });
 
-    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.findJoin(invocationId));
+    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.joins().find(invocationId));
     assertTrue(loaded.isPresent());
     assertEquals(join, loaded.get());
   }
@@ -226,7 +228,7 @@ public abstract class HarnessStoreJoinContract {
   @Test
   void findJoinNonExistentReturnsEmpty() {
     // 测试意图：验证查找不存在的 invocationId 返回 Optional.empty()。
-    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.findJoin(TestIds.id(999)));
+    Optional<ThreadJoin> loaded = store.transaction(tx -> tx.joins().find(TestIds.id(999)));
     assertTrue(loaded.isEmpty());
   }
 
@@ -245,8 +247,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(invalidCreatedAt);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(invalidCreatedAt);
                 }));
 
     ThreadJoin invalidUpdatedAt =
@@ -257,8 +259,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(invalidUpdatedAt);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(invalidUpdatedAt);
                 }));
   }
 
@@ -288,8 +290,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(matched);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(matched);
                 }));
 
     // 已冻结结果并已完成父交付的 Join
@@ -310,8 +312,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(delivered);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(delivered);
                 }));
 
     // 已推进提醒轮次的 Join
@@ -323,8 +325,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(reminded);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(reminded);
                 }));
   }
 
@@ -340,8 +342,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     assertThrows(
@@ -350,8 +352,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(join);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(join);
                 }));
   }
 
@@ -367,8 +369,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(baseline.threadId());
-                  tx.insertJoin(join);
+                  tx.threads().lock(baseline.threadId());
+                  tx.joins().insert(join);
                 }));
   }
 
@@ -385,8 +387,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(baseline.threadId());
-                  tx.insertJoin(join);
+                  tx.threads().lock(baseline.threadId());
+                  tx.joins().insert(join);
                 }));
   }
 
@@ -404,8 +406,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.insertJoin(join);
+                  tx.threads().lock(childId);
+                  tx.joins().insert(join);
                 }));
   }
 
@@ -418,7 +420,7 @@ public abstract class HarnessStoreJoinContract {
     ThreadJoin join = initialJoin(TestIds.id(109), baseline.threadId(), childId, 1L);
 
     assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.insertJoin(join)));
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.joins().insert(join)));
   }
 
   @Test
@@ -433,13 +435,13 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     ThreadJoin reminded = join.remind(1L, T1);
     assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.updateJoin(reminded)));
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.joins().update(reminded)));
   }
 
   @Test
@@ -456,8 +458,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(join);
+                  tx.threads().lock(childId);
+                  tx.joins().update(join);
                 }));
   }
 
@@ -474,8 +476,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     ThreadJoin alteredAgent =
@@ -502,8 +504,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(alteredAgent);
+                  tx.threads().lock(childId);
+                  tx.joins().update(alteredAgent);
                 }));
 
     ThreadJoin alteredSourceCommandSequence =
@@ -514,8 +516,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(alteredSourceCommandSequence);
+                  tx.threads().lock(childId);
+                  tx.joins().update(alteredSourceCommandSequence);
                 }));
   }
 
@@ -531,8 +533,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     // 产生子线程执行产生的终态 Entry（需在 open TURN_START 之内）
@@ -540,8 +542,10 @@ public abstract class HarnessStoreJoinContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), childId, T1));
+              tx.entries()
+                  .insert(
+                      turnStartEntry(
+                          id, baseline.sessionId(), baseline.rootEntryId(), childId, T1));
               return id;
             });
     UUID terminalEntryId =
@@ -554,11 +558,12 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
 
-    ThreadJoin storedDelivered = store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+    ThreadJoin storedDelivered =
+        store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
     assertEquals(delivered, storedDelivered);
     assertTrue(storedDelivered.matched());
     assertEquals(terminalEntryId, storedDelivered.terminalEntryId());
@@ -579,8 +584,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     Baseline other = seedThreadBaseline(store);
@@ -589,8 +594,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
 
     // 改写 terminalEntryId
@@ -611,8 +616,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(changedTerminal);
+                  tx.threads().lock(childId);
+                  tx.joins().update(changedTerminal);
                 }));
 
     // 改写 finalAnswerEntryId
@@ -633,8 +638,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(changedFinalAnswer);
+                  tx.threads().lock(childId);
+                  tx.joins().update(changedFinalAnswer);
                 }));
   }
 
@@ -652,16 +657,16 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     ThreadJoin delivered = join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
 
     ThreadJoin changedDelivery =
@@ -681,8 +686,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(changedDelivery);
+                  tx.threads().lock(childId);
+                  tx.joins().update(changedDelivery);
                 }));
   }
 
@@ -698,8 +703,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     insertCommand(baseline.threadId(), 1L, TestIds.id(2));
@@ -707,16 +712,16 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(reminded);
+          tx.threads().lock(childId);
+          tx.joins().update(reminded);
         });
 
     ThreadJoin delivered = reminded.match(baseline.rootEntryId(), null, T2).delivered(1L, T2);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
 
     ThreadJoin advancedReminder =
@@ -727,8 +732,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(advancedReminder);
+                  tx.threads().lock(childId);
+                  tx.joins().update(advancedReminder);
                 }));
   }
 
@@ -764,8 +769,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     UUID nonExistentEntryId = TestIds.id(987);
@@ -777,8 +782,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(matchedNonExistentTerminal);
+                  tx.threads().lock(childId);
+                  tx.joins().update(matchedNonExistentTerminal);
                 }));
 
     ThreadJoin matchedNonExistentFinalAnswer =
@@ -789,8 +794,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(matchedNonExistentFinalAnswer);
+                  tx.threads().lock(childId);
+                  tx.joins().update(matchedNonExistentFinalAnswer);
                 }));
   }
 
@@ -806,8 +811,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     ThreadJoin delivered = join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2);
@@ -817,8 +822,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(delivered);
+                  tx.threads().lock(childId);
+                  tx.joins().update(delivered);
                 }));
 
     // 只补齐缺失的父命令后，同一更新必须成功，排除其它前置校验导致的假阳性。
@@ -826,10 +831,10 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
-    assertEquals(delivered, store.transaction(tx -> tx.findJoin(invocationId).orElseThrow()));
+    assertEquals(delivered, store.transaction(tx -> tx.joins().find(invocationId).orElseThrow()));
   }
 
   @Test
@@ -844,29 +849,31 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
+          tx.threads().lock(childId);
+          tx.joins().insert(join);
         });
 
     ThreadJoin reminded1 = join.remind(1L, T1);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(reminded1);
+          tx.threads().lock(childId);
+          tx.joins().update(reminded1);
         });
     assertEquals(
-        1L, (long) store.transaction(tx -> tx.findJoin(invocationId).orElseThrow().reminderTurn()));
+        1L,
+        (long) store.transaction(tx -> tx.joins().find(invocationId).orElseThrow().reminderTurn()));
 
     ThreadJoin reminded2 = reminded1.remind(3L, T2);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(reminded2);
+          tx.threads().lock(childId);
+          tx.joins().update(reminded2);
         });
     assertEquals(
-        3L, (long) store.transaction(tx -> tx.findJoin(invocationId).orElseThrow().reminderTurn()));
+        3L,
+        (long) store.transaction(tx -> tx.joins().find(invocationId).orElseThrow().reminderTurn()));
   }
 
   @Test
@@ -899,32 +906,32 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId1);
-          tx.insertJoin(join1);
-          tx.insertJoin(join2);
-          tx.insertJoin(join3);
-          tx.insertJoin(join4);
-          tx.lockThread(childId2);
-          tx.insertJoin(joinOtherChild);
+          tx.threads().lock(childId1);
+          tx.joins().insert(join1);
+          tx.joins().insert(join2);
+          tx.joins().insert(join3);
+          tx.joins().insert(join4);
+          tx.threads().lock(childId2);
+          tx.joins().insert(joinOtherChild);
         });
 
     // joinOtherChild 属于不同 child，不参与 childId1 的 incomplete 集合
     assertEquals(
         List.of(join2, join1, join3, join4),
-        store.transaction(tx -> tx.loadIncompleteJoins(childId1)));
-    assertTrue(store.transaction(tx -> tx.loadIncompleteJoins(TestIds.id(999))).isEmpty());
+        store.transaction(tx -> tx.joins().loadIncomplete(childId1)));
+    assertTrue(store.transaction(tx -> tx.joins().loadIncomplete(TestIds.id(999))).isEmpty());
 
     insertCommand(baseline.threadId(), 1L, TestIds.id(6));
     ThreadJoin deliveredJoin1 = join1.match(baseline.rootEntryId(), null, T3).delivered(1L, T3);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId1);
-          tx.updateJoin(deliveredJoin1);
+          tx.threads().lock(childId1);
+          tx.joins().update(deliveredJoin1);
         });
 
     assertEquals(
-        List.of(join2, join3, join4), store.transaction(tx -> tx.loadIncompleteJoins(childId1)));
+        List.of(join2, join3, join4), store.transaction(tx -> tx.joins().loadIncomplete(childId1)));
   }
 
   @Test
@@ -943,8 +950,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join1);
+          tx.threads().lock(childId);
+          tx.joins().insert(join1);
         });
 
     ThreadJoin matchedWithoutDelivery = join1.match(baseline.rootEntryId(), null, T2);
@@ -954,19 +961,19 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(matchedWithoutDelivery);
+                  tx.threads().lock(childId);
+                  tx.joins().update(matchedWithoutDelivery);
                 }));
 
     ThreadJoin delivered = matchedWithoutDelivery.delivered(1L, T3);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered);
+          tx.threads().lock(childId);
+          tx.joins().update(delivered);
         });
 
-    ThreadJoin found = store.transaction(tx -> tx.findJoin(id1)).orElseThrow();
+    ThreadJoin found = store.transaction(tx -> tx.joins().find(id1)).orElseThrow();
     assertEquals(delivered, found);
   }
 
@@ -991,24 +998,24 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId1);
+          tx.threads().lock(childId1);
           ThreadJoin j1 = initialJoin(id1, baseline.threadId(), childId1, 1L);
           ThreadJoin j2 = initialJoin(id2, baseline.threadId(), childId1, 2L);
-          tx.insertJoin(j1);
-          tx.insertJoin(j2);
-          tx.updateJoin(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
-          tx.updateJoin(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
+          tx.joins().insert(j1);
+          tx.joins().insert(j2);
+          tx.joins().update(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.joins().update(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
 
-          tx.lockThread(childId2);
+          tx.threads().lock(childId2);
           ThreadJoin j3 = initialJoin(id3, baseline.threadId(), childId2, 1L);
-          tx.insertJoin(j3);
-          tx.updateJoin(j3.match(baseline.rootEntryId(), null, T1).delivered(3L, T2));
+          tx.joins().insert(j3);
+          tx.joins().update(j3.match(baseline.rootEntryId(), null, T1).delivered(3L, T2));
         });
 
     // 未锁定 childId1 时调用 deleteJoinsByChild 抛异常
     assertThrows(
         IllegalStateException.class,
-        () -> inTransaction(store, tx -> tx.deleteJoinsByChild(childId1)));
+        () -> inTransaction(store, tx -> tx.joins().deleteByChild(childId1)));
 
     // 仅锁定 Thread 但未持有 Tree 锁时调用 deleteJoinsByChild 抛异常
     assertThrows(
@@ -1017,26 +1024,26 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId1);
-                  tx.deleteJoinsByChild(childId1);
+                  tx.threads().lock(childId1);
+                  tx.joins().deleteByChild(childId1);
                 }));
 
     // 持有 Tree 锁及 Thread 锁后删除 childId1 的 join
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(baseline.threadId());
-              tx.lockThread(childId1);
-              return tx.deleteJoinsByChild(childId1);
+              tx.threads().lockTree(baseline.threadId());
+              tx.threads().lock(childId1);
+              return tx.joins().deleteByChild(childId1);
             });
     assertEquals(2, deleted);
 
     // childId1 的 join 已被删除，childId2 的 join 依然存在
     store.transaction(
         tx -> {
-          assertTrue(tx.findJoin(id1).isEmpty());
-          assertTrue(tx.findJoin(id2).isEmpty());
-          assertTrue(tx.findJoin(id3).isPresent());
+          assertTrue(tx.joins().find(id1).isEmpty());
+          assertTrue(tx.joins().find(id2).isEmpty());
+          assertTrue(tx.joins().find(id3).isPresent());
           return null;
         });
   }
@@ -1053,8 +1060,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
+          tx.threads().lock(childId);
+          tx.joins().insert(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
     // 直接尝试 deleteThreads 删除 childId 抛异常
@@ -1064,9 +1071,9 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(baseline.threadId());
-                  tx.lockThread(childId);
-                  tx.deleteThreads(List.of(childId));
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(childId);
+                  tx.threads().delete(List.of(childId));
                 }));
 
     // 直接尝试 deleteThreads 删除 parent 线程也抛异常
@@ -1076,18 +1083,18 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(baseline.threadId());
-                  tx.lockThread(baseline.threadId());
-                  tx.deleteThreads(List.of(baseline.threadId()));
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(baseline.threadId());
+                  tx.threads().delete(List.of(baseline.threadId()));
                 }));
 
     // 匹配并交付 Join
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          ThreadJoin join = tx.findJoin(invocationId).orElseThrow();
-          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.threads().lock(childId);
+          ThreadJoin join = tx.joins().find(invocationId).orElseThrow();
+          tx.joins().update(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     // 交付后但尚未调用 deleteJoinsByChild 时，deleteThreads 仍应被拒绝
@@ -1097,23 +1104,23 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(baseline.threadId());
-                  tx.lockThread(childId);
-                  tx.deleteThreads(List.of(childId));
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(childId);
+                  tx.threads().delete(List.of(childId));
                 }));
 
     // 显式清理 Join 后，deleteThreads 成功删除 childId，父线程保留
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(baseline.threadId());
-          tx.lockThread(childId);
-          tx.deleteJoinsByChild(childId);
-          tx.deleteThreads(List.of(childId));
+          tx.threads().lockTree(baseline.threadId());
+          tx.threads().lock(childId);
+          tx.joins().deleteByChild(childId);
+          tx.threads().delete(List.of(childId));
         });
 
-    assertTrue(store.transaction(tx -> tx.findThread(childId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isPresent());
+    assertTrue(store.transaction(tx -> tx.threads().find(childId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isPresent());
   }
 
   @Test
@@ -1127,8 +1134,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
+          tx.threads().lock(childId);
+          tx.joins().insert(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
     assertThrows(
@@ -1137,12 +1144,12 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(baseline.threadId());
-                  tx.lockThread(childId);
-                  tx.deleteJoinsByChild(childId);
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(childId);
+                  tx.joins().deleteByChild(childId);
                 }));
 
-    assertTrue(store.transaction(tx -> tx.findJoin(invocationId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.joins().find(invocationId)).isPresent());
   }
 
   @Test
@@ -1157,8 +1164,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
+          tx.threads().lock(childId);
+          tx.joins().insert(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
     // 未匹配时删除失败
@@ -1168,30 +1175,30 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(baseline.threadId());
-                  tx.lockThread(childId);
-                  tx.deleteJoinsByChild(childId);
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(childId);
+                  tx.joins().deleteByChild(childId);
                 }));
 
     // 推进为交付
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          ThreadJoin join = tx.findJoin(invocationId).orElseThrow();
-          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.threads().lock(childId);
+          ThreadJoin join = tx.joins().find(invocationId).orElseThrow();
+          tx.joins().update(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     // 交付后成功删除
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(baseline.threadId());
-              tx.lockThread(childId);
-              return tx.deleteJoinsByChild(childId);
+              tx.threads().lockTree(baseline.threadId());
+              tx.threads().lock(childId);
+              return tx.joins().deleteByChild(childId);
             });
     assertEquals(1, deleted);
-    assertTrue(store.transaction(tx -> tx.findJoin(invocationId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.joins().find(invocationId)).isEmpty());
   }
 
   @Test
@@ -1204,8 +1211,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(rootId);
-          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L));
+          tx.threads().lock(rootId);
+          tx.joins().insert(initialJoin(ticketId, null, rootId, 1L));
         });
 
     // 未匹配时删除根 ticket 抛出异常
@@ -1215,30 +1222,30 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(rootId);
-                  tx.lockThread(rootId);
-                  tx.deleteJoinsByChild(rootId);
+                  tx.threads().lockTree(rootId);
+                  tx.threads().lock(rootId);
+                  tx.joins().deleteByChild(rootId);
                 }));
 
     // 匹配根 ticket
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(rootId);
-          ThreadJoin join = tx.findJoin(ticketId).orElseThrow();
-          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1));
+          tx.threads().lock(rootId);
+          ThreadJoin join = tx.joins().find(ticketId).orElseThrow();
+          tx.joins().update(join.match(baseline.rootEntryId(), null, T1));
         });
 
     // 匹配后成功显式清理
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(rootId);
-              tx.lockThread(rootId);
-              return tx.deleteJoinsByChild(rootId);
+              tx.threads().lockTree(rootId);
+              tx.threads().lock(rootId);
+              return tx.joins().deleteByChild(rootId);
             });
     assertEquals(1, deleted);
-    assertTrue(store.transaction(tx -> tx.findJoin(ticketId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.joins().find(ticketId)).isEmpty());
   }
 
   @Test
@@ -1254,33 +1261,33 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(rootId);
-                  tx.lockThread(rootId);
-                  tx.deleteThreads(List.of(rootId));
+                  tx.threads().lockTree(rootId);
+                  tx.threads().lock(rootId);
+                  tx.threads().delete(List.of(rootId));
                 }));
 
-    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isPresent());
-    assertTrue(store.transaction(tx -> tx.findThread(childId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.threads().find(childId)).isPresent());
 
     // 先删除子线程，再删除父线程均成功
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(rootId);
-          tx.lockThread(childId);
-          tx.deleteThreads(List.of(childId));
+          tx.threads().lockTree(rootId);
+          tx.threads().lock(childId);
+          tx.threads().delete(List.of(childId));
         });
-    assertTrue(store.transaction(tx -> tx.findThread(childId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.threads().find(childId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isPresent());
 
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(rootId);
-          tx.lockThread(rootId);
-          tx.deleteThreads(List.of(rootId));
+          tx.threads().lockTree(rootId);
+          tx.threads().lock(rootId);
+          tx.threads().delete(List.of(rootId));
         });
-    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(rootId)).isEmpty());
   }
 
   @Test
@@ -1301,10 +1308,10 @@ public abstract class HarnessStoreJoinContract {
             first.executionId());
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          assertEquals(first, tx.registerExecution(first));
-          assertEquals(first, tx.registerExecution(first));
-          assertEquals(remote, tx.registerExecution(remote));
+          tx.threads().lock(threadId);
+          assertEquals(first, tx.exits().register(first));
+          assertEquals(first, tx.exits().register(first));
+          assertEquals(remote, tx.exits().register(remote));
           return null;
         });
     ExecutionExitFact replacedLease =
@@ -1322,8 +1329,8 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.registerExecution(replacedLease);
+                      tx.threads().lock(threadId);
+                      return tx.exits().register(replacedLease);
                     }));
     assertEquals(
         "execution " + first.executionId() + " identity cannot be replaced",
@@ -1331,11 +1338,11 @@ public abstract class HarnessStoreJoinContract {
     ExecutionExitFact acknowledged =
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
+              tx.threads().lock(threadId);
               ExecutionExitFact confirmed =
-                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
+                  tx.exits().confirm(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
               ExecutionExitFact repeated =
-                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
+                  tx.exits().confirm(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
               assertEquals(confirmed, repeated);
               assertEquals(ExecutionExitState.STUDIO_EXITED, repeated.state());
               return repeated;
@@ -1346,8 +1353,8 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED, T0);
+                      tx.threads().lock(threadId);
+                      return tx.exits().confirm(first, ExecutionExitState.NOT_STARTED, T0);
                     }));
     assertEquals(
         "execution " + first.executionId() + " is already confirmed as STUDIO_EXITED",
@@ -1359,21 +1366,21 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.confirmExecution(
-                          replacedLease, ExecutionExitState.STUDIO_EXITED, T0);
+                      tx.threads().lock(threadId);
+                      return tx.exits()
+                          .confirm(replacedLease, ExecutionExitState.STUDIO_EXITED, T0);
                     }));
     assertEquals(
         "execution " + first.executionId() + " identity cannot be replaced",
         staleConfirmation.getMessage());
     assertEquals(
         ExecutionExitState.STUDIO_EXITED,
-        store.transaction(tx -> tx.findExecution(first.executionId()).orElseThrow().state()));
+        store.transaction(tx -> tx.exits().find(first.executionId()).orElseThrow().state()));
     assertEquals(
         List.of(remote.executionId()),
         store.transaction(
             tx ->
-                tx.loadUnconfirmedExecutions(threadId).stream()
+                tx.exits().loadUnconfirmed(threadId).stream()
                     .map(ExecutionExitFact::executionId)
                     .toList()));
   }
@@ -1387,18 +1394,18 @@ public abstract class HarnessStoreJoinContract {
         fact(TestIds.id(821), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(exitFact);
+          tx.threads().lock(threadId);
+          tx.exits().register(exitFact);
           return null;
         });
 
     ExecutionExitFact abandoned =
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
-              ExecutionExitFact changed = tx.abandonExecution(exitFact, T0).orElseThrow();
+              tx.threads().lock(threadId);
+              ExecutionExitFact changed = tx.exits().abandon(exitFact, T0).orElseThrow();
               ExecutionExitFact repeated =
-                  tx.abandonExecution(exitFact, T0.plusMillis(500)).orElseThrow();
+                  tx.exits().abandon(exitFact, T0.plusMillis(500)).orElseThrow();
               assertEquals(changed, repeated);
               return changed;
             });
@@ -1406,15 +1413,15 @@ public abstract class HarnessStoreJoinContract {
     assertNull(abandoned.confirmedAt());
     assertEquals(T0, abandoned.abandonedAt());
     assertTrue(
-        store.transaction(tx -> tx.loadUnconfirmedExecutions(threadId)).stream()
+        store.transaction(tx -> tx.exits().loadUnconfirmed(threadId)).stream()
             .noneMatch(candidate -> candidate.executionId().equals(exitFact.executionId())));
 
     ExecutionExitFact confirmed =
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
-              return tx.confirmExecution(
-                      exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1))
+              tx.threads().lock(threadId);
+              return tx.exits()
+                  .confirm(exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1))
                   .orElseThrow();
             });
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
@@ -1424,9 +1431,9 @@ public abstract class HarnessStoreJoinContract {
         confirmed,
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
-              return tx.confirmExecution(
-                      exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(2))
+              tx.threads().lock(threadId);
+              return tx.exits()
+                  .confirm(exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(2))
                   .orElseThrow();
             }));
     assertThrows(
@@ -1434,8 +1441,8 @@ public abstract class HarnessStoreJoinContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.lockThread(threadId);
-                  return tx.abandonExecution(exitFact, T0.plusMillis(3));
+                  tx.threads().lock(threadId);
+                  return tx.exits().abandon(exitFact, T0.plusMillis(3));
                 }));
   }
 
@@ -1466,10 +1473,10 @@ public abstract class HarnessStoreJoinContract {
             tool.executionId());
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(tool);
-          tx.registerExecution(model);
-          tx.registerExecution(remote);
+          tx.threads().lock(threadId);
+          tx.exits().register(tool);
+          tx.exits().register(model);
+          tx.exits().register(remote);
           return null;
         });
     IllegalArgumentException modelRemoteAck =
@@ -1478,8 +1485,8 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
+                      tx.threads().lock(threadId);
+                      return tx.exits().confirm(model, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                     }));
     assertLocalExecutionRejectsRemoteAcknowledgement(modelRemoteAck);
     assertEquals(
@@ -1487,8 +1494,8 @@ public abstract class HarnessStoreJoinContract {
         store
             .transaction(
                 tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(model, ExecutionExitState.STUDIO_EXITED, T0);
+                  tx.threads().lock(threadId);
+                  return tx.exits().confirm(model, ExecutionExitState.STUDIO_EXITED, T0);
                 })
             .orElseThrow()
             .state());
@@ -1497,8 +1504,8 @@ public abstract class HarnessStoreJoinContract {
         store
             .transaction(
                 tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(remote, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
+                  tx.threads().lock(threadId);
+                  return tx.exits().confirm(remote, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                 })
             .orElseThrow()
             .state());
@@ -1535,9 +1542,9 @@ public abstract class HarnessStoreJoinContract {
             otherLeaseParent.executionId());
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(wrongKindParent);
-          tx.registerExecution(otherLeaseParent);
+          tx.threads().lock(threadId);
+          tx.exits().register(wrongKindParent);
+          tx.exits().register(otherLeaseParent);
           return null;
         });
     IllegalArgumentException wrongKindParentFailure =
@@ -1546,8 +1553,8 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.registerExecution(wrongKindRemote);
+                      tx.threads().lock(threadId);
+                      return tx.exits().register(wrongKindRemote);
                     }));
     assertEquals(
         "remote execution parent must be the same generation's TOOL execution",
@@ -1558,15 +1565,15 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.registerExecution(wrongIdentityRemote);
+                      tx.threads().lock(threadId);
+                      return tx.exits().register(wrongIdentityRemote);
                     }));
     assertEquals(
         "remote execution parent must be the same generation's TOOL execution",
         wrongLeaseParentFailure.getMessage());
-    assertTrue(store.transaction(tx -> tx.findExecution(wrongKindRemote.executionId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.exits().find(wrongKindRemote.executionId())).isEmpty());
     assertTrue(
-        store.transaction(tx -> tx.findExecution(wrongIdentityRemote.executionId())).isEmpty());
+        store.transaction(tx -> tx.exits().find(wrongIdentityRemote.executionId())).isEmpty());
   }
 
   @Test
@@ -1582,9 +1589,9 @@ public abstract class HarnessStoreJoinContract {
             TestIds.id(852), threadId, invocationId, 2, "lease-new", ExecutionExitKind.MODEL, null);
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(oldGeneration);
-          tx.registerExecution(newGeneration);
+          tx.threads().lock(threadId);
+          tx.exits().register(oldGeneration);
+          tx.exits().register(newGeneration);
           return null;
         });
 
@@ -1592,8 +1599,8 @@ public abstract class HarnessStoreJoinContract {
         store
             .transaction(
                 tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(newGeneration, ExecutionExitState.STUDIO_EXITED, T0);
+                  tx.threads().lock(threadId);
+                  return tx.exits().confirm(newGeneration, ExecutionExitState.STUDIO_EXITED, T0);
                 })
             .orElseThrow();
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
@@ -1601,7 +1608,7 @@ public abstract class HarnessStoreJoinContract {
         List.of(oldGeneration.executionId()),
         store.transaction(
             tx ->
-                tx.loadUnconfirmedExecutions(threadId).stream()
+                tx.exits().loadUnconfirmed(threadId).stream()
                     .map(ExecutionExitFact::executionId)
                     .toList()));
     IllegalArgumentException oldGenerationRemoteAck =
@@ -1610,15 +1617,15 @@ public abstract class HarnessStoreJoinContract {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      return tx.confirmExecution(
-                          oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
+                      tx.threads().lock(threadId);
+                      return tx.exits()
+                          .confirm(oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                     }));
     assertLocalExecutionRejectsRemoteAcknowledgement(oldGenerationRemoteAck);
     assertEquals(
         ExecutionExitState.UNCONFIRMED,
         store.transaction(
-            tx -> tx.findExecution(oldGeneration.executionId()).orElseThrow().state()));
+            tx -> tx.exits().find(oldGeneration.executionId()).orElseThrow().state()));
   }
 
   @Test
@@ -1639,21 +1646,21 @@ public abstract class HarnessStoreJoinContract {
             local.executionId());
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(local);
-          tx.registerExecution(remote);
+          tx.threads().lock(threadId);
+          tx.exits().register(local);
+          tx.exits().register(remote);
           return null;
         });
     store.transaction(
         tx -> {
-          tx.lockTree(threadId);
-          tx.lockThread(threadId);
-          assertEquals(1, tx.deleteThreads(List.of(threadId)));
+          tx.threads().lockTree(threadId);
+          tx.threads().lock(threadId);
+          assertEquals(1, tx.threads().delete(List.of(threadId)));
           return null;
         });
-    assertTrue(store.transaction(tx -> tx.findExecution(local.executionId())).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findExecution(remote.executionId())).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findThread(threadId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.exits().find(local.executionId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.exits().find(remote.executionId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(threadId)).isEmpty());
   }
 
   /** 内存校验与 PostgreSQL CHECK 都必须命中 kind/state 边界，不能由其它完整性错误让负例误通过。 */
@@ -1710,19 +1717,19 @@ public abstract class HarnessStoreJoinContract {
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(rootId);
+              tx.threads().lockTree(rootId);
               for (UUID threadId : allHierarchyThreads) {
-                tx.lockThread(threadId);
+                tx.threads().lock(threadId);
               }
-              return tx.deleteThreads(List.of(rootId, childId, grandChildId));
+              return tx.threads().delete(List.of(rootId, childId, grandChildId));
             });
     assertEquals(3, deleted);
 
     store.transaction(
         tx -> {
-          assertTrue(tx.findThread(rootId).isEmpty());
-          assertTrue(tx.findThread(childId).isEmpty());
-          assertTrue(tx.findThread(grandChildId).isEmpty());
+          assertTrue(tx.threads().find(rootId).isEmpty());
+          assertTrue(tx.threads().find(childId).isEmpty());
+          assertTrue(tx.threads().find(grandChildId).isEmpty());
           return null;
         });
   }
@@ -1745,15 +1752,15 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childA1);
+          tx.threads().lock(childA1);
           ThreadJoin j1 = initialJoin(joinA1, rootA, childA1, 1L);
-          tx.insertJoin(j1);
-          tx.updateJoin(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.joins().insert(j1);
+          tx.joins().update(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
 
-          tx.lockThread(childA2);
+          tx.threads().lock(childA2);
           ThreadJoin j2 = initialJoin(joinA2, rootA, childA2, 1L);
-          tx.insertJoin(j2);
-          tx.updateJoin(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
+          tx.joins().insert(j2);
+          tx.joins().update(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
         });
 
     // 建立隔离的 Session B 及关联事实
@@ -1767,10 +1774,10 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childB);
+          tx.threads().lock(childB);
           ThreadJoin jb = initialJoin(joinB, rootB, childB, 1L);
-          tx.insertJoin(jb);
-          tx.updateJoin(jb.match(baselineB.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.joins().insert(jb);
+          tx.joins().update(jb.match(baselineB.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     // 对 Session A 执行完整深删除（按规范顺序：joins -> child threads -> parent -> entries -> session）
@@ -1778,44 +1785,44 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           List<UUID> allThreadsA =
               List.of(rootA, childA1, childA2).stream().sorted(UuidOrder.COMPARATOR).toList();
-          tx.lockTree(rootA);
+          tx.threads().lockTree(rootA);
           for (UUID threadId : allThreadsA) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
 
-          assertEquals(1, tx.deleteJoinsByChild(childA1));
-          assertEquals(1, tx.deleteJoinsByChild(childA2));
+          assertEquals(1, tx.joins().deleteByChild(childA1));
+          assertEquals(1, tx.joins().deleteByChild(childA2));
 
           // 删除子线程
-          assertEquals(2, tx.deleteThreads(List.of(childA1, childA2)));
+          assertEquals(2, tx.threads().delete(List.of(childA1, childA2)));
 
           // 删除父线程
-          assertEquals(1, tx.deleteThreads(List.of(rootA)));
+          assertEquals(1, tx.threads().delete(List.of(rootA)));
 
           // 删除 Session A 的 entries
-          assertTrue(tx.deleteEntries(sessionA) > 0);
+          assertTrue(tx.entries().delete(sessionA) > 0);
 
           // 删除 Session A
-          assertTrue(tx.deleteSession(sessionA));
+          assertTrue(tx.sessions().delete(sessionA));
           return null;
         });
 
     // 校验 Session A 及其所有级联事实已被彻底清除
     store.transaction(
         tx -> {
-          assertTrue(tx.findSession(sessionA).isEmpty());
-          assertThrows(IllegalArgumentException.class, () -> tx.loadEntriesBySessionId(sessionA));
-          assertTrue(tx.findThread(rootA).isEmpty());
-          assertTrue(tx.findThread(childA1).isEmpty());
-          assertTrue(tx.findThread(childA2).isEmpty());
-          assertTrue(tx.findJoin(joinA1).isEmpty());
-          assertTrue(tx.findJoin(joinA2).isEmpty());
+          assertTrue(tx.sessions().find(sessionA).isEmpty());
+          assertThrows(IllegalArgumentException.class, () -> tx.entries().loadBySession(sessionA));
+          assertTrue(tx.threads().find(rootA).isEmpty());
+          assertTrue(tx.threads().find(childA1).isEmpty());
+          assertTrue(tx.threads().find(childA2).isEmpty());
+          assertTrue(tx.joins().find(joinA1).isEmpty());
+          assertTrue(tx.joins().find(joinA2).isEmpty());
 
           // 校验 Session B 毫发无损
-          assertTrue(tx.findSession(sessionB).isPresent());
-          assertTrue(tx.findThread(rootB).isPresent());
-          assertTrue(tx.findThread(childB).isPresent());
-          assertTrue(tx.findJoin(joinB).isPresent());
+          assertTrue(tx.sessions().find(sessionB).isPresent());
+          assertTrue(tx.threads().find(rootB).isPresent());
+          assertTrue(tx.threads().find(childB).isPresent());
+          assertTrue(tx.joins().find(joinB).isPresent());
           assertEquals(1, loadCommandsByThread(tx, childB).size());
           assertEquals(1, loadCommandsByThread(tx, rootB).size());
           return null;
@@ -1831,10 +1838,11 @@ public abstract class HarnessStoreJoinContract {
 
     store.transaction(
         tx -> {
-          assertEquals(List.of(rootId), tx.findAncestorChain(rootId));
-          assertEquals(List.of(childId, rootId), tx.findAncestorChain(childId));
-          assertEquals(List.of(grandChildId, childId, rootId), tx.findAncestorChain(grandChildId));
-          assertTrue(tx.findAncestorChain(TestIds.id(999)).isEmpty());
+          assertEquals(List.of(rootId), tx.threads().findAncestorChain(rootId));
+          assertEquals(List.of(childId, rootId), tx.threads().findAncestorChain(childId));
+          assertEquals(
+              List.of(grandChildId, childId, rootId), tx.threads().findAncestorChain(grandChildId));
+          assertTrue(tx.threads().findAncestorChain(TestIds.id(999)).isEmpty());
           return null;
         });
   }
@@ -1846,8 +1854,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(rootId);
-          tx.lockTree(rootId); // 重复获取合法
+          tx.threads().lockTree(rootId);
+          tx.threads().lockTree(rootId); // 重复获取合法
         });
   }
 
@@ -1862,8 +1870,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(rootId);
-                  tx.lockTree(rootId); // 锁序违背：行锁后禁止 tree lock
+                  tx.threads().lock(rootId);
+                  tx.threads().lockTree(rootId); // 锁序违背：行锁后禁止 tree lock
                 }));
 
     assertThrows(
@@ -1872,8 +1880,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockSessionForKeyShare(baseline.sessionId());
-                  tx.lockTree(rootId);
+                  tx.sessions().lockForKeyShare(baseline.sessionId());
+                  tx.threads().lockTree(rootId);
                 }));
   }
 
@@ -1884,9 +1892,9 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(rootId);
-          tx.lockSessionForKeyShare(baseline.sessionId());
-          tx.lockThread(rootId);
+          tx.threads().lockTree(rootId);
+          tx.sessions().lockForKeyShare(baseline.sessionId());
+          tx.threads().lock(rootId);
         });
   }
 
@@ -1902,8 +1910,8 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockTree(smaller);
-          tx.lockTree(larger);
+          tx.threads().lockTree(smaller);
+          tx.threads().lockTree(larger);
         });
 
     // 降序获取失败
@@ -1913,8 +1921,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(larger);
-                  tx.lockTree(smaller);
+                  tx.threads().lockTree(larger);
+                  tx.threads().lockTree(smaller);
                 }));
   }
 
@@ -1937,9 +1945,9 @@ public abstract class HarnessStoreJoinContract {
     store.transaction(
         tx -> {
           // 尚无任何 Join 时，不存在的父 Thread 与尚无子 Join 的父 Thread 均返回 0
-          assertEquals(0, tx.countIncompleteChildJoins(nonExistentParentId));
-          assertEquals(0, tx.countIncompleteChildJoins(rootId));
-          assertEquals(0, tx.countIncompleteChildJoins(childId1));
+          assertEquals(0, tx.joins().countIncompleteChildren(nonExistentParentId));
+          assertEquals(0, tx.joins().countIncompleteChildren(rootId));
+          assertEquals(0, tx.joins().countIncompleteChildren(childId1));
           return null;
         });
 
@@ -1953,28 +1961,28 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           // root one-shot ticket（parentThreadId 为 null）不占任何父 Thread 的 child quota
-          tx.lockThread(rootId);
-          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L));
+          tx.threads().lock(rootId);
+          tx.joins().insert(initialJoin(ticketId, null, rootId, 1L));
 
-          tx.lockThread(childId1);
-          tx.insertJoin(initialJoin(joinId1, rootId, childId1, 1L));
-          tx.insertJoin(initialJoin(joinId2, rootId, childId1, 2L));
+          tx.threads().lock(childId1);
+          tx.joins().insert(initialJoin(joinId1, rootId, childId1, 1L));
+          tx.joins().insert(initialJoin(joinId2, rootId, childId1, 2L));
 
-          tx.lockThread(childId2);
-          tx.insertJoin(initialJoin(joinId3, rootId, childId2, 1L));
+          tx.threads().lock(childId2);
+          tx.joins().insert(initialJoin(joinId3, rootId, childId2, 1L));
 
-          tx.lockThread(grandChildId);
-          tx.insertJoin(initialJoin(grandChildJoinId, childId1, grandChildId, 1L));
+          tx.threads().lock(grandChildId);
+          tx.joins().insert(initialJoin(grandChildJoinId, childId1, grandChildId, 1L));
         });
 
     store.transaction(
         tx -> {
           // rootId 的直接未匹配子 Join：childId1 两条 + childId2 一条 = 3（root ticket 与孙级 Join 不计入）
-          assertEquals(3, tx.countIncompleteChildJoins(rootId));
+          assertEquals(3, tx.joins().countIncompleteChildren(rootId));
           // childId1 的直接未匹配子 Join 只有孙级那一条
-          assertEquals(1, tx.countIncompleteChildJoins(childId1));
-          assertEquals(0, tx.countIncompleteChildJoins(childId2));
-          assertEquals(0, tx.countIncompleteChildJoins(nonExistentParentId));
+          assertEquals(1, tx.joins().countIncompleteChildren(childId1));
+          assertEquals(0, tx.joins().countIncompleteChildren(childId2));
+          assertEquals(0, tx.joins().countIncompleteChildren(nonExistentParentId));
           return null;
         });
 
@@ -1982,19 +1990,21 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId1);
-          tx.updateJoin(
-              tx.findJoin(joinId1)
-                  .orElseThrow()
-                  .match(baseline.rootEntryId(), null, T1)
-                  .delivered(1L, T1));
+          tx.threads().lock(childId1);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(joinId1)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T1)
+                      .delivered(1L, T1));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(2, tx.countIncompleteChildJoins(rootId));
+          assertEquals(2, tx.joins().countIncompleteChildren(rootId));
           // childId1 的孙级 Join 仍未匹配，计数不变
-          assertEquals(1, tx.countIncompleteChildJoins(childId1));
+          assertEquals(1, tx.joins().countIncompleteChildren(childId1));
           return null;
         });
   }
@@ -2017,8 +2027,8 @@ public abstract class HarnessStoreJoinContract {
 
     store.transaction(
         tx -> {
-          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
-          assertFalse(tx.hasIncompleteOwnerChildJoin(nonExistentParentId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(rootId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(nonExistentParentId));
           return null;
         });
 
@@ -2028,18 +2038,18 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(notifyChildId);
-          tx.insertJoin(initialJoin(notifyJoinId, rootId, notifyChildId, 1L));
+          tx.threads().lock(notifyChildId);
+          tx.joins().insert(initialJoin(notifyJoinId, rootId, notifyChildId, 1L));
 
-          tx.lockThread(settleChildId);
-          tx.insertJoin(settleOwnerJoin(settleJoinId, rootId, settleChildId, 1L));
+          tx.threads().lock(settleChildId);
+          tx.joins().insert(settleOwnerJoin(settleJoinId, rootId, settleChildId, 1L));
         });
 
     store.transaction(
         tx -> {
-          assertTrue(tx.hasIncompleteOwnerChildJoin(rootId));
-          assertFalse(tx.hasIncompleteOwnerChildJoin(settleChildId));
-          assertFalse(tx.hasIncompleteOwnerChildJoin(nonExistentParentId));
+          assertTrue(tx.joins().hasIncompleteOwnerChild(rootId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(settleChildId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(nonExistentParentId));
           return null;
         });
 
@@ -2047,13 +2057,17 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(settleChildId);
-          tx.updateJoin(
-              tx.findJoin(settleJoinId).orElseThrow().match(baseline.rootEntryId(), null, T1));
+          tx.threads().lock(settleChildId);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(settleJoinId)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T1));
         });
     store.transaction(
         tx -> {
-          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(rootId));
           return null;
         });
 
@@ -2061,27 +2075,28 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(supersededChildId);
-          tx.insertJoin(settleOwnerJoin(supersededJoinId, rootId, supersededChildId, 1L));
+          tx.threads().lock(supersededChildId);
+          tx.joins().insert(settleOwnerJoin(supersededJoinId, rootId, supersededChildId, 1L));
         });
     store.transaction(
         tx -> {
-          assertTrue(tx.hasIncompleteOwnerChildJoin(rootId));
+          assertTrue(tx.joins().hasIncompleteOwnerChild(rootId));
           return null;
         });
     inTransaction(
         store,
         tx -> {
           UUID successorJoinId = TestIds.id(814);
-          tx.lockThread(supersededChildId);
+          tx.threads().lock(supersededChildId);
           // 接管 Join 必须是真实存在的后续 Join；这里用 NOTIFY_PARENT 证明它不会冒充 owner 结算义务。
-          tx.insertJoin(initialJoin(successorJoinId, rootId, supersededChildId, 2L));
-          tx.updateJoin(
-              tx.findJoin(supersededJoinId).orElseThrow().superseded(successorJoinId, T1));
+          tx.joins().insert(initialJoin(successorJoinId, rootId, supersededChildId, 2L));
+          tx.joins()
+              .update(
+                  tx.joins().find(supersededJoinId).orElseThrow().superseded(successorJoinId, T1));
         });
     store.transaction(
         tx -> {
-          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
+          assertFalse(tx.joins().hasIncompleteOwnerChild(rootId));
           return null;
         });
   }
@@ -2091,7 +2106,7 @@ public abstract class HarnessStoreJoinContract {
     // 测试意图：查询参数不能为 null。
     assertThrows(
         NullPointerException.class,
-        () -> inTransaction(store, tx -> tx.hasIncompleteOwnerChildJoin(null)));
+        () -> inTransaction(store, tx -> tx.joins().hasIncompleteOwnerChild(null)));
   }
 
   @Test
@@ -2104,7 +2119,7 @@ public abstract class HarnessStoreJoinContract {
 
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countIncompleteSubagentJoins());
+          assertEquals(0, tx.joins().countIncompleteSubagent());
           return null;
         });
 
@@ -2135,21 +2150,21 @@ public abstract class HarnessStoreJoinContract {
               List.of(rootA, childA1, childA2, grandChildA1, childB1).stream()
                   .sorted(UuidOrder.COMPARATOR)
                   .toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
           // root one-shot ticket（parentThreadId 为 null）不占全局 subagent 额度
-          tx.insertJoin(initialJoin(ticketAId, null, rootA, 1L));
-          tx.insertJoin(initialJoin(joinA1Id, rootA, childA1, 1L));
+          tx.joins().insert(initialJoin(ticketAId, null, rootA, 1L));
+          tx.joins().insert(initialJoin(joinA1Id, rootA, childA1, 1L));
           // 更深的后代 Join（父为 childA1）同样计入全局未完成计数
-          tx.insertJoin(initialJoin(grandChildJoinId, childA1, grandChildA1, 1L));
-          tx.insertJoin(initialJoin(joinA2Id, rootA, childA2, 1L));
-          tx.insertJoin(initialJoin(joinB1Id, rootB, childB1, 1L));
+          tx.joins().insert(initialJoin(grandChildJoinId, childA1, grandChildA1, 1L));
+          tx.joins().insert(initialJoin(joinA2Id, rootA, childA2, 1L));
+          tx.joins().insert(initialJoin(joinB1Id, rootB, childB1, 1L));
         });
 
     store.transaction(
         tx -> {
           // 4 条带父未匹配 Join（跨 rootA / rootB、含孙级），root ticket 不计入
-          assertEquals(4, tx.countIncompleteSubagentJoins());
+          assertEquals(4, tx.joins().countIncompleteSubagent());
           return null;
         });
 
@@ -2157,17 +2172,19 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childA1);
-          tx.updateJoin(
-              tx.findJoin(joinA1Id)
-                  .orElseThrow()
-                  .match(baseline.rootEntryId(), null, T1)
-                  .delivered(1L, T1));
+          tx.threads().lock(childA1);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(joinA1Id)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T1)
+                      .delivered(1L, T1));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(3, tx.countIncompleteSubagentJoins());
+          assertEquals(3, tx.joins().countIncompleteSubagent());
           return null;
         });
 
@@ -2175,51 +2192,55 @@ public abstract class HarnessStoreJoinContract {
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(rootA);
-              tx.lockThread(rootA);
-              tx.lockThread(childA2);
-              return tx.deleteJoinsForThreads(List.of(rootA, childA2));
+              tx.threads().lockTree(rootA);
+              tx.threads().lock(rootA);
+              tx.threads().lock(childA2);
+              return tx.joins().deleteForThreads(List.of(rootA, childA2));
             });
     // 删除的是 root ticket（child 为 rootA）与 childA2 的 Join
     assertEquals(2, deleted);
 
     store.transaction(
         tx -> {
-          assertEquals(2, tx.countIncompleteSubagentJoins());
+          assertEquals(2, tx.joins().countIncompleteSubagent());
           return null;
         });
 
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(grandChildA1);
-          tx.updateJoin(
-              tx.findJoin(grandChildJoinId)
-                  .orElseThrow()
-                  .match(baseline.rootEntryId(), null, T1)
-                  .delivered(2L, T1));
+          tx.threads().lock(grandChildA1);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(grandChildJoinId)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T1)
+                      .delivered(2L, T1));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(1, tx.countIncompleteSubagentJoins());
+          assertEquals(1, tx.joins().countIncompleteSubagent());
           return null;
         });
 
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childB1);
-          tx.updateJoin(
-              tx.findJoin(joinB1Id)
-                  .orElseThrow()
-                  .match(other.rootEntryId(), null, T1)
-                  .delivered(1L, T1));
+          tx.threads().lock(childB1);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(joinB1Id)
+                      .orElseThrow()
+                      .match(other.rootEntryId(), null, T1)
+                      .delivered(1L, T1));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countIncompleteSubagentJoins());
+          assertEquals(0, tx.joins().countIncompleteSubagent());
           return null;
         });
   }
@@ -2232,10 +2253,10 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockJoinAdmission();
-          tx.lockJoinAdmission();
-          tx.lockTree(rootId);
-          tx.lockThread(rootId);
+          tx.joins().lockAdmission();
+          tx.joins().lockAdmission();
+          tx.threads().lockTree(rootId);
+          tx.threads().lock(rootId);
         });
 
     assertThrows(
@@ -2244,8 +2265,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(rootId);
-                  tx.lockJoinAdmission();
+                  tx.threads().lockTree(rootId);
+                  tx.joins().lockAdmission();
                 }));
 
     assertThrows(
@@ -2254,8 +2275,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(rootId);
-                  tx.lockJoinAdmission();
+                  tx.threads().lock(rootId);
+                  tx.joins().lockAdmission();
                 }));
   }
 
@@ -2275,18 +2296,19 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.insertCommands(
-              List.of(command(childId, 1L, tx.nextId()), command(childId, 2L, tx.nextId())));
-          tx.insertJoin(initialJoin(inv1, rootId, childId, 1L));
-          tx.insertJoin(initialJoin(inv2, rootId, childId, 2L));
+          tx.threads().lock(childId);
+          tx.commands()
+              .insert(
+                  List.of(command(childId, 1L, tx.nextId()), command(childId, 2L, tx.nextId())));
+          tx.joins().insert(initialJoin(inv1, rootId, childId, 1L));
+          tx.joins().insert(initialJoin(inv2, rootId, childId, 2L));
         });
 
     store.transaction(
         tx -> {
           // 两条未匹配 Join 各占一个额度，与子线程数量无关
-          assertEquals(2, tx.countIncompleteChildJoins(rootId));
-          assertEquals(2, tx.countIncompleteSubagentJoins());
+          assertEquals(2, tx.joins().countIncompleteChildren(rootId));
+          assertEquals(2, tx.joins().countIncompleteSubagent());
           return null;
         });
 
@@ -2294,27 +2316,31 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(
-              tx.findJoin(inv1)
-                  .orElseThrow()
-                  .match(baseline.rootEntryId(), null, T1)
-                  .delivered(1L, T1));
-          tx.updateJoin(
-              tx.findJoin(inv2)
-                  .orElseThrow()
-                  .match(baseline.rootEntryId(), null, T2)
-                  .delivered(2L, T2));
+          tx.threads().lock(childId);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(inv1)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T1)
+                      .delivered(1L, T1));
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(inv2)
+                      .orElseThrow()
+                      .match(baseline.rootEntryId(), null, T2)
+                      .delivered(2L, T2));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countIncompleteChildJoins(rootId));
-          assertEquals(0, tx.countIncompleteSubagentJoins());
+          assertEquals(0, tx.joins().countIncompleteChildren(rootId));
+          assertEquals(0, tx.joins().countIncompleteSubagent());
           // 额度清零与线程执行控制状态无关：子线程持久状态仍为 RUNNABLE
           assertEquals(
               ThreadExecutionControl.RUNNABLE,
-              tx.findThread(childId).orElseThrow().executionControl());
+              tx.threads().find(childId).orElseThrow().executionControl());
           return null;
         });
   }
@@ -2324,7 +2350,7 @@ public abstract class HarnessStoreJoinContract {
     // 测试意图：验证 countIncompleteChildJoins 对 null 参数抛出 NullPointerException。
     assertThrows(
         NullPointerException.class,
-        () -> inTransaction(store, tx -> tx.countIncompleteChildJoins(null)));
+        () -> inTransaction(store, tx -> tx.joins().countIncompleteChildren(null)));
   }
 
   @Test
@@ -2339,10 +2365,10 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childA);
+          tx.threads().lock(childA);
           ThreadJoin j = initialJoin(joinA, rootA, childA, 1L);
-          tx.insertJoin(j);
-          tx.updateJoin(j.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.joins().insert(j);
+          tx.joins().update(j.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     Baseline baselineB = seedThreadBaseline(store);
@@ -2355,8 +2381,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childA);
-                  tx.deleteJoinsByChild(childA);
+                  tx.threads().lock(childA);
+                  tx.joins().deleteByChild(childA);
                 }));
 
     // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
@@ -2366,18 +2392,18 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(rootB);
-                  tx.lockThread(childA);
-                  tx.deleteJoinsByChild(childA);
+                  tx.threads().lockTree(rootB);
+                  tx.threads().lock(childA);
+                  tx.joins().deleteByChild(childA);
                 }));
 
     // 3. 正确持有 rootA 的 tree lock：成功删除
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(rootA);
-              tx.lockThread(childA);
-              return tx.deleteJoinsByChild(childA);
+              tx.threads().lockTree(rootA);
+              tx.threads().lock(childA);
+              return tx.joins().deleteByChild(childA);
             });
     assertEquals(1, deleted);
   }
@@ -2399,8 +2425,8 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childA);
-                  tx.deleteThreads(List.of(childA));
+                  tx.threads().lock(childA);
+                  tx.threads().delete(List.of(childA));
                 }));
 
     // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
@@ -2410,21 +2436,21 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(rootB);
-                  tx.lockThread(childA);
-                  tx.deleteThreads(List.of(childA));
+                  tx.threads().lockTree(rootB);
+                  tx.threads().lock(childA);
+                  tx.threads().delete(List.of(childA));
                 }));
 
     // 3. 正确持有 rootA 的 tree lock：成功删除 childA
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(rootA);
-              tx.lockThread(childA);
-              return tx.deleteThreads(List.of(childA));
+              tx.threads().lockTree(rootA);
+              tx.threads().lock(childA);
+              return tx.threads().delete(List.of(childA));
             });
     assertEquals(1, deleted);
-    assertTrue(store.transaction(tx -> tx.findThread(childA)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(childA)).isEmpty());
   }
 
   @Test
@@ -2445,25 +2471,25 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(smallerRoot);
-                  tx.lockThread(smallerRoot);
-                  tx.lockThread(largerRoot);
-                  tx.deleteThreads(List.of(smallerRoot, largerRoot));
+                  tx.threads().lockTree(smallerRoot);
+                  tx.threads().lock(smallerRoot);
+                  tx.threads().lock(largerRoot);
+                  tx.threads().delete(List.of(smallerRoot, largerRoot));
                 }));
 
     // 2. 跨树批次按 UuidOrder 锁定两棵树及两个线程：成功删除 2 个根线程
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(smallerRoot);
-              tx.lockTree(largerRoot);
-              tx.lockThread(smallerRoot);
-              tx.lockThread(largerRoot);
-              return tx.deleteThreads(List.of(smallerRoot, largerRoot));
+              tx.threads().lockTree(smallerRoot);
+              tx.threads().lockTree(largerRoot);
+              tx.threads().lock(smallerRoot);
+              tx.threads().lock(largerRoot);
+              return tx.threads().delete(List.of(smallerRoot, largerRoot));
             });
     assertEquals(2, deleted);
-    assertTrue(store.transaction(tx -> tx.findThread(rootA)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findThread(rootB)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(rootA)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(rootB)).isEmpty());
   }
 
   @Test
@@ -2480,9 +2506,9 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
+          tx.threads().lock(childId);
           ThreadCommand queued = queuedCommand(tx, childId, 1L);
-          tx.updateCommands(List.of(queued.markApplied(source.turnStartId())));
+          tx.commands().update(List.of(queued.markApplied(source.turnStartId())));
         });
 
     // 正向：terminal 为子线程 Turn 的 TURN_END，final answer 为源应用之后的 ASSISTANT。
@@ -2491,14 +2517,16 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(
-              tx.findJoin(acceptedInvocation)
-                  .orElseThrow()
-                  .match(source.turnEndId(), source.assistantId(), T2)
-                  .delivered(1L, T2));
+          tx.threads().lock(childId);
+          tx.joins()
+              .update(
+                  tx.joins()
+                      .find(acceptedInvocation)
+                      .orElseThrow()
+                      .match(source.turnEndId(), source.assistantId(), T2)
+                      .delivered(1L, T2));
         });
-    ThreadJoin stored = store.transaction(tx -> tx.findJoin(acceptedInvocation).orElseThrow());
+    ThreadJoin stored = store.transaction(tx -> tx.joins().find(acceptedInvocation).orElseThrow());
     assertEquals(source.turnEndId(), stored.terminalEntryId());
     assertEquals(source.assistantId(), stored.finalAnswerEntryId());
 
@@ -2511,12 +2539,14 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(
-                      tx.findJoin(earlyInvocation)
-                          .orElseThrow()
-                          .match(source.turnEndId(), earlier.assistantId(), T2)
-                          .delivered(1L, T2));
+                  tx.threads().lock(childId);
+                  tx.joins()
+                      .update(
+                          tx.joins()
+                              .find(earlyInvocation)
+                              .orElseThrow()
+                              .match(source.turnEndId(), earlier.assistantId(), T2)
+                              .delivered(1L, T2));
                 }));
 
     // 负向：terminal TURN_END 由其它线程拥有。
@@ -2530,12 +2560,14 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(
-                      tx.findJoin(foreignInvocation)
-                          .orElseThrow()
-                          .match(foreignTurn.turnEndId(), foreignTurn.assistantId(), T2)
-                          .delivered(1L, T2));
+                  tx.threads().lock(childId);
+                  tx.joins()
+                      .update(
+                          tx.joins()
+                              .find(foreignInvocation)
+                              .orElseThrow()
+                              .match(foreignTurn.turnEndId(), foreignTurn.assistantId(), T2)
+                              .delivered(1L, T2));
                 }));
 
     // 负向：源命令尚未 APPLIED 时不允许冻结 ASSISTANT final answer。
@@ -2548,12 +2580,14 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(
-                      tx.findJoin(unappliedInvocation)
-                          .orElseThrow()
-                          .match(source.turnEndId(), source.assistantId(), T2)
-                          .delivered(1L, T2));
+                  tx.threads().lock(childId);
+                  tx.joins()
+                      .update(
+                          tx.joins()
+                              .find(unappliedInvocation)
+                              .orElseThrow()
+                              .match(source.turnEndId(), source.assistantId(), T2)
+                              .delivered(1L, T2));
                 }));
   }
 
@@ -2572,19 +2606,21 @@ public abstract class HarnessStoreJoinContract {
     return store.transaction(
         tx -> {
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(turnStartEntry(turnStartId, sessionId, parentEntryId, ownerThreadId, T1));
+          tx.entries()
+              .insert(turnStartEntry(turnStartId, sessionId, parentEntryId, ownerThreadId, T1));
           UUID userId = tx.nextId();
-          tx.insertEntry(new Entry(userId, sessionId, turnStartId, userMessagePayload(), T1));
+          tx.entries().insert(new Entry(userId, sessionId, turnStartId, userMessagePayload(), T1));
           UUID assistantId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T1));
+          tx.entries().insert(assistantEntry(assistantId, sessionId, userId, T1));
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  assistantId,
-                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      sessionId,
+                      assistantId,
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
           return new ChildTurn(turnStartId, assistantId, turnEndId);
         });
   }
@@ -2592,7 +2628,7 @@ public abstract class HarnessStoreJoinContract {
   /** 按 sequence 取队列命令。 */
   private static ThreadCommand queuedCommand(
       HarnessStore.Transaction tx, UUID threadId, long sequence) {
-    return tx.loadQueuedCommands(threadId).stream()
+    return tx.commands().loadQueued(threadId).stream()
         .filter(command -> command.sequence() == sequence)
         .findFirst()
         .orElseThrow();
@@ -2603,9 +2639,11 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childThreadId);
-          tx.insertJoin(
-              initialJoin(invocationId, baseline.threadId(), childThreadId, sourceCommandSequence));
+          tx.threads().lock(childThreadId);
+          tx.joins()
+              .insert(
+                  initialJoin(
+                      invocationId, baseline.threadId(), childThreadId, sourceCommandSequence));
         });
   }
 }

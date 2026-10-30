@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -71,24 +72,25 @@ class ThreadLifecycleCoordinatorJoinTest {
     terminalEntryId = child.turnEndId();
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  root.threadId(),
-                  childId,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      root.threadId(),
+                      childId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -115,7 +117,10 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertEquals(1, rootCommandCount());
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+            tx ->
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
+                    .isPresent()));
 
     // 新结算事件（新对话结果）不重投：命令与 Join 交付均保持不变。
     ThreadJoin before = matched;
@@ -151,7 +156,10 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertEquals(1, rootCommandCount());
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+            tx ->
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
+                    .isPresent()));
   }
 
   /** J3c：本 Thread 存在 QUEUED CUSTOM_MESSAGE 时，构成待处理输入需求，阻塞上游 Join 结算。 */
@@ -188,7 +196,7 @@ class ThreadLifecycleCoordinatorJoinTest {
 
     matchTerminal(false);
     assertFalse(join(joinId).matched());
-    assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(childId)));
+    assertEquals(1, store.<Integer>transaction(tx -> tx.joins().countIncompleteChildren(childId)));
     assertEquals(0, rootCommandCount());
     assertNullWork();
   }
@@ -206,10 +214,10 @@ class ThreadLifecycleCoordinatorJoinTest {
     // 应用 grandChild 的源输入命令
     store.transaction(
         tx -> {
-          tx.lockThread(grandChildId);
-          tx.loadQueuedCommands(grandChildId);
-          ThreadCommand source = tx.findCommand(grandChildId, 1L).orElseThrow();
-          tx.updateCommands(List.of(source.markApplied(grandChild.turnStartId())));
+          tx.threads().lock(grandChildId);
+          tx.commands().loadQueued(grandChildId);
+          ThreadCommand source = tx.commands().find(grandChildId, 1L).orElseThrow();
+          tx.commands().update(List.of(source.markApplied(grandChild.turnStartId())));
           return null;
         });
 
@@ -219,10 +227,15 @@ class ThreadLifecycleCoordinatorJoinTest {
           ThreadTreeLocks.lockForThread(tx, grandChildId);
           for (UUID threadId :
               List.of(grandChildId, childId).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-              tx, tx.findThread(grandChildId).orElseThrow(), grandChildTerminal, null, T1, false);
+              tx,
+              tx.threads().find(grandChildId).orElseThrow(),
+              grandChildTerminal,
+              null,
+              T1,
+              false);
           return null;
         });
 
@@ -247,21 +260,28 @@ class ThreadLifecycleCoordinatorJoinTest {
           ThreadTreeLocks.lockForThread(tx, childId);
           for (UUID threadId :
               List.of(childId, root.threadId()).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
+          JoinStore joins =
+              (JoinStore)
+                  Proxy.newProxyInstance(
+                      JoinStore.class.getClassLoader(),
+                      new Class<?>[] {JoinStore.class},
+                      (proxy, method, args) -> {
+                        if (method.getName().equals("update")) {
+                          updatedJoins.add((ThreadJoin) args[0]);
+                        }
+                        return method.invoke(tx.joins(), args);
+                      });
           HarnessStore.Transaction wrapped =
               (HarnessStore.Transaction)
                   Proxy.newProxyInstance(
                       HarnessStore.Transaction.class.getClassLoader(),
                       new Class<?>[] {HarnessStore.Transaction.class},
-                      (proxy, method, args) -> {
-                        if (method.getName().equals("updateJoin")) {
-                          updatedJoins.add((ThreadJoin) args[0]);
-                        }
-                        return method.invoke(tx, args);
-                      });
+                      (proxy, method, args) ->
+                          method.getName().equals("joins") ? joins : method.invoke(tx, args));
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-              wrapped, tx.findThread(childId).orElseThrow(), terminalEntryId, null, T1, false);
+              wrapped, tx.threads().find(childId).orElseThrow(), terminalEntryId, null, T1, false);
           return null;
         });
 
@@ -285,9 +305,9 @@ class ThreadLifecycleCoordinatorJoinTest {
     // 模拟 INPUT 接纳该通知：水位推进到 seq 2，后续结算恰一次。
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          ThreadState child = tx.findThread(childId).orElseThrow();
-          tx.updateThread(child.advanceInputThroughSequence(2L, T1));
+          tx.threads().lock(childId);
+          ThreadState child = tx.threads().find(childId).orElseThrow();
+          tx.threads().update(child.advanceInputThroughSequence(2L, T1));
           return null;
         });
     matchTerminal(false);
@@ -324,46 +344,50 @@ class ThreadLifecycleCoordinatorJoinTest {
     return store.transaction(
         tx -> {
           UUID turnStart = tx.nextId();
-          tx.insertEntry(
-              turnStartEntry(turnStart, root.sessionId(), root.rootEntryId(), T1, threadId));
+          tx.entries()
+              .insert(
+                  turnStartEntry(turnStart, root.sessionId(), root.rootEntryId(), T1, threadId));
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, root.sessionId(), turnStart, T1));
+          tx.entries().insert(userMessageEntry(userEntryId, root.sessionId(), turnStart, T1));
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantEntryId, root.sessionId(), userEntryId, T1));
+          tx.entries().insert(assistantEntry(assistantEntryId, root.sessionId(), userEntryId, T1));
           UUID turnEnd = tx.nextId();
-          tx.insertEntry(
-              turnEndEntry(turnEnd, root.sessionId(), assistantEntryId, T1, turnStart, false));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  root.sessionId(),
-                  parentThreadId,
-                  turnEnd,
-                  CREATION_REQUEST_HASH,
-                  "thread-" + threadId,
-                  root.threadId(),
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  2L,
-                  0L,
-                  T0,
-                  T0));
-          var payload = userMessagePayload("task");
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
+          tx.entries()
+              .insert(
+                  turnEndEntry(turnEnd, root.sessionId(), assistantEntryId, T1, turnStart, false));
+          tx.threads()
+              .insert(
+                  new ThreadState(
                       threadId,
-                      1L,
-                      payload,
-                      TestIds.id(idempotencyKeySeed),
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+                      root.sessionId(),
+                      parentThreadId,
+                      turnEnd,
+                      CREATION_REQUEST_HASH,
+                      "thread-" + threadId,
+                      root.threadId(),
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      2L,
+                      0L,
+                      T0,
+                      T0));
+          var payload = userMessagePayload("task");
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          1L,
+                          payload,
+                          TestIds.id(idempotencyKeySeed),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return new SeededChild(turnStart, turnEnd);
         });
   }
@@ -374,24 +398,25 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void insertUnmatchedJoin(UUID newJoinId, UUID parentThreadId, UUID childThreadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(childThreadId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  newJoinId,
-                  CREATION_REQUEST_HASH,
-                  parentThreadId,
-                  childThreadId,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childThreadId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      newJoinId,
+                      CREATION_REQUEST_HASH,
+                      parentThreadId,
+                      childThreadId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -400,20 +425,21 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void seedQueuedUserCommandAtSequenceTwo() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
+          tx.threads().lock(childId);
           var payload = userMessagePayload("steering");
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      childId,
-                      2L,
-                      payload,
-                      TestIds.id(52),
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          childId,
+                          2L,
+                          payload,
+                          TestIds.id(52),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return null;
         });
   }
@@ -422,20 +448,21 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void seedQueuedSetAgentCommandAtSequenceTwo() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
+          tx.threads().lock(childId);
           var payload = new SetAgentCommandPayload("assistant");
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      childId,
-                      2L,
-                      payload,
-                      TestIds.id(52),
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          childId,
+                          2L,
+                          payload,
+                          TestIds.id(52),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return null;
         });
   }
@@ -444,20 +471,21 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void seedQueuedCustomMessageCommandAtSequenceTwo() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
+          tx.threads().lock(childId);
           var payload = new CustomMessageCommandPayload(AgentMessage.user("custom-steering"));
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      childId,
-                      2L,
-                      payload,
-                      TestIds.id(52),
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          childId,
+                          2L,
+                          payload,
+                          TestIds.id(52),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return null;
         });
   }
@@ -466,25 +494,26 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void seedQueuedNotificationCommandAtSequenceTwo() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
+          tx.threads().lock(childId);
           var payload =
               new NotificationCommandPayload(
                   UUID.randomUUID(),
                   NotificationKind.SUBAGENT_RESULT,
                   childId,
                   AgentMessage.user("queued-result"));
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      childId,
-                      2L,
-                      payload,
-                      TestIds.id(52),
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          childId,
+                          2L,
+                          payload,
+                          TestIds.id(52),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return null;
         });
   }
@@ -493,8 +522,8 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void seedAppliedNotificationAtSequenceTwo() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          ThreadState child = tx.findThread(childId).orElseThrow();
+          tx.threads().lock(childId);
+          ThreadState child = tx.threads().find(childId).orElseThrow();
           UUID notificationId = UUID.randomUUID();
           AgentMessage receipt = AgentMessage.user("receipt");
           NotificationCommandPayload payload =
@@ -511,18 +540,19 @@ class ThreadLifecycleCoordinatorJoinTest {
                   null,
                   null,
                   T1);
-          tx.insertCommands(List.of(command));
+          tx.commands().insert(List.of(command));
           UUID entryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  entryId,
-                  root.sessionId(),
-                  child.headEntryId(),
-                  new NotificationPayload(
-                      notificationId, NotificationKind.SUBAGENT_RESULT, childId, receipt),
-                  T1));
-          tx.updateCommands(List.of(command.markApplied(entryId)));
-          tx.updateThread(child.reserveCommandSequences(1, T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      entryId,
+                      root.sessionId(),
+                      child.headEntryId(),
+                      new NotificationPayload(
+                          notificationId, NotificationKind.SUBAGENT_RESULT, childId, receipt),
+                      T1));
+          tx.commands().update(List.of(command.markApplied(entryId)));
+          tx.threads().update(child.reserveCommandSequences(1, T1));
           return null;
         });
   }
@@ -533,9 +563,9 @@ class ThreadLifecycleCoordinatorJoinTest {
           ThreadTreeLocks.lockForThread(tx, childId);
           for (UUID threadId :
               List.of(childId, root.threadId()).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
-          ThreadState child = tx.findThread(childId).orElseThrow();
+          ThreadState child = tx.threads().find(childId).orElseThrow();
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
               tx, child, terminalEntryId, null, T1, includeUnappliedSource);
           return null;
@@ -545,16 +575,16 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void markSourceApplied() {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.loadQueuedCommands(childId);
-          ThreadCommand source = tx.findCommand(childId, 1L).orElseThrow();
-          tx.updateCommands(List.of(source.markApplied(turnStartEntryId)));
+          tx.threads().lock(childId);
+          tx.commands().loadQueued(childId);
+          ThreadCommand source = tx.commands().find(childId, 1L).orElseThrow();
+          tx.commands().update(List.of(source.markApplied(turnStartEntryId)));
           return null;
         });
   }
 
   private ThreadJoin join(UUID invocationId) {
-    return store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+    return store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
   }
 
   /**
@@ -568,37 +598,38 @@ class ThreadLifecycleCoordinatorJoinTest {
     UUID compactionJoinId = UUID.randomUUID();
     store.transaction(
         tx -> {
-          tx.lockThread(compactionChildId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  compactionJoinId,
-                  CREATION_REQUEST_HASH,
-                  root.threadId(),
-                  compactionChildId,
-                  1L,
-                  "compactor",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.SETTLE_OWNER_TURN,
-                  null));
+          tx.threads().lock(compactionChildId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      compactionJoinId,
+                      CREATION_REQUEST_HASH,
+                      root.threadId(),
+                      compactionChildId,
+                      1L,
+                      "compactor",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.SETTLE_OWNER_TURN,
+                      null));
           return null;
         });
     // 未完成 COMPACTION join 不占普通 task 配额：计数仍只含 setUp 的 TASK join。
     assertEquals(
-        1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(root.threadId())));
+        1, store.<Integer>transaction(tx -> tx.joins().countIncompleteChildren(root.threadId())));
 
     // 应用 COMPACTION 子线程的源命令，使其可通过收敛判据。
     store.transaction(
         tx -> {
-          tx.lockThread(compactionChildId);
-          tx.loadQueuedCommands(compactionChildId);
-          ThreadCommand source = tx.findCommand(compactionChildId, 1L).orElseThrow();
-          tx.updateCommands(List.of(source.markApplied(compaction.turnStartId())));
+          tx.threads().lock(compactionChildId);
+          tx.commands().loadQueued(compactionChildId);
+          ThreadCommand source = tx.commands().find(compactionChildId, 1L).orElseThrow();
+          tx.commands().update(List.of(source.markApplied(compaction.turnStartId())));
           return null;
         });
 
@@ -609,9 +640,9 @@ class ThreadLifecycleCoordinatorJoinTest {
               List.of(compactionChildId, root.threadId()).stream()
                   .sorted(UuidOrder.COMPARATOR)
                   .toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
-          ThreadState compactionChild = tx.findThread(compactionChildId).orElseThrow();
+          ThreadState compactionChild = tx.threads().find(compactionChildId).orElseThrow();
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
               tx, compactionChild, compaction.turnEndId(), null, T1, false);
           return null;
@@ -625,11 +656,16 @@ class ThreadLifecycleCoordinatorJoinTest {
     // 但唤醒父 Thread Work 供压缩 owner 消费。
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+            tx ->
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
+                    .isPresent()));
     // COMPACTION 冻结结果不属于 NOTIFY_PARENT 子任务，不占用子任务并发计数（仍只有 setUp 中的普通 task join）。
     assertEquals(
         1,
-        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(root.threadId())).intValue());
+        store
+            .<Integer>transaction(tx -> tx.joins().countIncompleteChildren(root.threadId()))
+            .intValue());
   }
 
   private int rootCommandCount() {
@@ -639,6 +675,7 @@ class ThreadLifecycleCoordinatorJoinTest {
   private void assertNullWork() {
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isEmpty()));
+            tx ->
+                tx.work().find(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isEmpty()));
   }
 }

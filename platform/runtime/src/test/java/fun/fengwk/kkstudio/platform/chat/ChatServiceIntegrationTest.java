@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -59,7 +60,9 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   @BeforeEach
   void configureThreadWithoutProjectOwner() {
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
-    when(transaction.findThread(any())).thenReturn(Optional.empty());
+    ThreadStore threadStore = mock(ThreadStore.class);
+    when(transaction.threads()).thenReturn(threadStore);
+    when(threadStore.find(any())).thenReturn(Optional.empty());
     when(harnessStore.transaction(any()))
         .thenAnswer(
             invocation -> {

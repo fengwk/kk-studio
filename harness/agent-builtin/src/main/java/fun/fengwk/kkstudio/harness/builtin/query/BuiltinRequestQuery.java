@@ -32,11 +32,11 @@ public final class BuiltinRequestQuery {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElse(null);
+          ThreadState thread = tx.threads().lock(threadId).orElse(null);
           if (thread == null) {
             return Optional.empty();
           }
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           Entry turn = path.openTurnStart().orElse(null);
           if (turn == null
               || !(turn.payload() instanceof TurnStartPayload start)

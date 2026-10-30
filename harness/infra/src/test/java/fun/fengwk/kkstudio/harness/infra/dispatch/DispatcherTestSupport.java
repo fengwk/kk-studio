@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -133,10 +134,10 @@ final class DispatcherTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, sessionId, rootEntryId));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.threads().insert(thread(threadId, sessionId, rootEntryId));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return new ThreadSeed(threadId);
         });
   }
@@ -152,11 +153,11 @@ final class DispatcherTestSupport {
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           UUID modelId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
-          builtin(tx)
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -173,7 +174,7 @@ final class DispatcherTestSupport {
                       List.of(),
                       NOW,
                       NOW));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId));
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
           return new ModelSeed(threadId, modelId);
         });
   }
@@ -194,10 +195,10 @@ final class DispatcherTestSupport {
           UUID threadId = tx.nextId();
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertEntry(userEntry(userEntryId, sessionId, turnStartEntryId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.entries().insert(userEntry(userEntryId, sessionId, turnStartEntryId));
           // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
           // binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。
           ModelRequestSpec requestSpec = tooledRequest();
@@ -218,41 +219,44 @@ final class DispatcherTestSupport {
                   List.of(),
                   NOW,
                   NOW);
-          tx.insertEntry(
-              assistantEntry(
-                  assistantEntryId, sessionId, userEntryId, ready.markRunning(NOW), response));
-          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
-          builtin(tx).insertModelInvocation(ready);
-          ModelInvocation current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(NOW));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.succeed(response, NOW));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
-          tx.insertToolInvocations(
-              List.of(
-                  new ToolInvocation(
-                      toolId,
-                      threadId,
-                      turnStartEntryId,
-                      assistantEntryId,
-                      0,
-                      toolRequest().call(),
-                      toolRequest().binding(),
-                      ToolInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      NOW,
-                      NOW)));
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), ENV_ID);
+          tx.entries()
+              .insert(
+                  assistantEntry(
+                      assistantEntryId, sessionId, userEntryId, ready.markRunning(NOW), response));
+          tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
+          builtin(store, tx).insertModelInvocation(ready);
+          ModelInvocation current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(NOW));
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.succeed(response, NOW));
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx)
+              .updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          toolId,
+                          threadId,
+                          turnStartEntryId,
+                          assistantEntryId,
+                          0,
+                          toolRequest().call(),
+                          toolRequest().binding(),
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          NOW,
+                          NOW)));
+          tx.work().request(new WorkTarget(WorkTargetType.TOOL, toolId), ENV_ID);
           return new ToolSeed(threadId, modelId, toolId);
         });
   }
 
   static Work work(HarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target).orElse(null));
+    return store.transaction(tx -> tx.work().find(target).orElse(null));
   }
 
   /** 测试可控时钟：默认始终返回整毫秒 {@link Instant}。 */
@@ -350,7 +354,7 @@ final class DispatcherTestSupport {
   /**
    * 可编程阻塞 store：armed 后阻塞所有事务（except arming 线程）直到 release，用于确定性地把 drain 线程钉在 claim / return 事务边界上。
    */
-  static final class BlockingStore implements HarnessStore {
+  static final class BlockingStore implements HarnessStore, BuiltinStore {
 
     private final HarnessStore delegate;
     private final AtomicBoolean armed = new AtomicBoolean();
@@ -360,6 +364,11 @@ final class DispatcherTestSupport {
 
     BlockingStore(HarnessStore delegate) {
       this.delegate = delegate;
+    }
+
+    @Override
+    public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
+      return ((BuiltinStore) delegate).in(tx);
     }
 
     @Override
@@ -373,7 +382,7 @@ final class DispatcherTestSupport {
     }
 
     @Override
-    public <T> T transaction(Function<Transaction, T> callback) {
+    public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
       if (armed.get() && Thread.currentThread() != armingThread) {
         entered.countDown();
         try {

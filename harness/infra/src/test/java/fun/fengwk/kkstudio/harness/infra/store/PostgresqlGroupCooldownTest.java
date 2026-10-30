@@ -147,13 +147,14 @@ class PostgresqlGroupCooldownTest {
   private void freeze(String member, Instant until) {
     store.transaction(
         tx -> {
-          builtin(tx).freezeGroupMember("group", 0L, member, "v1", until);
+          builtin(store, tx).freezeGroupMember("group", 0L, member, "v1", until);
           return null;
         });
   }
 
   private static boolean cooling(HarnessStore target, String member) {
-    return target.transaction(tx -> builtin(tx).isGroupMemberCooling("group", 0L, member, "v1"));
+    return target.transaction(
+        tx -> builtin(target, tx).isGroupMemberCooling("group", 0L, member, "v1"));
   }
 
   private static int cooldownRows() {
