@@ -201,15 +201,15 @@ describe('pending-request-store', () => {
     expect(() => saveBoundPendingMessage(threadId, boundPendingMessage, storage)).not.toThrow()
 
     // 2. 但异请求身份必须抛出 Conflict 错误
-    const anotherRequest = {
+    const anotherRequest: BoundPendingMessage = {
       ...boundPendingMessage,
       request: {
         ...boundBatchRequest,
         commands: [
           {
-            type: 'USER_MESSAGE' as const,
+            type: 'USER_MESSAGE',
             idempotencyKey: 'cmd-bound-unique-2',
-            contents: [{ type: 'TEXT' as const, text: 'second' }],
+            contents: [{ type: 'TEXT', text: 'second' }],
           },
         ],
       },
