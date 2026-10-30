@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -118,7 +119,7 @@ final class DispatcherTestSupport {
 
   /** 事务时间固定在 {@link #NOW} 的内存 store，与 {@link #clock()} 同一时间域。 */
   static InMemoryHarnessStore newStore() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     store.setNow(NOW);
     return store;
   }
