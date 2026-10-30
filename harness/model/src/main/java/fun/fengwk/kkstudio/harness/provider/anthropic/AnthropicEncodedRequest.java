@@ -8,9 +8,9 @@ import java.util.Objects;
  *
  * <p>{@code betaFeatures} 是配置能力与运行时强制能力的并集（已去重）：为空表示不发送 {@code anthropic-beta} 头。
  */
-record AnthropicEncodedRequest(byte[] bodyUtf8Bytes, List<String> betaFeatures) {
+public record AnthropicEncodedRequest(byte[] bodyUtf8Bytes, List<String> betaFeatures) {
 
-  AnthropicEncodedRequest {
+  public AnthropicEncodedRequest {
     Objects.requireNonNull(bodyUtf8Bytes, "bodyUtf8Bytes");
     betaFeatures = List.copyOf(Objects.requireNonNull(betaFeatures, "betaFeatures"));
     bodyUtf8Bytes = bodyUtf8Bytes.clone();
