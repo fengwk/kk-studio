@@ -61,10 +61,7 @@ final class InMemoryWorkStore implements WorkStore {
     Objects.requireNonNull(claim, "claim");
     tx.locks().requireCanLockWork(claim.target());
     Work work = state.works.get(claim.target());
-    if (work == null
-        || !claim.leaseToken().equals(work.leaseToken())
-        || work.leaseUntil() == null
-        || !work.leaseUntil().isAfter(now)) {
+    if (work == null || !work.isOwnedBy(claim.leaseToken(), now)) {
       // 行缺失 / token 不匹配 / lease 已过期都是正常竞态：lost / stale ownership，不以异常表达。
       return Optional.empty();
     }
@@ -204,6 +201,7 @@ final class InMemoryWorkStore implements WorkStore {
     Objects.requireNonNull(claim, "claim");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     Work work = lockedWork(claim.target());
+    work.state().requireActiveLease(claim.leaseToken(), now);
     Instant target = now.plus(leaseDuration);
     if (!target.isAfter(work.leaseUntil())) {
       // 现有 lease 已覆盖目标 margin：保持不变，避免把更长的 lease 缩短。

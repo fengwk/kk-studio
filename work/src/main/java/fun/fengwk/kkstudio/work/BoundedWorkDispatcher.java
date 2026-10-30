@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.common.concurrent;
+package fun.fengwk.kkstudio.work;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
