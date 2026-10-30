@@ -11,8 +11,8 @@ import java.util.function.Supplier;
 /**
  * 把 {@code durable_work} SQL 接到 Harness 事务核心。
  *
- * <p>查询与更新走同一 {@link PostgresqlHarnessTransaction} 连接，因此与 Thread、Driver、Tool 写入共享物理事务；底层 JDBC 失败由核心记录为首个数据库故障。
- * 调用方已经处在该事务内，{@link #inTransaction(Supplier)} 不再开启新事务。
+ * <p>查询与更新走同一 {@link PostgresqlHarnessTransaction} 连接，因此与 Thread、Driver、Tool 写入共享物理事务；底层 JDBC
+ * 失败由核心记录为首个数据库故障。 调用方已经处在该事务内，{@link #inTransaction(Supplier)} 不再开启新事务。
  */
 final class PostgresqlDurableWorkJdbc implements DurableWorkJdbc {
 

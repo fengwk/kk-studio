@@ -34,6 +34,7 @@ public class ProjectAutoConfiguration {
   @Bean
   public DurableWorkStore issueWorkQueue(
       JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
-    return new DurableWorkStore(IssueReconcileDispatcher.TARGET_TYPE, jdbcClient, transactionManager);
+    return new DurableWorkStore(
+        IssueReconcileDispatcher.TARGET_TYPE, jdbcClient, transactionManager);
   }
 }

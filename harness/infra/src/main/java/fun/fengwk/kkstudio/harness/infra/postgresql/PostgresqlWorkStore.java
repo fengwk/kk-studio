@@ -21,11 +21,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Harness 的 Work 视图：锁阶梯、目标存在性与环境等待通知留在本类，{@code durable_work} SQL 与调度跃迁全部委托
- * {@link DurableWorkStore}。
+ * Harness 的 Work 视图：锁阶梯、目标存在性与环境等待通知留在本类，{@code durable_work} SQL 与调度跃迁全部委托 {@link
+ * DurableWorkStore}。
  *
- * <p>每种 target type 一个 Store 实例，共享本事务的连接与数据库时间。claim 仍要求本事务尚未持有 Work 行锁；request / delete
- * 仍要求 owning Thread 已锁定。
+ * <p>每种 target type 一个 Store 实例，共享本事务的连接与数据库时间。claim 仍要求本事务尚未持有 Work 行锁；request / delete 仍要求 owning
+ * Thread 已锁定。
  */
 final class PostgresqlWorkStore implements WorkStore {
 
@@ -106,7 +106,8 @@ final class PostgresqlWorkStore implements WorkStore {
   /**
    * 登记或唤醒指定 Work。
    *
-   * <p>必须在已锁定属主 Thread 的事务内调用。委托中央 Store 计算立即 wake：不存在则新建，已存在则提前 due 并递增 wakeVersion，已冻结的环境亲和性冲突被拒绝。
+   * <p>必须在已锁定属主 Thread 的事务内调用。委托中央 Store 计算立即 wake：不存在则新建，已存在则提前 due 并递增
+   * wakeVersion，已冻结的环境亲和性冲突被拒绝。
    */
   @Override
   public void request(WorkTarget target, EnvironmentId requiredEnvironmentId) {
@@ -121,8 +122,7 @@ final class PostgresqlWorkStore implements WorkStore {
     DurableWork written =
         store(target)
             .request(
-                target.id(),
-                requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
+                target.id(), requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
     Work work = toWork(target, written);
     tx.recordWorkLock(work.target());
     tx.notifyEnvironmentWorkChanged(target, work.requiredEnvironmentId());
@@ -286,5 +286,4 @@ final class PostgresqlWorkStore implements WorkStore {
         claim.leaseUntil(),
         claim.requiredEnvironmentId() == null ? null : claim.requiredEnvironmentId().value());
   }
-
 }

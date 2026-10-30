@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Clock;
@@ -27,14 +27,14 @@ import java.util.Optional;
 @Repository
 public class CanvasFunctionWorkStore {
 
-  private final DurableWorkQueue canvasRunWorkQueue;
+  private final DurableWorkStore canvasRunWorkQueue;
   private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final TransactionTemplate transactions;
   private final Clock clock;
 
   public CanvasFunctionWorkStore(
-      DurableWorkQueue canvasRunWorkQueue,
+      DurableWorkStore canvasRunWorkQueue,
       CanvasFunctionRunJdbcStore runStore,
       CanvasFunctionRunStateCodecPort stateCodec,
       PlatformTransactionManager transactionManager,
@@ -66,7 +66,16 @@ public class CanvasFunctionWorkStore {
   }
 
   public boolean renew(ClaimedRun claim, Duration leaseDuration) {
-    return canvasRunWorkQueue.renew(Objects.requireNonNull(claim, "claim").work(), leaseDuration);
+    Objects.requireNonNull(claim, "claim");
+    return Boolean.TRUE.equals(
+        transactions.execute(
+            status -> {
+              if (canvasRunWorkQueue.lockClaimed(claim.work()).isEmpty()) {
+                return false;
+              }
+              canvasRunWorkQueue.renew(claim.work(), leaseDuration);
+              return true;
+            }));
   }
 
   /** 归还仍持有的 claim：Run 退回 READY，Work 推迟 {@code delay} 后可再领取；已失去租约时不写入。 */
@@ -74,9 +83,17 @@ public class CanvasFunctionWorkStore {
     Objects.requireNonNull(claim, "claim");
     return Boolean.TRUE.equals(
         transactions.execute(
-            status ->
-                runStore.returnToReady(claim.nodeId(), claim.leaseToken(), now()) == 1
-                    && canvasRunWorkQueue.reschedule(claim.work(), delay)));
+            status -> {
+              runStore.findByNodeIdForUpdate(claim.nodeId());
+              if (canvasRunWorkQueue.lockClaimed(claim.work()).isEmpty()) {
+                return false;
+              }
+              if (runStore.returnToReady(claim.nodeId(), claim.leaseToken(), now()) != 1) {
+                return false;
+              }
+              canvasRunWorkQueue.reschedule(claim.work(), delay);
+              return true;
+            }));
   }
 
   private sealed interface AttemptResult {}
@@ -91,7 +108,7 @@ public class CanvasFunctionWorkStore {
   private AttemptResult startAttempt(WorkClaim work) {
     // 保持 Run -> Work 锁序；Work 锁覆盖检查到 attempt 写入的整个短事务。
     runStore.findByNodeIdForUpdate(work.targetId());
-    if (!canvasRunWorkQueue.lockOwned(work)) {
+    if (canvasRunWorkQueue.lockClaimed(work).isEmpty()) {
       return NotStarted.LOST;
     }
     Optional<CanvasFunctionRunDO> started = runStore.startAttempt(work.targetId(), now());

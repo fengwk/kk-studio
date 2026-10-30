@@ -43,7 +43,7 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.function.FixedCanvasFunctionCatalogSource;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -86,9 +86,9 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     if (!status.equals("MISSING")) {
       insertRunRow(invalid, UUID.randomUUID(), status);
     }
-    DurableWorkQueue queue =
-        new DurableWorkQueue(
-            JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN");
+    DurableWorkStore queue =
+        new DurableWorkStore(
+            "CANVAS_RUN", JdbcClient.create(jdbc), transactions.getTransactionManager());
     queue.request(invalid, Duration.ZERO);
     jdbc.update(
         "update durable_work set available_at = statement_timestamp() - interval '1 day' where target_id = ?",
@@ -105,10 +105,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void holdsRunAndWorkLocksThroughAttemptWrite() {
     UUID nodeId = addNode(addDocument(), true).id();
     runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
-    DurableWorkQueue queue =
+    DurableWorkStore queue =
         spy(
-            new DurableWorkQueue(
-                JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN"));
+            new DurableWorkStore(
+                "CANVAS_RUN", JdbcClient.create(jdbc), transactions.getTransactionManager()));
     CanvasFunctionRunJdbcStore observedRuns =
         spy(AopTestUtils.<CanvasFunctionRunJdbcStore>getUltimateTargetObject(runJdbcStore));
     doAnswer(
@@ -142,7 +142,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertEquals(1, observed.claimNext(LEASE, "owner").orElseThrow().run().attempt());
     var order = inOrder(observedRuns, queue);
     order.verify(observedRuns).findByNodeIdForUpdate(nodeId);
-    order.verify(queue).lockOwned(any());
+    order.verify(queue).lockClaimed(any());
     order.verify(observedRuns).startAttempt(any(), any());
   }
 
@@ -152,10 +152,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void takeoverBeforeStartFencesOldClaim(boolean takeover) throws Exception {
     UUID nodeId = addNode(addDocument(), true).id();
     runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
-    DurableWorkQueue queue =
+    DurableWorkStore queue =
         spy(
-            new DurableWorkQueue(
-                JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN"));
+            new DurableWorkStore(
+                "CANVAS_RUN", JdbcClient.create(jdbc), transactions.getTransactionManager()));
     CountDownLatch claimed = new CountDownLatch(1);
     CountDownLatch resume = new CountDownLatch(1);
     doAnswer(
@@ -419,12 +419,12 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void readyCommitSendsAnImmediateEmptyNotification() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
 
       PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
-      assertEquals(DurableWorkQueue.CHANNEL, notifications[0].getName());
+      assertEquals(DurableWorkStore.CHANNEL, notifications[0].getName());
       assertEquals("CANVAS_RUN", notifications[0].getParameter());
     }
   }
@@ -434,7 +434,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   void rolledBackReadyInsertDoesNotNotify() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertThrows(
           IllegalStateException.class,
           () ->
@@ -457,7 +457,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
     ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
 
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertTrue(
           runs.transitionTerminal(
               terminal(claim.run(), CanvasFunctionRunStatus.SUCCEEDED, "SUCCEEDED"),
@@ -480,7 +480,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     ClaimedRun immediate = workStore.claimNext(LEASE, "owner-immediate").orElseThrow();
     ClaimedRun future = workStore.claimNext(LEASE, "owner-future").orElseThrow();
 
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       // 立即重排 → 立即领取提示
       assertTrue(workStore.reschedule(immediate, Duration.ZERO));
       PGNotification[] notifications = pollNotifications(listener, 5_000);
@@ -503,7 +503,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     awaitLeaseExpiry();
     workStore.claimNext(LEASE, "owner-new").orElseThrow();
 
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertFalse(workStore.reschedule(stale, Duration.ofSeconds(1)));
 
       assertNoNotification(listener);
@@ -517,7 +517,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     NodeRecord node = addNode(canvasId, true);
     insertRunRow(node.id(), UUID.randomUUID(), "CANCELLED");
 
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertTrue(runs.replaceTerminalWithReady(ready(node.id(), UUID.randomUUID(), T0)));
       PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
@@ -533,7 +533,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID requestId = UUID.randomUUID();
     insertRunRow(node.id(), requestId, "UNKNOWN");
 
-    try (Connection listener = listenOn(DurableWorkQueue.CHANNEL)) {
+    try (Connection listener = listenOn(DurableWorkStore.CHANNEL)) {
       assertTrue(runs.resumeUnknown(ready(node.id(), requestId, T0)));
       PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
