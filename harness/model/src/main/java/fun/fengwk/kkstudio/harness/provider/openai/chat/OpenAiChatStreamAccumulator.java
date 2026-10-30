@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 
 import java.math.BigInteger;
@@ -128,12 +129,7 @@ final class OpenAiChatStreamAccumulator {
           ProviderErrorKind.INVALID_RESPONSE, "semantic payload received after [DONE]");
     }
 
-    JsonNode root;
-    try {
-      root = OBJECT_MAPPER.readTree(trimmed);
-    } catch (JacksonException exception) {
-      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid SSE JSON payload");
-    }
+    JsonNode root = ProviderJsonHelper.parseSseJson(trimmed, "invalid SSE JSON payload");
 
     if (!root.isObject()) {
       throw new ProviderException(
@@ -630,7 +626,7 @@ final class OpenAiChatStreamAccumulator {
 
         boolean idValid = (id != null && !id.isBlank());
         boolean nameValid = (name != null && !name.isBlank());
-        JsonNode parsedJson = tryParseJsonObject(args);
+        JsonNode parsedJson = ProviderJsonHelper.tryParseJsonObject(args);
 
         if (stopReason == GenerationStopReason.LENGTH) {
           if (!idValid || !nameValid || parsedJson == null) {
@@ -774,21 +770,6 @@ final class OpenAiChatStreamAccumulator {
     }
 
     return new ProviderCompletion(response, replayState);
-  }
-
-  private static JsonNode tryParseJsonObject(String text) {
-    if (text == null || text.isBlank()) {
-      return null;
-    }
-    try {
-      JsonNode node = OBJECT_MAPPER.readTree(text);
-      if (node.isObject()) {
-        return node;
-      }
-    } catch (JacksonException ignored) {
-      // Not a valid JSON object
-    }
-    return null;
   }
 
   private static final class ToolCallBuilder {
