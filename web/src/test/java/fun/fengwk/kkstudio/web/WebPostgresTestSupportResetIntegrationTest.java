@@ -19,7 +19,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshDispatcher;
+import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.runtime.PluginCatalogRefresher;

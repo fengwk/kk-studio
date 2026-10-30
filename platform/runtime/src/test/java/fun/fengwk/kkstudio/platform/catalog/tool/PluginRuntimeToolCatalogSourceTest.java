@@ -40,8 +40,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 
 import java.time.Duration;
 import java.util.List;

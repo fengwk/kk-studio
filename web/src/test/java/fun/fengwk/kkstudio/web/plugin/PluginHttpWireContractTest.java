@@ -36,7 +36,7 @@ import fun.fengwk.kkstudio.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
+import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;

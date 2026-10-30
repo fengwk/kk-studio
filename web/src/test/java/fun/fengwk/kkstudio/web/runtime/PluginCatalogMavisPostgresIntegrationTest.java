@@ -18,10 +18,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
