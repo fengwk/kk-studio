@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChildThreadView } from '@/features/chat/runtime/ChildThreadView'
+import { ThreadView, ConnectedThreadView } from '@/features/chat/runtime/ChildThreadView'
 import { harnessService } from '@/shared/api/harness-service'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { extractQueuedCustomMessages } from '@/features/chat/runtime/queued-custom-messages'
@@ -154,10 +154,11 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     const projection = createMockProjection(snapshot)
 
     render(
-      <ChildThreadView
+      <ThreadView
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
+        readOnly
       />,
       { wrapper },
     )
@@ -184,10 +185,11 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     const projection = createMockProjection(snapshot)
 
     render(
-      <ChildThreadView
+      <ThreadView
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
+        readOnly
       />,
       { wrapper },
     )
@@ -204,10 +206,11 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     const initialProjection = createMockProjection(initialSnapshot)
 
     const { rerender } = render(
-      <ChildThreadView
+      <ThreadView
         threadId={CHILD_THREAD_ID}
         projection={initialProjection}
         environments={[]}
+        readOnly
       />,
       { wrapper },
     )
@@ -254,10 +257,11 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     const appliedProjection = createMockProjection(appliedSnapshot)
 
     rerender(
-      <ChildThreadView
+      <ThreadView
         threadId={CHILD_THREAD_ID}
         projection={appliedProjection}
         environments={[]}
+        readOnly
       />,
     )
 
@@ -292,10 +296,11 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     const abandon = vi.spyOn(harnessService, 'abandonExecution').mockResolvedValue(stopped)
 
     render(
-      <ChildThreadView
+      <ThreadView
         threadId={CHILD_THREAD_ID}
         projection={projection}
         environments={[]}
+        readOnly
       />,
       { wrapper },
     )

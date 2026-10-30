@@ -24,6 +24,7 @@ export interface ThreadPresentation {
   parentThreadId: string | null
   parentHref: string | null
   identity: string | null
+  environmentName?: string | null
   act: (viewKey: string, action: PresentationAction, trigger?: HTMLElement) => void
 }
 
@@ -120,8 +121,10 @@ export function useThreadPresentation({
   const report = useMemo<ThreadPresentation>(() => ({
     viewKey: views.viewKey, threadId: thread?.threadId ?? null, mode: views.mode,
     name: thread?.parentThreadId && thread.name === 'main' ? null : thread?.name ?? null,
-    parentThreadId: thread?.parentThreadId ?? null, parentHref, identity, act,
-  }), [views.viewKey, views.mode, thread?.threadId, thread?.name, thread?.parentThreadId, parentHref, identity, act])
+    parentThreadId: thread?.parentThreadId ?? null, parentHref, identity,
+    environmentName: thread?.branchSettings?.environmentName ?? null,
+    act,
+  }), [views.viewKey, views.mode, thread?.threadId, thread?.name, thread?.parentThreadId, thread?.branchSettings?.environmentName, parentHref, identity, act])
   const callback = useRef(onReport)
   useLayoutEffect(() => { callback.current = onReport })
   useEffect(() => {

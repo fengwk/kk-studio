@@ -4,6 +4,22 @@ import { StrictMode } from 'react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoundBranchPanel } from '@/features/chat/runtime/useBoundBranchPanel'
+import { useThreadProjection, type ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
+import type { ComposerPart } from '@/features/chat/composer/composer-parts'
+
+function useTestBoundBranchPanel({
+  threadId,
+  initialParts,
+  projection: explicitProjection,
+}: {
+  threadId?: string
+  initialParts?: ComposerPart[]
+  projection?: ThreadProjection
+}) {
+  const ownProjection = useThreadProjection(threadId ?? '')
+  const projection = explicitProjection ?? ownProjection
+  return useBoundBranchPanel({ threadId, projection, initialParts })
+}
 import { createTextPart } from '@/features/chat/composer/composer-parts'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
@@ -373,7 +389,7 @@ describe('useBoundBranchPanel', () => {
         queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
       }),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -403,7 +419,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('applies draft-local selections with freeze rules and emits the fixed minimal diff order in one batch', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -451,7 +467,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_MODEL+USER_MESSAGE', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -493,7 +509,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('rejects selectAgent when agent model or variant is unresolvable without mutating draft', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -514,7 +530,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('resets manual model modification when reselecting the same agent', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -535,7 +551,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -572,7 +588,7 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new Error('STALE_VERSION: version 2 does not match expected 0'),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -607,7 +623,7 @@ describe('useBoundBranchPanel', () => {
         }),
       )
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -656,7 +672,7 @@ describe('useBoundBranchPanel', () => {
         )
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -707,7 +723,7 @@ describe('useBoundBranchPanel', () => {
       ),
     )
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -770,7 +786,7 @@ describe('useBoundBranchPanel', () => {
           resolve(threadFixture(threadId, { yoloEnabled: true, version: '1' }))
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -830,7 +846,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useTestBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -876,7 +892,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useTestBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -914,7 +930,7 @@ describe('useBoundBranchPanel', () => {
     })
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useTestBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -972,7 +988,7 @@ describe('useBoundBranchPanel', () => {
 
   it('surfaces raw string and fallback yolo rejection payloads and dismisses them', async () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce('plain string failure')
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -1001,7 +1017,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('ignores yolo toggles while no snapshot is bound yet', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     act(() => {
@@ -1016,7 +1032,7 @@ describe('useBoundBranchPanel', () => {
 
   it('follows the base from a newer snapshot while preserving the local draft', async () => {
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -1052,7 +1068,7 @@ describe('useBoundBranchPanel', () => {
       }),
     )
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -1079,7 +1095,7 @@ describe('useBoundBranchPanel', () => {
 
   it('follows an external YOLO policy change without discarding unsent model edits', async () => {
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1097,7 +1113,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('reloads base and draft from an authoritative thread DTO and ignores foreign threads', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -1144,7 +1160,7 @@ describe('useBoundBranchPanel', () => {
         acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
       ),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -1189,7 +1205,7 @@ describe('useBoundBranchPanel', () => {
         acceptedResponse(threadFixture(THREAD_ID), []),
       )
       const { result, unmount } = renderHook(
-        () => useBoundBranchPanel({ threadId: THREAD_ID }),
+        () => useTestBoundBranchPanel({ threadId: THREAD_ID }),
         { wrapper: clientWrapper(createClient()) },
       )
       await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1241,7 +1257,7 @@ describe('useBoundBranchPanel', () => {
           ))
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1284,7 +1300,7 @@ describe('useBoundBranchPanel', () => {
         ),
       ),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1309,7 +1325,7 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
       new Error('request rejected'),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1346,7 +1362,7 @@ describe('useBoundBranchPanel', () => {
         Promise.resolve(
           acceptedResponse(busyThreadFixture(threadId, { version: '6' }), request.commands),
         ))
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1378,7 +1394,7 @@ describe('useBoundBranchPanel', () => {
           )
       }))
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useTestBoundBranchPanel({ threadId }),
       {
         initialProps: { threadId: THREAD_ID },
         wrapper: clientWrapper(createClient()),
@@ -1411,7 +1427,7 @@ describe('useBoundBranchPanel', () => {
       Promise.resolve(
         acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
       ))
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: strictClientWrapper(createClient()),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1450,7 +1466,7 @@ describe('useBoundBranchPanel', () => {
       )
     })
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useTestBoundBranchPanel({ threadId }),
       {
         initialProps: { threadId: THREAD_ID },
         wrapper: clientWrapper(createClient()),

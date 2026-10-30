@@ -27,6 +27,8 @@ export { RootThreadControlArea } from '@/features/chat/runtime/RootThreadControl
 export {
   BoundThreadView,
   ChildThreadView,
+  ThreadView,
+  ConnectedThreadView,
 } from '@/features/chat/runtime/ChildThreadView'
 export { ThreadLink } from '@/features/chat/runtime/ThreadLink'
 export { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'

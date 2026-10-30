@@ -6,6 +6,7 @@ import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import {
   BoundThreadView,
+  ConnectedThreadView,
 } from '@/features/chat/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/chat/runtime/RootAgentPane'
 import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
@@ -198,11 +199,10 @@ export function AgentPane({
 
   // 各 thread layer 进入语义明确选择当前可操作环境，不从 toolarguments 猜 cwd；
   // 准确解析 EnvironmentCard.id/name/ready/HOME，查不到不能用 name 冒充 UUID。
-  const activeChildThreadId = navigation.activeThreadId
-  const childProjection = useThreadProjection(activeChildThreadId ?? '')
-  const activeLayerEnvironmentName = activeChildThreadId
-    ? childProjection.thread?.branchSettings?.environmentName ?? null
-    : projection.thread?.branchSettings?.environmentName ?? defaults?.environmentName ?? null
+  const activeLayerEnvironmentName = visiblePresentation?.environmentName
+    ?? projection.thread?.branchSettings?.environmentName
+    ?? defaults?.environmentName
+    ?? null
 
   const matchedEnvCard = activeLayerEnvironmentName
     ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
@@ -309,7 +309,7 @@ export function AgentPane({
             hidden={hidden || index !== topLayerIndex}
             inert={hidden || index !== topLayerIndex}
           >
-            <BoundThreadView
+            <ConnectedThreadView
               threadId={layer.threadId}
               environments={environments}
               readOnly

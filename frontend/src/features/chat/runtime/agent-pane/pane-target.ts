@@ -1,5 +1,6 @@
 import type { ComposerPart } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
+import type { PendingAcceptance } from '@/features/chat/runtime/pending-request-store'
 import { isCanonicalThreadName } from '@/features/chat/thread-name'
 import type {
   AgentCommandTargetDTO,
@@ -22,8 +23,6 @@ export type PaneTarget =
   | { kind: 'BOUND_THREAD'; threadId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
-
-export type { PendingAcceptance } from '@/features/chat/runtime/pending-request-store'
 
 export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
   return owner.type === 'CHAT'
@@ -416,20 +415,4 @@ export function targetIdentity(target: PaneTarget): string {
   }
   return `thread:${target.threadId}`
 }
-
-export {
-  samePendingAcceptanceIdentity,
-  sameBatchRequestIdentity,
-  inspectPendingAcceptanceSlot,
-  loadPendingAcceptance,
-  savePendingAcceptance,
-  clearPendingAcceptance,
-  boundPendingStorageKey,
-  isBoundPendingMessageValue,
-  loadBoundPendingMessage,
-  saveBoundPendingMessage,
-  clearBoundPendingMessage,
-  type PendingAcceptanceSlot,
-  type BoundPendingMessage,
-} from '@/features/chat/runtime/pending-request-store'
 

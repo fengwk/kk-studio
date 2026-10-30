@@ -84,13 +84,13 @@ export function retireStaleStopPending(
 }
 
 export function useAgentThreadController(
-  threadId: string,
+  projection: ThreadProjection,
   initialParts: ComposerPart[] = [],
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
   buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
-  injectedProjection?: ThreadProjection,
 ) {
   const { t } = useI18n()
+  const threadId = projection.threadId
   const boundThreadIdRef = useRef(threadId)
   const bindingEpochRef = useRef(0)
   if (boundThreadIdRef.current !== threadId) {
@@ -127,13 +127,10 @@ export function useAgentThreadController(
   const [stopReplayPending, setStopReplayPending] = useState(false)
   const queryClient = useQueryClient()
 
-  // 只读投影是唯一所有者：控制面只叠加编辑草稿、待决提交与人工执行 mutation。
-  // 根面板已经把该 Thread 的投影（快照、实时流、timeline、usage）交给调用方时直接复用，
-  // 不再自建第二个订阅；未注入时（例如草稿面板）才自建。
-  const ownProjection = useThreadProjection(injectedProjection ? '' : threadId)
-  const projection = injectedProjection ?? ownProjection
+  // 命令与控制面仅消费 required 投影，不再自建订阅，也不再使用空串关闭技巧。
   const { thread, queuedCommands, stopReceipts, manualCompaction, snapshotQuery } = projection
   const bound = projection.bound
+
 
   const draftRecord = useThreadDraftRecord({
     threadId,
