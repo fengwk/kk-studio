@@ -184,7 +184,7 @@ public class InMemoryHarnessStore implements HarnessStore {
     return predicate != null && predicate.hasReadyLease(environmentId, now);
   }
 
-  private static void requireMillisecondPrecision(Instant instant) {
+  protected static void requireMillisecondPrecision(Instant instant) {
     HarnessStoreTime.requireMillisecondPrecision(instant);
   }
 
@@ -309,7 +309,7 @@ public class InMemoryHarnessStore implements HarnessStore {
     final Map<CommandKey, ThreadCommand> commands = new HashMap<>();
     final Map<UUID, Object> driverRows = new HashMap<>();
     final Map<UUID, UUID> driverRowOwners = new HashMap<>();
-    final Map<String, Object> driverAttributes = new HashMap<>();
+    final Map<Object, Object> driverAttributes = new HashMap<>();
     final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
     final Map<UUID, ThreadJoin> joins = new HashMap<>();
     final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
@@ -452,11 +452,6 @@ public class InMemoryHarnessStore implements HarnessStore {
 
     protected InMemoryTransaction(State state) {
       this.state = state;
-    }
-
-    /** 事务所属 Store；扩展事务只能在同一个 Store 内被投影。 */
-    protected final InMemoryHarnessStore ownerStore() {
-      return InMemoryHarnessStore.this;
     }
 
     @Override
@@ -617,6 +612,18 @@ public class InMemoryHarnessStore implements HarnessStore {
       if (!locked.contains(key)) {
         throw new IllegalStateException(key + " is not locked in this transaction");
       }
+    }
+
+    /** 扩展事务在依赖 Thread 当前状态前断言已持有其行锁；错误分类与文本与核心一致。 */
+    protected final void requireThreadLocked(UUID threadId) {
+      checkOpen();
+      requireLocked(LockKey.thread(threadId));
+    }
+
+    /** 扩展事务在存在性 / transition 校验前断言已持有 driver row 行锁；不主动加锁。 */
+    protected final void requireDriverRowLocked(UUID id) {
+      checkOpen();
+      requireLocked(LockKey.model(id));
     }
 
     private void requireAbsent(Map<UUID, ?> rows, UUID id, String kind) {
@@ -1683,12 +1690,12 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Map.copyOf(state.driverRows);
     }
 
-    protected Optional<Object> driverAttribute(String key) {
+    protected Optional<Object> driverAttribute(Object key) {
       checkOpen();
       return Optional.ofNullable(state.driverAttributes.get(key));
     }
 
-    protected void putDriverAttribute(String key, Object value) {
+    protected void putDriverAttribute(Object key, Object value) {
       checkOpen();
       Objects.requireNonNull(key, "key");
       Objects.requireNonNull(value, "value");
