@@ -231,4 +231,100 @@ describe('pending-request-store', () => {
     expect(sameBatchRequestIdentity(reqA, reqC)).toBe(false)
     expect(sameBatchRequestIdentity(reqA, reqD)).toBe(false)
   })
+
+  it('acceptance 目标匹配过滤、损坏数据与不可用 storage 防护', () => {
+    const storage = memoryStorage()
+    savePendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)
+
+    // expectedTarget 匹配时返回，不匹配时返回 null
+    const matched = loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'NEW_SESSION_DRAFT' })
+    expect(matched).not.toBeNull()
+
+    const mismatched = loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'BOUND_THREAD', threadId: 'other-id' })
+    expect(mismatched).toBeNull()
+
+    // 槽位损坏（坏 JSON）
+    storage.setItem(`kk-studio.agent-pane-acceptance.${owner.type === 'CHAT' ? `CHAT:${owner.chatId}` : ''}:pane-1`, 'not-json')
+    const corruptedSlot = inspectPendingAcceptanceSlot(owner, 'pane-1', storage)
+    expect(corruptedSlot.status).toBe('invalid')
+
+    // 尝试写入损坏槽位直接拒绝
+    expect(savePendingAcceptance(owner, 'pane-1', pendingAcceptance, storage)).toBe(false)
+
+    // 存储不可用（抛错）
+    const throwingStorage: Storage = {
+      getItem: () => { throw new Error('QuotaExceeded') },
+      setItem: () => { throw new Error('QuotaExceeded') },
+      removeItem: () => { throw new Error('QuotaExceeded') },
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    }
+    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', throwingStorage).status).toBe('unavailable')
+    expect(savePendingAcceptance(owner, 'pane-1', pendingAcceptance, throwingStorage)).toBe(false)
+    expect(clearPendingAcceptance(owner, 'pane-1', pendingAcceptance, throwingStorage)).toBe(false)
+  })
+
+  it('bound message 边界校验、损坏清理与回读验证', () => {
+    const storage = memoryStorage()
+
+    // 1. threadId 为空或非法 shape
+    expect(() => saveBoundPendingMessage('', boundPendingMessage, storage)).toThrow(/threadId is required/)
+    expect(() => saveBoundPendingMessage(threadId, {} as unknown as BoundPendingMessage, storage)).toThrow(/Invalid bound pending message shape/)
+
+    // 2. loadBoundPendingMessage 遇到非法 JSON 或不匹配数据自动清理
+    const key = `kk-studio.agent-thread-pending.${threadId}`
+    storage.setItem(key, JSON.stringify({ invalid: 'shape', threadId }))
+    expect(loadBoundPendingMessage(threadId, storage)).toBeNull()
+    expect(storage.getItem(key)).toBeNull()
+
+    // 3. 回读校验失败防护
+    const faultyStorage: Storage = {
+      ...storage,
+      getItem: (k: string) => {
+        if (k === key) return 'tampered'
+        return storage.getItem(k)
+      },
+    }
+    expect(() => saveBoundPendingMessage(threadId, boundPendingMessage, faultyStorage)).toThrow(
+      /Persistence verification failed/,
+    )
+
+    // 4. clear 遇到坏数据或存储异常
+    storage.setItem(key, 'bad-json')
+    expect(clearBoundPendingMessage(threadId, boundPendingMessage.request, storage)).toBe(true)
+    // key 不存在时 clear 匹配请求直接返回 true
+    expect(clearBoundPendingMessage('non-existent-thread', boundPendingMessage.request, storage)).toBe(true)
+
+    const throwingStorage: Storage = {
+      getItem: () => { throw new Error('SecurityError') },
+      setItem: () => { throw new Error('SecurityError') },
+      removeItem: () => { throw new Error('SecurityError') },
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    }
+    expect(clearBoundPendingMessage(threadId, undefined, throwingStorage)).toBe(false)
+  })
+
+  it('默认 globalThis.localStorage 路径与空键防线', () => {
+    localStorage.clear()
+
+    // 默认 storage 路径
+    expect(savePendingAcceptance(owner, 'pane-default', pendingAcceptance)).toBe(true)
+    expect(loadPendingAcceptance(owner, 'pane-default')).not.toBeNull()
+    expect(clearPendingAcceptance(owner, 'pane-default', pendingAcceptance)).toBe(true)
+
+    saveBoundPendingMessage(threadId, boundPendingMessage)
+    expect(loadBoundPendingMessage(threadId)).not.toBeNull()
+    expect(clearBoundPendingMessage(threadId)).toBe(true)
+
+    // 空 threadId
+    expect(loadBoundPendingMessage('')).toBeNull()
+    expect(clearBoundPendingMessage('')).toBe(true)
+
+    // 不匹配的 owner 保存拒绝
+    const mismatchOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-other' }
+    expect(savePendingAcceptance(mismatchOwner, 'pane-1', pendingAcceptance, memoryStorage())).toBe(false)
+  })
 })

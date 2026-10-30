@@ -6,6 +6,7 @@ import {
   useAgentThreadController,
   retireStaleStopPending,
 } from '@/features/chat/runtime/useAgentThreadController'
+import { useThreadProjection, type ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { isCursorFreeThreadBatch } from '@/features/chat/runtime/agent-pane/agent-pane-pipeline'
 import {
   buildMessageBatchPlan,
@@ -21,7 +22,19 @@ import {
 } from '@/features/chat/composer/composer-parts'
 import { loadThreadDraft } from '@/features/chat/runtime/thread-draft-store'
 import { pendingStopStorageKey } from '@/features/chat/runtime/pending-stop-sidecar'
-import { loadBoundPendingMessage } from '@/features/chat/runtime/agent-pane/pane-target'
+import { loadBoundPendingMessage } from '@/features/chat/runtime/pending-request-store'
+
+function useTestController(
+  threadId: string,
+  initialParts: ComposerPart[] = [],
+  buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
+  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
+  injectedProjection?: ThreadProjection,
+) {
+  const ownProjection = useThreadProjection(threadId)
+  const projection = injectedProjection ?? ownProjection
+  return useAgentThreadController(projection, initialParts, buildBatch, buildGoalBatch)
+}
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
@@ -290,7 +303,7 @@ describe('useAgentThreadController', () => {
     }
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -342,7 +355,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -378,7 +391,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
 
     const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
+      () => useTestController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -445,7 +458,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -487,7 +500,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -540,7 +553,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatch,
@@ -577,7 +590,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -616,7 +629,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -640,7 +653,7 @@ describe('useAgentThreadController', () => {
 
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, draft),
@@ -666,7 +679,7 @@ describe('useAgentThreadController', () => {
         stoppedThreads: [],
       } as HarnessThreadStopResultDTO)
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -719,7 +732,7 @@ describe('useAgentThreadController', () => {
           },
         ],
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft([createTextPart('current')]))
 
@@ -766,7 +779,7 @@ describe('useAgentThreadController', () => {
         },
       ],
     } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -785,7 +798,7 @@ describe('useAgentThreadController', () => {
 
   it('restores the persisted pending Stop identity after remount', async () => {
     vi.mocked(harnessService.stopThread).mockRejectedValueOnce(new Error('response lost'))
-    const first = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const first = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(first.result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -800,7 +813,7 @@ describe('useAgentThreadController', () => {
       thread: threadFixture(),
       stoppedThreads: [],
     } as HarnessThreadStopResultDTO)
-    const second = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const second = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(second.result.current.disabled).toBe(false))
     await waitFor(() => expect(second.result.current.stopReplayPending).toBe(true))
 
@@ -822,7 +835,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -868,7 +881,7 @@ describe('useAgentThreadController', () => {
         thread: threadFixture(),
         stoppedThreads: [],
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -896,7 +909,7 @@ describe('useAgentThreadController', () => {
         thread: threadFixture(),
         stoppedThreads: [],
       } as HarnessThreadStopResultDTO)
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -946,7 +959,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -983,7 +996,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh stopRequestId after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1005,7 +1018,7 @@ describe('useAgentThreadController', () => {
       .mockRejectedValueOnce(new Error('network unavailable'))
       .mockResolvedValueOnce(toolInvocationFixture({ id: 'tool-1' }))
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1034,7 +1047,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('mints a fresh decisionId for a different invocation', async () => {
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     await act(async () => {
@@ -1062,7 +1075,7 @@ describe('useAgentThreadController', () => {
         toolInvocationFixture({ id: 'tool-child', toolName: 'bash', rendererKey: 'bash' }),
       )
 
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     // 子 Thread 审批：mutation 必须打到 status.threadId，而不是父 Thread。
@@ -1095,7 +1108,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
       new ApiError('stale child version', 409),
     )
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1112,7 +1125,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('invalidates the snapshot after a successful stop', async () => {
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     const initialCalls = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
@@ -1152,7 +1165,7 @@ describe('useAgentThreadController', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
-    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+    const { result } = renderHook(() => useTestController(currentThread.threadId), {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1203,7 +1216,7 @@ describe('useAgentThreadController', () => {
       }),
     )
 
-    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+    const { result } = renderHook(() => useTestController(currentThread.threadId), {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1232,7 +1245,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
 
     const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
+      () => useTestController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1257,7 +1270,7 @@ describe('useAgentThreadController', () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1293,7 +1306,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, base),
@@ -1314,7 +1327,7 @@ describe('useAgentThreadController', () => {
 
   it('surfaces a raw string rejection from stop without wrapping it', async () => {
     vi.mocked(harnessService.stopThread).mockRejectedValueOnce('plain string failure')
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     await act(async () => {
       await result.current.stopThread()
@@ -1326,7 +1339,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(
       new Promise<HarnessThreadSnapshotDTO>(() => undefined),
     )
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await act(async () => {
       await result.current.stopThread()
     })
@@ -1342,7 +1355,7 @@ describe('useAgentThreadController', () => {
     const currentThread = threadFixture()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
     // 缺省 buildBatch（null）：submit 给出 threadNotLoaded 并阻止发送。
-    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+    const { result } = renderHook(() => useTestController(currentThread.threadId), {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1356,7 +1369,7 @@ describe('useAgentThreadController', () => {
     // buildBatch 返回 null（不可构建的 payload）：静默 no-op，draft 原样保留。
     const { result: nullPlan } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           () => null,
@@ -1379,7 +1392,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, base),
@@ -1417,7 +1430,7 @@ describe('useAgentThreadController', () => {
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
       () =>
-        useAgentThreadController(
+        useTestController(
           currentThread.threadId,
           [],
           buildBatchFor(currentThread, base, base),
@@ -1459,7 +1472,7 @@ describe('useAgentThreadController', () => {
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
-      () => useAgentThreadController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
+      () => useTestController(currentThread.threadId, [], buildBatchFor(currentThread, base, base)),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1478,7 +1491,7 @@ describe('useAgentThreadController', () => {
   it('persists edit drafts to the thread record and skips persistence for history sources', async () => {
     const currentThread = threadFixture()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
-    const { result } = renderHook(() => useAgentThreadController(currentThread.threadId), {
+    const { result } = renderHook(() => useTestController(currentThread.threadId), {
       wrapper,
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1524,7 +1537,7 @@ describe('useAgentThreadController', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1553,7 +1566,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.compactThread).mockRejectedValueOnce(
       new ApiError('stale compact version', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
     )
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+    const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1577,7 +1590,7 @@ describe('useAgentThreadController', () => {
   })
 
   it('reports compaction unavailability when the advisory sidecar is missing', async () => {
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     await act(async () => {
       await result.current.compactThread()
@@ -1596,7 +1609,7 @@ describe('useAgentThreadController', () => {
       turnStartEntryId: 't1',
       childThreadId: null,
     })
-    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.runCommand({ id: 'stop', label: 'stop', description: 'stop' }))
     await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
@@ -1623,7 +1636,7 @@ describe('useAgentThreadController', () => {
     })
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper: clientWrapper(client), initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1664,7 +1677,7 @@ describe('useAgentThreadController', () => {
       Promise.resolve(snapshotOf(threadFixture({ threadId }))),
     )
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1694,7 +1707,7 @@ describe('useAgentThreadController', () => {
       Promise.resolve(snapshotOf(threadFixture({ threadId }))),
     )
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1717,7 +1730,7 @@ describe('useAgentThreadController', () => {
       snapshotOf(threadFixture({ threadId: THREAD_ID, status: 'RUNNING' })),
     )
     const { result } = renderHook(
-      () => useAgentThreadController(THREAD_ID),
+      () => useTestController(THREAD_ID),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -1734,7 +1747,7 @@ describe('useAgentThreadController', () => {
       ),
     )
     const { result: result2 } = renderHook(
-      () => useAgentThreadController(THREAD_ID_2),
+      () => useTestController(THREAD_ID_2),
       { wrapper },
     )
     await waitFor(() => expect(result2.current.disabled).toBe(false))
@@ -1773,7 +1786,7 @@ describe('useAgentThreadController', () => {
 
     const { result, rerender } = renderHook(
       ({ tid }: { tid: string }) =>
-        useAgentThreadController(tid, [], (parts) => {
+        useTestController(tid, [], (parts) => {
           const curThread = tid === THREAD_ID_2 ? threadB : threadA
           const curBase = tid === THREAD_ID_2 ? baseB : baseA
           return buildBatchFor(curThread, curBase, curBase)(parts)
@@ -1853,7 +1866,7 @@ describe('useAgentThreadController', () => {
 
     const { result, rerender } = renderHook(
       ({ tid }: { tid: string }) =>
-        useAgentThreadController(tid, [], (parts) => {
+        useTestController(tid, [], (parts) => {
           const curThread = tid === THREAD_ID_2 ? threadB : threadA
           const curBase = branchDraftFromThread(curThread)
           return buildBatchFor(curThread, curBase, curBase)(parts)
@@ -1919,7 +1932,7 @@ describe('useAgentThreadController', () => {
 
     const { result, rerender } = renderHook(
       ({ tid }: { tid: string }) =>
-        useAgentThreadController(tid, [], (parts) => {
+        useTestController(tid, [], (parts) => {
           const curThread = tid === THREAD_ID_2 ? threadB : threadA
           const curBase = branchDraftFromThread(curThread)
           return buildBatchFor(curThread, curBase, curBase)(parts)
@@ -1971,7 +1984,7 @@ describe('useAgentThreadController', () => {
       ({ tid }: { tid: string }) => {
         const curThread = tid === THREAD_ID_2 ? threadB : threadA
         const curBase = branchDraftFromThread(curThread)
-        return useAgentThreadController(tid, [], buildBatchFor(curThread, curBase, curBase))
+        return useTestController(tid, [], buildBatchFor(curThread, curBase, curBase))
       },
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
@@ -2022,7 +2035,7 @@ describe('useAgentThreadController', () => {
 
     const { result, rerender } = renderHook(
       ({ tid }: { tid: string }) =>
-        useAgentThreadController(tid, [], (parts) => {
+        useTestController(tid, [], (parts) => {
           const curThread = tid === THREAD_ID_2 ? threadB : threadA
           const curBase = branchDraftFromThread(curThread)
           return buildBatchFor(curThread, curBase, curBase)(parts)
@@ -2123,7 +2136,7 @@ describe('useAgentThreadController', () => {
 
     const { result, rerender } = renderHook(
       ({ tid }: { tid: string }) =>
-        useAgentThreadController(tid, [], (parts) => {
+        useTestController(tid, [], (parts) => {
           const curThread = tid === THREAD_ID_2 ? threadB : threadA
           const curBase = branchDraftFromThread(curThread)
           return buildBatchFor(curThread, curBase, curBase)(parts)
@@ -2195,7 +2208,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(harnessService.decideApproval).mockImplementation(async () => approvalPromiseA)
 
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -2249,7 +2262,7 @@ describe('useAgentThreadController', () => {
     })
 
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
@@ -2322,7 +2335,7 @@ describe('useAgentThreadController', () => {
     })
 
     const { result, rerender } = renderHook(
-      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      ({ tid }: { tid: string }) => useTestController(tid),
       { wrapper, initialProps: { tid: THREAD_ID } },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
