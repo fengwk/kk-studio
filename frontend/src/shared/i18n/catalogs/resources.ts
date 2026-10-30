@@ -354,6 +354,14 @@ export const resourcesCatalog = {
     'en-US': 'in {{input}} / out {{output}} / read {{cacheRead}} / write {{cacheWrite}} · {{overrides}} overrides · {{multipliers}} multipliers',
     'zh-CN': '输入 {{input}} / 输出 {{output}} / 缓存读 {{cacheRead}} / 缓存写 {{cacheWrite}} · 覆盖 {{overrides}} · 倍率 {{multipliers}}',
   },
+  'ai.catalog.catalog.issue.ignoredRegionMultiplier': {
+    'en-US': 'Region multipliers ignored; estimated costs may be lower than your actual bill',
+    'zh-CN': '已忽略地区倍率，统计费用可能低于实际账单',
+  },
+  'ai.catalog.catalog.issue.nonTokenCostWebSearch': {
+    'en-US': 'Web search surcharges are not included in token prices',
+    'zh-CN': '网页搜索附加费用未计入Token价格',
+  },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
     'zh-CN': 'Model ID',
