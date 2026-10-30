@@ -1,0 +1,9 @@
+/**
+ * Issue 的后台推进与部署级调度配置。
+ *
+ * <p>{@link IssueReconcileDispatcher} 只做 {@code durable_work} 中 ISSUE 行的 claim、bounded handoff 与
+ * poll 生命周期；{@link IssueReconciler} 在 Project −&gt; Issue −&gt; 活动 Run 的固定锁序下推进目标语义（安全等待、Run
+ * 收尾、交接、失败暂停与迟到回调拒绝）。Run 接受与收尾的原子编排仍在 {@code fun.fengwk.kkstudio.project.service}，Work 邮箱的租约与唤醒由共享的
+ * {@code fun.fengwk.kkstudio.work.DurableWorkQueue} 承担。
+ */
+package fun.fengwk.kkstudio.project.reconcile;

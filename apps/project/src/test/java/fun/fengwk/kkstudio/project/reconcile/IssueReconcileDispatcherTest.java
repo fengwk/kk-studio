@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.controller;
+package fun.fengwk.kkstudio.project.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -43,24 +43,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 /**
- * {@link IssueControllerDispatcher} 有界调度器的纯单元测试（无 Spring，无数据库）。
+ * {@link IssueReconcileDispatcher} 有界调度器的纯单元测试（无 Spring，无数据库）。
  *
  * <p>测试意图：覆盖 dispatcher 的周期轮询注册、首次与合并 wake 驱动、工作者拒绝退避与防热循环、 调谐异常重试、最大并发容量限制与容量计量、stop/close
  * 优雅收尾及执行器拒绝策略校验等全部契约。
  */
-class IssueControllerDispatcherTest {
+class IssueReconcileDispatcherTest {
 
   private static final Instant LEASE_UNTIL = Instant.parse("2026-09-27T10:00:30Z");
 
   /** 调度边界没有 Clock 依赖，也不向 store 传绝对时间，避免 JVM 时钟参与租约或 due 的计算。 */
   @Test
   void schedulingBoundaryHasNoApplicationClockDependency() {
-    for (var constructor : IssueControllerDispatcher.class.getDeclaredConstructors()) {
+    for (var constructor : IssueReconcileDispatcher.class.getDeclaredConstructors()) {
       for (Class<?> parameter : constructor.getParameterTypes()) {
         assertFalse(Clock.class.isAssignableFrom(parameter));
       }
     }
-    for (var field : IssueControllerDispatcher.class.getDeclaredFields()) {
+    for (var field : IssueReconcileDispatcher.class.getDeclaredFields()) {
       assertFalse(Clock.class.isAssignableFrom(field.getType()));
     }
     for (var method : DurableWorkQueue.class.getMethods()) {
@@ -83,12 +83,12 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenAnswer(inv -> pollFuture);
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     properties.setPollInterval(Duration.ofSeconds(2));
     properties.setLeaseDuration(Duration.ofSeconds(30));
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
@@ -130,9 +130,9 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenAnswer(inv -> pollFuture);
 
-    IssueControllerProperties properties = new IssueControllerProperties();
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileProperties properties = new IssueReconcileProperties();
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     // start 前 wake 是 no-op
@@ -177,15 +177,15 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     AtomicInteger drainCount = new AtomicInteger();
 
     // 可控同步执行器：每次执行提交由主线程触发
     LinkedBlockingQueue<Runnable> drainQueue = new LinkedBlockingQueue<>();
     Executor drainExecutor = drainQueue::add;
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, drainExecutor, Runnable::run, pollScheduler);
 
     when(workStore.claimNext(anyString(), any(Duration.class)))
@@ -226,7 +226,7 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     properties.setRejectionDelay(Duration.ofSeconds(3));
 
     Executor rejectingWorkerExecutor =
@@ -234,8 +234,8 @@ class IssueControllerDispatcherTest {
           throw new RejectedExecutionException("worker pool saturated");
         };
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore,
             reconciler,
             properties,
@@ -268,11 +268,11 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     properties.setRetryDelay(Duration.ofSeconds(5));
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, throwingReconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
@@ -296,7 +296,7 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     properties.setMaxDispatchTasks(2);
 
     CountDownLatch enteredLatch = new CountDownLatch(2);
@@ -316,8 +316,8 @@ class IssueControllerDispatcherTest {
     ExecutorService workerExecutor = Executors.newFixedThreadPool(4);
     ExecutorService drainExecutor = Executors.newSingleThreadExecutor();
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore,
             blockingReconciler,
             properties,
@@ -353,11 +353,11 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     properties.setRejectionDelay(Duration.ofSeconds(1));
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
@@ -383,7 +383,7 @@ class IssueControllerDispatcherTest {
     DurableWorkQueue workStore = mock(DurableWorkQueue.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
 
     ThreadPoolExecutor discardDrain =
@@ -397,7 +397,7 @@ class IssueControllerDispatcherTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IssueControllerDispatcher(
+            new IssueReconcileDispatcher(
                 workStore, reconciler, properties, discardDrain, Runnable::run, pollScheduler));
 
     ThreadPoolExecutor callerRunsWorker =
@@ -411,7 +411,7 @@ class IssueControllerDispatcherTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IssueControllerDispatcher(
+            new IssueReconcileDispatcher(
                 workStore, reconciler, properties, Runnable::run, callerRunsWorker, pollScheduler));
 
     ThreadPoolExecutor discardOldestWorker =
@@ -425,7 +425,7 @@ class IssueControllerDispatcherTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IssueControllerDispatcher(
+            new IssueReconcileDispatcher(
                 workStore,
                 reconciler,
                 properties,
@@ -449,14 +449,14 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     Executor rejectingDrain =
         r -> {
           throw new RejectedExecutionException("drain executor full");
         };
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, rejectingDrain, Runnable::run, pollScheduler);
 
     assertDoesNotThrow(dispatcher::start);
@@ -474,14 +474,14 @@ class IssueControllerDispatcherTest {
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
         .thenReturn(mock(ScheduledFuture.class));
 
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     Executor errorWorker =
         r -> {
           throw new AssertionError("worker executor assertion error");
         };
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, Runnable::run, errorWorker, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
@@ -498,11 +498,11 @@ class IssueControllerDispatcherTest {
   void publicConstructorInitializesCorrectly() {
     DurableWorkQueue workStore = mock(DurableWorkQueue.class);
     IssueReconciler reconciler = mock(IssueReconciler.class);
-    IssueControllerProperties properties = new IssueControllerProperties();
+    IssueReconcileProperties properties = new IssueReconcileProperties();
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
 
-    IssueControllerDispatcher dispatcher =
-        new IssueControllerDispatcher(
+    IssueReconcileDispatcher dispatcher =
+        new IssueReconcileDispatcher(
             workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
     assertNotNull(dispatcher);
     assertEquals(0, dispatcher.dispatchCapacity());

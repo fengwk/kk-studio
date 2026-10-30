@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.controller;
+package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -106,7 +106,7 @@ public class IssueReconciler {
   private final DurableWorkQueue issueWorkQueue;
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
-  private final IssueControllerProperties properties;
+  private final IssueReconcileProperties properties;
   private final Clock clock;
 
   @Autowired
@@ -123,7 +123,7 @@ public class IssueReconciler {
       DurableWorkQueue issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
-      IssueControllerProperties properties) {
+      IssueReconcileProperties properties) {
     this(
         projectRepository,
         issueRepository,
@@ -154,7 +154,7 @@ public class IssueReconciler {
       DurableWorkQueue issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
-      IssueControllerProperties properties,
+      IssueReconcileProperties properties,
       Clock clock) {
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");

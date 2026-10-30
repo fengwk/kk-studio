@@ -13,8 +13,8 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
-import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
@@ -25,50 +25,50 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * {@link IssueControllerRuntimeConfiguration} 运行时装配集成测试：
+ * {@link IssueReconcileRuntimeConfiguration} 运行时装配集成测试：
  *
- * <p>验证 Issue Controller 的 dispatcher、executors、lifecycle 与 PostgreSQL notification loop 的 Spring
+ * <p>验证 Issue Reconcile 的 dispatcher、executors、lifecycle 与 PostgreSQL notification loop 的 Spring
  * 依赖图装配，以及 workers-enabled=false 时的行为。
  */
-class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
+class IssueReconcileRuntimeConfigurationTest extends WebPostgresTestSupport {
 
   @DynamicPropertySource
-  static void overrideControllerProperties(DynamicPropertyRegistry registry) {
-    registry.add("kk-studio.project.controller.max-dispatch-tasks", () -> "12");
-    registry.add("kk-studio.project.controller.lease-duration", () -> "40s");
-    registry.add("kk-studio.project.controller.poll-interval", () -> "3s");
-    registry.add("kk-studio.project.controller.rejection-delay", () -> "500ms");
-    registry.add("kk-studio.project.controller.retry-delay", () -> "8s");
-    registry.add("kk-studio.project.controller.worker.concurrency", () -> "4");
-    registry.add("kk-studio.project.controller.worker.queue-capacity", () -> "16");
+  static void overrideReconcileProperties(DynamicPropertyRegistry registry) {
+    registry.add("kk-studio.project.reconcile.max-dispatch-tasks", () -> "12");
+    registry.add("kk-studio.project.reconcile.lease-duration", () -> "40s");
+    registry.add("kk-studio.project.reconcile.poll-interval", () -> "3s");
+    registry.add("kk-studio.project.reconcile.rejection-delay", () -> "500ms");
+    registry.add("kk-studio.project.reconcile.retry-delay", () -> "8s");
+    registry.add("kk-studio.project.reconcile.worker.concurrency", () -> "4");
+    registry.add("kk-studio.project.reconcile.worker.queue-capacity", () -> "16");
   }
 
-  @Autowired private IssueControllerProperties properties;
-  @Autowired private IssueControllerDispatcher dispatcher;
+  @Autowired private IssueReconcileProperties properties;
+  @Autowired private IssueReconcileDispatcher dispatcher;
 
   @Autowired
-  @Qualifier("issueControllerRuntimeLifecycle")
+  @Qualifier("issueReconcileRuntimeLifecycle")
   private SmartLifecycle lifecycle;
 
   @Autowired
-  @Qualifier("issueControllerDispatcherDrainExecutor")
+  @Qualifier("issueReconcileDispatcherDrainExecutor")
   private ExecutorService drainExecutor;
 
   @Autowired
-  @Qualifier("issueControllerDispatcherWorkerExecutor")
+  @Qualifier("issueReconcileDispatcherWorkerExecutor")
   private ExecutorService workerExecutor;
 
   @Autowired
-  @Qualifier("issueControllerDispatcherPollScheduler")
+  @Qualifier("issueReconcileDispatcherPollScheduler")
   private ScheduledExecutorService pollScheduler;
 
   @Autowired
   @Qualifier("postgresqlNotificationLoop")
   private PostgresqlNotificationLoop postgresqlNotificationLoop;
 
-  /** 测试意图：验证完整的 Issue Controller 运行时 bean 图正确装配， 且配置属性正确绑定到 IssueControllerProperties。 */
+  /** 测试意图：验证完整的 Issue Reconcile 运行时 bean 图正确装配， 且配置属性正确绑定到 IssueReconcileProperties。 */
   @Test
-  void composesIssueControllerRuntimeBeanGraph() {
+  void composesIssueReconcileRuntimeBeanGraph() {
     assertNotNull(properties);
     assertEquals(12, properties.getMaxDispatchTasks());
     assertEquals(Duration.ofSeconds(40), properties.getLeaseDuration());
@@ -119,7 +119,7 @@ class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
   }
 
   /**
-   * 测试意图：验证 workers-enabled=false 时，Issue Controller dispatcher 不启动（lifecycle 处于 stopped 状态）， 但
+   * 测试意图：验证 workers-enabled=false 时，Issue Reconcile dispatcher 不启动（lifecycle 处于 stopped 状态）， 但
    * PostgresqlNotificationLoop 保持运行，且向 dispatcher 发起 wake 为安全 no-op。
    */
   @Test
