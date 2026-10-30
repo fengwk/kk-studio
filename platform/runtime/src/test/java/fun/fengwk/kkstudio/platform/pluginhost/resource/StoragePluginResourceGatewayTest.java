@@ -24,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
@@ -1364,7 +1365,9 @@ class StoragePluginResourceGatewayTest {
             invocation -> {
               Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
               HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              when(tx.threads().find(threadId)).thenReturn(Optional.of(thread));
+              ThreadStore threadStore = mock(ThreadStore.class);
+              when(tx.threads()).thenReturn(threadStore);
+              when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
               return callback.apply(tx);
             });
   }
@@ -1375,7 +1378,9 @@ class StoragePluginResourceGatewayTest {
             invocation -> {
               Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
               HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              when(tx.threads().find(threadId)).thenReturn(Optional.empty());
+              ThreadStore threadStore = mock(ThreadStore.class);
+              when(tx.threads()).thenReturn(threadStore);
+              when(threadStore.find(threadId)).thenReturn(Optional.empty());
               return callback.apply(tx);
             });
   }

@@ -1100,10 +1100,10 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                         running.requestedAt()),
                 now));
 
-    builtin(tx).insertModelInvocation(model);
-    builtin(tx).updateModelInvocation(running);
-    builtin(tx).updateModelInvocation(running.succeed(response, now));
-    builtin(tx)
+    builtin(store, tx).insertModelInvocation(model);
+    builtin(store, tx).updateModelInvocation(running);
+    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx)
         .updateModelInvocation(
             running.succeed(response, now).attachResultEntry(assistantEntryId, now));
 
