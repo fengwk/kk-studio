@@ -491,7 +491,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   }
 
   /** READY -&gt; RUNNING（attempt+1）+ version+1：副作用之前的持久执行意图，要求 claim 仍 owned 且 attempt 匹配。 */
-  boolean markRunning() {
+  private boolean markRunning() {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
