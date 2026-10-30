@@ -124,8 +124,9 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 ## REST 调度
 
 [`reconcile`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/package-info.java)
-承载 Issue 的部署级配置与确定性推进：`IssueReconcileDispatcher` 只做 `durable_work` 中 `ISSUE` 行的
-claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
+承载 Issue 的部署级配置与确定性推进：Web 组合根的
+[`IssueReconcileRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/IssueReconcileRuntimeConfiguration.java)
+只做 `durable_work` 中 `ISSUE` 行的 claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
 拒绝/失败分型复用 [Durable Work](work.md) 的
 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)，
 [`IssueReconciler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/IssueReconciler.java)
@@ -137,7 +138,7 @@ Work 的请求、claim、续租、完成与重排由共享的
 完成，Project 只持有 target type 为 `ISSUE` 的实例 `issueWorkQueue`：时间一律取数据库
 `statement_timestamp()` 并截断到毫秒，调用方传相对 `Duration`，Dispatcher 不持有 Clock；请求合并较早 due
 并递增 wake_version，完成与重排以 lease token 围栏，处理期间到达的新 wake 不会被吞掉。
-工作者拒绝、reconciler 失败与 stop 后未 handoff 的 claim，都由 dispatcher 在短事务中先
+工作者拒绝、reconciler 失败与 stop 后未 handoff 的 claim，都由该配置在短事务中先
 `lockClaimed` 确认仍持有有效租约，再按对应延迟 `reschedule`；失权则不归还。
 Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
 

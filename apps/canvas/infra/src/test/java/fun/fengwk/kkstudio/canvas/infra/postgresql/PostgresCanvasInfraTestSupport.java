@@ -26,7 +26,8 @@ import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.infra.CanvasInfraTestApplication;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -67,7 +68,9 @@ public abstract class PostgresCanvasInfraTestSupport {
   @Autowired protected TransactionTemplate transactions;
   @Autowired protected CanvasStore canvasStore;
   @Autowired protected CanvasResourceRepository resourceRepository;
-  @MockitoBean private CanvasFunctionDispatcher dispatcher;
+
+  @MockitoBean(name = "canvasFunctionDispatcher")
+  private BoundedWorkDispatcher<ClaimedRun> dispatcher;
 
   @DynamicPropertySource
   static void configurePostgres(DynamicPropertyRegistry registry) {

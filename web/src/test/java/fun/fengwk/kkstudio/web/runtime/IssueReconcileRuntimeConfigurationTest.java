@@ -12,11 +12,13 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
@@ -44,7 +46,10 @@ class IssueReconcileRuntimeConfigurationTest extends WebPostgresTestSupport {
   }
 
   @Autowired private IssueReconcileProperties properties;
-  @Autowired private IssueReconcileDispatcher dispatcher;
+
+  @Autowired
+  @Qualifier("issueReconcileDispatcher")
+  private BoundedWorkDispatcher<WorkClaim> dispatcher;
 
   @Autowired
   @Qualifier("issueReconcileRuntimeLifecycle")
@@ -89,8 +94,10 @@ class IssueReconcileRuntimeConfigurationTest extends WebPostgresTestSupport {
    */
   @Test
   void workerExecutorIsBoundedWithAbortPolicy() {
-    assertInstanceOf(ThreadPoolExecutor.class, workerExecutor);
-    ThreadPoolExecutor pool = (ThreadPoolExecutor) workerExecutor;
+    ThreadPoolExecutor pool =
+        assertInstanceOf(
+            ThreadPoolExecutor.class,
+            ReflectionTestUtils.getField(workerExecutor, "executorService"));
     assertEquals(4, pool.getCorePoolSize());
     assertEquals(4, pool.getMaximumPoolSize());
     assertInstanceOf(LinkedBlockingQueue.class, pool.getQueue());

@@ -88,6 +88,9 @@ import java.util.UUID;
 @Service
 public class IssueReconciler {
 
+  /** Issue Reconcile 在 {@code durable_work} 上的 target type。 */
+  public static final String TARGET_TYPE = "ISSUE";
+
   /** 单次 reconcile 检视的 Activity 窗口上限：只读有界窗口，窗口未到流尾时先推进已检视游标再立即续扫。 */
   static final int ACTIVITY_SCAN_LIMIT = 200;
 

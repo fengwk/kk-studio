@@ -8,8 +8,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 /**
@@ -34,7 +34,6 @@ public class ProjectAutoConfiguration {
   @Bean
   public DurableWorkStore issueWorkQueue(
       JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
-    return new DurableWorkStore(
-        IssueReconcileDispatcher.TARGET_TYPE, jdbcClient, transactionManager);
+    return new DurableWorkStore(IssueReconciler.TARGET_TYPE, jdbcClient, transactionManager);
   }
 }

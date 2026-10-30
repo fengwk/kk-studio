@@ -18,7 +18,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -26,6 +25,7 @@ import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -48,7 +48,10 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private InMemoryS3StorageService s3;
-  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+
+  @MockitoBean(name = "canvasFunctionDispatcher")
+  private BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher;
+
   @MockitoBean private StorageMaintenance maintenance;
   @MockitoBean private StorageBlobPreviewService previews;
 

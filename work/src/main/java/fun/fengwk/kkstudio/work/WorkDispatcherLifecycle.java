@@ -1,36 +1,35 @@
-package fun.fengwk.kkstudio.web.runtime;
+package fun.fengwk.kkstudio.work;
 
 import org.springframework.context.SmartLifecycle;
-
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 
 import java.util.Objects;
 
 /**
- * Issue Reconcile dispatcher 生命周期。
+ * {@link BoundedWorkDispatcher} 的 Spring 生命周期。
  *
- * <p>{@code workersEnabled=false} 时不启动 dispatcher；重复 start / stop 幂等。 start 失败会尝试回滚 dispatcher，且
- * running 状态在任何失败路径都正确复位。stop 只有在底层 dispatcher 成功关闭后才标记为 stopped；异常时保持 running，允许再次停止。 start 与 stop
+ * <p>{@code enabled=false} 时不启动 dispatcher；重复 start / stop 幂等。start 失败会尝试回滚 dispatcher，且 running
+ * 状态在任何失败路径都正确复位。stop 只有在底层 dispatcher 成功关闭后才标记为 stopped；异常时保持 running，允许再次停止。start 与 stop
  * 串行，避免并发交错。
  *
- * <p>当前 {@link IssueReconcileDispatcher#stop()} 在置位后不会抛出；本类仍按“抛出即尚未可靠关闭”处理，以便故障注入和未来实现变化 都能重试。
+ * <p>当前 {@link BoundedWorkDispatcher#stop()} 在置位后不会抛出；本类仍按“抛出即尚未可靠关闭”处理，以便故障注入和未来实现变化都能重试。调度器本身不实现
+ * Spring 生命周期，避免被容器自动启动。
  */
-final class IssueReconcileRuntimeLifecycle implements SmartLifecycle {
+public final class WorkDispatcherLifecycle implements SmartLifecycle {
 
-  private final boolean workersEnabled;
-  private final IssueReconcileDispatcher dispatcher;
+  private final boolean enabled;
+  private final BoundedWorkDispatcher<?> dispatcher;
   private final Object lifecycleLock = new Object();
   private boolean running;
 
-  IssueReconcileRuntimeLifecycle(boolean workersEnabled, IssueReconcileDispatcher dispatcher) {
-    this.workersEnabled = workersEnabled;
+  public WorkDispatcherLifecycle(boolean enabled, BoundedWorkDispatcher<?> dispatcher) {
+    this.enabled = enabled;
     this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
   }
 
   @Override
   public void start() {
     synchronized (lifecycleLock) {
-      if (!workersEnabled || running) {
+      if (!enabled || running) {
         return;
       }
       running = true;

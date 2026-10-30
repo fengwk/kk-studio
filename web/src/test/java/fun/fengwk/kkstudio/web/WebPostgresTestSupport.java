@@ -17,13 +17,14 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.runtime.PluginCatalogRefresher;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import javax.sql.DataSource;
 
@@ -71,7 +72,8 @@ public abstract class WebPostgresTestSupport {
   private static final Path SKILL_CACHE_ROOT =
       Path.of("target", "kk-studio-skills").toAbsolutePath();
 
-  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+  @MockitoBean(name = "canvasFunctionDispatcher")
+  private BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

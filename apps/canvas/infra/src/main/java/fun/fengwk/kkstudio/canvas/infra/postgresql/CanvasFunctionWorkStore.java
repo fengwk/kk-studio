@@ -27,6 +27,9 @@ import java.util.Optional;
 @Repository
 public class CanvasFunctionWorkStore {
 
+  /** Canvas Function Run 在 {@code durable_work} 上的 target type。 */
+  public static final String TARGET_TYPE = "CANVAS_RUN";
+
   private final DurableWorkStore canvasRunWorkQueue;
   private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
