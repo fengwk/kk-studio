@@ -271,7 +271,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     Issue issue1 = createIssue(projectId);
     Issue issue2 = createIssue(projectId);
 
-    issueService.transition(issue1.getId(), issue1.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue1.getId(), issue1.getVersion(), key("t"), "DESIGN");
     IssueRun runOfIssue1 = issueRunService.acceptRun(issue1.getId(), key("accept"));
 
     UUID blobId = UUID.randomUUID();
@@ -294,7 +294,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("测试工作流", agent, agent, 3);
     Issue issue = createIssue(projectId);
 
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     UUID blobId = UUID.randomUUID();

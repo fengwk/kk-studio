@@ -28,7 +28,8 @@ import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
@@ -69,7 +70,8 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ProjectService projectService;
-  @Autowired private IssueService issueService;
+  @Autowired private IssueEditingService issueEditingService;
+  @Autowired private IssueLifecycleService issueLifecycleService;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private StorageUploadService uploadService;
   @MockitoBean private StorageMaintenance storageMaintenance;
@@ -210,8 +212,8 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
     UUID uploadId = support.readyUpload("late.txt", "late body");
     UUID blobId = support.blobIdOf(uploadId);
     // 已归档 Issue 只读：无活动 Run 时可直接归档，任何公开入口都必须拒绝
-    Issue issue = issueService.getIssue(issueId);
-    issueService.archiveIssue(issueId, issue.getVersion());
+    Issue issue = issueEditingService.getIssue(issueId);
+    issueLifecycleService.archiveIssue(issueId, issue.getVersion());
 
     mockMvc
         .perform(
@@ -252,7 +254,7 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
 
   private UUID createIssueFixture() {
     Project project = projectService.createProject("Evidence HTTP project", "Desc", false);
-    Issue issue = issueService.createIssue(project.getId(), "Publish through HTTP", "Desc");
+    Issue issue = issueEditingService.createIssue(project.getId(), "Publish through HTTP", "Desc");
     return issue.getId();
   }
 }

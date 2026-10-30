@@ -44,13 +44,13 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.work.DurableWork;
@@ -275,9 +275,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("归档Issue调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    issue = issueService.getIssue(issue.getId());
-    issueService.archiveIssue(issue.getId(), issue.getVersion());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.archiveIssue(issue.getId(), issue.getVersion());
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -303,11 +303,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("DONE状态Issue调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t1"), "DESIGN");
-    issue = issueService.getIssue(issue.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t2"), "REVIEW");
-    issue = issueService.getIssue(issue.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t3"), "DONE");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t1"), "DESIGN");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t2"), "REVIEW");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t3"), "DONE");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -318,7 +318,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
             issue.getId()));
-    assertEquals("DONE", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DONE", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -329,7 +329,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("空闲接受Run", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -391,7 +391,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
-    assertEquals("INIT", issueService.getIssue(issue.getId()).getState());
+    assertEquals("INIT", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：处于无 Agent 绑定的阶段且无活动 Run 的 Issue 不会自动派发，reconcile 返回 CONVERGED_NO_AGENT 并清除 mailbox。 */
@@ -407,7 +407,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             + "]}";
     projectService.updateWorkflow(project.getId(), project.getVersion(), wf);
     Issue issue = createIssue(project.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -420,7 +420,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
-    assertEquals("MANUAL", issueService.getIssue(issue.getId()).getState());
+    assertEquals("MANUAL", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：当项目工作流配置无法被业务正常解码时，reconcile 返回 CONVERGED_NO_AGENT 并清除 mailbox。 */
@@ -429,7 +429,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("损坏工作流项目", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     jdbc.update(
         "update project set workflow = '{\"states\":[{\"state\":\"INVALID LOWERCASE\"}]}'::jsonb"
@@ -455,9 +455,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("暂停阶段空闲", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    issue = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
 
     WorkClaim claim = claimWork(issue.getId());
@@ -471,7 +471,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
-    assertTrue(issueService.getIssue(issue.getId()).isPaused());
+    assertTrue(issueEditingService.getIssue(issue.getId()).isPaused());
   }
 
   /**
@@ -482,7 +482,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("阶段额度耗尽", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntry = appendHistoryEntry(run.getThreadId());
     issueRunService.completeRun(
@@ -510,7 +510,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("执行时长耗尽", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     jdbc.update(
         "update project_issue_run set remaining_execution_ms = 100, active_since ="
@@ -584,7 +584,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("在途预算耗尽", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     jdbc.update(
         "update project_issue_run set remaining_execution_ms = 1, active_since ="
@@ -626,7 +626,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("交接推进", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
@@ -647,7 +647,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " next_state = 'REVIEW' and end_entry_id = ?",
             run.getId(),
             newHead));
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(
         1L,
         count(
@@ -674,7 +674,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("匹配后仍忙碌", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.COMPLETED);
     matchRunJoin(run.getId(), terminal);
@@ -700,7 +700,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " next_state = 'REVIEW' and end_entry_id = ?",
             run.getId(),
             terminal));
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     // 收尾在同一业务锁内闭合 scope：最新 scope 是同一 runId 的 active=false 副本。
     ProjectRunScope closed = latestRunScope(run.getThreadId());
     assertEquals(run.getId(), closed.runId());
@@ -713,7 +713,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("Join失败不误完成", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueTransitionService.accept(
         run.getThreadId(),
@@ -734,7 +734,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId(),
             terminal));
     // 失败不推进阶段：Issue 仍停在本阶段，交接意图不生效。
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
     assertFalse(latestRunScope(run.getThreadId()).active());
   }
 
@@ -744,7 +744,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("Join取消不误完成", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.CANCELLED);
     matchRunJoin(run.getId(), terminal);
@@ -759,7 +759,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " end_entry_id = ?",
             run.getId(),
             terminal));
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
     assertFalse(latestRunScope(run.getThreadId()).active());
   }
 
@@ -769,7 +769,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("scope写入顺序", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID threadId = first.getThreadId();
     UUID terminal = appendTurnEndEntry(threadId, TurnEndOutcome.COMPLETED);
@@ -800,11 +800,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("收尾不吞指示", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
     // 收尾窗口内到达的人工指示绑定在当前 Run 上。
-    issue = issueService.getIssue(issue.getId());
-    issueService.appendInstruction(issue.getId(), issue.getVersion(), key("inst"), "先处理这条人工指示");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueEditingService.appendInstruction(
+        issue.getId(), issue.getVersion(), key("inst"), "先处理这条人工指示");
     Long instructionSequence =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -858,7 +859,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("迟到Run有进展", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
@@ -877,7 +878,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " next_state is null and end_entry_id = ?",
             run.getId(),
             newHead));
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：阶段已不匹配且无历史产出的迟到 Run，reconcile 将其失败收尾并将 Issue 暂停置 ERROR。 */
@@ -886,7 +887,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("迟到Run无进展", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     jdbc.update(
         "update project_issue set state = 'REVIEW', version = version + 1 where id = ?",
@@ -907,7 +908,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from project_issue where id = ? and pause_reason = 'ERROR'",
             issue.getId()));
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：工作流中阶段 Agent 发生变更导致所有权不再匹配时，reconcile 安全收尾旧 Run 为 COMPLETED 且不推进阶段。 */
@@ -918,7 +919,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String reviewAgent = createAgent();
     UUID projectId = createProjectWithStages("Agent变更迟到Run", designAgent1, reviewAgent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
@@ -939,7 +940,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " end_entry_id = ?",
             run.getId(),
             newHead));
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：未投递的 INSTRUCTION 活动会被精确投递给当前 Run 绑定的 Agent Thread，推进 observed sequence，再次调谐不会重复投递。 */
@@ -948,10 +949,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("指示投递", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueService.getIssue(issue.getId());
-    issueService.appendInstruction(issue.getId(), issue.getVersion(), key("inst"), "请调整方案设计");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueEditingService.appendInstruction(
+        issue.getId(), issue.getVersion(), key("inst"), "请调整方案设计");
     Long instSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -988,10 +990,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("普通评论跳过", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueService.getIssue(issue.getId());
-    issueService.appendComment(issue.getId(), issue.getVersion(), key("c"), "这是一条普通评论");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueEditingService.appendComment(issue.getId(), issue.getVersion(), key("c"), "这是一条普通评论");
     Long commentSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
@@ -1016,10 +1018,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("运行中遇到暂停", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
 
     WorkClaim claim = claimWork(issue.getId());
@@ -1046,10 +1048,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("等待中仍暂停", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
     issueRunService.waitRun(run.getId(), run.getVersion());
 
@@ -1070,14 +1072,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("等待中恢复", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issue = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
     issueRunService.waitRun(run.getId(), run.getVersion());
-    issue = issueService.getIssue(issue.getId());
-    issueService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -1097,7 +1099,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("有产出无交接收尾", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
@@ -1113,7 +1115,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " next_state is null and end_entry_id = ?",
             run.getId(),
             newHead));
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 测试意图：在完全静止点且尚无历史产出、无交接、无待投递指令的 Run，reconcile 返回 DEFERRED_IDLE 并延后重检。 */
@@ -1122,7 +1124,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("无产出静止延后", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     WorkClaim claim = claimWork(issue.getId());
@@ -1150,7 +1152,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("委派子线程不阻塞收尾", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
     // 未静止的委派子树不再参与 Run 收尾判定。
@@ -1204,7 +1206,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("命令在途延后", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     ThreadSnapshot processing =
@@ -1228,7 +1230,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("模型在途延后", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     ModelInvocation model = mock(ModelInvocation.class);
@@ -1256,7 +1258,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("连续Turn在途延后", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     ThreadSnapshot continuable =
@@ -1285,7 +1287,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("心跳与租约行为", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     issueWorkQueue.request(issue.getId(), Duration.ZERO);
@@ -1307,7 +1309,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("已取代Claim调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     // 不存在的 Issue 触发 lockIssue == null 路径，并经 finish(completeWork) 安全处理
     WorkClaim nonExistentClaim =
@@ -1327,7 +1329,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("静止工具等待测试", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     // 模拟工具处于 WAITING_INPUT 状态（问卷安全等待）
@@ -1370,7 +1372,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("最后额度等待恢复测试", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     assertEquals(1L, run.getOrdinal());
 
@@ -1398,14 +1400,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("BLOCKED门禁测试", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.waitRun(run.getId(), run.getVersion());
 
-    issue = issueService.getIssue(issue.getId());
-    issueService.blockIssue(issue.getId(), issue.getVersion(), key("block"), "等待外部依赖");
-    assertTrue(issueService.getIssue(issue.getId()).isBlocked());
-    assertTrue(issueService.getIssue(issue.getId()).isGateClosed());
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.blockIssue(issue.getId(), issue.getVersion(), key("block"), "等待外部依赖");
+    assertTrue(issueEditingService.getIssue(issue.getId()).isBlocked());
+    assertTrue(issueEditingService.getIssue(issue.getId()).isGateClosed());
 
     // 处于 BLOCKED 时调谐，必须维持 WAITING_FOR_GATE，禁止 resume
     WorkClaim claim = claimWork(issue.getId());
@@ -1414,9 +1416,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
 
     // 显式恢复业务阻塞
-    issue = issueService.getIssue(issue.getId());
-    issueService.recoverIssue(issue.getId(), issue.getVersion(), key("recover"));
-    assertFalse(issueService.getIssue(issue.getId()).isGateClosed());
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.recoverIssue(issue.getId(), issue.getVersion(), key("recover"));
+    assertFalse(issueEditingService.getIssue(issue.getId()).isGateClosed());
 
     // 恢复后调谐：Run 恢复为 RUNNING
     WorkClaim resumeClaim = claimWork(issue.getId());
@@ -1431,9 +1433,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("空闲BLOCKED调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    issue = issueService.getIssue(issue.getId());
-    issueService.blockIssue(issue.getId(), issue.getVersion(), key("b"), "业务阻断");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.blockIssue(issue.getId(), issue.getVersion(), key("b"), "业务阻断");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -1454,18 +1456,19 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("大窗口指示优先交接", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     // 插入 220 条普通评论（超过单页 200 限制）
-    issue = issueService.getIssue(issue.getId());
+    issue = issueEditingService.getIssue(issue.getId());
     for (int i = 1; i <= 220; i++) {
       issue =
-          issueService.appendComment(issue.getId(), issue.getVersion(), key("c" + i), "评论 " + i);
+          issueEditingService.appendComment(
+              issue.getId(), issue.getVersion(), key("c" + i), "评论 " + i);
     }
     // 随后追加一条 INSTRUCTION
     issue =
-        issueService.appendInstruction(
+        issueEditingService.appendInstruction(
             issue.getId(), issue.getVersion(), key("inst"), "第221条是指示，必须先处理");
     Long instSeq =
         jdbc.queryForObject(
@@ -1495,7 +1498,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             Long.class,
             run.getId()));
     // Issue 状态依然为 DESIGN，交接尚未提交
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
 
     // 指示投递后，模拟生成产出并完全静止
@@ -1506,7 +1509,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // 此时才安全交接
     assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, secondOutcome);
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(IssueRunStatus.COMPLETED, issueRunService.getRun(run.getId()).getStatus());
   }
 
@@ -1519,7 +1522,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("收尾报告与证据发布", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     UUID blobId = UUID.randomUUID();
@@ -1564,7 +1567,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("UNKNOWN工具模型反馈", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueTransitionService.accept(
         run.getThreadId(),
@@ -1600,7 +1603,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome deferred = reconciler.reconcile(claimWork(issue.getId()));
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, deferred);
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
 
     ThreadSnapshot unknownSnapshot = withTools(run.getThreadId(), unknownTools);
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(unknownSnapshot);
@@ -1609,8 +1612,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // UNKNOWN 工具是已收敛的模型反馈：不构成门禁，Run 保持运行并延后重检。
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
-    assertNull(issueService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
+    assertNull(issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertEquals(
         0L,
         count(
@@ -1633,7 +1636,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("UNKNOWN不优先于审批等待", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     appendHistoryEntry(run.getThreadId());
 
@@ -1648,7 +1651,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
     assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
-    assertNull(issueService.getIssue(issue.getId()).getPauseReason());
+    assertNull(issueEditingService.getIssue(issue.getId()).getPauseReason());
   }
 
   /**
@@ -1660,7 +1663,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("迟到UNKNOWN工具失败关闭", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     appendHistoryEntry(run.getThreadId());
 
@@ -1687,7 +1690,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from project_issue where id = ? and pause_reason = 'ERROR'",
             issue.getId()));
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** E02：只有最终 assistant 答复明确引用、且来源 Session 持有的 Resource 才公开。中间消息、工具/用户附件和非本 Session 的 Blob 保持私有。 */
@@ -1696,7 +1699,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("最终答复证据边界", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     UUID intermediateBlob = UUID.randomUUID();
@@ -1760,7 +1763,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("迟到在途Run安全停机", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     // 将 Issue 强制推进到 REVIEW 阶段，并将 Run 的 next_state 设为 DONE
@@ -1782,7 +1785,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 1. 在途时不收尾，返回 DEFERRED_PROCESSING
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
 
     // 2. 执行静止且有进展
     UUID newHead = appendHistoryEntry(run.getThreadId());
@@ -1798,7 +1801,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.COMPLETED, closedRun.getStatus());
     assertNull(closedRun.getNextState());
     assertEquals(newHead, closedRun.getEndEntryId());
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 缺陷 8 测试意图：归档的项目（project.isArchived()）不会执行任何派发，reconcile 返回 CONVERGED_ARCHIVED。 */
@@ -1807,7 +1810,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("归档项目调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     jdbc.update("update project set archived_at = current_timestamp where id = ?", projectId);
 
@@ -1837,7 +1840,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             + "]}";
     projectService.updateWorkflow(project.getId(), project.getVersion(), wf);
     Issue issue = createIssue(project.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
 
     // 验证空闲派发安全收敛为 CONVERGED_NO_AGENT
     WorkClaim claim = claimWork(issue.getId());
@@ -1853,7 +1856,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("异常向外传播测试", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     // 删除 agent_definition 模拟数据损坏或环境异常，验证异常向外传播而不是被吞为 CONVERGED_UNDISPATCHABLE
     jdbc.update("delete from agent_definition where name = ?", agent);
@@ -1872,7 +1875,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("不可用资源收尾测试", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     // 构造一个未在 storage_blob 中注册（不存在）的虚假 blobId

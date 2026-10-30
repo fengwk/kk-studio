@@ -14,10 +14,11 @@ import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
-import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
 import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
@@ -41,19 +42,23 @@ import java.util.UUID;
 @Component
 public class IssueDetailAssembler {
 
-  private final IssueService issueService;
+  private final IssueEditingService issueEditingService;
+  private final IssueStageBudgetService issueStageBudgetService;
   private final IssueRunService issueRunService;
   private final ProjectService projectService;
   private final ProjectDtoMapper mapper;
   private final ProjectWorkflowJsonCodec workflowCodec;
 
   public IssueDetailAssembler(
-      IssueService issueService,
+      IssueEditingService issueEditingService,
+      IssueStageBudgetService issueStageBudgetService,
       IssueRunService issueRunService,
       ProjectService projectService,
       ProjectDtoMapper mapper,
       ProjectWorkflowJsonCodec workflowCodec) {
-    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueEditingService = Objects.requireNonNull(issueEditingService, "issueEditingService");
+    this.issueStageBudgetService =
+        Objects.requireNonNull(issueStageBudgetService, "issueStageBudgetService");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
     this.projectService = Objects.requireNonNull(projectService, "projectService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
@@ -64,9 +69,9 @@ public class IssueDetailAssembler {
   public IssueDetailDTO assemble(UUID issueId, long afterSequence, int activityLimit) {
     Objects.requireNonNull(issueId, "issueId");
 
-    Issue issue = issueService.getIssue(issueId);
+    Issue issue = issueEditingService.getIssue(issueId);
     List<IssueActivity> activities =
-        issueService.listActivities(issueId, afterSequence, activityLimit);
+        issueEditingService.listActivities(issueId, afterSequence, activityLimit);
     List<IssueActivityDTO> activityDtos = activities.stream().map(mapper::toDto).toList();
 
     String nextActivityCursor = null;
@@ -75,7 +80,7 @@ public class IssueDetailAssembler {
       nextActivityCursor = String.valueOf(lastSequence);
     }
 
-    List<IssueAgentThread> agentThreads = issueService.listAgentThreads(issueId);
+    List<IssueAgentThread> agentThreads = issueEditingService.listAgentThreads(issueId);
     List<IssueAgentThreadDTO> agentThreadDtos = agentThreads.stream().map(mapper::toDto).toList();
     Map<UUID, String> threadToAgent = new HashMap<>();
     for (IssueAgentThread thread : agentThreads) {
@@ -117,7 +122,8 @@ public class IssueDetailAssembler {
         ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
         for (ProjectWorkflowState state : workflow.workStages()) {
           try {
-            StageBudgetView view = issueService.getStageBudget(issueId, state.state().value());
+            StageBudgetView view =
+                issueStageBudgetService.getStageBudget(issueId, state.state().value());
             stageBudgets.add(mapper.toDto(view));
           } catch (ProjectNotFoundException ignored) {
             // 阶段额度尚未授权时静默跳过
