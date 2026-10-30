@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
-import fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import java.time.Duration;
 import java.util.Objects;

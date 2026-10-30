@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;

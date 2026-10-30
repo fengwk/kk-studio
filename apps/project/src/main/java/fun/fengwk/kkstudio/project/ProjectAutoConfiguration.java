@@ -10,7 +10,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 /**
  * Project 模块的自动装配入口：把 Project 领域 Bean、领域编解码器与 Spring JDBC 持久化组件注册到宿主应用。
@@ -32,9 +32,8 @@ public class ProjectAutoConfiguration {
 
   /** Issue 调度邮箱：{@code durable_work} 中 target type 为 ISSUE 的行，Worker 领取后重新检查当前 Issue。 */
   @Bean
-  public DurableWorkQueue issueWorkQueue(
+  public DurableWorkStore issueWorkQueue(
       JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
-    return new DurableWorkQueue(
-        jdbcClient, transactionManager, IssueReconcileDispatcher.TARGET_TYPE);
+    return new DurableWorkStore(IssueReconcileDispatcher.TARGET_TYPE, jdbcClient, transactionManager);
   }
 }

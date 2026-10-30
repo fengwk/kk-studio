@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.work;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.common.work.WorkState;
 
@@ -133,9 +132,6 @@ public final class DurableWorkStore {
       from candidate
       """;
 
-  private static final String NOTIFY =
-      "select pg_notify('" + CHANNEL + "', ?) as ignored, true as sent";
-
   private final String targetType;
   private final DurableWorkJdbc jdbc;
 
@@ -160,20 +156,38 @@ public final class DurableWorkStore {
 
   /** 请求一次立即 wake：新行 wakeVersion=1；已有行递增 wakeVersion、due 取更早值并保留当前租约。 */
   public DurableWork request(UUID targetId) {
-    return request(targetId, null);
+    return request(targetId, Duration.ZERO, null);
+  }
+
+  /**
+   * 请求一次可延迟的 wake。新行 due 为数据库此刻加 {@code delay}；已有行递增 wakeVersion，due 取更早值并保留当前租约。
+   */
+  public DurableWork request(UUID targetId, Duration delay) {
+    return request(targetId, delay, null);
   }
 
   /**
    * 请求一次立即 wake，并可选携带环境亲和性；已冻结的亲和性只允许传 null（不改变）或相同值。
-   *
-   * <p>插入使用 {@code on conflict do nothing}，冲突后的更新在行锁下由 {@link WorkState#request} 计算，避免在 SQL 中复制跃迁。
    */
   public DurableWork request(UUID targetId, UUID requiredEnvironmentId) {
+    return request(targetId, Duration.ZERO, requiredEnvironmentId);
+  }
+
+  /**
+   * 请求一次可延迟的 wake，并可选携带环境亲和性。
+   *
+   * <p>插入使用 {@code on conflict do nothing}，冲突后的更新在行锁下由 {@link WorkState#request} 计算，避免在 SQL 中复制跃迁。
+   * {@code delay} 只作用于本次请求的 due，不改变已有更早的 due。
+   */
+  public DurableWork request(UUID targetId, Duration delay, UUID requiredEnvironmentId) {
     Objects.requireNonNull(targetId, "targetId");
+    Duration delayValue = requireNonNegativeWholeMillis(delay, "delay");
     return jdbc.inTransaction(
         () -> {
           while (true) {
-            WorkState initial = WorkState.initial(databaseNow(), requiredEnvironmentId);
+            Instant now = databaseNow();
+            Instant due = now.plus(delayValue);
+            WorkState initial = WorkState.initial(due, requiredEnvironmentId);
             Optional<DurableWork> inserted =
                 jdbc.queryOne(
                     INSERT_WORK,
@@ -184,7 +198,7 @@ public final class DurableWorkStore {
                     initial.wakeVersion(),
                     requiredEnvironmentId);
             if (inserted.isPresent()) {
-              notifyAvailable();
+              notifyIfClaimable(targetId);
               return inserted.get();
             }
             Optional<Row> existing =
@@ -193,11 +207,10 @@ public final class DurableWorkStore {
               // 竞争事务在 insert 冲突与 select 之间删除了行：按新建重试。
               continue;
             }
-            WorkState next =
-                existing.get().work().state().request(existing.get().now(), requiredEnvironmentId);
-            update(targetId, next);
-            notifyAvailable();
-            return new DurableWork(targetId, next);
+            WorkState requested = existing.get().work().state().request(due, requiredEnvironmentId);
+            update(targetId, requested);
+            notifyIfClaimable(targetId);
+            return new DurableWork(targetId, requested);
           }
         });
   }
@@ -303,7 +316,7 @@ public final class DurableWorkStore {
             return Optional.empty();
           }
           update(claim.targetId(), next.get());
-          notifyAvailable();
+          notifyIfClaimable(claim.targetId());
           return Optional.of(new DurableWork(claim.targetId(), next.get()));
         });
   }
@@ -328,7 +341,7 @@ public final class DurableWorkStore {
                       row.now(),
                       row.now().plus(delayValue));
           update(claim.targetId(), next);
-          notifyAvailable();
+          notifyIfClaimable(claim.targetId());
           return null;
         });
   }
@@ -370,6 +383,26 @@ public final class DurableWorkStore {
         arguments);
   }
 
+  /**
+   * 删除某个 Canvas 下全部 CANVAS_RUN 调度行。
+   *
+   * <p>这是 Canvas 级联删除使用的唯一 {@code durable_work} 写语句；其它 target type 没有对应的领域父表。
+   */
+  public int deleteByCanvas(UUID canvasId) {
+    if (!"CANVAS_RUN".equals(targetType)) {
+      throw new IllegalStateException("deleteByCanvas requires target type CANVAS_RUN");
+    }
+    return jdbc.update(
+        """
+        delete from durable_work w
+        using canvas_function_run r, canvas_node n
+        where w.target_type = ? and w.target_id = r.node_id
+          and r.node_id = n.id and n.canvas_id = ?
+        """,
+        targetType,
+        Objects.requireNonNull(canvasId, "canvasId"));
+  }
+
   private Row lockRow(UUID targetId) {
     return jdbc.queryOne(SELECT_ROW_FOR_UPDATE, ROW_MAPPER, targetType, targetId)
         .orElseThrow(
@@ -402,17 +435,22 @@ public final class DurableWorkStore {
     }
   }
 
-  private void notifyAvailable() {
-    boolean sent =
-        jdbc.queryOne(NOTIFY, (resultSet, rowNumber) -> resultSet.getBoolean("sent"), targetType)
-            .orElseThrow(() -> new IllegalStateException("pg_notify returned no row"));
-    if (!sent) {
-      throw new IllegalStateException("pg_notify did not confirm execution");
-    }
+  /** 行在数据库时钟下已到期且无有效租约时才发提示；未来 due 或仍被租约持有的行不发。 */
+  private void notifyIfClaimable(UUID targetId) {
+    jdbc.queryOne(
+        "select pg_notify('"
+            + CHANNEL
+            + "', target_type) as ignored, true as sent from durable_work"
+            + " where target_type = ? and target_id = ?"
+            + " and available_at <= clock_timestamp()"
+            + " and (lease_until is null or lease_until <= clock_timestamp())",
+        (resultSet, rowNumber) -> resultSet.getBoolean("sent"),
+        targetType,
+        targetId);
   }
 
-  private static void requireActiveTransaction() {
-    if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+  private void requireActiveTransaction() {
+    if (!jdbc.transactionActive()) {
       throw new IllegalStateException("work row locking requires an active transaction");
     }
   }

@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.util.Objects;
@@ -30,13 +30,13 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
 
   private static final String NAME = "issue reconcile dispatcher";
 
-  private final DurableWorkQueue workQueue;
+  private final DurableWorkStore workQueue;
   private final Function<WorkClaim, IssueReconcileOutcome> reconciler;
   private final IssueReconcileProperties properties;
   private final BoundedWorkDispatcher<WorkClaim> dispatcher;
 
   public IssueReconcileDispatcher(
-      DurableWorkQueue workQueue,
+      DurableWorkStore workQueue,
       IssueReconciler reconciler,
       IssueReconcileProperties properties,
       Executor drainExecutor,
@@ -52,7 +52,7 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
   }
 
   IssueReconcileDispatcher(
-      DurableWorkQueue workQueue,
+      DurableWorkStore workQueue,
       Function<WorkClaim, IssueReconcileOutcome> reconciler,
       IssueReconcileProperties properties,
       Executor drainExecutor,
@@ -122,6 +122,8 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
   private void returnClaim(WorkClaim claim) {
     try {
       workQueue.reschedule(claim, properties.getRejectionDelay());
+    } catch (IllegalArgumentException | IllegalStateException lost) {
+      // 租约已失效是正常竞态，只留 lease 自愈。
     } catch (RuntimeException error) {
       log.warn(
           "Failed to return claim for issueId={}; failure={}",
@@ -134,6 +136,8 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
   private void tryRescheduleOnFailure(WorkClaim claim) {
     try {
       workQueue.reschedule(claim, properties.getRetryDelay());
+    } catch (IllegalArgumentException | IllegalStateException lost) {
+      // 所有权已丢失时不再重排。
     } catch (RuntimeException error) {
       log.warn(
           "Failed to reschedule work after reconciler failure for issueId={}; failure={}",
