@@ -670,7 +670,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   /**
    * 真实静止：没有待处理 Work/Command，也没有 local execution 的退出确认尚未落账。
    *
-   * <p>Model/Tool 的终态 Work 会先删除、随后退出确认才在同一事务里推进 Thread version；只看 durable_work
+   * <p>Model/Tool 的终态 Work 会先删除，退出确认随后在另一个事务里推进 Thread version；只看 durable_work
    * 会把「确认前」误当静止，使测试指纹与随后迟到的 updated_at/version 变化竞争。
    */
   private boolean quiescent(UUID threadId) {
