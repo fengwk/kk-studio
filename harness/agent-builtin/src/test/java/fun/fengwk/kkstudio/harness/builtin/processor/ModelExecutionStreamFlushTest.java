@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -17,7 +17,9 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -49,7 +51,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -58,7 +59,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -915,7 +915,7 @@ class ModelExecutionStreamFlushTest {
   void committedPartialWithFilteredResponseClearsCheckpointAndDoesNotPublishRegression() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -983,7 +983,7 @@ class ModelExecutionStreamFlushTest {
   void unflushedPartialWithFilteredResponseClearsCheckpointAndDiscardsBatch() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -1040,7 +1040,7 @@ class ModelExecutionStreamFlushTest {
   void illegalFilteredResponseWithToolCallsConvergesToInvalidResponseFailure() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
+    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -1251,7 +1251,7 @@ class ModelExecutionStreamFlushTest {
       ModelRequestSpec requestSpec,
       AtomicReference<String> dbThreadRecord,
       AtomicReference<String> publishThreadRecord) {
-    CountingStore store = new CountingStore(new InMemoryHarnessStore(), dbThreadRecord);
+    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore(), dbThreadRecord);
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec, NOW);
     RecordingSink sink = new RecordingSink(publishThreadRecord);
@@ -1683,7 +1683,7 @@ class ModelExecutionStreamFlushTest {
    * <p>只统计 UPDATE 次数不足以证明「每个 buffered delta 零数据库开销」：必须同时证明零事务、零行锁查询、零 SQL 执行。
    */
   static final class CountingStore implements HarnessStore, BuiltinStore {
-    private final InMemoryHarnessStore delegate;
+    private final InMemoryBuiltinHarnessStore delegate;
     private final AtomicInteger modelInvocationUpdateCount = new AtomicInteger();
     private final AtomicInteger transactionCount = new AtomicInteger();
     private final AtomicInteger modelInvocationLockCount = new AtomicInteger();
@@ -1692,16 +1692,16 @@ class ModelExecutionStreamFlushTest {
     volatile RuntimeException updateInvocationFailure;
     volatile RuntimeException transactionFailure;
 
-    CountingStore(InMemoryHarnessStore delegate) {
+    CountingStore(InMemoryBuiltinHarnessStore delegate) {
       this(delegate, null);
     }
 
-    CountingStore(InMemoryHarnessStore delegate, AtomicReference<String> threadRecord) {
+    CountingStore(InMemoryBuiltinHarnessStore delegate, AtomicReference<String> threadRecord) {
       this.delegate = Objects.requireNonNull(delegate);
       this.threadRecord = threadRecord;
     }
 
-    InMemoryHarnessStore delegate() {
+    InMemoryBuiltinHarnessStore delegate() {
       return delegate;
     }
 

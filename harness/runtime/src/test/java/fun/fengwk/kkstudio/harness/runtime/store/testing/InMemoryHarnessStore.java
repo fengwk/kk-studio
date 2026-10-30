@@ -1,0 +1,2579 @@
+package fun.fengwk.kkstudio.harness.runtime.store.testing;
+
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.runtime.work.Work;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+
+/**
+ * Test-only in-memory reference implementation of {@link HarnessStore}，供 Processor / 契约测试复用。
+ *
+ * <p>{@link #transaction} 由单个全局 monitor 串行化：进入事务时对所有 map 与 nextId 做 shallow copy-on-write 快照（持久记录均为
+ * immutable records，shallow map copy 即可隔离），回调成功提交快照， 抛出 {@link RuntimeException} 或 {@link Error}
+ * 时丢弃快照（完整 rollback，包括 nextId）。事务句柄在 回调结束后关闭，任何后续调用抛 {@link IllegalStateException}；同一 Store
+ * 的重入事务被拒绝。
+ *
+ * <p>模拟必要 schema 约束：Session / Entry / Thread / Invocation id 唯一；Entry 写入前用完整 {@link EntryPath} 校验（每
+ * Session 一个 ROOT 且 ROOT 先于其他 Entry、parent 连续且同 Session、createdAt 顺序与 turn / tool-prefix 结构）；Thread
+ * head Entry 存在（insert 与 update）；Command 只能以 QUEUED 插入，所属 thread 存在且 保持 {@code (thread, sequence)}
+ * 与 {@code (thread, idempotencyKey)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
+ * exact-idempotent，appliedEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
+ * ModelInvocation 只能以 READY / attempt=0 插入并保持 {@code (thread, turnStartEntryId)}
+ * 唯一，requestHeadEntryId 必须等于 thread 当前 head（创建时 requestHead CAS），turnStartEntryId 必须位于 requestHead
+ * 的 EntryPath 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path
+ * 同时包含 requestHead 与 turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的
+ * unattached FAILED）、attempt=0、approval=null 插入并保持 {@code (assistantEntryId, callIndex)} 唯一，其
+ * modelInvocation 的 resultEntryId 必须等于 assistantEntryId，durable {@code call} 与 Assistant 中按
+ * callIndex 提取的 ToolCall 精确一致 （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为
+ * ToolResult MESSAGE Entry 后行 被 batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)}
+ * 主键。
+ *
+ * <p>per-transaction lock tracking：updateThread / updateCommands / updateModelInvocation /
+ * updateToolInvocations 要求对应行已在本事务锁定，且 Thread / Model / Tool 更新必须通过 aggregate 共享 transition
+ * validation （非法状态机跳跃与 terminal 回退/改写被拒绝）；lock* 方法、loadQueuedCommands 与
+ * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新，insertModelInvocation 额外要求 Thread
+ * 已在本事务锁定（requestHead CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
+ * 已在本事务锁定（锁序 Thread -&gt; commands）；Work 的 renew / complete / reschedule 方法内部先锁定目标行，
+ * lockClaimedWork 在 ownership 校验通过后锁行；Thread 同层按 {@link UuidOrder} 升序，Tool siblings 按 callIndex
+ * 升序，Work 同层按 (type, id) 升序；requestWork 与存在行的 deleteWork 要求 owning Thread 已锁定。返回对象与 list 均为
+ * immutable records / copies。
+ */
+public class InMemoryHarnessStore implements HarnessStore {
+
+  private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
+      Comparator.comparing(ThreadCommand::threadId, UuidOrder.COMPARATOR)
+          .thenComparingLong(ThreadCommand::sequence);
+  private static final Comparator<ToolInvocation> TOOL_LOCK_ORDER =
+      Comparator.comparing(ToolInvocation::assistantEntryId, UuidOrder.COMPARATOR)
+          .thenComparingInt(ToolInvocation::callIndex)
+          .thenComparing(ToolInvocation::id, UuidOrder.COMPARATOR);
+  private static final Comparator<WorkTarget> WORK_LOCK_ORDER =
+      Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
+          .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
+
+  private final Object monitor = new Object();
+  private State committed;
+  private boolean inTransaction;
+  private volatile RouteReadyPredicate routeReadyPredicate;
+  private volatile EnvironmentReadyLeasePredicate environmentReadyLeasePredicate;
+  private final Map<EnvironmentId, String> environmentNames = new HashMap<>();
+  private volatile Clock clock = HarnessStoreTime.millisecondClock(Clock.systemUTC());
+
+  /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
+  @FunctionalInterface
+  public interface RouteReadyPredicate {
+    boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now);
+  }
+
+  /**
+   * 环境 READY 租约判定谓词：任意节点是否持有该环境的有效 READY 连接租约（权威时间域为 {@code now}）。
+   *
+   * <p>与 {@link RouteReadyPredicate} 分层：后者判定「本节点 + 本 leaseToken」能否承接路由，本谓词判定环境在读取投影中是否已上线（无有效 READY
+   * 租约即为等待环境）。未注入时视为环境没有有效 READY 租约。
+   */
+  @FunctionalInterface
+  public interface EnvironmentReadyLeasePredicate {
+    boolean hasReadyLease(EnvironmentId environmentId, Instant now);
+  }
+
+  public InMemoryHarnessStore() {
+    this(0L, null);
+  }
+
+  public InMemoryHarnessStore(RouteReadyPredicate routeReadyPredicate) {
+    this(0L, routeReadyPredicate);
+  }
+
+  /** 仅用于测试的构造函数，用于播种全局 id 序列；下一个分配的 id 为 {@code initialNextId + 1}。 */
+  public InMemoryHarnessStore(long initialNextId) {
+    this(initialNextId, null);
+  }
+
+  public InMemoryHarnessStore(long initialNextId, RouteReadyPredicate routeReadyPredicate) {
+    if (initialNextId < 0) {
+      throw new IllegalArgumentException("initialNextId must not be negative");
+    }
+    this.committed = new State();
+    this.committed.nextId = initialNextId;
+    this.routeReadyPredicate = routeReadyPredicate;
+  }
+
+  /** 测试时钟：每个事务首次 {@link Transaction#now()} 时读取一次，对应生产实现的数据库时钟。 */
+  public void setClock(Clock clock) {
+    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
+  }
+
+  /** 把测试时钟固定在给定时刻。 */
+  public void setNow(Instant now) {
+    setClock(Clock.fixed(now, ZoneOffset.UTC));
+  }
+
+  public void setRouteReadyPredicate(RouteReadyPredicate routeReadyPredicate) {
+    this.routeReadyPredicate = routeReadyPredicate;
+  }
+
+  public void setEnvironmentReadyLeasePredicate(
+      EnvironmentReadyLeasePredicate environmentReadyLeasePredicate) {
+    this.environmentReadyLeasePredicate = environmentReadyLeasePredicate;
+  }
+
+  /** 测试环境目录：名称沿 Work 冻结身份查询，不依赖 Thread 设置。 */
+  public void setEnvironmentName(EnvironmentId environmentId, String name) {
+    synchronized (monitor) {
+      environmentNames.put(environmentId, name);
+    }
+  }
+
+  private boolean hasReadyEnvironmentLease(EnvironmentId environmentId, Instant now) {
+    EnvironmentReadyLeasePredicate predicate = environmentReadyLeasePredicate;
+    return predicate != null && predicate.hasReadyLease(environmentId, now);
+  }
+
+  private static void requireMillisecondPrecision(Instant instant) {
+    HarnessStoreTime.requireMillisecondPrecision(instant);
+  }
+
+  private int transactionCount;
+  private final ThreadLocal<ArrayList<Runnable>> afterCommitActions = new ThreadLocal<>();
+
+  /** 测试钩子：在每个事务开始前执行，用于确定性地观察事务与并发回调的因果关系。 */
+  public volatile Runnable beforeTransaction;
+
+  public int transactionCount() {
+    synchronized (monitor) {
+      return transactionCount;
+    }
+  }
+
+  public void resetTransactionCount() {
+    synchronized (monitor) {
+      transactionCount = 0;
+    }
+  }
+
+  /** 测试钩子：直接把已存在 Work 行的 lease deadline 改写为给定值（通常已过期），用于验证 stale ownership 路径。 */
+  public void forceLeaseUntil(WorkTarget target, Instant leaseUntil) {
+    Objects.requireNonNull(target, "target");
+    requireMillisecondPrecision(leaseUntil);
+    synchronized (monitor) {
+      Work work = committed.works.get(target);
+      if (work == null || work.leaseToken() == null) {
+        throw new IllegalStateException("work has no lease to rewrite: " + target);
+      }
+      committed.works.put(
+          target,
+          new Work(
+              work.target(),
+              work.availableAt(),
+              work.wakeVersion(),
+              work.leaseToken(),
+              leaseUntil,
+              work.requiredEnvironmentId()));
+    }
+  }
+
+  /** 测试钩子：直接把已存在 Work 行的 availableAt 改写为给定值（通常已 due），用于验证“立即唤醒/到期即可 claim”路径。 */
+  public void forceAvailableAt(WorkTarget target, Instant availableAt) {
+    Objects.requireNonNull(target, "target");
+    requireMillisecondPrecision(availableAt);
+    synchronized (monitor) {
+      Work work = committed.works.get(target);
+      if (work == null) {
+        throw new IllegalStateException("work does not exist to rewrite: " + target);
+      }
+      committed.works.put(
+          target,
+          new Work(
+              work.target(),
+              availableAt,
+              work.wakeVersion(),
+              work.leaseToken(),
+              work.leaseUntil(),
+              work.requiredEnvironmentId()));
+    }
+  }
+
+  @Override
+  public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
+    Objects.requireNonNull(callback, "callback");
+    Runnable hook = beforeTransaction;
+    if (hook != null) {
+      hook.run();
+    }
+    ArrayList<Runnable> pending = new ArrayList<>();
+    afterCommitActions.set(pending);
+    T result;
+    synchronized (monitor) {
+      if (inTransaction) {
+        afterCommitActions.remove();
+        throw new IllegalStateException("nested transactions are not supported");
+      }
+      inTransaction = true;
+      transactionCount++;
+      try {
+        InMemoryTransaction tx = createTransaction(State.copyOf(committed));
+        try {
+          result = callback.apply(tx);
+          tx.close();
+          committed = tx.state;
+        } catch (RuntimeException | Error error) {
+          tx.close();
+          afterCommitActions.remove();
+          throw error;
+        }
+      } finally {
+        inTransaction = false;
+      }
+    }
+    afterCommitActions.remove();
+    for (Runnable action : pending) {
+      action.run();
+    }
+    return result;
+  }
+
+  @Override
+  public void afterCommit(Runnable action) {
+    Objects.requireNonNull(action, "action");
+    ArrayList<Runnable> pending = afterCommitActions.get();
+    if (pending == null) {
+      throw new IllegalStateException("afterCommit must be registered inside a store transaction");
+    }
+    pending.add(action);
+  }
+
+  /** 内存实现没有环境事务；手动压缩的事务外入口在这里始终放行。 */
+  @Override
+  public void assertNoAmbientTransaction() {}
+
+  /** 已提交的 working state；每个 transaction 都基于 shallow copy 工作。 */
+  protected static final class State {
+    final Map<UUID, Session> sessions = new HashMap<>();
+    final Map<UUID, Entry> entries = new HashMap<>();
+    final Map<UUID, ThreadState> threads = new HashMap<>();
+    final Map<CommandKey, ThreadCommand> commands = new HashMap<>();
+    final Map<UUID, Object> driverRows = new HashMap<>();
+    final Map<UUID, UUID> driverRowOwners = new HashMap<>();
+    final Map<String, Object> driverAttributes = new HashMap<>();
+    final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
+    final Map<UUID, ThreadJoin> joins = new HashMap<>();
+    final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
+    final Map<StopRootKey, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
+    final Map<WorkTarget, Work> works = new HashMap<>();
+    final Map<UUID, ExecutionExitFact> executions = new HashMap<>();
+    long nextId;
+
+    protected static State copyOf(State source) {
+      State copy = new State();
+      copy.sessions.putAll(source.sessions);
+      copy.entries.putAll(source.entries);
+      copy.threads.putAll(source.threads);
+      copy.commands.putAll(source.commands);
+      copy.driverRows.putAll(source.driverRows);
+      copy.driverRowOwners.putAll(source.driverRowOwners);
+      copy.driverAttributes.putAll(source.driverAttributes);
+      copy.toolInvocations.putAll(source.toolInvocations);
+      copy.joins.putAll(source.joins);
+      copy.stopReceipts.putAll(source.stopReceipts);
+      copy.stopReceiptsByRoot.putAll(source.stopReceiptsByRoot);
+      copy.works.putAll(source.works);
+      copy.executions.putAll(source.executions);
+      copy.nextId = source.nextId;
+      return copy;
+    }
+  }
+
+  /** Stop 回执身份 {@code (threadId, stopRequestId)}。 */
+  private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
+
+  /** 一次 Stop 的根范围 {@code (rootThreadId, rootStopRequestId)}。 */
+  private record StopRootKey(UUID rootThreadId, UUID rootStopRequestId) {}
+
+  /** 回执本体与其所属 Stop 根范围。 */
+  private record StoredStopReceipt(StoppedThreadReceipt receipt, StopRootKey root) {}
+
+  /** 环境等待分组键：{@code (真实执行根, 冻结的所需环境)}。 */
+  private record EnvironmentWaitGroupKey(UUID rootThreadId, EnvironmentId environmentId) {}
+
+  /** 组内累积：最早的 {@code (createdAt, id)} 代表与调用数。 */
+  private static final class EnvironmentWaitAccumulator {
+    private Instant representativeCreatedAt;
+    private UUID representativeInvocationId;
+    private int count;
+
+    void add(Instant createdAt, UUID invocationId) {
+      count++;
+      if (representativeCreatedAt == null
+          || createdAt.isBefore(representativeCreatedAt)
+          || (createdAt.equals(representativeCreatedAt)
+              && UuidOrder.COMPARATOR.compare(invocationId, representativeInvocationId) < 0)) {
+        representativeCreatedAt = createdAt;
+        representativeInvocationId = invocationId;
+      }
+    }
+
+    PendingEnvironmentWaitRow toRow(EnvironmentWaitGroupKey key) {
+      return new PendingEnvironmentWaitRow(
+          key.rootThreadId(),
+          key.environmentId(),
+          representativeCreatedAt,
+          representativeInvocationId,
+          count);
+    }
+  }
+
+  private static boolean isAfterRepresentativeCursor(
+      PendingEnvironmentWaitRow row, Instant afterCreatedAt, UUID afterId) {
+    int timeComparison = row.representativeCreatedAt().compareTo(afterCreatedAt);
+    if (timeComparison != 0) {
+      return timeComparison > 0;
+    }
+    return UuidOrder.COMPARATOR.compare(row.representativeInvocationId(), afterId) > 0;
+  }
+
+  /** 行锁 key，用于每个 transaction 的 update tracking。 */
+  private enum LockRank {
+    SESSION,
+    THREAD,
+    COMMAND,
+    MODEL,
+    TOOL,
+    WORK
+  }
+
+  /** 行锁 key；{@code ownerThreadId} 记录 COMMAND 行所属 Thread，用于同树例外判定。 */
+  private record LockKey(LockRank rank, String key, UUID ownerThreadId) {
+    static LockKey session(UUID id) {
+      return new LockKey(LockRank.SESSION, "session:" + id, null);
+    }
+
+    static LockKey thread(UUID id) {
+      return new LockKey(LockRank.THREAD, "thread:" + id, null);
+    }
+
+    static LockKey command(UUID threadId, long sequence) {
+      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence, threadId);
+    }
+
+    static LockKey model(UUID id) {
+      return new LockKey(LockRank.MODEL, "model:" + id, null);
+    }
+
+    static LockKey tool(UUID id) {
+      return new LockKey(LockRank.TOOL, "tool:" + id, null);
+    }
+
+    static LockKey work(WorkTarget target) {
+      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id(), null);
+    }
+  }
+
+  /** 创建当前事务句柄的工厂；测试子类可返回扩展事务，与核心 Store 共用同一快照与锁语义。 */
+  protected InMemoryTransaction createTransaction(State state) {
+    return new InMemoryTransaction(state);
+  }
+
+  private record CommandKey(UUID threadId, long sequence) {}
+
+  private record CommandSequenceKey(UUID threadId, long sequence) {}
+
+  private record CommandClientKey(UUID threadId, UUID idempotencyKey) {}
+
+  private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
+
+  protected class InMemoryTransaction implements HarnessStore.Transaction {
+
+    private final State state;
+    private final Set<LockKey> locked = new HashSet<>();
+    private final Set<UUID> lockedTrees = new HashSet<>();
+    private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
+    private final Thread owner = Thread.currentThread();
+    private boolean joinAdmissionLocked;
+    private LockRank highestLockRank;
+    private UUID highestThreadId;
+    private WorkTarget highestWorkTarget;
+    private boolean closed;
+    private Instant now;
+
+    protected InMemoryTransaction(State state) {
+      this.state = state;
+    }
+
+    /** 事务所属 Store；扩展事务只能在同一个 Store 内被投影。 */
+    protected final InMemoryHarnessStore ownerStore() {
+      return InMemoryHarnessStore.this;
+    }
+
+    @Override
+    public Instant now() {
+      checkOpen();
+      if (now == null) {
+        now = clock.instant();
+      }
+      return now;
+    }
+
+    protected void close() {
+      closed = true;
+    }
+
+    protected void checkOpen() {
+      if (Thread.currentThread() != owner) {
+        throw new IllegalStateException("transaction handle may only be used by its owner thread");
+      }
+      if (closed) {
+        throw new IllegalStateException("transaction is closed");
+      }
+    }
+
+    /**
+     * 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。
+     *
+     * <p>唯一例外是同一执行树内、已持有<b>该行所属树</b>事务级锁的前提下回写 COMMAND（父 Thread 结果交付）：交付命令可能在 Model/Tool 收敛过程中（Work
+     * 之前）或 Work fencing 之后（Stop 收尾）写入。例外严格限定在「command 所属 Thread 落在已持有的树锁内」， 仅持有其它执行树的树锁不允许逆序加锁。
+     */
+    private void requireCanLockRank(LockRank rank, UUID commandThreadId) {
+      if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
+        if (rank == LockRank.COMMAND
+            && commandThreadId != null
+            && isInLockedTree(commandThreadId)) {
+          return;
+        }
+        throw new IllegalStateException(
+            "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
+      }
+    }
+
+    private void requireCanLockRank(LockRank rank) {
+      requireCanLockRank(rank, null);
+    }
+
+    private void requireCanLockThread(UUID threadId) {
+      LockKey key = LockKey.thread(threadId);
+      if (locked.contains(key)) {
+        return;
+      }
+      requireCanLock(key);
+      if (highestThreadId != null && UuidOrder.COMPARATOR.compare(threadId, highestThreadId) <= 0) {
+        throw new IllegalStateException(
+            "thread locks must be acquired by ascending id: "
+                + highestThreadId
+                + " before "
+                + threadId);
+      }
+    }
+
+    private void recordThreadLock(UUID threadId) {
+      requireCanLockThread(threadId);
+      LockKey key = LockKey.thread(threadId);
+      if (!locked.contains(key)) {
+        lock(key);
+        highestThreadId = threadId;
+      }
+    }
+
+    private void requireCanLock(LockKey key) {
+      if (!locked.contains(key)) {
+        requireCanLockRank(key.rank(), key.ownerThreadId());
+      }
+    }
+
+    private void lock(LockKey key) {
+      requireCanLock(key);
+      if (locked.add(key)) {
+        highestLockRank = key.rank();
+      }
+    }
+
+    private void requireCanLockTools(List<ToolInvocation> invocations) {
+      Map<UUID, Integer> callIndexes = new HashMap<>(highestToolCallIndexByAssistant);
+      for (ToolInvocation invocation : invocations) {
+        LockKey key = LockKey.tool(invocation.id());
+        if (locked.contains(key)) {
+          continue;
+        }
+        requireCanLock(key);
+        Integer previous = callIndexes.put(invocation.assistantEntryId(), invocation.callIndex());
+        if (previous != null && invocation.callIndex() <= previous) {
+          throw new IllegalStateException(
+              "tool invocation locks for assistant entry "
+                  + invocation.assistantEntryId()
+                  + " must be acquired by ascending callIndex");
+        }
+      }
+    }
+
+    private void lockTool(ToolInvocation invocation) {
+      requireCanLockTools(List.of(invocation));
+      LockKey key = LockKey.tool(invocation.id());
+      if (!locked.contains(key)) {
+        lock(key);
+        highestToolCallIndexByAssistant.put(invocation.assistantEntryId(), invocation.callIndex());
+      }
+    }
+
+    private void requireCanLockWork(WorkTarget target) {
+      LockKey key = LockKey.work(target);
+      if (locked.contains(key)) {
+        return;
+      }
+      requireCanLock(key);
+      if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
+        if (target.type() == WorkTargetType.THREAD
+            && !lockedTrees.isEmpty()
+            && locked.contains(LockKey.thread(target.id()))
+            && isInLockedTree(target.id())) {
+          return;
+        }
+        throw new IllegalStateException(
+            "work locks must be acquired by ascending (type, id): "
+                + highestWorkTarget
+                + " before "
+                + target);
+      }
+    }
+
+    private boolean isInLockedTree(UUID threadId) {
+      if (lockedTrees.isEmpty()) {
+        return false;
+      }
+      ThreadState thread = state.threads.get(threadId);
+      return lockedTrees.contains(thread == null ? threadId : thread.rootThreadId());
+    }
+
+    private void requireCanClaimWork() {
+      requireCanLockRank(LockRank.WORK);
+      if (highestWorkTarget != null) {
+        throw new IllegalStateException(
+            "claimNextWork must be the first Work lock acquisition in a transaction");
+      }
+    }
+
+    private void recordWorkLock(WorkTarget target) {
+      requireCanLockWork(target);
+      LockKey key = LockKey.work(target);
+      if (!locked.contains(key)) {
+        lock(key);
+        highestWorkTarget = target;
+      }
+    }
+
+    private void requireLocked(LockKey key) {
+      if (!locked.contains(key)) {
+        throw new IllegalStateException(key + " is not locked in this transaction");
+      }
+    }
+
+    private void requireAbsent(Map<UUID, ?> rows, UUID id, String kind) {
+      if (rows.containsKey(id)) {
+        throw new IllegalArgumentException("duplicate " + kind + " id " + id);
+      }
+    }
+
+    private Entry requireExistingEntry(UUID entryId) {
+      Entry entry = state.entries.get(entryId);
+      if (entry == null) {
+        throw new IllegalArgumentException("entry " + entryId + " does not exist");
+      }
+      return entry;
+    }
+
+    @Override
+    public UUID nextId() {
+      checkOpen();
+      state.nextId = Math.addExact(state.nextId, 1L);
+      return new UUID(0L, state.nextId);
+    }
+
+    @Override
+    public void insertSession(Session session) {
+      checkOpen();
+      Objects.requireNonNull(session, "session");
+      requireMillisecondPrecision(session.createdAt());
+      requireAbsent(state.sessions, session.id(), "session");
+      state.sessions.put(session.id(), session);
+    }
+
+    @Override
+    public void updateSession(Session session) {
+      checkOpen();
+      Objects.requireNonNull(session, "session");
+      requireMillisecondPrecision(session.createdAt());
+      requireLocked(LockKey.session(session.id()));
+      Session stored = state.sessions.get(session.id());
+      if (stored == null) {
+        throw new IllegalArgumentException("session " + session.id() + " does not exist");
+      }
+      Session.validateTransition(stored, session);
+      state.sessions.put(session.id(), session);
+    }
+
+    @Override
+    public Optional<Session> findSession(UUID id) {
+      checkOpen();
+      return Optional.ofNullable(state.sessions.get(id));
+    }
+
+    @Override
+    public Optional<Session> lockSessionForKeyShare(UUID id) {
+      checkOpen();
+      // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
+      if (!locked.contains(LockKey.session(id))) {
+        requireCanLockRank(LockRank.SESSION);
+      }
+      Session session = state.sessions.get(id);
+      if (session != null) {
+        lock(LockKey.session(id));
+      }
+      return Optional.ofNullable(session);
+    }
+
+    @Override
+    public Optional<Session> lockSessionForUpdate(UUID id) {
+      // 单 monitor 参考实现没有真正的并发，但为与生产实现一致的锁序记账，FOR UPDATE 与 KEY SHARE 走同一路径。
+      return lockSessionForKeyShare(id);
+    }
+
+    @Override
+    public void insertEntry(Entry entry) {
+      checkOpen();
+      Objects.requireNonNull(entry, "entry");
+      requireMillisecondPrecision(entry.createdAt());
+      requireAbsent(state.entries, entry.id(), "entry");
+      if (!state.sessions.containsKey(entry.sessionId())) {
+        throw new IllegalArgumentException("session " + entry.sessionId() + " does not exist");
+      }
+      boolean root = entry.payload().type().isRoot();
+      if (root) {
+        if (hasRoot(entry.sessionId())) {
+          throw new IllegalArgumentException(
+              "session " + entry.sessionId() + " already has a ROOT entry");
+        }
+        new EntryPath(List.of(entry));
+      } else {
+        if (!hasRoot(entry.sessionId())) {
+          throw new IllegalArgumentException(
+              "session " + entry.sessionId() + " must have a ROOT entry before any other entry");
+        }
+        // 写入前校验 parent path + new entry 的完整 EntryPath（turn / tool-prefix 结构不能以非法序列进入 store）。
+        EntryPath parentPath = loadEntryPath(entry.parentEntryId());
+        List<Entry> nextPath = new ArrayList<>(parentPath.entries());
+        nextPath.add(entry);
+        new EntryPath(nextPath);
+      }
+      state.entries.put(entry.id(), entry);
+    }
+
+    private boolean hasRoot(UUID sessionId) {
+      return findRootEntry(sessionId).isPresent();
+    }
+
+    @Override
+    public Optional<Entry> findEntry(UUID id) {
+      checkOpen();
+      return Optional.ofNullable(state.entries.get(id));
+    }
+
+    @Override
+    public Optional<Entry> findRootEntry(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      for (Entry entry : state.entries.values()) {
+        if (entry.sessionId().equals(sessionId) && entry.payload().type().isRoot()) {
+          return Optional.of(entry);
+        }
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public EntryPath loadEntryPath(UUID headEntryId) {
+      checkOpen();
+      List<Entry> path = new ArrayList<>();
+      UUID cursor = headEntryId;
+      while (cursor != null) {
+        Entry entry = requireExistingEntry(cursor);
+        path.add(entry);
+        cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+      }
+      Collections.reverse(path);
+      return new EntryPath(path);
+    }
+
+    @Override
+    public List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId) {
+      checkOpen();
+      Objects.requireNonNull(headEntryId, "headEntryId");
+      Objects.requireNonNull(contributorId, "contributorId");
+      return loadEntryPath(headEntryId).entries().stream()
+          .filter(
+              entry ->
+                  entry.payload() instanceof CustomEntryPayload custom
+                      && contributorId.equals(custom.contributorId()))
+          .toList();
+    }
+
+    @Override
+    public BranchSettings loadBranchSettings(UUID headEntryId) {
+      checkOpen();
+      Objects.requireNonNull(headEntryId, "headEntryId");
+      // 参考实现直接复用完整路径语义：与 PostgreSQL 窄查询保持同一 settings 结果。
+      return loadEntryPath(headEntryId).baseSettings();
+    }
+
+    @Override
+    public List<Entry> loadEntriesBySessionId(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      if (!state.sessions.containsKey(sessionId)) {
+        throw new IllegalArgumentException("session " + sessionId + " does not exist");
+      }
+      List<Entry> entries = new ArrayList<>();
+      for (Entry entry : state.entries.values()) {
+        if (entry.sessionId().equals(sessionId)) {
+          entries.add(entry);
+        }
+      }
+      entries.sort(
+          Comparator.comparing(Entry::createdAt).thenComparing(Entry::id, UuidOrder.COMPARATOR));
+      return List.copyOf(entries);
+    }
+
+    @Override
+    public void insertThread(ThreadState thread) {
+      checkOpen();
+      Objects.requireNonNull(thread, "thread");
+      requireMillisecondPrecision(thread.createdAt());
+      requireMillisecondPrecision(thread.updatedAt());
+      requireAbsent(state.threads, thread.id(), "thread");
+      requireExistingEntry(thread.headEntryId());
+      requireThreadHeadInSession(thread);
+      if (thread.parentThreadId() != null && !state.threads.containsKey(thread.parentThreadId())) {
+        throw new IllegalArgumentException(
+            "parent thread " + thread.parentThreadId() + " does not exist");
+      }
+      requireUniqueRootThreadName(thread);
+      boolean joinedChild =
+          thread.parentThreadId() != null
+              && !lockedTrees.isEmpty()
+              && locked.contains(LockKey.thread(thread.parentThreadId()));
+      if (!joinedChild) {
+        requireCanLockThread(thread.id());
+      }
+      state.threads.put(thread.id(), thread);
+      if (joinedChild) {
+        locked.add(LockKey.thread(thread.id()));
+        if (highestThreadId == null
+            || UuidOrder.COMPARATOR.compare(thread.id(), highestThreadId) > 0) {
+          highestThreadId = thread.id();
+        }
+      } else {
+        recordThreadLock(thread.id());
+      }
+    }
+
+    /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（Session -&gt; head 同一 Session 约束）。 */
+    private void requireThreadHeadInSession(ThreadState thread) {
+      if (!state.sessions.containsKey(thread.sessionId())) {
+        throw new IllegalArgumentException("session " + thread.sessionId() + " does not exist");
+      }
+      Entry head = state.entries.get(thread.headEntryId());
+      if (head == null || !head.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "thread head entry "
+                + thread.headEntryId()
+                + " must belong to thread session "
+                + thread.sessionId());
+      }
+    }
+
+    @Override
+    public Optional<ThreadState> findThread(UUID id) {
+      checkOpen();
+      return Optional.ofNullable(state.threads.get(id));
+    }
+
+    @Override
+    public Optional<ThreadState> lockThread(UUID id) {
+      checkOpen();
+      requireCanLockThread(id);
+      ThreadState thread = state.threads.get(id);
+      if (thread != null) {
+        recordThreadLock(id);
+      }
+      return Optional.ofNullable(thread);
+    }
+
+    @Override
+    public List<ThreadState> listThreadsBySession(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      if (!state.sessions.containsKey(sessionId)) {
+        throw new IllegalArgumentException("session " + sessionId + " does not exist");
+      }
+      return state.threads.values().stream()
+          .filter(thread -> thread.sessionId().equals(sessionId))
+          .sorted(
+              Comparator.comparing(ThreadState::createdAt)
+                  .thenComparing(ThreadState::id, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public List<ThreadState> listChildren(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return state.threads.values().stream()
+          .filter(thread -> parentThreadId.equals(thread.parentThreadId()))
+          .sorted(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public void updateThread(ThreadState thread) {
+      checkOpen();
+      Objects.requireNonNull(thread, "thread");
+      requireMillisecondPrecision(thread.createdAt());
+      requireMillisecondPrecision(thread.updatedAt());
+      requireLocked(LockKey.thread(thread.id()));
+      ThreadState stored = state.threads.get(thread.id());
+      if (stored == null) {
+        throw new IllegalArgumentException("thread " + thread.id() + " does not exist");
+      }
+      ThreadState.validateTransition(stored, thread);
+      requireExistingEntry(thread.headEntryId());
+      requireThreadHeadInSession(thread);
+      requireUniqueRootThreadName(thread);
+      state.threads.put(thread.id(), thread);
+    }
+
+    /**
+     * 模拟 {@code uk_harness_thread_root_name}：同一 Session 内执行根（parent 为 null）名称唯一，子代理与跨 Session
+     * 同名不受影响。按规范化后的原值精确比较，不引入大小写/兼容折叠。
+     */
+    private void requireUniqueRootThreadName(ThreadState thread) {
+      if (thread.parentThreadId() != null) {
+        return;
+      }
+      boolean conflict =
+          state.threads.values().stream()
+              .anyMatch(
+                  existing ->
+                      !existing.id().equals(thread.id())
+                          && existing.parentThreadId() == null
+                          && existing.sessionId().equals(thread.sessionId())
+                          && existing.name().equals(thread.name()));
+      if (conflict) {
+        throw new HarnessRuntimeConflictException(
+            HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT,
+            "thread name "
+                + thread.name()
+                + " is already used by an execution root in session "
+                + thread.sessionId());
+      }
+    }
+
+    @Override
+    public List<UUID> findAncestorChain(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      if (!state.threads.containsKey(threadId)) {
+        return List.of();
+      }
+      List<UUID> chain = new ArrayList<>();
+      for (UUID current = threadId; current != null; ) {
+        chain.add(current);
+        current = state.threads.get(current).parentThreadId();
+      }
+      return List.copyOf(chain);
+    }
+
+    @Override
+    public List<ThreadState> listThreadsByRoot(UUID rootThreadId) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      return state.threads.values().stream()
+          .filter(thread -> thread.rootThreadId().equals(rootThreadId))
+          .toList();
+    }
+
+    @Override
+    public void lockTree(UUID rootThreadId) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      if (lockedTrees.contains(rootThreadId)) {
+        return;
+      }
+      if (highestLockRank != null) {
+        throw new IllegalStateException("tree lock must precede business row locks");
+      }
+      if (!lockedTrees.isEmpty()
+          && UuidOrder.COMPARATOR.compare(
+                  rootThreadId, lockedTrees.stream().max(UuidOrder.COMPARATOR).orElseThrow())
+              <= 0) {
+        throw new IllegalStateException("tree locks must be acquired in ascending root order");
+      }
+      lockedTrees.add(rootThreadId);
+    }
+
+    @Override
+    public void insertJoin(ThreadJoin join) {
+      checkOpen();
+      Objects.requireNonNull(join, "join");
+      requireMillisecondPrecision(join.createdAt());
+      requireMillisecondPrecision(join.updatedAt());
+      if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
+        throw new IllegalArgumentException("new join must be unmatched");
+      }
+      requireAbsent(state.joins, join.invocationId(), "join");
+      if (!state.threads.containsKey(join.childThreadId())) {
+        throw new IllegalArgumentException(
+            "child thread " + join.childThreadId() + " does not exist");
+      }
+      if (join.parentThreadId() != null && !state.threads.containsKey(join.parentThreadId())) {
+        throw new IllegalArgumentException(
+            "parent thread " + join.parentThreadId() + " does not exist");
+      }
+      CommandKey sourceKey = new CommandKey(join.childThreadId(), join.sourceCommandSequence());
+      if (!state.commands.containsKey(sourceKey)) {
+        throw new IllegalArgumentException(
+            "source command "
+                + join.childThreadId()
+                + "/"
+                + join.sourceCommandSequence()
+                + " does not exist");
+      }
+      requireLocked(LockKey.thread(join.childThreadId()));
+      state.joins.put(join.invocationId(), join);
+    }
+
+    @Override
+    public Optional<ThreadJoin> findJoin(UUID invocationId) {
+      checkOpen();
+      Objects.requireNonNull(invocationId, "invocationId");
+      return Optional.ofNullable(state.joins.get(invocationId));
+    }
+
+    @Override
+    public List<ThreadJoin> loadIncompleteJoins(UUID childThreadId) {
+      checkOpen();
+      Objects.requireNonNull(childThreadId, "childThreadId");
+      return state.joins.values().stream()
+          .filter(
+              join ->
+                  join.childThreadId().equals(childThreadId)
+                      && !join.matched()
+                      && join.supersededByInvocationId() == null)
+          .sorted(
+              Comparator.comparing(ThreadJoin::createdAt)
+                  .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public int countIncompleteChildJoins(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return (int)
+          state.joins.values().stream()
+              .filter(
+                  join ->
+                      parentThreadId.equals(join.parentThreadId())
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null
+                          && join.delivery() == JoinDelivery.NOTIFY_PARENT)
+              .count();
+    }
+
+    @Override
+    public boolean hasIncompleteOwnerChildJoin(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return state.joins.values().stream()
+          .anyMatch(
+              join ->
+                  parentThreadId.equals(join.parentThreadId())
+                      && !join.matched()
+                      && join.supersededByInvocationId() == null
+                      && join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
+    }
+
+    @Override
+    public void lockJoinAdmission() {
+      checkOpen();
+      if (joinAdmissionLocked) {
+        return;
+      }
+      if (highestLockRank != null || !lockedTrees.isEmpty()) {
+        throw new IllegalStateException(
+            "join admission lock must precede tree and business row locks");
+      }
+      // 参考实现由全局 monitor 串行化事务，准入锁只需保留与 PG 一致的“必须最先获取”防御。
+      joinAdmissionLocked = true;
+    }
+
+    @Override
+    public int countIncompleteSubagentJoins() {
+      checkOpen();
+      return (int)
+          state.joins.values().stream()
+              .filter(
+                  join ->
+                      join.parentThreadId() != null
+                          && join.delivery() == JoinDelivery.NOTIFY_PARENT
+                          && !join.matched()
+                          && join.supersededByInvocationId() == null)
+              .count();
+    }
+
+    @Override
+    public void insertStopReceipts(
+        UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+      Objects.requireNonNull(receipts, "receipts");
+      if (receipts.isEmpty()) {
+        throw new IllegalArgumentException("stop receipts must not be empty");
+      }
+      StopRootKey root = new StopRootKey(rootThreadId, rootStopRequestId);
+      List<StopReceiptKey> keys = new ArrayList<>(receipts.size());
+      boolean rootReceiptPresent = false;
+      for (StoppedThreadReceipt receipt : receipts) {
+        requireLocked(LockKey.thread(receipt.threadId()));
+        StopReceiptKey key = new StopReceiptKey(receipt.threadId(), receipt.stopRequestId());
+        if (state.stopReceipts.containsKey(key)) {
+          throw new IllegalArgumentException("stop receipt already exists: " + key);
+        }
+        requireThreadInStopSubtree(receipt.threadId(), rootThreadId);
+        if (receipt.threadId().equals(rootThreadId)) {
+          rootReceiptPresent = true;
+          if (!receipt.stopRequestId().equals(rootStopRequestId)) {
+            throw new IllegalArgumentException(
+                "root stop receipt must carry the root stop request id " + rootStopRequestId);
+          }
+        }
+        if (receipt.stoppedTurnEndEntryId() != null) {
+          requireStoppedTurnEnd(receipt.threadId(), receipt.stoppedTurnEndEntryId());
+        }
+        keys.add(key);
+      }
+      if (!rootReceiptPresent) {
+        throw new IllegalArgumentException(
+            "stop receipt set must contain the root thread receipt " + rootThreadId);
+      }
+      for (int i = 0; i < receipts.size(); i++) {
+        state.stopReceipts.put(keys.get(i), new StoredStopReceipt(receipts.get(i), root));
+      }
+      state.stopReceiptsByRoot.computeIfAbsent(root, ignored -> new ArrayList<>()).addAll(keys);
+    }
+
+    /** 回执所属 Thread 必须位于 rootThreadId 的停止子树内（rootThreadId 是其祖先或自身）。 */
+    private void requireThreadInStopSubtree(UUID threadId, UUID rootThreadId) {
+      if (!findAncestorChain(threadId).contains(rootThreadId)) {
+        throw new IllegalArgumentException(
+            "thread " + threadId + " is not in the stop subtree rooted at " + rootThreadId);
+      }
+    }
+
+    /** 停止边界必须是该 Thread 自己 Session 内、由其自有 Turn 关闭的 STOPPED TurnEnd。 */
+    private void requireStoppedTurnEnd(UUID threadId, UUID stoppedTurnEndEntryId) {
+      ThreadState thread = state.threads.get(threadId);
+      if (thread == null) {
+        throw new IllegalArgumentException("thread " + threadId + " does not exist");
+      }
+      Entry turnEnd = requireExistingEntry(stoppedTurnEndEntryId);
+      if (!turnEnd.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "stopped turn end must be in the receipt thread's session");
+      }
+      if (!(turnEnd.payload() instanceof TurnEndPayload end)
+          || end.outcome() != TurnEndOutcome.STOPPED) {
+        throw new IllegalArgumentException(
+            "stopped turn end must be a STOPPED TurnEnd entry: " + stoppedTurnEndEntryId);
+      }
+      Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload start)
+          || !threadId.equals(start.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "stopped turn end must close a turn owned by thread " + threadId);
+      }
+    }
+
+    @Override
+    public Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(stopRequestId, "stopRequestId");
+      return Optional.ofNullable(
+              state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)))
+          .map(StoredStopReceipt::receipt);
+    }
+
+    @Override
+    public List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.stopReceipts.values().stream()
+          .map(StoredStopReceipt::receipt)
+          .filter(receipt -> receipt.threadId().equals(threadId))
+          .toList();
+    }
+
+    @Override
+    public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
+        UUID rootThreadId, UUID rootStopRequestId) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+      List<StopReceiptKey> keys =
+          state.stopReceiptsByRoot.get(new StopRootKey(rootThreadId, rootStopRequestId));
+      if (keys == null) {
+        return List.of();
+      }
+      return keys.stream()
+          .map(state.stopReceipts::get)
+          .map(StoredStopReceipt::receipt)
+          .sorted(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public void updateJoin(ThreadJoin join) {
+      checkOpen();
+      Objects.requireNonNull(join, "join");
+      requireMillisecondPrecision(join.createdAt());
+      requireMillisecondPrecision(join.updatedAt());
+      requireLocked(LockKey.thread(join.childThreadId()));
+      ThreadJoin old =
+          findJoin(join.invocationId())
+              .orElseThrow(
+                  () -> new IllegalArgumentException("join not found: " + join.invocationId()));
+      ThreadJoin.validateTransition(old, join);
+      requireValidJoinReceipt(join);
+      if (join.terminalEntryId() != null) {
+        requireExistingEntry(join.terminalEntryId());
+      }
+      if (join.finalAnswerEntryId() != null) {
+        requireExistingEntry(join.finalAnswerEntryId());
+      }
+      if (join.deliveryCommandSequence() != null) {
+        if (join.parentThreadId() == null) {
+          throw new IllegalArgumentException("delivery requires a parent thread");
+        }
+        CommandKey deliveryKey =
+            new CommandKey(join.parentThreadId(), join.deliveryCommandSequence());
+        if (!state.commands.containsKey(deliveryKey)) {
+          throw new IllegalArgumentException(
+              "delivery command "
+                  + join.parentThreadId()
+                  + "/"
+                  + join.deliveryCommandSequence()
+                  + " does not exist");
+        }
+      }
+      state.joins.put(join.invocationId(), join);
+    }
+
+    /**
+     * 已冻结的 Join 回执必须与子 Thread 历史一致：terminal 与子 Thread 当前 head 必须在同一 branch（互为祖先）；terminal 是 TurnEnd
+     * 时其 Turn 必须由子 Thread 拥有；final answer 是 ASSISTANT MESSAGE 时必须位于源命令应用 Entry 之后、 terminal 路径上。共享
+     * store 契约允许 opaque 占位 Entry，因此非 TurnEnd/非 ASSISTANT 的占位仅做同 Session 校验。
+     */
+    private void requireValidJoinReceipt(ThreadJoin join) {
+      if (join.terminalEntryId() == null) {
+        return;
+      }
+      UUID childThreadId = join.childThreadId();
+      ThreadState child = state.threads.get(childThreadId);
+      if (child == null) {
+        throw new IllegalArgumentException("thread " + childThreadId + " does not exist");
+      }
+      EntryPath terminalPath = loadEntryPath(join.terminalEntryId());
+      EntryPath childPath = loadEntryPath(child.headEntryId());
+      if (indexOfEntry(childPath, join.terminalEntryId()) < 0
+          && indexOfEntry(terminalPath, child.headEntryId()) < 0) {
+        throw new IllegalArgumentException(
+            "join terminal entry must be on the child thread branch: " + join.terminalEntryId());
+      }
+      if (terminalPath.head().payload() instanceof TurnEndPayload end) {
+        requireTurnEndOwnedBy(end, childThreadId);
+      }
+      if (join.finalAnswerEntryId() == null) {
+        return;
+      }
+      Entry finalAnswer = requireExistingEntry(join.finalAnswerEntryId());
+      if (!finalAnswer.sessionId().equals(child.sessionId())) {
+        throw new IllegalArgumentException(
+            "join final answer must be in the child thread's session");
+      }
+      if (!(finalAnswer.payload() instanceof MessagePayload message)
+          || message.message().role() != AgentMessageRole.ASSISTANT) {
+        return;
+      }
+      ThreadCommand source = findCommand(childThreadId, join.sourceCommandSequence()).orElse(null);
+      UUID appliedStart = source == null ? null : source.appliedEntryId();
+      if (appliedStart == null) {
+        throw new IllegalArgumentException("join final answer requires an applied source command");
+      }
+      int startIndex = indexOfEntry(terminalPath, appliedStart);
+      if (startIndex < 0) {
+        throw new IllegalArgumentException(
+            "join source applied entry must be on the terminal path: " + appliedStart);
+      }
+      int finalIndex = indexOfEntry(terminalPath, join.finalAnswerEntryId());
+      if (finalIndex <= startIndex) {
+        throw new IllegalArgumentException(
+            "join final answer entry must follow the applied source entry");
+      }
+    }
+
+    /** TurnEnd 引用的 TurnStart 必须由指定 Thread 拥有。 */
+    private void requireTurnEndOwnedBy(TurnEndPayload end, UUID ownerThreadId) {
+      Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload start)
+          || !ownerThreadId.equals(start.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "join terminal turn must be owned by the child thread " + ownerThreadId);
+      }
+    }
+
+    private static int indexOfEntry(EntryPath path, UUID entryId) {
+      List<Entry> entries = path.entries();
+      for (int i = 0; i < entries.size(); i++) {
+        if (entries.get(i).id().equals(entryId)) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    @Override
+    public int deleteJoinsByChild(UUID childThreadId) {
+      checkOpen();
+      Objects.requireNonNull(childThreadId, "childThreadId");
+      requireLocked(LockKey.thread(childThreadId));
+      if (!isInLockedTree(childThreadId)) {
+        throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
+      }
+      List<ThreadJoin> childJoins =
+          state.joins.values().stream()
+              .filter(j -> j.childThreadId().equals(childThreadId))
+              .toList();
+      for (ThreadJoin join : childJoins) {
+        if (join.supersededByInvocationId() != null) {
+          // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
+          continue;
+        }
+        if (!join.matched()) {
+          throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
+        }
+        if (join.delivery() == JoinDelivery.NOTIFY_PARENT
+            && join.deliveryCommandSequence() == null) {
+          throw new IllegalArgumentException(
+              "cannot delete join pending delivery " + join.invocationId());
+        }
+      }
+      int count = 0;
+      var it = state.joins.entrySet().iterator();
+      while (it.hasNext()) {
+        if (it.next().getValue().childThreadId().equals(childThreadId)) {
+          it.remove();
+          count++;
+        }
+      }
+      return count;
+    }
+
+    @Override
+    public Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
+      checkOpen();
+      Objects.requireNonNull(idempotencyKey, "idempotencyKey");
+      for (ThreadCommand command : state.commands.values()) {
+        if (command.threadId().equals(threadId)
+            && command.idempotencyKey().equals(idempotencyKey)) {
+          return Optional.of(command);
+        }
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      for (ThreadCommand command : state.commands.values()) {
+        if (command.threadId().equals(threadId) && command.sequence() == sequence) {
+          return Optional.of(command);
+        }
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public int deleteJoinsForThreads(List<UUID> threadIds) {
+      checkOpen();
+      List<UUID> copied = List.copyOf(threadIds);
+      Set<UUID> deleting = Set.copyOf(copied);
+      for (UUID threadId : copied) {
+        requireLocked(LockKey.thread(threadId));
+        if (!isInLockedTree(threadId)) {
+          throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+        }
+      }
+      int count = 0;
+      var it = state.joins.entrySet().iterator();
+      while (it.hasNext()) {
+        ThreadJoin join = it.next().getValue();
+        if (!deleting.contains(join.childThreadId())) {
+          continue;
+        }
+        boolean parentAlsoDeleted =
+            join.parentThreadId() == null || deleting.contains(join.parentThreadId());
+        if (!parentAlsoDeleted
+            && join.supersededByInvocationId() == null
+            && (!join.matched()
+                || (join.delivery() == JoinDelivery.NOTIFY_PARENT
+                    && join.deliveryCommandSequence() == null))) {
+          throw new IllegalArgumentException(
+              "cannot delete join pending delivery " + join.invocationId());
+        }
+        it.remove();
+        count++;
+      }
+      return count;
+    }
+
+    @Override
+    public List<ThreadCommand> loadQueuedCommands(UUID threadId) {
+      checkOpen();
+      // 锁序 Thread -> commands：先锁 Thread 才能读它的 mailbox。
+      requireLocked(LockKey.thread(threadId));
+      requireCanLockRank(LockRank.COMMAND, threadId);
+      List<ThreadCommand> queued =
+          state.commands.values().stream()
+              .filter(
+                  command ->
+                      command.threadId().equals(threadId)
+                          && command.state() == ThreadCommandState.QUEUED)
+              .sorted(Comparator.comparingLong(ThreadCommand::sequence))
+              .toList();
+      for (ThreadCommand command : queued) {
+        lock(LockKey.command(command.threadId(), command.sequence()));
+      }
+      return queued;
+    }
+
+    @Override
+    public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.commands.values().stream()
+          .anyMatch(
+              command ->
+                  command.threadId().equals(threadId)
+                      && command.sequence() > afterSequence
+                      && command.state() == ThreadCommandState.APPLIED
+                      && command.type().isNotification());
+    }
+
+    @Override
+    public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(stopRequestId, "stopRequestId");
+      return state.commands.values().stream()
+          .filter(
+              command ->
+                  command.threadId().equals(threadId)
+                      && stopRequestId.equals(command.stopRequestId()))
+          .sorted(Comparator.comparingLong(ThreadCommand::sequence))
+          .toList();
+    }
+
+    @Override
+    public void insertCommands(List<ThreadCommand> commands) {
+      checkOpen();
+      List<ThreadCommand> copied =
+          List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
+      Set<CommandSequenceKey> sequences = new HashSet<>();
+      Set<CommandClientKey> idempotencyKeys = new HashSet<>();
+      for (ThreadCommand command : copied) {
+        requireMillisecondPrecision(command.cancelledAt());
+        requireMillisecondPrecision(command.createdAt());
+        if (!sequences.add(new CommandSequenceKey(command.threadId(), command.sequence()))) {
+          throw new IllegalArgumentException(
+              "duplicate command sequence "
+                  + command.sequence()
+                  + " on thread "
+                  + command.threadId());
+        }
+        if (!idempotencyKeys.add(
+            new CommandClientKey(command.threadId(), command.idempotencyKey()))) {
+          throw new IllegalArgumentException(
+              "duplicate idempotencyKey "
+                  + command.idempotencyKey()
+                  + " on thread "
+                  + command.threadId());
+        }
+        if (command.state() != ThreadCommandState.QUEUED) {
+          throw new IllegalArgumentException("inserted commands must be QUEUED");
+        }
+        if (!state.threads.containsKey(command.threadId())) {
+          throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
+        }
+        // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
+        requireLocked(LockKey.thread(command.threadId()));
+        requireCanLockRank(LockRank.COMMAND, command.threadId());
+        requireUniqueCommandKey(command);
+      }
+      for (ThreadCommand command : copied) {
+        state.commands.put(new CommandKey(command.threadId(), command.sequence()), command);
+        lock(LockKey.command(command.threadId(), command.sequence()));
+      }
+    }
+
+    private void requireUniqueCommandKey(ThreadCommand command) {
+      for (ThreadCommand existing : state.commands.values()) {
+        if (existing.threadId().equals(command.threadId())
+            && existing.sequence() == command.sequence()) {
+          throw new IllegalArgumentException(
+              "command sequence "
+                  + command.sequence()
+                  + " already used on thread "
+                  + command.threadId());
+        }
+        if (existing.threadId().equals(command.threadId())
+            && existing.idempotencyKey().equals(command.idempotencyKey())) {
+          throw new IllegalArgumentException(
+              "idempotencyKey "
+                  + command.idempotencyKey()
+                  + " already used on thread "
+                  + command.threadId());
+        }
+      }
+    }
+
+    @Override
+    public void updateCommands(List<ThreadCommand> commands) {
+      checkOpen();
+      List<ThreadCommand> copied =
+          List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
+      for (ThreadCommand command : copied) {
+        requireMillisecondPrecision(command.cancelledAt());
+        requireMillisecondPrecision(command.createdAt());
+        ThreadCommand stored =
+            state.commands.get(new CommandKey(command.threadId(), command.sequence()));
+        if (stored == null) {
+          throw new IllegalArgumentException(
+              "command " + command.threadId() + "/" + command.sequence() + " does not exist");
+        }
+        requireLocked(LockKey.command(command.threadId(), command.sequence()));
+        requireSameCommandIdentity(stored, command);
+        // 锁序 Thread -> commands：harvest / stop 更新 mailbox 前必须先锁定相关 Thread；身份检查先行，
+        // 伪造身份的 update 仍以 IllegalArgumentException 拒绝。
+        requireLocked(LockKey.thread(command.threadId()));
+        requireValidCommandLifecycle(stored, command);
+        requireValidAppliedEntry(command);
+      }
+      for (ThreadCommand command : copied) {
+        state.commands.put(new CommandKey(command.threadId(), command.sequence()), command);
+      }
+    }
+
+    /**
+     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；standalone 分支设置
+     * 命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）可以引用本 Thread 拥有的 SETTINGS 快照 Entry；其它命令必须引用本
+     * Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
+     */
+    private void requireValidAppliedEntry(ThreadCommand command) {
+      UUID appliedEntryId = command.appliedEntryId();
+      if (appliedEntryId == null) {
+        return;
+      }
+      Entry applied = requireExistingEntry(appliedEntryId);
+      ThreadState thread = state.threads.get(command.threadId());
+      if (thread == null) {
+        throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
+      }
+      if (!applied.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "consumed entry must be in the command thread's session");
+      }
+      if (command.type().isNotification()) {
+        if (!(applied.payload() instanceof NotificationPayload notification)
+            || !(command.payload() instanceof NotificationCommandPayload submitted)) {
+          throw new IllegalArgumentException(
+              "NOTIFICATION command must apply its own NOTIFICATION entry");
+        }
+        if (!notification.notificationId().equals(submitted.notificationId())
+            || notification.kind() != submitted.kind()
+            || !notification.sourceThreadId().equals(submitted.sourceThreadId())
+            || !notification.message().equals(submitted.message())) {
+          throw new IllegalArgumentException(
+              "NOTIFICATION applied entry must match the command payload");
+        }
+        return;
+      }
+      if (isBranchSettingCommand(command.type())
+          && applied.payload() instanceof SettingsPayload settings
+          && command.threadId().equals(settings.ownerThreadId())) {
+        return;
+      }
+      if (!(applied.payload() instanceof TurnStartPayload turnStartPayload)
+          || !command.threadId().equals(turnStartPayload.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "appliedEntryId must reference a TURN_START or SETTINGS entry owned by the command"
+                + " thread");
+      }
+    }
+
+    private static boolean isBranchSettingCommand(ThreadCommandType type) {
+      return type == ThreadCommandType.SET_AGENT
+          || type == ThreadCommandType.SET_MODEL
+          || type == ThreadCommandType.SET_ENVIRONMENT;
+    }
+
+    /**
+     * QUEUED 只能推进为 APPLIED / CANCELLED；terminal 行只接受 exact-idempotent 重放（相同 marker），禁止
+     * terminal-&gt;QUEUED、APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变。
+     */
+    private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {
+      if (stored.appliedEntryId() != null || stored.cancelledAt() != null) {
+        if (!Objects.equals(stored.appliedEntryId(), command.appliedEntryId())
+            || !Objects.equals(stored.cancelledAt(), command.cancelledAt())) {
+          throw new IllegalArgumentException(
+              "terminal commands must be updated exactly idempotently");
+        }
+        return;
+      }
+      boolean consumed = command.appliedEntryId() != null;
+      boolean cancelled = command.cancelledAt() != null;
+      if (consumed == cancelled) {
+        // 两者都缺失：QUEUED -> QUEUED；两者都存在时已被 record contract 直接拒绝。
+        throw new IllegalArgumentException(
+            "queued commands may only transition to APPLIED or CANCELLED");
+      }
+    }
+
+    private static void requireSameCommandIdentity(ThreadCommand stored, ThreadCommand command) {
+      if (!stored.threadId().equals(command.threadId())
+          || !stored.payload().equals(command.payload())
+          || !stored.idempotencyKey().equals(command.idempotencyKey())
+          || !stored.requestHash().equals(command.requestHash())
+          || stored.sequence() != command.sequence()
+          || !stored.createdAt().equals(command.createdAt())) {
+        throw new IllegalArgumentException(
+            "command identity (thread/payload/idempotencyKey/requestHash/sequence/createdAt) must not change");
+      }
+    }
+
+    protected Optional<Object> findDriverRow(UUID id) {
+      checkOpen();
+      return Optional.ofNullable(state.driverRows.get(id));
+    }
+
+    protected Optional<Object> lockDriverRow(UUID id) {
+      checkOpen();
+      LockKey lockKey = LockKey.model(id);
+      requireCanLock(lockKey);
+      Object row = state.driverRows.get(id);
+      if (row != null) {
+        lock(lockKey);
+      }
+      return Optional.ofNullable(row);
+    }
+
+    protected void insertDriverRow(UUID id, UUID ownerThreadId, Object value) {
+      checkOpen();
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(ownerThreadId, "ownerThreadId");
+      Objects.requireNonNull(value, "value");
+      requireAbsent(state.driverRows, id, "driver row");
+      if (!state.threads.containsKey(ownerThreadId)) {
+        throw new IllegalArgumentException("thread " + ownerThreadId + " does not exist");
+      }
+      requireLocked(LockKey.thread(ownerThreadId));
+      LockKey lockKey = LockKey.model(id);
+      requireCanLock(lockKey);
+      state.driverRows.put(id, value);
+      state.driverRowOwners.put(id, ownerThreadId);
+      lock(lockKey);
+    }
+
+    protected void updateDriverRow(UUID id, Object value) {
+      checkOpen();
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(value, "value");
+      requireLocked(LockKey.model(id));
+      if (!state.driverRows.containsKey(id)) {
+        throw new IllegalArgumentException("driver row " + id + " does not exist");
+      }
+      state.driverRows.put(id, value);
+    }
+
+    protected boolean deleteDriverRow(UUID id) {
+      checkOpen();
+      Objects.requireNonNull(id, "id");
+      if (!state.driverRows.containsKey(id)) {
+        throw new IllegalArgumentException("driver row " + id + " does not exist");
+      }
+      requireLocked(LockKey.model(id));
+      state.driverRowOwners.remove(id);
+      return state.driverRows.remove(id) != null;
+    }
+
+    protected Map<UUID, Object> driverRows() {
+      checkOpen();
+      return Map.copyOf(state.driverRows);
+    }
+
+    protected Optional<Object> driverAttribute(String key) {
+      checkOpen();
+      return Optional.ofNullable(state.driverAttributes.get(key));
+    }
+
+    protected void putDriverAttribute(String key, Object value) {
+      checkOpen();
+      Objects.requireNonNull(key, "key");
+      Objects.requireNonNull(value, "value");
+      state.driverAttributes.put(key, value);
+    }
+
+    public Optional<ToolInvocation> findToolInvocation(UUID id) {
+      checkOpen();
+      return Optional.ofNullable(state.toolInvocations.get(id));
+    }
+
+    @Override
+    public Optional<ToolInvocation> lockToolInvocation(UUID id) {
+      checkOpen();
+      ToolInvocation invocation = state.toolInvocations.get(id);
+      if (invocation != null) {
+        lockTool(invocation);
+      }
+      return Optional.ofNullable(invocation);
+    }
+
+    @Override
+    public List<ToolInvocation> loadToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
+      checkOpen();
+      return state.toolInvocations.values().stream()
+          .filter(invocation -> invocation.assistantEntryId().equals(assistantEntryId))
+          .sorted(Comparator.comparingInt(ToolInvocation::callIndex))
+          .toList();
+    }
+
+    @Override
+    public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
+      checkOpen();
+      requireCanLockRank(LockRank.TOOL);
+      List<ToolInvocation> invocations = loadToolInvocationsByAssistantEntryId(assistantEntryId);
+      requireCanLockTools(invocations);
+      for (ToolInvocation invocation : invocations) {
+        lockTool(invocation);
+      }
+      return invocations;
+    }
+
+    @Override
+    public List<PendingToolInvocationRow> listPendingToolInvocations(
+        Instant afterCreatedAt, UUID afterId, int limit) {
+      checkOpen();
+      Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
+      Objects.requireNonNull(afterId, "afterId");
+      if (limit <= 0) {
+        throw new IllegalArgumentException("limit must be positive");
+      }
+      List<PendingToolInvocationRow> rows = new ArrayList<>();
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.WAITING_INPUT
+            && invocation.status() != ToolInvocationStatus.WAITING_APPROVAL) {
+          continue;
+        }
+        if (!isAfterCursor(invocation, afterCreatedAt, afterId)) {
+          continue;
+        }
+        ThreadState thread = state.threads.get(invocation.threadId());
+        if (thread == null) {
+          throw new IllegalStateException(
+              "pending tool invocation " + invocation.id() + " lost its owning thread");
+        }
+        rows.add(new PendingToolInvocationRow(invocation, thread.id(), thread.sessionId()));
+      }
+      rows.sort(
+          Comparator.comparing((PendingToolInvocationRow row) -> row.invocation().createdAt())
+              .thenComparing(row -> row.invocation().id(), UuidOrder.COMPARATOR));
+      return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
+    }
+
+    private boolean isAfterCursor(ToolInvocation invocation, Instant afterCreatedAt, UUID afterId) {
+      int timeComparison = invocation.createdAt().compareTo(afterCreatedAt);
+      if (timeComparison != 0) {
+        return timeComparison > 0;
+      }
+      return UuidOrder.COMPARATOR.compare(invocation.id(), afterId) > 0;
+    }
+
+    @Override
+    public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+        Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
+      Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
+      if (limit <= 0) {
+        throw new IllegalArgumentException("limit must be positive");
+      }
+      Map<EnvironmentWaitGroupKey, EnvironmentWaitAccumulator> groups = new HashMap<>();
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.READY) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id()));
+        if (work == null) {
+          continue;
+        }
+        EnvironmentId environmentId = work.requiredEnvironmentId();
+        if (environmentId == null || work.availableAt().isAfter(now)) {
+          continue;
+        }
+        if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
+          continue;
+        }
+        if (hasReadyEnvironmentLease(environmentId, now)) {
+          continue;
+        }
+        ThreadState thread = state.threads.get(invocation.threadId());
+        if (thread == null) {
+          throw new IllegalStateException(
+              "pending environment tool invocation " + invocation.id() + " lost its owning thread");
+        }
+        UUID rootThreadId = thread.rootThreadId();
+        groups
+            .computeIfAbsent(
+                new EnvironmentWaitGroupKey(rootThreadId, environmentId),
+                key -> new EnvironmentWaitAccumulator())
+            .add(invocation.createdAt(), invocation.id());
+      }
+      List<PendingEnvironmentWaitRow> rows = new ArrayList<>(groups.size());
+      for (Map.Entry<EnvironmentWaitGroupKey, EnvironmentWaitAccumulator> group :
+          groups.entrySet()) {
+        PendingEnvironmentWaitRow row = group.getValue().toRow(group.getKey());
+        if (isAfterRepresentativeCursor(
+            row, afterRepresentativeCreatedAt, afterRepresentativeInvocationId)) {
+          rows.add(row);
+        }
+      }
+      rows.sort(
+          Comparator.comparing(PendingEnvironmentWaitRow::representativeCreatedAt)
+              .thenComparing(
+                  PendingEnvironmentWaitRow::representativeInvocationId, UuidOrder.COMPARATOR));
+      return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
+    }
+
+    @Override
+    public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(invocationIds, "invocationIds");
+      if (invocationIds.isEmpty()) {
+        return List.of();
+      }
+      List<EnvironmentToolWaitRow> rows = new ArrayList<>(invocationIds.size());
+      for (UUID invocationId : invocationIds) {
+        Objects.requireNonNull(invocationId, "invocationId");
+        ToolInvocation invocation = state.toolInvocations.get(invocationId);
+        if (invocation == null) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocationId));
+        EnvironmentId environmentId = work == null ? null : work.requiredEnvironmentId();
+        Instant freshnessAt = null;
+        if (invocation.status() == ToolInvocationStatus.READY && environmentId != null) {
+          freshnessAt =
+              earliestOf(laterThan(work.availableAt(), now), laterThan(work.leaseUntil(), now));
+        }
+        // 已有内存 READY 环境谓词只有 boolean、没有 deadline；仍真实计算本调用的 Work 时间边界。
+        rows.add(
+            new EnvironmentToolWaitRow(
+                invocationId,
+                environmentId,
+                isWaitingForEnvironment(invocation, work, now),
+                environmentNames.get(environmentId),
+                freshnessAt));
+      }
+      return List.copyOf(rows);
+    }
+
+    @Override
+    public Optional<Instant> findNextEnvironmentWaitChange() {
+      checkOpen();
+      Instant now = now();
+      Instant earliest = null;
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.READY) {
+          continue;
+        }
+        Work work = state.works.get(new WorkTarget(WorkTargetType.TOOL, invocation.id()));
+        if (work == null || work.requiredEnvironmentId() == null) {
+          continue;
+        }
+        earliest = earliestOf(earliest, laterThan(work.availableAt(), now));
+        earliest =
+            earliestOf(
+                earliest, laterThan(work.leaseToken() != null ? work.leaseUntil() : null, now));
+      }
+      // 内存实现的 READY 环境租约只是布尔谓词，没有 deadline，因此无法在这里表达「环境租约自然到期」这一类变更；
+      // 生产实现（数据库）用 environment_connection.lease_until 覆盖它。
+      return Optional.ofNullable(earliest);
+    }
+
+    private boolean isWaitingForEnvironment(ToolInvocation invocation, Work work, Instant now) {
+      if (invocation.status() != ToolInvocationStatus.READY || work == null) {
+        return false;
+      }
+      EnvironmentId environmentId = work.requiredEnvironmentId();
+      if (environmentId == null || work.availableAt().isAfter(now)) {
+        return false;
+      }
+      if (work.leaseToken() != null && work.leaseUntil().isAfter(now)) {
+        return false;
+      }
+      return !hasReadyEnvironmentLease(environmentId, now);
+    }
+
+    private static Instant laterThan(Instant candidate, Instant now) {
+      return candidate != null && candidate.isAfter(now) ? candidate : null;
+    }
+
+    private static Instant earliestOf(Instant current, Instant candidate) {
+      if (candidate == null) {
+        return current;
+      }
+      return current == null || candidate.isBefore(current) ? candidate : current;
+    }
+
+    @Override
+    public Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      Objects.requireNonNull(invocationId, "invocationId");
+      Entry found = null;
+      for (Entry entry : state.entries.values()) {
+        if (!entry.sessionId().equals(sessionId)
+            || !(entry.payload() instanceof MessagePayload message)
+            || message.toolResultMetadata() == null
+            || !invocationId.equals(message.toolResultMetadata().invocationId())) {
+          continue;
+        }
+        if (found != null) {
+          throw new IllegalStateException(
+              "multiple tool result entries reference invocation " + invocationId);
+        }
+        found = entry;
+      }
+      return Optional.ofNullable(found);
+    }
+
+    @Override
+    public void insertToolInvocations(List<ToolInvocation> invocations) {
+      checkOpen();
+      List<ToolInvocation> copied =
+          List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
+      Set<UUID> ids = new HashSet<>();
+      Set<ToolCallIndexKey> callIndexes = new HashSet<>();
+      for (ToolInvocation invocation : copied) {
+        requireMillisecondPrecision(invocation.createdAt());
+        requireMillisecondPrecision(invocation.updatedAt());
+        if (!ids.add(invocation.id())) {
+          throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
+        }
+        if (!callIndexes.add(
+            new ToolCallIndexKey(invocation.assistantEntryId(), invocation.callIndex()))) {
+          throw new IllegalArgumentException(
+              "duplicate tool invocation callIndex "
+                  + invocation.callIndex()
+                  + " on assistant entry "
+                  + invocation.assistantEntryId());
+        }
+        requireAbsent(state.toolInvocations, invocation.id(), "tool invocation");
+        // sibling 静态拒绝允许 unattached FAILED。初始均为 attempt=0、approval=null，
+        // effects 由 record 不变量保证为空。
+        if ((invocation.status() != ToolInvocationStatus.READY
+                && invocation.status() != ToolInvocationStatus.FAILED)
+            || invocation.attempt() != 0
+            || invocation.approval() != null) {
+          throw new IllegalArgumentException(
+              "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
+        }
+        requireUniqueToolOrdinal(invocation);
+        requireValidToolReferences(invocation);
+      }
+      requireCanLockTools(copied);
+      for (ToolInvocation invocation : copied) {
+        state.toolInvocations.put(invocation.id(), invocation);
+        lockTool(invocation);
+      }
+    }
+
+    private void requireUniqueToolOrdinal(ToolInvocation invocation) {
+      for (ToolInvocation existing : state.toolInvocations.values()) {
+        if (existing.assistantEntryId().equals(invocation.assistantEntryId())
+            && existing.callIndex() == invocation.callIndex()) {
+          throw new IllegalArgumentException(
+              "tool invocation callIndex "
+                  + invocation.callIndex()
+                  + " already used on assistant entry "
+                  + invocation.assistantEntryId());
+        }
+      }
+    }
+
+    private void requireValidToolReferences(ToolInvocation invocation) {
+      ThreadState thread = state.threads.get(invocation.threadId());
+      if (thread == null) {
+        throw new IllegalArgumentException("thread " + invocation.threadId() + " does not exist");
+      }
+      if (invocation.binding() == null && invocation.status() != ToolInvocationStatus.FAILED) {
+        throw new IllegalArgumentException(
+            "unbound tool invocations must be terminal FAILED slots");
+      }
+      Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload start)) {
+        throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
+      }
+      if (!start.ownerThreadId().equals(thread.id())
+          || !turnStart.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "turn start must belong to the tool invocation thread and session");
+      }
+      Entry assistant = requireExistingEntry(invocation.assistantEntryId());
+      if (!isAssistantEntry(assistant)) {
+        throw new IllegalArgumentException(
+            "assistantEntryId must reference an assistant MESSAGE entry");
+      }
+      if (!assistant.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "assistantEntryId must belong to the tool invocation thread session");
+      }
+      EntryPath assistantPath = loadEntryPath(assistant.id());
+      if (assistantPath.openTurnStart().map(Entry::id).orElse(null) == null
+          || !assistantPath.openTurnStart().orElseThrow().id().equals(turnStart.id())) {
+        throw new IllegalArgumentException(
+            "assistantEntryId must be on the branch opened by turnStartEntryId");
+      }
+      requireMatchingAssistantToolCall(invocation, assistant);
+    }
+
+    /**
+     * ToolInvocation 的 durable call/binding 必须与 Assistant MESSAGE 中按 callIndex 提取的 ToolCall（id /
+     * toolName / rendererKey / argumentsJson）精确一致。
+     */
+    private static void requireMatchingAssistantToolCall(
+        ToolInvocation invocation, Entry assistant) {
+      MessagePayload message = (MessagePayload) assistant.payload();
+      List<ToolCallMessageContent> calls = new ArrayList<>();
+      for (AgentMessageContent content : message.message().contents()) {
+        if (content instanceof ToolCallMessageContent call) {
+          calls.add(call);
+        }
+      }
+      if (invocation.callIndex() >= calls.size()) {
+        throw new IllegalArgumentException(
+            "tool callIndex " + invocation.callIndex() + " exceeds the assistant tool calls");
+      }
+      ToolCallMessageContent call = calls.get(invocation.callIndex());
+      ToolCall requestCall = invocation.call();
+      String expectedRendererKey =
+          invocation.binding() == null
+              ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
+              : invocation.binding().descriptor().rendererKey();
+      if (!call.toolCallId().equals(requestCall.id())
+          || !call.toolName().equals(requestCall.toolName())
+          || !call.rendererKey().equals(expectedRendererKey)
+          || !call.argumentsJson().equals(requestCall.argumentsJson())) {
+        throw new IllegalArgumentException(
+            "tool call/binding must exactly match the assistant tool call at the same callIndex");
+      }
+    }
+
+    private static boolean isAssistantEntry(Entry entry) {
+      return entry.payload().type() == EntryType.MESSAGE
+          && entry.payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT;
+    }
+
+    @Override
+    public void updateToolInvocations(List<ToolInvocation> invocations) {
+      checkOpen();
+      List<ToolInvocation> copied =
+          List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
+      Set<UUID> ids = new HashSet<>();
+      for (ToolInvocation invocation : copied) {
+        requireMillisecondPrecision(invocation.createdAt());
+        requireMillisecondPrecision(invocation.updatedAt());
+        if (!ids.add(invocation.id())) {
+          throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
+        }
+        requireLocked(LockKey.tool(invocation.id()));
+        ToolInvocation stored = state.toolInvocations.get(invocation.id());
+        if (stored == null) {
+          throw new IllegalArgumentException(
+              "tool invocation " + invocation.id() + " does not exist");
+        }
+        ToolInvocation.validateTransition(stored, invocation);
+      }
+      for (ToolInvocation invocation : copied) {
+        state.toolInvocations.put(invocation.id(), invocation);
+      }
+    }
+
+    @Override
+    public Optional<Work> findWork(WorkTarget target) {
+      checkOpen();
+      Objects.requireNonNull(target, "target");
+      return Optional.ofNullable(state.works.get(target));
+    }
+
+    @Override
+    public Optional<Work> lockWork(WorkTarget target) {
+      checkOpen();
+      Objects.requireNonNull(target, "target");
+      requireCanLockWork(target);
+      Work work = state.works.get(target);
+      if (work != null) {
+        recordWorkLock(target);
+      }
+      return Optional.ofNullable(work);
+    }
+
+    @Override
+    public Optional<Work> lockClaimedWork(ClaimedWork claim) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(claim, "claim");
+      requireCanLockWork(claim.target());
+      Work work = state.works.get(claim.target());
+      if (work == null
+          || !claim.leaseToken().equals(work.leaseToken())
+          || work.leaseUntil() == null
+          || !work.leaseUntil().isAfter(now)) {
+        // 行缺失 / token 不匹配 / lease 已过期都是正常竞态：lost / stale ownership，不以异常表达。
+        return Optional.empty();
+      }
+      recordWorkLock(claim.target());
+      return Optional.of(work);
+    }
+
+    @Override
+    public boolean deleteWork(WorkTarget target) {
+      checkOpen();
+      Objects.requireNonNull(target, "target");
+      if (!state.works.containsKey(target)) {
+        return false;
+      }
+      requireWorkOwnerLocked(target);
+      requireCanLockWork(target);
+      state.works.remove(target);
+      recordWorkLock(target);
+      return true;
+    }
+
+    // ---------- 应用侧深删除原语（与 PostgresqlHarnessTransaction 语义一致） ----------
+
+    @Override
+    public int deleteThreads(List<UUID> threadIds) {
+      checkOpen();
+      Objects.requireNonNull(threadIds, "threadIds");
+      List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+      for (int i = 1; i < copied.size(); i++) {
+        if (copied.get(i).equals(copied.get(i - 1))) {
+          throw new IllegalArgumentException(
+              "duplicate thread id " + copied.get(i) + " must not be deleted twice");
+        }
+      }
+      for (UUID threadId : copied) {
+        requireLocked(LockKey.thread(threadId));
+        if (!isInLockedTree(threadId)) {
+          throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+        }
+        if (!state.threads.containsKey(threadId)) {
+          throw new IllegalArgumentException("thread " + threadId + " does not exist");
+        }
+      }
+      Set<UUID> threadIdSet = Set.copyOf(copied);
+      for (ThreadJoin join : state.joins.values()) {
+        if (threadIdSet.contains(join.childThreadId())
+            || (join.parentThreadId() != null && threadIdSet.contains(join.parentThreadId()))) {
+          throw new IllegalArgumentException(
+              "cannot delete thread referenced by join " + join.invocationId());
+        }
+      }
+      for (UUID threadId : copied) {
+        for (ThreadState thread : state.threads.values()) {
+          if (threadId.equals(thread.parentThreadId()) && !threadIdSet.contains(thread.id())) {
+            throw new IllegalArgumentException(
+                "cannot delete parent thread "
+                    + threadId
+                    + " while child thread "
+                    + thread.id()
+                    + " still exists");
+          }
+        }
+      }
+
+      List<ThreadCommand> commands =
+          state.commands.values().stream()
+              .filter(command -> threadIdSet.contains(command.threadId()))
+              .sorted(COMMAND_LOCK_ORDER)
+              .toList();
+      for (ThreadCommand command : commands) {
+        lock(LockKey.command(command.threadId(), command.sequence()));
+      }
+
+      List<UUID> driverRowIds =
+          state.driverRows.keySet().stream()
+              .filter(id -> threadIdSet.contains(state.driverRowOwners.get(id)))
+              .sorted(UuidOrder.COMPARATOR)
+              .toList();
+      for (UUID driverRowId : driverRowIds) {
+        lock(LockKey.model(driverRowId));
+      }
+
+      List<ToolInvocation> tools =
+          state.toolInvocations.values().stream()
+              .filter(tool -> threadIdSet.contains(tool.threadId()))
+              .sorted(TOOL_LOCK_ORDER)
+              .toList();
+      Set<UUID> toolIds = new HashSet<>();
+      for (ToolInvocation tool : tools) {
+        toolIds.add(tool.id());
+        lockTool(tool);
+      }
+
+      List<WorkTarget> workTargets =
+          state.works.keySet().stream()
+              .filter(
+                  target ->
+                      (target.type() == WorkTargetType.THREAD && threadIdSet.contains(target.id()))
+                          || (target.type() == WorkTargetType.MODEL
+                              && driverRowIds.contains(target.id()))
+                          || (target.type() == WorkTargetType.TOOL
+                              && toolIds.contains(target.id())))
+              .sorted(WORK_LOCK_ORDER)
+              .toList();
+      for (WorkTarget target : workTargets) {
+        recordWorkLock(target);
+      }
+
+      for (WorkTarget target : workTargets) {
+        state.works.remove(target);
+      }
+      for (ThreadCommand command : commands) {
+        state.commands.remove(new CommandKey(command.threadId(), command.sequence()));
+      }
+      for (ToolInvocation tool : tools) {
+        state.toolInvocations.remove(tool.id());
+      }
+      for (UUID driverRowId : driverRowIds) {
+        state.driverRows.remove(driverRowId);
+        state.driverRowOwners.remove(driverRowId);
+      }
+      for (UUID threadId : copied) {
+        state.threads.remove(threadId);
+      }
+      state.executions.values().removeIf(fact -> copied.contains(fact.threadId()));
+      return copied.size();
+    }
+
+    @Override
+    public ExecutionExitFact registerExecution(ExecutionExitFact fact) {
+      checkOpen();
+      Objects.requireNonNull(fact, "fact");
+      requireLocked(LockKey.thread(fact.threadId()));
+      if (!state.threads.containsKey(fact.threadId())) {
+        throw new IllegalArgumentException("thread " + fact.threadId() + " does not exist");
+      }
+      ExecutionExitFact stored = state.executions.get(fact.executionId());
+      if (stored != null) {
+        requireSameIdentity(stored, fact);
+        return stored;
+      }
+      if (fact.parentExecutionId() != null) {
+        ExecutionExitFact parent = state.executions.get(fact.parentExecutionId());
+        if (parent == null) {
+          throw new IllegalArgumentException(
+              "parent execution " + fact.parentExecutionId() + " does not exist");
+        }
+        fact.requireRemoteParent(parent);
+      }
+      state.executions.put(fact.executionId(), fact);
+      return fact;
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> confirmExecution(
+        ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
+      checkOpen();
+      Objects.requireNonNull(expected, "expected");
+      Objects.requireNonNull(state, "state");
+      Objects.requireNonNull(confirmedAt, "confirmedAt");
+      if (!state.confirmed()) {
+        throw new IllegalArgumentException("confirmation requires real exit evidence");
+      }
+      ExecutionExitFact stored = this.state.executions.get(expected.executionId());
+      if (stored == null) {
+        return Optional.empty();
+      }
+      requireLocked(LockKey.thread(stored.threadId()));
+      requireSameIdentity(stored, expected);
+      ExecutionExitFact confirmed = stored.confirm(state, confirmedAt);
+      this.state.executions.put(expected.executionId(), confirmed);
+      return Optional.of(confirmed);
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> abandonExecution(
+        ExecutionExitFact expected, Instant abandonedAt) {
+      checkOpen();
+      Objects.requireNonNull(expected, "expected");
+      Objects.requireNonNull(abandonedAt, "abandonedAt");
+      ExecutionExitFact stored = this.state.executions.get(expected.executionId());
+      if (stored == null) {
+        return Optional.empty();
+      }
+      requireLocked(LockKey.thread(stored.threadId()));
+      requireSameIdentity(stored, expected);
+      ExecutionExitFact abandoned = stored.abandon(abandonedAt);
+      this.state.executions.put(expected.executionId(), abandoned);
+      return Optional.of(abandoned);
+    }
+
+    @Override
+    public List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.executions.values().stream()
+          .filter(
+              fact ->
+                  fact.threadId().equals(threadId)
+                      && fact.state() == ExecutionExitState.UNCONFIRMED)
+          .sorted(
+              Comparator.comparing(ExecutionExitFact::registeredAt)
+                  .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> findExecution(UUID executionId) {
+      checkOpen();
+      Objects.requireNonNull(executionId, "executionId");
+      return Optional.ofNullable(state.executions.get(executionId));
+    }
+
+    private static void requireSameIdentity(ExecutionExitFact stored, ExecutionExitFact requested) {
+      if (!stored.sameIdentity(requested)) {
+        throw new IllegalArgumentException(
+            "execution " + stored.executionId() + " identity cannot be replaced");
+      }
+    }
+
+    @Override
+    public int deleteEntries(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      int total = 0;
+      while (true) {
+        // 叶子优先：只删除本 Session 内未被任何（同 Session）Entry 引用为 parent 的 Entry，逐层剥到 ROOT。
+        Set<UUID> referencedParents = new HashSet<>();
+        for (Entry entry : state.entries.values()) {
+          if (entry.sessionId().equals(sessionId) && entry.parentEntryId() != null) {
+            referencedParents.add(entry.parentEntryId());
+          }
+        }
+        Set<UUID> deletable = new HashSet<>();
+        for (Entry entry : state.entries.values()) {
+          if (entry.sessionId().equals(sessionId) && !referencedParents.contains(entry.id())) {
+            deletable.add(entry.id());
+          }
+        }
+        if (deletable.isEmpty()) {
+          return total;
+        }
+        for (UUID entryId : deletable) {
+          state.entries.remove(entryId);
+          total++;
+        }
+      }
+    }
+
+    @Override
+    public boolean deleteSession(UUID sessionId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      return state.sessions.remove(sessionId) != null;
+    }
+
+    @Override
+    public int deleteToolInvocationsByIds(List<UUID> toolInvocationIds) {
+      checkOpen();
+      List<UUID> copied =
+          List.copyOf(toolInvocationIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+      for (int i = 1; i < copied.size(); i++) {
+        if (copied.get(i).equals(copied.get(i - 1))) {
+          throw new IllegalArgumentException(
+              "duplicate tool invocation id " + copied.get(i) + " must not be deleted twice");
+        }
+      }
+      for (UUID toolInvocationId : copied) {
+        if (!state.toolInvocations.containsKey(toolInvocationId)) {
+          throw new IllegalArgumentException(
+              "tool invocation " + toolInvocationId + " does not exist");
+        }
+        requireLocked(LockKey.tool(toolInvocationId));
+      }
+      int deleted = 0;
+      for (UUID toolInvocationId : copied) {
+        state.toolInvocations.remove(toolInvocationId);
+        deleted++;
+      }
+      return copied.size();
+    }
+
+    @Override
+    public void requestWork(WorkTarget target) {
+      requestWork(target, null);
+    }
+
+    @Override
+    public void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(target, "target");
+      if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
+        throw new IllegalArgumentException(
+            "requiredEnvironmentId must be null for target type " + target.type());
+      }
+      requireWorkOwnerLocked(target);
+      requireCanLockWork(target);
+      Work existing = state.works.get(target);
+      Work next =
+          existing == null
+              ? Work.initial(target, now, requiredEnvironmentId)
+              : existing.request(now, requiredEnvironmentId);
+      state.works.put(target, next);
+      recordWorkLock(target);
+    }
+
+    private void requireWorkOwnerLocked(WorkTarget target) {
+      UUID threadId =
+          switch (target.type()) {
+            case THREAD -> {
+              if (!state.threads.containsKey(target.id())) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              yield target.id();
+            }
+            case MODEL -> {
+              UUID ownerThreadId = state.driverRowOwners.get(target.id());
+              if (!state.driverRows.containsKey(target.id()) || ownerThreadId == null) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              yield ownerThreadId;
+            }
+            case TOOL -> {
+              ToolInvocation tool = state.toolInvocations.get(target.id());
+              if (tool == null) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              yield tool.threadId();
+            }
+          };
+      requireLocked(LockKey.thread(threadId));
+    }
+
+    private void requireTargetExists(WorkTarget target) {
+      boolean exists =
+          switch (target.type()) {
+            case THREAD -> state.threads.containsKey(target.id());
+            case MODEL -> state.driverRows.containsKey(target.id());
+            case TOOL -> state.toolInvocations.containsKey(target.id());
+          };
+      if (!exists) {
+        throw new IllegalArgumentException("work target does not exist: " + target);
+      }
+    }
+
+    @Override
+    public Optional<ClaimedWork> claimNextWork(
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+      return claimNextWork(targetType, leaseToken, leaseDuration, null);
+    }
+
+    @Override
+    public Optional<ClaimedWork> claimNextWork(
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(targetType, "targetType");
+      Objects.requireNonNull(leaseToken, "leaseToken");
+      HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+      Instant leaseUntil = now.plus(leaseDuration);
+      requireCanClaimWork();
+      List<Work> due =
+          state.works.values().stream()
+              .filter(work -> work.target().type() == targetType)
+              .filter(work -> !work.availableAt().isAfter(now))
+              .filter(work -> work.leaseToken() == null || !work.leaseUntil().isAfter(now))
+              .filter(
+                  work ->
+                      work.requiredEnvironmentId() == null
+                          || isRouteReady(nodeInstanceId, work.requiredEnvironmentId(), now))
+              .sorted(
+                  Comparator.comparing(Work::availableAt)
+                      .thenComparing(work -> work.target().id(), UuidOrder.COMPARATOR))
+              .toList();
+      if (due.isEmpty()) {
+        return Optional.empty();
+      }
+      Work candidate = due.get(0);
+      requireTargetExists(candidate.target());
+      Work claimed = candidate.claim(now, leaseToken, leaseUntil);
+      requireCanLockWork(claimed.target());
+      state.works.put(claimed.target(), claimed);
+      recordWorkLock(claimed.target());
+      return Optional.of(
+          new ClaimedWork(
+              claimed.target(),
+              claimed.wakeVersion(),
+              claimed.leaseToken(),
+              claimed.leaseUntil(),
+              claimed.requiredEnvironmentId()));
+    }
+
+    private boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now) {
+      if (routeReadyPredicate == null) {
+        return true;
+      }
+      return nodeInstanceId != null
+          && routeReadyPredicate.isRouteReady(nodeInstanceId, environmentId, now);
+    }
+
+    @Override
+    public boolean renewWork(ClaimedWork claim, Duration leaseDuration) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(claim, "claim");
+      HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+      Work work = lockedWork(claim.target());
+      Instant target = now.plus(leaseDuration);
+      if (!target.isAfter(work.leaseUntil())) {
+        // 现有 lease 已覆盖目标 margin：保持不变，避免把更长的 lease 缩短。
+        return false;
+      }
+      Work renewed = work.renew(claim.leaseToken(), now, target);
+      state.works.put(renewed.target(), renewed);
+      return true;
+    }
+
+    @Override
+    public Optional<Work> completeWork(ClaimedWork claim) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(claim, "claim");
+      Work work = state.works.get(claim.target());
+      if (work == null) {
+        // 行不存在意味着没有可验证的 lease：completed 的 ownership 已丢失，不能幂等吞掉终态。
+        throw new IllegalStateException(
+            "work does not exist for target " + claim.target() + " (lost ownership)");
+      }
+      requireCanLockWork(claim.target());
+      recordWorkLock(claim.target());
+      Optional<Work> next = work.complete(claim.leaseToken(), claim.claimedWakeVersion(), now);
+      if (next.isEmpty()) {
+        state.works.remove(claim.target());
+      } else {
+        state.works.put(claim.target(), next.get());
+      }
+      return next;
+    }
+
+    @Override
+    public void rescheduleWork(ClaimedWork claim, Duration delay) {
+      checkOpen();
+      Instant now = now();
+      Objects.requireNonNull(claim, "claim");
+      HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+      Work work = lockedWork(claim.target());
+      Work next =
+          work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, now.plus(delay));
+      state.works.put(next.target(), next);
+    }
+
+    private Work lockedWork(WorkTarget target) {
+      requireCanLockWork(target);
+      recordWorkLock(target);
+      Work work = state.works.get(target);
+      if (work == null) {
+        throw new IllegalStateException("work does not exist for target " + target);
+      }
+      return work;
+    }
+  }
+}

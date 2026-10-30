@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -25,10 +27,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -268,7 +268,7 @@ class ModelExecutionDecodeDurationTest {
 
     final ThreadProcessorTestSupport.Fixture threadFixture =
         new ThreadProcessorTestSupport.Fixture();
-    final InMemoryHarnessStore store = threadFixture.store;
+    final InMemoryBuiltinHarnessStore store = threadFixture.store;
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     final ScriptedNanoTime nano;
     final ThreadProcessorTestSupport.OpenTurnBaseline turn;
