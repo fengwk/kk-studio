@@ -10,10 +10,10 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.common.io.DeadlineResponseBody;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubException.Kind;
 
 import java.io.ByteArrayOutputStream;
