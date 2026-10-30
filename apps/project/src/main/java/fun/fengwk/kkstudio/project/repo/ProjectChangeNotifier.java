@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.repo.impl;
+package fun.fengwk.kkstudio.project.repo;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -9,11 +9,11 @@ import java.util.UUID;
 
 /** 在持久化事务中发送 Project 快照失效信号；PostgreSQL 仅在提交时投递通知。 */
 @Component
-public class PostgresqlProjectChangeNotifier {
+public class ProjectChangeNotifier {
 
   private final JdbcClient jdbc;
 
-  public PostgresqlProjectChangeNotifier(JdbcClient jdbc) {
+  public ProjectChangeNotifier(JdbcClient jdbc) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
   }
 

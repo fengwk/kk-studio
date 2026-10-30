@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.repo.impl.store;
+package fun.fengwk.kkstudio.project.repo;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
