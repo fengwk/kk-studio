@@ -337,7 +337,8 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 ## 源码与测试
 
 - 内核测试集中在 [`harness/runtime/src/test`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/)：控制面、Thread/Join、历史与 Store 契约都在本模块内运行，`mvn -pl harness/runtime -am verify` 可独立完成测试与覆盖门禁。
-- Runtime test-jar 是唯一中立 kernel 测试基座：提供 `InMemoryHarnessStore`、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `infra` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
+- Runtime test-jar 是唯一中立 kernel 测试基座：提供内存 Store、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `infra` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
+- 内存参考 Store 与 PostgreSQL 实现同构：`InMemoryHarnessStore` 只持有唯一已提交快照与全局 monitor，`InMemoryHarnessTransaction` 负责复制快照、commit/rollback、事务时钟、id 分配与锁阶梯，九个聚合原语各由一个 `InMemory*Store` 类实现，Driver 私有行经事务核心公开的测试 hook 在同一事务快照内挂载。锁阶梯为 `Session → Thread → Command → Driver → Tool → Work`，不存在第二份状态或按聚合拆分的快照。
 - `FakeAgentDriver` 是 `AgentDriver` 的最小确定性实现：默认 no-op，可配置 turn resolution、活动投影、响应物化与停止结果。其私有状态只存在内存、不参与 Store 事务回滚，因此只用于不验证 Driver 私有持久化的内核测试。
 - 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 27 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 

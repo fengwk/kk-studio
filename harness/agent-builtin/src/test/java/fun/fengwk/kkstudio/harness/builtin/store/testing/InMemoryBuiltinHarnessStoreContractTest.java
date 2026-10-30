@@ -151,7 +151,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
                       return null;
                     }));
 
-    assertEquals(notLocked("MODEL", "model:" + missingModelId), failure.getMessage());
+    assertEquals(notLocked("DRIVER", "driver:" + missingModelId), failure.getMessage());
   }
 
   @Test
@@ -199,7 +199,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
             IllegalStateException.class,
             () -> store.transaction(tx -> builtin(tx).deleteModelInvocation(modelId)));
 
-    assertEquals(notLocked("MODEL", "model:" + modelId), failure.getMessage());
+    assertEquals(notLocked("DRIVER", "driver:" + modelId), failure.getMessage());
   }
 
   @Test
