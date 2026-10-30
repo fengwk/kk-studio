@@ -24,6 +24,7 @@ import {
   decodeFrame,
   encodeBinary,
   encodeFrame,
+  validateUpgrade,
 } from '../../src/protocol/control/codec.js'
 import { frame, unframe } from '../../src/protocol/control/framing.js'
 import { MAX_MESSAGE_BYTES, MAX_SAFE_BIGINT } from '../../src/protocol/control/runtime.js'
@@ -40,6 +41,7 @@ import {
   completedEnvelope,
   executionExitedEnvelope,
   invokeEnvelope,
+  upgradeRequired,
 } from './control-fixtures.mjs'
 
 const GOLDEN = fileURLToPath(
@@ -295,6 +297,23 @@ describe('v8 control binary codec', () => {
       contents,
     })
     expect(() => encodeBinary(completedWithResult(result))).toThrow(/64 items/)
+  })
+})
+
+describe('v8 upgrade payload', () => {
+  it('accepts only a positive int32 target protocol version', () => {
+    // UpgradeRequired.target_protocol_version is proto int32, so the direct validator must reject
+    // values that are safe integers but not representable as signed 32-bit integers.
+    const upgrade = upgradeRequired()
+    expect(validateUpgrade({ ...upgrade, targetProtocolVersion: 2147483647 }).targetProtocolVersion).toBe(
+      2147483647,
+    )
+
+    for (const targetProtocolVersion of [undefined, 0, -1, 1.5, 2147483648]) {
+      expect(() => validateUpgrade({ ...upgrade, targetProtocolVersion })).toThrow(
+        /targetProtocolVersion must be in 1\.\.2147483647/,
+      )
+    }
   })
 })
 

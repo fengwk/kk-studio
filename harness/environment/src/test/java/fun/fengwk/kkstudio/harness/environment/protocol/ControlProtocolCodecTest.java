@@ -202,6 +202,23 @@ class ControlProtocolCodecTest {
             .setArtifactSha256("a".repeat(64))
             .build();
     ControlProtocolCodec.validateUpgrade(upgrade);
+    ControlProtocolCodec.validateUpgrade(
+        upgrade.toBuilder().setTargetProtocolVersion(Integer.MAX_VALUE).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(
+                upgrade.toBuilder().clearTargetProtocolVersion().build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(
+                upgrade.toBuilder().setTargetProtocolVersion(0).build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(
+                upgrade.toBuilder().setTargetProtocolVersion(-1).build()));
     assertThrows(
         ControlProtocolException.class,
         () ->

@@ -171,11 +171,9 @@ export function encodeFrame(envelope: Envelope): Uint8Array {
 /** Validates the HTTP 426 upgrade payload. It is not a control-stream envelope. */
 export function validateUpgrade(upgrade: UpgradeRequired): UpgradeRequired {
   assertNoUnknown(upgrade, 'upgradeRequired')
-  requireSafeLong(
+  requirePositiveInt32(
     upgrade.targetProtocolVersion,
     'upgradeRequired.targetProtocolVersion',
-    1n,
-    BigInt(Number.MAX_SAFE_INTEGER),
   )
   const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
   if (!ARTIFACT_URL_PATTERN.test(url)) {
@@ -837,6 +835,14 @@ function requireDaemonVersion(value: unknown, name: string): string {
 
 function requirePositive(value: unknown, name: string): bigint {
   return requireSafeLong(value, name, 1n, MAX_POSITIVE_BIGINT)
+}
+
+/** proto int32 is a 32-bit signed integer; values above 2^31-1 are not representable. */
+function requirePositiveInt32(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 2147483647) {
+    throw new Error(`${name} must be in 1..2147483647`)
+  }
+  return value
 }
 
 function requireSingleLine(value: unknown, name: string, maxChars = Number.MAX_SAFE_INTEGER): string {
