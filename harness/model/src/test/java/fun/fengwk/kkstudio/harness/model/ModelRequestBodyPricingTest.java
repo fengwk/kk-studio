@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -54,6 +55,60 @@ class ModelRequestBodyPricingTest {
     assertVector(bigInteger, "{\"n\":9007199254740993}", true);
     assertVector(bigInteger, "{\"n\":9007199254740992}", false);
     assertVector(bigInteger, "{\"n\":9007199254740994}", false);
+  }
+
+  /** body 缺失、超过 32MiB 或嵌套超限都保持 unknown；深度 64 仍可正常求值。 */
+  @Test
+  void enforcesBodySizeAndNestingBounds() {
+    RequestBody condition = RequestBody.stringValue("/a", "x");
+    ModelRequestBodyPricing.Plan plan =
+        ModelRequestBodyPricing.plan(pricing("bounds", condition, "9"));
+
+    assertTrue(plan.evaluate(null).isEmpty());
+    assertTrue(plan.evaluate(new byte[0]).isEmpty());
+    assertTrue(plan.evaluate(new byte[ModelRequestBodyPricing.MAX_BODY_BYTES + 1]).isEmpty());
+    assertFalse(
+        plan.evaluate(nestedBody(ModelRequestBodyPricing.MAX_NESTING_DEPTH)).matches().isEmpty());
+    assertTrue(plan.evaluate(nestedBody(ModelRequestBodyPricing.MAX_NESTING_DEPTH + 1)).isEmpty());
+  }
+
+  /** 数组只在 canonical 十进制下标上求值；对象属性名 "01" 仍是独立 key，不发生数组键转换。 */
+  @Test
+  void arrayIndicesAreCanonicalButObjectKeysRemainLiteral() {
+    RequestBody leadingZero = RequestBody.stringValue("/a/01", "x");
+    assertVector(leadingZero, "{\"a\":[\"x\"]}", false);
+    assertVector(leadingZero, "{\"a\":{\"01\":\"x\"}}", true);
+
+    for (String token : List.of("-1", "+1", "1.0", "", "12345678901", "9999999999")) {
+      assertVector(RequestBody.stringValue("/a/" + token, "x"), "{\"a\":[\"x\"]}", false);
+    }
+
+    RequestBody empty = RequestBody.stringValue("/a/", "x");
+    assertVector(empty, "{\"a\":{\"\":\"x\"}}", true);
+    assertVector(empty, "{\"a\":[\"x\"]}", false);
+  }
+
+  /** 快照只接受合法指纹与布尔值，map 不可变，且字符串表示不泄露条件原值。 */
+  @Test
+  void snapshotRejectsInvalidDataAndIsImmutable() {
+    RequestBody condition = RequestBody.stringValue("/secret", "raw-value");
+    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+    RequestBodyPricingSnapshot snapshot = new RequestBodyPricingSnapshot(Map.of(fingerprint, true));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RequestBodyPricingSnapshot(Map.of("not-a-fingerprint", true)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RequestBodyPricingSnapshot(Map.of("A".repeat(64), true)));
+    Map<String, Boolean> nullValue = new HashMap<>();
+    nullValue.put(fingerprint, null);
+    assertThrows(IllegalArgumentException.class, () -> new RequestBodyPricingSnapshot(nullValue));
+    assertThrows(
+        UnsupportedOperationException.class, () -> snapshot.matches().put(fingerprint, false));
+    assertEquals(new HashMap<>(Map.of(fingerprint, true)), snapshot.matches());
+    assertFalse(snapshot.toString().contains("secret"));
+    assertFalse(snapshot.toString().contains("raw-value"));
   }
 
   /** 指纹只由 path/type/规范值决定；rule ID、价格与重复规则不改变身份。 */
@@ -262,6 +317,18 @@ class ModelRequestBodyPricingTest {
     assertEquals(
         RequestBodyPricingSnapshot.MAX_CONDITIONS,
         plan.evaluate("{\"n\":0}".getBytes(StandardCharsets.UTF_8)).matches().size());
+  }
+
+  private static byte[] nestedBody(int depth) {
+    StringBuilder json = new StringBuilder();
+    for (int index = 0; index < depth; index++) {
+      json.append("{\"a\":");
+    }
+    json.append('1');
+    for (int index = 0; index < depth; index++) {
+      json.append('}');
+    }
+    return json.toString().getBytes(StandardCharsets.UTF_8);
   }
 
   private static void assertVector(RequestBody condition, String body, boolean expected) {
