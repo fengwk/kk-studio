@@ -19,8 +19,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 
 import java.util.List;
 import java.util.Map;

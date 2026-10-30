@@ -75,10 +75,10 @@ import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotific
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
-import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
-import fun.fengwk.kkstudio.platform.plugin.resource.StoragePluginResourceGateway;
+import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.resource.StoragePluginResourceGateway;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;

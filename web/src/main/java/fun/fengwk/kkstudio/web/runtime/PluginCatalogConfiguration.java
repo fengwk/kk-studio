@@ -9,9 +9,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 
 import java.time.Duration;
 
