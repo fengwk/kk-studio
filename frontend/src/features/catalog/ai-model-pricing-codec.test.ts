@@ -252,6 +252,11 @@ describe('ai-model-pricing-codec', () => {
       .toThrow(/512 UTF-8 bytes/)
     expect(() => normalizeCondition({ requestBody: { path: '/n', equals: {} } }))
       .toThrow(/string, number, boolean or null/)
+    // Count UTF-8 bytes rather than JS code units, matching the server limit.
+    expect(() => normalizeCondition({ requestBody: { path: '/n', equals: '中'.repeat(342) } }))
+      .toThrow(/1024 UTF-8 bytes/)
+    expect(normalizeCondition({ requestBody: { path: '/n', equals: 'x'.repeat(1024) } })
+      .requestBody?.equals).toBe('x'.repeat(1024))
     expect(() => normalizeCondition({ requestBody: { path: '/n', equals: { rawJson: '1e19' } } }))
       .toThrow(/scale/)
     expect(() => normalizeCondition({ requestBody: { path: '/n', equals: { rawJson: '1'.repeat(65) } } }))
