@@ -8,6 +8,11 @@ import {
 } from '@/shared/api/generated/contracts'
 import type { ModelPricingDraft } from '@/features/catalog/ai-console-types'
 import { describeCondition } from '@/features/catalog/ai-model-pricing-codec'
+import {
+  isRawJsonNumber,
+  scalarKind,
+  type PricingScalarKind,
+} from '@/features/catalog/pricing-condition-scalar'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
@@ -482,7 +487,7 @@ function FactorEditor({
   )
 }
 
-type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'all' | 'any' | 'not'
+type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'requestBody' | 'all' | 'any' | 'not'
 
 /** 每种条件的显示名：添加菜单与已添加的条件块使用同一组 i18n key。 */
 const CONDITION_LABELS: Record<ConditionKey, TranslationKey> = {
@@ -490,6 +495,7 @@ const CONDITION_LABELS: Record<ConditionKey, TranslationKey> = {
   serviceTier: 'ai.catalog.form.conditionServiceTier',
   date: 'ai.catalog.form.conditionDate',
   time: 'ai.catalog.form.conditionTime',
+  requestBody: 'ai.catalog.form.conditionRequestBody',
   all: 'ai.catalog.form.condition.all',
   any: 'ai.catalog.form.condition.any',
   not: 'ai.catalog.form.condition.not',
@@ -524,7 +530,7 @@ export function ConditionEditor({
   depth?: number
 }) {
   const { t } = useI18n()
-  const available = (['context', 'serviceTier', 'date', 'time', 'all', 'any', 'not'] as ConditionKey[])
+  const available = (['context', 'serviceTier', 'date', 'time', 'requestBody', 'all', 'any', 'not'] as ConditionKey[])
     .filter((key) => condition[key] === undefined)
 
   function remove(key: ConditionKey) {
@@ -544,6 +550,8 @@ export function ConditionEditor({
       onChange({ ...condition, serviceTier: [] })
     } else if (key === 'time') {
       onChange({ ...condition, time: { ...ALL_DAY_TIME } })
+    } else if (key === 'requestBody') {
+      onChange({ ...condition, requestBody: { path: '/', equals: '' } })
     } else {
       onChange({ ...condition, [key]: {} })
     }
@@ -690,6 +698,84 @@ export function ConditionEditor({
           </ConditionBlock>
         ) : null}
 
+        {condition.requestBody ? (
+          <ConditionBlock
+            label={t(CONDITION_LABELS.requestBody)}
+            onRemove={() => remove('requestBody')}
+          >
+            <label className="form-group">
+              <FieldLabel required>{t('ai.catalog.form.requestBodyPath')}</FieldLabel>
+              <TextInput
+                value={condition.requestBody.path ?? ''}
+                placeholder="/speed"
+                spellCheck={false}
+                aria-label={t('ai.catalog.form.requestBodyPath')}
+                onChange={(event) => onChange({
+                  ...condition,
+                  requestBody: { ...condition.requestBody, path: event.target.value },
+                })}
+              />
+            </label>
+            <label className="form-group">
+              <FieldLabel required>{t('ai.catalog.form.requestBodyType')}</FieldLabel>
+              <Select
+                value={scalarKind(condition.requestBody.equals) ?? 'string'}
+                options={(['string', 'number', 'boolean', 'null'] as PricingScalarKind[]).map((kind) => ({
+                  value: kind,
+                  label: t(`ai.catalog.form.requestBodyType.${kind}`),
+                }))}
+                aria-label={t('ai.catalog.form.requestBodyType')}
+                onChange={(kind) => onChange({
+                  ...condition,
+                  requestBody: {
+                    ...condition.requestBody,
+                    equals: defaultScalar(kind as PricingScalarKind),
+                  },
+                })}
+              />
+            </label>
+            {scalarKind(condition.requestBody.equals) === 'boolean' ? (
+              <label className="form-group">
+                <FieldLabel required>{t('ai.catalog.form.requestBodyValue')}</FieldLabel>
+                <Select
+                  value={String(condition.requestBody.equals)}
+                  options={[
+                    { value: 'true', label: 'true' },
+                    { value: 'false', label: 'false' },
+                  ]}
+                  aria-label={t('ai.catalog.form.requestBodyValue')}
+                  onChange={(value) => onChange({
+                    ...condition,
+                    requestBody: { ...condition.requestBody, equals: value === 'true' },
+                  })}
+                />
+              </label>
+            ) : scalarKind(condition.requestBody.equals) !== 'null' ? (
+              <label className="form-group">
+                <FieldLabel required>{t('ai.catalog.form.requestBodyValue')}</FieldLabel>
+                <TextInput
+                  value={scalarInputValue(condition.requestBody.equals)}
+                  inputMode={scalarKind(condition.requestBody.equals) === 'number' ? 'decimal' : undefined}
+                  spellCheck={false}
+                  aria-label={t('ai.catalog.form.requestBodyValue')}
+                  onChange={(event) => onChange({
+                    ...condition,
+                    requestBody: {
+                      ...condition.requestBody,
+                      equals: scalarInputScalar(
+                        scalarKind(condition.requestBody!.equals) ?? 'string',
+                        event.target.value,
+                      ),
+                    },
+                  })}
+                />
+              </label>
+            ) : null}
+            <span className="inline-hint">{t('ai.catalog.form.requestBodyHint')}</span>
+            <span className="inline-hint">{t('ai.catalog.form.requestBodySourceHint')}</span>
+          </ConditionBlock>
+        ) : null}
+
         {(['all', 'any'] as const).map((key) => condition[key] ? (
           <ConditionBlock
             key={key}
@@ -731,6 +817,36 @@ export function ConditionEditor({
       ) : null}
     </fieldset>
   )
+}
+
+/** 切换类型时的最小合法默认值；number 以原文对象保存，提交时才变成 JSON number。 */
+function defaultScalar(kind: PricingScalarKind): unknown {
+  switch (kind) {
+    case 'number':
+      return { rawJson: '0' }
+    case 'boolean':
+      return true
+    case 'null':
+      return null
+    case 'string':
+    default:
+      return ''
+  }
+}
+
+function scalarInputValue(value: unknown): string {
+  if (isRawJsonNumber(value)) return 'rawJson' in value ? value.rawJson : value.rawJSON
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return String(value)
+  if (typeof value === 'number') return String(value)
+  return ''
+}
+
+function scalarInputScalar(kind: PricingScalarKind, text: string): unknown {
+  if (kind === 'number') return { rawJson: text }
+  if (kind === 'boolean') return text === 'true'
+  if (kind === 'null') return null
+  return text
 }
 
 function NestedConditions({

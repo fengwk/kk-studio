@@ -3,6 +3,7 @@ import type { AxiosAdapter } from 'axios'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
+import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 
 const adapter = vi.fn<AxiosAdapter>()
 let apiClient: HttpClient
@@ -70,6 +71,55 @@ describe('apiClient with real axios', () => {
     const [config] = adapter.mock.calls[0]
     expect(config.data).toBe('{"name":"example"}')
     expect(config.headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('leaves ordinary path/equals and raw marker objects unchanged when lossless parsing is opted in', async () => {
+    adapter.mockImplementation(async (config) => ({
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: new AxiosHeaders(),
+      data: JSON.stringify({
+        status: 200,
+        data: {
+          plain: { path: '/x', equals: 2 },
+          rawJson: { rawJson: '2' },
+          rawJSON: { rawJSON: '2' },
+        },
+      }),
+    }))
+
+    await expect(apiClient.get('/catalog', {
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })).resolves.toEqual({
+      plain: { path: '/x', equals: 2 },
+      rawJson: { rawJson: '2' },
+      rawJSON: { rawJSON: '2' },
+    })
+  })
+
+  it('rejects a numeric requestBody when JSON.parse source access is unavailable', async () => {
+    adapter.mockImplementation(async (config) => ({
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: new AxiosHeaders(),
+      data: '{"status":200,"data":{"requestBody":{"path":"/n","equals":2}}}',
+    }))
+    const original = JSON.parse
+    const spy = vi.spyOn(JSON, 'parse').mockImplementation(((
+      input: string,
+      reviver?: (this: unknown, key: string, value: unknown) => unknown,
+    ) => original(input, function (this: unknown, key: string, value: unknown) {
+      return reviver ? reviver.call(this, key, value) : value
+    })) as typeof JSON.parse)
+    try {
+      await expect(apiClient.get('/models/example', {
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      })).rejects.toThrow(/source text access/)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('transforms HTTP error bodies before normalizing backend error context', async () => {

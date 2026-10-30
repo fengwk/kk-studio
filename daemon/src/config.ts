@@ -16,7 +16,7 @@ import { MAX_NOTE_CHARS, ProtocolError, parseStrictJson } from './protocol.js'
  */
 
 /** 统一项目版本；HELLO/READY 上报的 daemon 构建版本。 */
-export const DAEMON_VERSION = '5.0.0'
+export const DAEMON_VERSION = '5.0.1'
 
 /** 未显式配置时的 bash 可执行文件。 */
 export const DEFAULT_BASH_EXECUTABLE = 'bash'

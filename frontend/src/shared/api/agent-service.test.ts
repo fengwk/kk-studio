@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createAgentService } from '@/shared/api/agent-service'
 import { createMockHttpClient } from '@/test-support/mock-http-client'
+import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionUpdateDTO,
@@ -25,7 +26,10 @@ describe('agentService', () => {
     await service.listTools()
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 2, pageSize: 20 } })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/models', { params: { pageNumber: 3, pageSize: 30 } })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/models', {
+      params: { pageNumber: 3, pageSize: 30 },
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
     expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 4, pageSize: 40 } })
     expect(client.get).toHaveBeenNthCalledWith(4, '/tools')
   })
@@ -39,7 +43,10 @@ describe('agentService', () => {
     await service.listAgents()
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/providers', { params: { pageNumber: 1, pageSize: 50 } })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/models', { params: { pageNumber: 1, pageSize: 50 } })
+    expect(client.get).toHaveBeenNthCalledWith(2, '/models', {
+      params: { pageNumber: 1, pageSize: 50 },
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
     expect(client.get).toHaveBeenNthCalledWith(3, '/agents', { params: { pageNumber: 1, pageSize: 50 } })
   })
 
@@ -129,12 +136,32 @@ describe('agentService', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/providers', providerBody)
     expect(client.put).toHaveBeenNthCalledWith(1, '/providers/minimax', updateProviderBody)
     expect(client.delete).toHaveBeenNthCalledWith(1, '/providers/minimax', { params: { expectedVersion: '8' } })
-    expect(client.post).toHaveBeenNthCalledWith(2, '/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', updateModelBody)
+    expect(client.post).toHaveBeenNthCalledWith(2, '/models', modelBody, {
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', updateModelBody, {
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
     expect(client.delete).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', { params: { expectedVersion: '10' } })
     expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
     expect(client.put).toHaveBeenNthCalledWith(3, '/agents/default-assistant', updateAgentBody)
     expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/default-assistant', { params: { expectedVersion: '11' } })
+  })
+
+  it('opts model defaults into the lossless JSON parser', async () => {
+    const client = createClient()
+    const service = createAgentService(client)
+
+    await service.listModelDefaults('speed', 'cursor-1', 10)
+    await service.refreshModelDefaults()
+
+    expect(client.get).toHaveBeenCalledWith('/model-defaults', {
+      params: { query: 'speed', cursor: 'cursor-1', pageSize: 10 },
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
+    expect(client.post).toHaveBeenCalledWith('/model-defaults/refresh', {}, {
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })
   })
 
   /**

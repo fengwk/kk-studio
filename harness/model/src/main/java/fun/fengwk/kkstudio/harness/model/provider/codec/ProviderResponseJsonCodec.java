@@ -11,6 +11,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -56,6 +57,7 @@ public final class ProviderResponseJsonCodec {
           "rawUsageJson",
           "toolCallDiagnostics",
           "decodeDurationMillis");
+  private static final Set<String> RESPONSE_OPTIONAL_FIELDS = orderedSet("requestBodyPricing");
   private static final Set<String> TOOL_CALL_FIELDS =
       orderedSet("id", "name", "argumentsJson", "historyAction");
   private static final Set<String> DIAGNOSTIC_FIELDS =
@@ -112,6 +114,12 @@ public final class ProviderResponseJsonCodec {
     } else {
       node.put("decodeDurationMillis", response.decodeDurationMillis());
     }
+    if (response.requestBodyPricing() != null) {
+      ObjectNode pricing = node.putObject("requestBodyPricing");
+      for (Map.Entry<String, Boolean> entry : response.requestBodyPricing().matches().entrySet()) {
+        pricing.put(entry.getKey(), entry.getValue());
+      }
+    }
     return node;
   }
 
@@ -127,7 +135,7 @@ public final class ProviderResponseJsonCodec {
   public ProviderResponse decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     ObjectNode node = object(value, "response");
-    requireFields(node, RESPONSE_FIELDS, "response");
+    requireFields(node, RESPONSE_FIELDS, RESPONSE_OPTIONAL_FIELDS, "response");
     String text = text(node, "text");
     String thinking = text(node, "thinking");
     ArrayNode toolCalls = array(node.get("toolCalls"), "toolCalls");
@@ -151,6 +159,7 @@ public final class ProviderResponseJsonCodec {
       diagnosticList.add(decodeToolCallDiagnostic(item));
     }
     Long decodeDurationMillis = nullableNonNegativeLong(node, "decodeDurationMillis");
+    RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
     return new ProviderResponse(
         text,
         thinking,
@@ -161,7 +170,25 @@ public final class ProviderResponseJsonCodec {
         serviceTier,
         rawUsageJson,
         diagnosticList,
-        decodeDurationMillis);
+        decodeDurationMillis,
+        requestBodyPricing);
+  }
+
+  private RequestBodyPricingSnapshot decodeRequestBodyPricing(ObjectNode node) {
+    JsonNode value = node.get("requestBodyPricing");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    ObjectNode pricing = object(value, "requestBodyPricing");
+    Map<String, Boolean> matches = new LinkedHashMap<>();
+    for (String fingerprint : pricing.propertyNames()) {
+      JsonNode matched = pricing.get(fingerprint);
+      if (matched == null || !matched.isBoolean()) {
+        throw new IllegalArgumentException("requestBodyPricing values must be boolean");
+      }
+      matches.put(fingerprint, matched.booleanValue());
+    }
+    return new RequestBodyPricingSnapshot(matches);
   }
 
   private ObjectNode encodeToolCallDiagnostic(ProviderToolCallDiagnostic diagnostic) {
@@ -375,11 +402,19 @@ public final class ProviderResponseJsonCodec {
 
   /** 严格字段集合校验：{@code expected} 必须全部存在且实际字段不得超出它；未知字段、缺失必填字段一律拒绝。 */
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {
+    requireFields(node, expected, Set.of(), name);
+  }
+
+  /** 可选字段缺失或存在均合法；任何其它未知字段与缺失必填字段仍然拒绝。 */
+  private static void requireFields(
+      ObjectNode node, Set<String> required, Set<String> optional, String name) {
     Set<String> actual = new HashSet<>();
     node.propertyNames().forEach(actual::add);
-    if (!actual.equals(expected)) {
+    Set<String> allowed = new HashSet<>(required);
+    allowed.addAll(optional);
+    if (!actual.containsAll(required) || !allowed.containsAll(actual)) {
       throw new IllegalArgumentException(
-          "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");
+          "unexpected fields for " + name + ": " + actual + " (expected " + required + ")");
     }
   }
 
