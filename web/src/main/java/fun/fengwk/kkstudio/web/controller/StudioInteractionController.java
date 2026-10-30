@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +15,7 @@ import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -58,11 +57,11 @@ public class StudioInteractionController {
    * canonical {@literal ->} 400）。响应项保留原始 {@code threadId/sessionId}，另给 {@code rootThreadId}。
    */
   @GetMapping
-  public Result<InteractionPageDTO> listInteractions(
+  public ApiResponse<InteractionPageDTO> listInteractions(
       @RequestParam(name = "rootThreadId", required = false) String rootThreadId,
       @RequestParam(name = "cursor", required = false) String cursor,
       @RequestParam(name = "limit", required = false) String limit) {
-    return Results.ok(
+    return ApiResponse.ok(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               UUID root =
@@ -81,12 +80,12 @@ public class StudioInteractionController {
    * {@literal ->} 409；目标不存在 {@literal ->} 404。
    */
   @PostMapping("/{interactionId}/input")
-  public Result<HarnessToolInputResultDTO> submitToolInput(
+  public ApiResponse<HarnessToolInputResultDTO> submitToolInput(
       @PathVariable String interactionId,
       @RequestBody HarnessToolInputDTO request,
       HttpServletRequest httpRequest) {
     String operator = resolveOperator(httpRequest);
-    return Results.ok(
+    return ApiResponse.ok(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               ToolInputSubmissionCommand command =

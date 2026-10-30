@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -9,6 +7,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;

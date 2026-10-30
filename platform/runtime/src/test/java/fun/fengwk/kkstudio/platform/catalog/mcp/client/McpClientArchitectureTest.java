@@ -15,25 +15,21 @@ import java.util.stream.Stream;
 /**
  * MCP client 包的 SDK 边界守卫。
  *
- * <p>client 包只依赖 JDK、LangChain4j SDK、Jackson 3 与 {@code fun.fengwk.kkstudio.common}，不接触
- * Spring、存储或其它 Platform 包；Jackson 2 core/databind 是 SDK 签名强加的唯一例外（{@code McpToolResultExtractor}
- * 固定接收 {@code com.fasterxml.jackson.databind.JsonNode}），整个 platform 主源码中只有 {@value
- * #JACKSON2_BOUNDARY_FILE} 可以导入它。
+ * <p>client 包只依赖 JDK、官方 MCP Java SDK、Jackson 3 与 {@code fun.fengwk.kkstudio.common}，不接触
+ * Spring、存储或其它 Platform 包；不允许再引入 LangChain4j 或 Jackson 2 core/databind。
  */
 class McpClientArchitectureTest {
-
-  private static final String JACKSON2_BOUNDARY_FILE = "McpResultExtractor.java";
 
   private static final String CLIENT_PACKAGE_PATH =
       "fun/fengwk/kkstudio/platform/catalog/mcp/client";
 
-  /** client 包只导入 JDK、SDK、Jackson 3、common 与自身。 */
+  /** client 包只导入 JDK、官方 SDK、Jackson 3、common 与自身。 */
   @Test
   void clientSourcesStayOnJdkSdkJackson3AndCommon() throws IOException {
     List<String> violations = new ArrayList<>();
     for (Path file : javaFiles(mainJava().resolve(CLIENT_PACKAGE_PATH))) {
       for (String imported : imports(file)) {
-        if (!isJackson2CoreOrDatabind(imported) && !isAllowedClientImport(imported)) {
+        if (!isAllowedClientImport(imported)) {
           violations.add(file.getFileName() + ": " + imported);
         }
       }
@@ -42,35 +38,10 @@ class McpClientArchitectureTest {
         violations.isEmpty(), () -> "client imports violate the SDK boundary:\n" + violations);
   }
 
-  /** platform 主源码中只有 SDK 边界文件导入 Jackson 2 core/databind。 */
-  @Test
-  void onlyResultExtractorImportsJackson2() throws IOException {
-    List<String> violations = new ArrayList<>();
-    for (Path file : javaFiles(mainJava())) {
-      if (JACKSON2_BOUNDARY_FILE.equals(file.getFileName().toString())) {
-        continue;
-      }
-      for (String imported : imports(file)) {
-        if (isJackson2CoreOrDatabind(imported)) {
-          violations.add(file.getFileName() + ": " + imported);
-        }
-      }
-    }
-    assertTrue(
-        violations.isEmpty(),
-        () -> "Jackson 2 imports outside the MCP SDK boundary:\n" + violations);
-  }
-
-  /** Jackson 3 仍复用的 {@code com.fasterxml.jackson.annotation} 不算 Jackson 2。 */
-  private static boolean isJackson2CoreOrDatabind(String imported) {
-    return imported.startsWith("com.fasterxml.jackson.core.")
-        || imported.startsWith("com.fasterxml.jackson.databind.");
-  }
-
   private static boolean isAllowedClientImport(String imported) {
     return imported.startsWith("java.")
         || imported.startsWith("javax.")
-        || imported.startsWith("dev.langchain4j.")
+        || imported.startsWith("io.modelcontextprotocol.")
         || imported.startsWith("com.fasterxml.jackson.annotation.")
         || imported.startsWith("tools.jackson.")
         || imported.startsWith("fun.fengwk.kkstudio.common.")

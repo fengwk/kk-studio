@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +22,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 import java.util.UUID;
@@ -39,41 +38,41 @@ public class StudioChatController {
   private final HarnessOwnerQueryService harnessQueryService;
 
   @GetMapping
-  public Result<List<ChatDTO>> listChats() {
-    return Results.ok(chatService.listChats());
+  public ApiResponse<List<ChatDTO>> listChats() {
+    return ApiResponse.ok(chatService.listChats());
   }
 
   @PostMapping
-  public Result<ChatDTO> createChat(@RequestBody(required = false) ChatCreateDTO createDTO) {
+  public ApiResponse<ChatDTO> createChat(@RequestBody(required = false) ChatCreateDTO createDTO) {
     ChatCreateDTO body = createDTO == null ? new ChatCreateDTO() : createDTO;
-    return Results.created(chatService.createChat(body));
+    return ApiResponse.created(chatService.createChat(body));
   }
 
   @GetMapping("/{chatId}")
-  public Result<ChatDTO> getChat(@PathVariable("chatId") String chatId) {
-    return Results.ok(chatService.getChat(chatId));
+  public ApiResponse<ChatDTO> getChat(@PathVariable("chatId") String chatId) {
+    return ApiResponse.ok(chatService.getChat(chatId));
   }
 
   @PutMapping("/{chatId}")
-  public Result<ChatDTO> updateChat(
+  public ApiResponse<ChatDTO> updateChat(
       @PathVariable("chatId") String chatId, @RequestBody ChatUpdateDTO updateDTO) {
-    return Results.ok(chatService.updateChat(chatId, updateDTO));
+    return ApiResponse.ok(chatService.updateChat(chatId, updateDTO));
   }
 
   @DeleteMapping("/{chatId}")
-  public Result<Void> deleteChat(
+  public ApiResponse<Void> deleteChat(
       @PathVariable("chatId") String chatId,
       @RequestParam("expectedVersion") String expectedVersion) {
     chatService.deleteChat(chatId, expectedVersion);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   /** 返回该 Chat 关联的 Session 摘要（按归属时间从新到旧）。 */
   @GetMapping("/{chatId}/sessions")
-  public Result<List<HarnessSessionSummaryDTO>> listChatSessions(
+  public ApiResponse<List<HarnessSessionSummaryDTO>> listChatSessions(
       @PathVariable("chatId") String chatId) {
     UUID id = ChatIds.parseUuid(chatId, "chatId");
-    return Results.ok(withRuntimeTranslation(() -> harnessQueryService.listChatSessions(id)));
+    return ApiResponse.ok(withRuntimeTranslation(() -> harnessQueryService.listChatSessions(id)));
   }
 
   /** 将 Harness Runtime 异常翻译为统一 HTTP 错误响应。 */

@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.project;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +43,7 @@ import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 import java.util.Locale;
@@ -94,17 +93,18 @@ public class StudioIssueController {
   }
 
   @PostMapping("/api/projects/{projectId}/issues")
-  public ResponseEntity<Result<IssueDTO>> createIssue(
+  public ResponseEntity<ApiResponse<IssueDTO>> createIssue(
       @PathVariable("projectId") String projectIdStr, @RequestBody CreateIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     Issue created =
         issueEditingService.createIssue(projectId, request.getTitle(), request.getDescription());
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(ApiResponse.created(mapper.toDto(created)));
   }
 
   @GetMapping("/api/issues/{issueId}")
-  public Result<IssueDetailDTO> getIssue(
+  public ApiResponse<IssueDetailDTO> getIssue(
       @PathVariable("issueId") String issueIdStr,
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
@@ -112,11 +112,11 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
-    return Results.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
+    return ApiResponse.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
   }
 
   @GetMapping("/api/issues/{issueId}/activities")
-  public Result<List<IssueActivityDTO>> listActivities(
+  public ApiResponse<List<IssueActivityDTO>> listActivities(
       @PathVariable("issueId") String issueIdStr,
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
@@ -127,11 +127,11 @@ public class StudioIssueController {
     issueEditingService.getIssue(issueId);
     List<IssueActivity> activities =
         issueEditingService.listActivities(issueId, afterSequence, activityLimit);
-    return Results.ok(activities.stream().map(mapper::toDto).toList());
+    return ApiResponse.ok(activities.stream().map(mapper::toDto).toList());
   }
 
   @PutMapping("/api/issues/{issueId}")
-  public Result<IssueDTO> updateIssue(
+  public ApiResponse<IssueDTO> updateIssue(
       @PathVariable("issueId") String issueIdStr, @RequestBody UpdateIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -140,11 +140,11 @@ public class StudioIssueController {
     Issue updated =
         issueEditingService.updateIssue(
             issueId, expectedVersion, request.getTitle(), request.getDescription());
-    return Results.ok(mapper.toDto(updated));
+    return ApiResponse.ok(mapper.toDto(updated));
   }
 
   @PostMapping("/api/issues/{issueId}/transition")
-  public Result<IssueDTO> transition(
+  public ApiResponse<IssueDTO> transition(
       @PathVariable("issueId") String issueIdStr, @RequestBody TransitionIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -153,11 +153,11 @@ public class StudioIssueController {
     Issue updated =
         issueLifecycleService.transition(
             issueId, expectedVersion, request.getRequestKey(), request.getToState());
-    return Results.ok(mapper.toDto(updated));
+    return ApiResponse.ok(mapper.toDto(updated));
   }
 
   @PostMapping("/api/issues/{issueId}/block")
-  public Result<IssueDTO> block(
+  public ApiResponse<IssueDTO> block(
       @PathVariable("issueId") String issueIdStr, @RequestBody BlockIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -166,11 +166,11 @@ public class StudioIssueController {
     Issue blocked =
         issueLifecycleService.blockIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getReason());
-    return Results.ok(mapper.toDto(blocked));
+    return ApiResponse.ok(mapper.toDto(blocked));
   }
 
   @PostMapping("/api/issues/{issueId}/recover")
-  public Result<IssueDTO> recover(
+  public ApiResponse<IssueDTO> recover(
       @PathVariable("issueId") String issueIdStr, @RequestBody RecoverIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -178,11 +178,11 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue recovered =
         issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
-    return Results.ok(mapper.toDto(recovered));
+    return ApiResponse.ok(mapper.toDto(recovered));
   }
 
   @PostMapping("/api/issues/{issueId}/pause")
-  public Result<IssueDTO> pause(
+  public ApiResponse<IssueDTO> pause(
       @PathVariable("issueId") String issueIdStr, @RequestBody PauseIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -192,11 +192,11 @@ public class StudioIssueController {
     Issue paused =
         issueLifecycleService.pauseIssue(
             issueId, expectedVersion, request.getRequestKey(), reason, request.getDetail());
-    return Results.ok(mapper.toDto(paused));
+    return ApiResponse.ok(mapper.toDto(paused));
   }
 
   @PostMapping("/api/issues/{issueId}/resume")
-  public Result<IssueDTO> resume(
+  public ApiResponse<IssueDTO> resume(
       @PathVariable("issueId") String issueIdStr, @RequestBody ResumeIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -204,11 +204,11 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue resumed =
         issueLifecycleService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
-    return Results.ok(mapper.toDto(resumed));
+    return ApiResponse.ok(mapper.toDto(resumed));
   }
 
   @PostMapping("/api/issues/{issueId}/stop")
-  public Result<IssueDTO> stop(
+  public ApiResponse<IssueDTO> stop(
       @PathVariable("issueId") String issueIdStr, @RequestBody StopIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -217,11 +217,11 @@ public class StudioIssueController {
     Issue stopped =
         issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
-    return Results.ok(mapper.toDto(stopped));
+    return ApiResponse.ok(mapper.toDto(stopped));
   }
 
   @PostMapping("/api/issues/{issueId}/resolve-unknown")
-  public Result<IssueDTO> resolveUnknown(
+  public ApiResponse<IssueDTO> resolveUnknown(
       @PathVariable("issueId") String issueIdStr,
       @RequestBody ResolveUnknownIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -231,7 +231,7 @@ public class StudioIssueController {
     Issue resolved =
         issueLifecycleService.resolveUnknown(
             issueId, expectedVersion, request.getRequestKey(), request.getVerification());
-    return Results.ok(mapper.toDto(resolved));
+    return ApiResponse.ok(mapper.toDto(resolved));
   }
 
   @DeleteMapping("/api/issues/{issueId}")
@@ -246,7 +246,7 @@ public class StudioIssueController {
   }
 
   @PostMapping("/api/issues/{issueId}/reopen")
-  public Result<IssueDTO> reopen(
+  public ApiResponse<IssueDTO> reopen(
       @PathVariable("issueId") String issueIdStr, @RequestBody ReopenIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -254,11 +254,11 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue reopened =
         issueLifecycleService.reopen(issueId, expectedVersion, request.getRequestKey());
-    return Results.ok(mapper.toDto(reopened));
+    return ApiResponse.ok(mapper.toDto(reopened));
   }
 
   @PostMapping("/api/issues/{issueId}/budget-reset")
-  public Result<IssueStageBudgetDTO> resetBudget(
+  public ApiResponse<IssueStageBudgetDTO> resetBudget(
       @PathVariable("issueId") String issueIdStr, @RequestBody ResetStageBudgetRequestDTO request) {
     Objects.requireNonNull(request, "request");
     if (request.getMaxRuns() == null) {
@@ -274,33 +274,33 @@ public class StudioIssueController {
             request.getRequestKey(),
             request.getState(),
             request.getMaxRuns());
-    return Results.ok(mapper.toDto(view));
+    return ApiResponse.ok(mapper.toDto(view));
   }
 
   @PostMapping("/api/issues/{issueId}/archive")
-  public Result<IssueDTO> archive(
+  public ApiResponse<IssueDTO> archive(
       @PathVariable("issueId") String issueIdStr, @RequestBody ArchiveIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue archived = issueLifecycleService.archiveIssue(issueId, expectedVersion);
-    return Results.ok(mapper.toDto(archived));
+    return ApiResponse.ok(mapper.toDto(archived));
   }
 
   @PostMapping("/api/issues/{issueId}/unarchive")
-  public Result<IssueDTO> unarchive(
+  public ApiResponse<IssueDTO> unarchive(
       @PathVariable("issueId") String issueIdStr, @RequestBody UnarchiveIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue unarchived = issueLifecycleService.unarchiveIssue(issueId, expectedVersion);
-    return Results.ok(mapper.toDto(unarchived));
+    return ApiResponse.ok(mapper.toDto(unarchived));
   }
 
   @PostMapping("/api/issues/{issueId}/activities")
-  public ResponseEntity<Result<IssueActivityDTO>> appendActivity(
+  public ResponseEntity<ApiResponse<IssueActivityDTO>> appendActivity(
       @PathVariable("issueId") String issueIdStr,
       @RequestBody AppendIssueActivityRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -342,19 +342,21 @@ public class StudioIssueController {
       throw new IllegalStateException("appended activity could not be found");
     }
 
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(activity)));
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(ApiResponse.created(mapper.toDto(activity)));
   }
 
   @GetMapping("/api/issues/{issueId}/evidence")
-  public Result<List<IssueEvidenceDTO>> listEvidence(@PathVariable("issueId") String issueIdStr) {
+  public ApiResponse<List<IssueEvidenceDTO>> listEvidence(
+      @PathVariable("issueId") String issueIdStr) {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     issueEditingService.getIssue(issueId);
-    return Results.ok(
+    return ApiResponse.ok(
         issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
   }
 
   @PostMapping("/api/issues/{issueId}/evidence")
-  public ResponseEntity<Result<IssueEvidenceDTO>> addEvidence(
+  public ResponseEntity<ApiResponse<IssueEvidenceDTO>> addEvidence(
       @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
@@ -362,7 +364,8 @@ public class StudioIssueController {
 
     IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
 
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(evidence)));
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(ApiResponse.created(mapper.toDto(evidence)));
   }
 
   private static long parseActivityCursor(String value) {

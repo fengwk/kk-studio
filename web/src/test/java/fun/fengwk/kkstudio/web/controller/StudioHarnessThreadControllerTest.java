@@ -17,7 +17,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -57,6 +56,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -103,7 +103,7 @@ class StudioHarnessThreadControllerTest {
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
   }
 

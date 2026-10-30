@@ -28,6 +28,7 @@
         <spring-boot.version>4.0.8</spring-boot.version>
         <jackson.version>2.22.3</jackson.version>
         <jackson3.version>3.1.7</jackson3.version>
+        <flyway.version>12.0.3</flyway.version>
         <tomcat.version>11.0.26</tomcat.version>
         <netty.version>4.2.18.Final</netty.version>
         <httpclient5.version>5.6.4</httpclient5.version>
@@ -37,9 +38,8 @@
         <postgresql.version>42.7.13</postgresql.version>
         <opennlp.version>2.5.12</opennlp.version>
         <aws.sdk.version>2.29.52</aws.sdk.version>
-        <convention4j.version>1.2.2</convention4j.version>
         <json-path.version>2.9.0</json-path.version>
-        <langchain4j.version>1.19.0</langchain4j.version>
+        <mcp-sdk.version>2.1.0</mcp-sdk.version>
         <testcontainers.version>2.0.5</testcontainers.version>
         <jgit.version>7.7.1.202607240634-r</jgit.version>
         <okhttp.version>4.12.0</okhttp.version>
@@ -77,6 +77,17 @@
                 <groupId>org.apache.httpcomponents.core5</groupId>
                 <artifactId>httpcore5-h2</artifactId>
                 <version>${httpcore5.version}</version>
+            </dependency>
+            <!-- Flyway 12 使用 Jackson 3；core 与 database-postgresql 必须同版本。 -->
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-core</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-database-postgresql</artifactId>
+                <version>${flyway.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.netty</groupId>
@@ -239,48 +250,19 @@
                 <scope>import</scope>
             </dependency>
             <dependency>
-                <groupId>fun.fengwk.convention4j</groupId>
-                <artifactId>convention4j-spring-boot-starter</artifactId>
-                <version>${convention4j.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.springframework.boot</groupId>
-                        <artifactId>spring-boot-starter-aop</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.convention4j</groupId>
-                <artifactId>convention4j-spring-boot-starter-web</artifactId>
-                <version>${convention4j.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.springframework.boot</groupId>
-                        <artifactId>spring-boot-starter-aop</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.convention4j</groupId>
-                <artifactId>convention4j-spring-boot-starter-test</artifactId>
-                <version>${convention4j.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.convention4j</groupId>
-                <artifactId>convention4j-agent</artifactId>
-                <version>${convention4j.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>com.jayway.jsonpath</groupId>
                 <artifactId>json-path</artifactId>
                 <version>${json-path.version}</version>
             </dependency>
             <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-bom</artifactId>
-                <version>${langchain4j.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-core</artifactId>
+                <version>${mcp-sdk.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-json-jackson3</artifactId>
+                <version>${mcp-sdk.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.eclipse.jgit</groupId>

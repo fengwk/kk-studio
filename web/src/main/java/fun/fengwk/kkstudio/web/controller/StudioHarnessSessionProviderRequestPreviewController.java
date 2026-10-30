@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,6 +14,7 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessDraftPreviewRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.util.List;
@@ -52,10 +51,10 @@ public class StudioHarnessSessionProviderRequestPreviewController {
 
   /** 现算一次本地分支草稿的最终 Provider 请求体；草稿未落库，因此不做任何 Thread cursor / busy / 压缩判定。 */
   @PostMapping("/{sessionId}/provider-request-preview")
-  public Result<HarnessProviderRequestPreviewDTO> previewDraft(
+  public ApiResponse<HarnessProviderRequestPreviewDTO> previewDraft(
       @PathVariable String sessionId, @RequestBody HarnessDraftPreviewRequestDTO request) {
     try {
-      return Results.ok(
+      return ApiResponse.ok(
           StudioHarnessSessionController.withRuntimeTranslation(
               () -> {
                 UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
@@ -74,10 +73,10 @@ public class StudioHarnessSessionProviderRequestPreviewController {
 
   /** 重建一次历史模型输出的最终 Provider 请求体；按当前 catalog / Provider 定义重建，不是原始发送字节。 */
   @GetMapping("/{sessionId}/entries/{entryId}/provider-request-preview")
-  public Result<HarnessProviderRequestPreviewDTO> previewHistorical(
+  public ApiResponse<HarnessProviderRequestPreviewDTO> previewHistorical(
       @PathVariable String sessionId, @PathVariable String entryId) {
     try {
-      return Results.ok(
+      return ApiResponse.ok(
           StudioHarnessSessionController.withRuntimeTranslation(
               () -> {
                 UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");

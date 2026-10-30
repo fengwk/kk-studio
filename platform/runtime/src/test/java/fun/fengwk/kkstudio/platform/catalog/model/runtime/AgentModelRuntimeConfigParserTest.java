@@ -816,7 +816,7 @@ class AgentModelRuntimeConfigParserTest {
         "\"reasoningEffort\":\"high\",\"protocolOptionsJson\":" + token);
   }
 
-  /** 模拟本地真相：convention4j 与 HTTP mapper 都把 Long 序列化为字符串以避免 JS 精度丢失。 */
+  /** 模拟 HTTP mapper 将 Long 序列化为字符串以避免 JS 精度丢失的契约。 */
   private static ObjectMapper longToStringMapper() {
     SimpleModule module = new SimpleModule();
     module.addSerializer(

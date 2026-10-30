@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * client/transport 在快照切换到 proxyB 后，新请求现读快照改走 proxyB，无需重建 client。
  *
  * <p>两个专用回环服务各自模拟最小 MCP 握手（initialize / notifications/initialized）与 tools/list 协议并计数；目标 URL
- * 不可解析，因此计数只可能来自代理，能区分请求实际命中的是 A 还是 B。LangChain4j 传输层构建 JDK {@code HttpClient} 时不覆盖 proxy，捕获的是全局默认
+ * 不可解析，因此计数只可能来自代理，能区分请求实际命中的是 A 还是 B。MCP SDK 传输层构建 JDK {@code HttpClient} 时不覆盖 proxy，捕获的是全局默认
  * selector（SDK 无 proxy 入口），所以这一回归直接覆盖 Platform MCP 发现/执行路径的真实选路。
  */
 @ResourceLock("jvm-proxy-selector")

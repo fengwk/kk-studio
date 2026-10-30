@@ -1,20 +1,14 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.client;
 
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.exception.ToolExecutionException;
-import dev.langchain4j.internal.JsonSchemaElementJsonUtils;
-import dev.langchain4j.mcp.client.DefaultMcpClient;
-import dev.langchain4j.mcp.client.transport.McpTransport;
-import dev.langchain4j.service.tool.ToolExecutionResult;
+import io.modelcontextprotocol.client.McpSyncClient;
+import io.modelcontextprotocol.spec.McpSchema;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.common.result.ResultContent;
-import fun.fengwk.kkstudio.common.result.TextResultContent;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -31,20 +25,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 基于 LangChain4j {@link DefaultMcpClient} 实现的 {@link McpClient} 包装器。
+ * 基于官方 MCP Java SDK {@link McpSyncClient} 实现的 {@link McpClient} 包装器。
  *
- * <p>SDK 的 {@code executeTool}/{@code listTools} 是同步阻塞调用，公开 API 不提供 per-call 取消句柄，因此本实现不以 {@code
- * CompletableFuture.supplyAsync(...).cancel(...)} 冒充协议取消。
+ * <p>SDK 的 {@code callTool}/{@code listTools} 是同步阻塞调用。
  *
- * <p>取消与超时都按「调用级」处理：立即结束本地等待，且不关闭共享 client，因此同一 client 上的其它并发调用不受影响。 Streamable HTTP 传输通过关闭
- * per-request SSE 流取消，无需额外的协议取消通道。
+ * <p>取消与超时都按「调用级」处理：立即结束本地等待并中断执行线程，且不关闭共享 client，因此同一 client 上的其它并发调用不受影响。官方同步 SDK
+ * 不提供独立的协议取消通道，在途请求由服务端响应或 SDK 请求超时收敛。
  *
  * <p>阻塞 SDK 调用跑在至多 {@value #MAX_CONCURRENT_OPERATIONS} 个 worker 的 {@link ThreadPoolExecutor}
- * 上，交接队列为 {@link SynchronousQueue}，不保存等待任务：并发上限与外层工具 admission 的默认并发 64 对齐，不另设配置。池满或 client 已关闭时
- * 提交立即拒绝，并映射为可重试的 {@link McpException}，绝不挂起调用方。{@code future.cancel} 只结束本地等待、不释放容量：不响应 interrupt 的
- * worker 仍在执行任务，不会被 idle worker 接收新任务，因此容量上界始终是 executor 的真实 worker 上界。
+ * 上，交接队列为 {@link SynchronousQueue}，不保存等待任务：并发上限与外层工具 admission 的默认并发 64 对齐，不另设配置。池满或 client
+ * 已关闭时提交立即拒绝，并映射为可重试的 {@link McpException}，绝不挂起调用方。{@code future.cancel} 只结束本地等待、不释放容量：不响应
+ * interrupt 的 worker 仍在执行任务，不会被 idle worker 接收新任务，因此容量上界始终是 executor 的真实 worker 上界。
  */
-final class LangChainMcpClient implements McpClient {
+final class SdkMcpClient implements McpClient {
 
   /**
    * 单个 client 上同时执行的 SDK 阻塞调用上限。
@@ -57,17 +50,20 @@ final class LangChainMcpClient implements McpClient {
   private static final long WORKER_KEEP_ALIVE_SECONDS = 60L;
 
   /**
-   * 模块自有 JSON（工具 schema、调用详情）的 Jackson 3 mapper。
+   * 模块自有 JSON（工具 schema）的 Jackson 3 mapper。
    *
    * <p>显式开启 {@link SerializationFeature#FAIL_ON_EMPTY_BEANS}：Jackson 3 默认关闭该开关，会把无可序列化属性的 value 写成
-   * {@code {}}；这里保持 Jackson 2 的原有约定，让「无法编码的 attributes」继续走失败回退，而不是产出看似合法的空对象 JSON。
+   * {@code {}}；这里保持既有约定，让「无法编码的 schema」继续走失败回退，而不是产出看似合法的空对象 JSON。
    */
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder().enable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build();
 
-  private final DefaultMcpClient client;
-  private final McpTransport transport;
+  private static final TypeReference<Map<String, Object>> MAP_TYPE =
+      new TypeReference<Map<String, Object>>() {};
+
+  private final McpSyncClient client;
   private final ThreadPoolExecutor workers = newWorkerPool();
+  private final McpResultExtractor extractor = new McpResultExtractor();
 
   /**
    * 有界、无排队的阻塞调用池：只在有 idle worker 时直接交接，否则新建 worker，达到 {@link #MAX_CONCURRENT_OPERATIONS} 后拒绝。
@@ -89,20 +85,19 @@ final class LangChainMcpClient implements McpClient {
         new ThreadPoolExecutor.AbortPolicy());
   }
 
-  LangChainMcpClient(DefaultMcpClient client, McpTransport transport) {
+  SdkMcpClient(McpSyncClient client) {
     this.client = Objects.requireNonNull(client, "client");
-    this.transport = transport;
   }
 
   @Override
   public List<McpToolDefinition> listTools(McpDeadline deadline, McpCancellationToken token) {
     Objects.requireNonNull(deadline, "deadline");
     Objects.requireNonNull(token, "token");
-    List<ToolSpecification> specifications =
+    McpSchema.ListToolsResult result =
         runOperation(deadline, token, "MCP listTools", client::listTools);
-    List<McpToolDefinition> definitions = new ArrayList<>(specifications.size());
-    for (ToolSpecification specification : specifications) {
-      definitions.add(toDefinition(specification));
+    List<McpToolDefinition> definitions = new ArrayList<>(result.tools().size());
+    for (McpSchema.Tool tool : result.tools()) {
+      definitions.add(toDefinition(tool));
     }
     return List.copyOf(definitions);
   }
@@ -115,23 +110,12 @@ final class LangChainMcpClient implements McpClient {
     }
     Objects.requireNonNull(deadline, "deadline");
     Objects.requireNonNull(token, "token");
-    ToolExecutionRequest request =
-        ToolExecutionRequest.builder()
-            .name(name)
-            .arguments(normalizeArguments(argumentsJson))
-            .build();
-    try {
-      ToolExecutionResult executionResult =
-          runOperation(deadline, token, "MCP tool call", () -> client.executeTool(request));
-      return new McpToolCallResult(
-          executionResult.isError(),
-          extractContents(executionResult),
-          extractDetailsJson(executionResult));
-    } catch (ToolExecutionException error) {
-      // SDK 把「工具以错误结束」抛成异常而不是返回结果：那仍是工具自己的可读输出，必须按 error 结果透传，
-      // 否则上层会把正常的工具错误误判为连接/进程失败并销毁共享 client。
-      return McpToolCallResult.errorText(errorMessageOf(error));
-    }
+    Map<String, Object> arguments = parseArguments(normalizeArguments(argumentsJson));
+    McpSchema.CallToolRequest request =
+        McpSchema.CallToolRequest.builder(name).arguments(arguments).build();
+    McpSchema.CallToolResult result =
+        runOperation(deadline, token, "MCP tool call", () -> client.callTool(request));
+    return extractor.extract(result);
   }
 
   /** 在 worker 线程上执行一次 SDK 阻塞调用，并按总预算等待。 */
@@ -181,9 +165,8 @@ final class LangChainMcpClient implements McpClient {
       if (cause instanceof McpCancelledException cancelled) {
         throw cancelled;
       }
-      if (cause instanceof ToolExecutionException toolError) {
-        // 工具自身以错误结束：这是可读的工具输出而不是传输失败，必须原样交给调用点映射为 error 结果。
-        throw toolError;
+      if (containsTimeout(cause)) {
+        throw new McpTimeoutException(what + " timed out");
       }
       throw new McpException(what + " failed");
     } catch (InterruptedException error) {
@@ -196,18 +179,17 @@ final class LangChainMcpClient implements McpClient {
     }
   }
 
-  private McpToolDefinition toDefinition(ToolSpecification specification) {
+  private McpToolDefinition toDefinition(McpSchema.Tool tool) {
     String inputSchemaJson = "{}";
-    if (specification.parameters() != null) {
-      Map<String, Object> map = JsonSchemaElementJsonUtils.toMap(specification.parameters());
+    Map<String, Object> inputSchema = tool.inputSchema();
+    if (inputSchema != null && !inputSchema.isEmpty()) {
       try {
-        inputSchemaJson = OBJECT_MAPPER.writeValueAsString(map);
+        inputSchemaJson = OBJECT_MAPPER.writeValueAsString(inputSchema);
       } catch (JacksonException error) {
         throw new McpException("failed to encode MCP tool input schema");
       }
     }
-    return new McpToolDefinition(
-        specification.name(), specification.description(), inputSchemaJson);
+    return new McpToolDefinition(tool.name(), tool.description(), inputSchemaJson);
   }
 
   /**
@@ -224,34 +206,26 @@ final class LangChainMcpClient implements McpClient {
     }
   }
 
-  private static List<ResultContent> extractContents(ToolExecutionResult executionResult) {
-    if (executionResult.result() instanceof List<?> list && !list.isEmpty()) {
-      List<ResultContent> contents = new ArrayList<>(list.size());
-      for (Object item : list) {
-        if (item instanceof ResultContent content) {
-          contents.add(content);
-        }
-      }
-      if (!contents.isEmpty()) {
-        return contents;
-      }
+  private static Map<String, Object> parseArguments(String strictJsonObject) {
+    try {
+      return OBJECT_MAPPER.readValue(strictJsonObject, MAP_TYPE);
+    } catch (JacksonException error) {
+      throw new McpException("MCP tool arguments must be a strict JSON object");
     }
-    String resultText = executionResult.resultText();
-    if (resultText != null && !resultText.isEmpty()) {
-      return List.of(new TextResultContent(resultText));
-    }
-    return List.of(new TextResultContent(""));
   }
 
-  private static String extractDetailsJson(ToolExecutionResult executionResult) {
-    if (executionResult.attributes() != null && !executionResult.attributes().isEmpty()) {
-      try {
-        return OBJECT_MAPPER.writeValueAsString(executionResult.attributes());
-      } catch (JacksonException ignored) {
-        return "{}";
+  /** SDK 会把请求超时包装成普通执行失败，这里沿 cause 链识别超时语义。 */
+  private static boolean containsTimeout(Throwable error) {
+    Throwable current = error;
+    int depth = 0;
+    while (current != null && depth < 16) {
+      if (current instanceof TimeoutException || current instanceof McpTimeoutException) {
+        return true;
       }
+      current = current.getCause();
+      depth++;
     }
-    return "{}";
+    return false;
   }
 
   @Override
@@ -259,26 +233,9 @@ final class LangChainMcpClient implements McpClient {
     workers.shutdownNow();
     try {
       client.close();
-    } catch (Exception ignored) {
-      // 关闭失败不影响后续清理。
+    } catch (RuntimeException error) {
+      throw new McpException("MCP client close failed");
     }
-    if (transport != null) {
-      try {
-        transport.close();
-      } catch (Exception ignored) {
-        // 关闭失败不影响后续清理。
-      }
-    }
-  }
-
-  /**
-   * 提取 SDK 工具执行异常中的可读文本。
-   *
-   * <p>SDK 把服务端 {@code isError} 结果的消息压进异常文本；这里只取文本，不向上抛出异常对象，避免异常消息中的本地事实泄漏到模块边界之外。
-   */
-  private static String errorMessageOf(ToolExecutionException error) {
-    String message = error.getMessage();
-    return message == null || message.isBlank() ? "MCP tool returned an error result" : message;
   }
 
   /** 底层 SDK 阻塞调用。 */

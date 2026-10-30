@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +46,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -84,7 +84,7 @@ class StudioEnvironmentIdeControllerTest {
             .setControllerAdvice(
                 new StudioDomainErrorAdvice(new StudioMessageService()),
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
   }
 
@@ -304,7 +304,7 @@ class StudioEnvironmentIdeControllerTest {
             .setControllerAdvice(
                 new StudioDomainErrorAdvice(new StudioMessageService()),
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
