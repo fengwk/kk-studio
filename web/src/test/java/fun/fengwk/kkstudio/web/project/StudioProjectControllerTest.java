@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Project;

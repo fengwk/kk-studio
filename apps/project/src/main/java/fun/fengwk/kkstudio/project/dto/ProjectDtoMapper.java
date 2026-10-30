@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.dto;
 
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;

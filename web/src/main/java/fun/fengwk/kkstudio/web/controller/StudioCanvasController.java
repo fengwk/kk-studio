@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandResult;
 import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
@@ -22,7 +24,6 @@ import fun.fengwk.kkstudio.share.canvas.CanvasPatchDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,12 +45,12 @@ public class StudioCanvasController {
 
   private final CanvasQueryService canvasQueryService;
   private final CanvasCommandService canvasCommandService;
-  private final WebDtoMapper mapper;
+  private final CanvasDtoMapper mapper;
 
   public StudioCanvasController(
       CanvasQueryService canvasQueryService,
       CanvasCommandService canvasCommandService,
-      WebDtoMapper mapper) {
+      CanvasDtoMapper mapper) {
     this.canvasQueryService = Objects.requireNonNull(canvasQueryService, "canvasQueryService");
     this.canvasCommandService =
         Objects.requireNonNull(canvasCommandService, "canvasCommandService");
@@ -78,7 +79,7 @@ public class StudioCanvasController {
   @GetMapping("/{canvasId}")
   public ApiResponse<CanvasSnapshotDTO> get(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
       return canvasQueryService
           .findSnapshot(canvasId)
           .map(snapshot -> ApiResponse.ok(mapper.toDto(snapshot)))
@@ -104,8 +105,8 @@ public class StudioCanvasController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID idempotencyKey = WebDtoMapper.parseUuid(request.getIdempotencyKey(), "idempotencyKey");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
+      UUID idempotencyKey = Uuids.parseCanonical(request.getIdempotencyKey(), "idempotencyKey");
       CanvasCommandResult result =
           canvasCommandService.applyCommands(
               canvasId, idempotencyKey, mapper.toCommands(request.getCommands()));
@@ -129,7 +130,7 @@ public class StudioCanvasController {
   @DeleteMapping("/{canvasId}")
   public ApiResponse<Void> delete(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
       canvasCommandService.deleteCanvas(canvasId);
       return ApiResponse.noContent();
     } catch (IllegalArgumentException ex) {
