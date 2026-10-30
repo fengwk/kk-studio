@@ -5,9 +5,11 @@ import { crc32 } from 'node:zlib'
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -82,7 +84,6 @@ function workspace() {
     'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
     'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
     'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
-    'BOOT-INF/lib/convention4j-agent-1.2.2.jar': storedZip({ 'META-INF/MANIFEST.MF': '' }),
   })
   return { directory, jar, output }
 }
@@ -121,15 +122,17 @@ test('stage copies only the application JAR and records its digest', () => {
     assert.equal(staged.version, VERSION)
     assert.equal(staged.sourceCommit, COMMIT)
     assert.equal(staged.sha256[APP_FILE], sha256(path.join(fixture.output, APP_FILE)))
-    assert.equal(existsSync(path.join(fixture.output, 'convention4j-agent')), false)
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
   }
 })
 
 test('stage refuses an existing output directory', () => {
-  const fixture = stageFixture()
+  const fixture = workspace()
   try {
+    mkdirSync(fixture.output)
+    const sentinel = path.join(fixture.output, 'sentinel.txt')
+    writeFileSync(sentinel, 'preserve me\n')
     const result = run(
       'stage',
       '--jar', fixture.jar,
@@ -139,16 +142,21 @@ test('stage refuses an existing output directory', () => {
     )
     assert.equal(result.status, 1)
     assert.match(result.stderr, /output directory already exists/u)
+    assert.equal(readFileSync(sentinel, 'utf8'), 'preserve me\n')
+    assert.equal(existsSync(path.join(fixture.output, APP_FILE)), false)
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
   }
 })
 
-test('stage rejects an application JAR without embedded frontend assets', () => {
+test('stage rejects an application JAR without embedded frontend assets or with invalid parameters', () => {
   const fixture = workspace()
   try {
-    writeArchive(fixture.jar, { 'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n' })
-    const result = run(
+    writeArchive(fixture.jar, {
+      'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
+      'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+    })
+    let result = run(
       'stage',
       '--jar', fixture.jar,
       '--output', fixture.output,
@@ -156,7 +164,35 @@ test('stage rejects an application JAR without embedded frontend assets', () => 
       '--source-commit', COMMIT,
     )
     assert.equal(result.status, 1)
-    assert.match(result.stderr, /static\/index\.html/u)
+    assert.match(result.stderr, /does not contain BOOT-INF\/classes\/static\/index\.html/u)
+
+    writeArchive(fixture.jar, {
+      'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
+      'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
+    })
+    result = run(
+      'stage',
+      '--jar', fixture.jar,
+      '--output', fixture.output,
+      '--version', VERSION,
+      '--source-commit', COMMIT,
+    )
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /does not contain embedded frontend assets/u)
+
+    writeArchive(fixture.jar, {
+      'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
+      'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+    })
+    result = run(
+      'stage',
+      '--jar', fixture.jar,
+      '--output', fixture.output,
+      '--version', VERSION,
+      '--source-commit', 'not-a-commit',
+    )
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /full 40-character Git SHA/u)
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
   }
@@ -183,7 +219,7 @@ test('verify rejects manifest or payload tampering', () => {
   try {
     const appJar = path.join(fixture.output, APP_FILE)
     writeFileSync(appJar, Buffer.concat([readFileSync(appJar), Buffer.from('tamper')]))
-    const result = run(
+    let result = run(
       'verify',
       '--dir', fixture.output,
       '--version', VERSION,
@@ -193,34 +229,37 @@ test('verify rejects manifest or payload tampering', () => {
     assert.match(result.stderr, /integrity check failed for app\.jar/u)
 
     stageFixture(fixture)
-    const staged = manifest(fixture.output)
-    staged.version = '9.9.9'
-    writeFileSync(path.join(fixture.output, MANIFEST_FILE), `${JSON.stringify(staged)}\n`)
-    const versionMismatch = run(
-      'verify',
-      '--dir', fixture.output,
-      '--version', VERSION,
-      '--source-commit', COMMIT,
-    )
-    assert.equal(versionMismatch.status, 1)
-    assert.match(versionMismatch.stderr, /artifact version/u)
+    for (const [label, args] of [
+      ['commit', ['--version', VERSION, '--source-commit', 'f'.repeat(40)]],
+      ['version', ['--version', '4.0.2', '--source-commit', COMMIT]],
+    ]) {
+      const mismatched = run('verify', '--dir', fixture.output, ...args)
+      assert.equal(mismatched.status, 1, `${label} must be rejected`)
+      assert.match(mismatched.stderr, /does not match/u)
+    }
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
   }
 })
 
-test('verify rejects extra files and missing payloads', () => {
+test('verify rejects extra files, corrupt manifests, missing payloads and symlinks', () => {
   const fixture = stageFixture()
   try {
     writeFileSync(path.join(fixture.output, 'extra.txt'), 'extra')
-    const extra = run(
+    let result = run(
       'verify',
       '--dir', fixture.output,
       '--version', VERSION,
       '--source-commit', COMMIT,
     )
-    assert.equal(extra.status, 1)
-    assert.match(extra.stderr, /closed contract/u)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /closed contract/u)
+
+    stageFixture(fixture)
+    writeFileSync(path.join(fixture.output, 'manifest.json'), '{not json')
+    result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /not valid JSON/u)
 
     stageFixture(fixture)
     unlinkSync(path.join(fixture.output, APP_FILE))
@@ -232,6 +271,12 @@ test('verify rejects extra files and missing payloads', () => {
     )
     assert.equal(missing.status, 1)
     assert.match(missing.stderr, /application JAR is missing/u)
+
+    stageFixture(fixture)
+    symlinkSync('/etc/hostname', path.join(fixture.output, 'link.txt'))
+    result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /must not contain symlinks/u)
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
   }

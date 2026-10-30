@@ -7,8 +7,8 @@ import lombok.Data;
 public class AgentModelLimitDTO {
 
   /**
-   * 模型上下文窗口大小，单位为 Token。使用 {@code Integer}，使 wire format 始终为普通 JSON 数字， 不受 convention4j 将 {@code
-   * Long} 自动配置为字符串的影响。
+   * 模型上下文窗口大小，单位为 Token。使用 {@code Integer}，使 wire format 始终为普通 JSON 数字， 不受全局将 {@code Long}
+   * 配置为字符串序列化的影响。
    */
   private Integer context;
 

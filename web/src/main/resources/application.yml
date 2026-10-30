@@ -1,12 +1,5 @@
 spring:
 
-  autoconfigure:
-    exclude:
-      - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
-      # 请求追踪由官方 ServerHttpObservationFilter 承担；旧 interceptor/aspect 不再激活。
-      - fun.fengwk.convention4j.springboot.starter.web.tracer.TracerWebAutoConfiguration
-      - fun.fengwk.convention4j.springboot.starter.tracer.ConventionSpanAspectAutoConfiguration
-
   application:
     # 应用名称
     name: kk-studio
@@ -73,19 +66,6 @@ management:
 logging:
   level:
     root: info
-
-# 规约配置
-convention:
-  i18n:
-    # i18n properties文件名称
-    base-name: string
-    # 使用语言
-    locale: en_US
-
-  code:
-    i18n:
-      # 错误码i18n语言，与i18n.locale保持一致
-      locale: ${convention.i18n.locale}
 
 kk-studio:
   catalog:

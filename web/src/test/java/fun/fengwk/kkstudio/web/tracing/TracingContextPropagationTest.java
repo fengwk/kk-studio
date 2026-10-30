@@ -44,7 +44,6 @@ class TracingContextPropagationTest {
   static void startTracingContext() {
     SpringApplication application = new SpringApplication(PropagationProbeApplication.class);
     application.setWebApplicationType(WebApplicationType.NONE);
-    application.setInitializers(List.of());
     context =
         application.run(
             "--spring.main.banner-mode=off",

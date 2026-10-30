@@ -1,11 +1,5 @@
 spring:
 
-  autoconfigure:
-    exclude:
-      - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
-      - fun.fengwk.convention4j.springboot.starter.web.tracer.TracerWebAutoConfiguration
-      - fun.fengwk.convention4j.springboot.starter.tracer.ConventionSpanAspectAutoConfiguration
-
   application:
     name: kk-studio
 
