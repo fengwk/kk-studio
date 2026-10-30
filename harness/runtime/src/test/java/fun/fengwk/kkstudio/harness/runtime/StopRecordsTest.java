@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,13 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -55,12 +56,12 @@ class StopRecordsTest {
           Instant.ofEpochMilli(1),
           Instant.ofEpochMilli(1));
 
-  private InMemoryBuiltinHarnessStore store;
+  private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryBuiltinHarnessStore();
+    store = new InMemoryHarnessStore();
     runtime =
         HarnessRuntimeTestSupport.runtime(
             store, Clock.fixed(Instant.ofEpochMilli(3_000), ZoneOffset.UTC));
@@ -122,8 +123,7 @@ class StopRecordsTest {
   /** stopRequestId 作为 closeRequestId 原样持久化到 STOPPED TURN_END，并端到端贯穿一次真实 Stop 事务。 */
   @Test
   void stopRequestIdIsPersistedAsTheTurnEndCloseRequestId() {
-    HarnessRuntimeTestSupport.ModelBaseline baseline =
-        HarnessRuntimeTestSupport.seedModel(store, ModelInvocationStatus.READY);
+    var baseline = seedBaseline(store);
     UUID stopRequestId = id(8L);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
     assertStopped(result);
@@ -141,8 +141,7 @@ class StopRecordsTest {
         Arrays.stream(HarnessRuntime.class.getDeclaredConstructors())
             .filter(constructor -> Modifier.isPublic(constructor.getModifiers()))
             .count());
-    AgentDriver driver =
-        HarnessRuntimeTestSupport.driver(store, HarnessRuntimeTestSupport.UNUSED_RESOLVER);
+    AgentDriver driver = new FakeAgentDriver();
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
