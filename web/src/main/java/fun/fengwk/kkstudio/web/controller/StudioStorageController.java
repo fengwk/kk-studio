@@ -7,13 +7,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -73,6 +73,6 @@ public class StudioStorageController {
   }
 
   private static UUID parseUuid(String text, String name) {
-    return WebDtoMapper.parseUuid(text, name);
+    return Uuids.parseCanonical(text, name);
   }
 }
