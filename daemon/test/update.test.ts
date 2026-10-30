@@ -182,7 +182,7 @@ async function createWindowsScriptFixture(): Promise<WindowsScriptFixture> {
   return { root, script, log, installed, operation, staged }
 }
 
-function runWindowsScript(
+async function runWindowsScript(
   fixture: WindowsScriptFixture,
   action: 'stop' | 'start',
   overrides: Record<string, string> = {},
@@ -207,7 +207,13 @@ function runWindowsScript(
     },
   )
   if (result.error !== undefined) {
-    throw result.error
+    const calls = await readWindowsScriptCalls(fixture)
+    throw new Error(
+      `Windows update fixture failed: ${result.error.message}\n`
+        + `scheduler calls: ${JSON.stringify(calls)}\n`
+        + `stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      { cause: result.error },
+    )
   }
   return result
 }
@@ -1161,7 +1167,7 @@ describe.runIf(process.platform === 'win32')('Windows update script action dispa
   it('stop stops the installer-owned task and never starts it', async () => {
     const fixture = await createWindowsScriptFixture()
     try {
-      const result = runWindowsScript(fixture, 'stop', { KK_TEST_STATE: 'Running' })
+      const result = await runWindowsScript(fixture, 'stop', { KK_TEST_STATE: 'Running' })
       expect(result.status, result.stderr).toBe(0)
       expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Running', 'stop', 'get:Ready'])
     } finally {
@@ -1172,7 +1178,7 @@ describe.runIf(process.platform === 'win32')('Windows update script action dispa
   it('start starts the installer-owned task and never stops it', async () => {
     const fixture = await createWindowsScriptFixture()
     try {
-      const result = runWindowsScript(fixture, 'start')
+      const result = await runWindowsScript(fixture, 'start')
       expect(result.status, result.stderr).toBe(0)
       expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Ready', 'start'])
     } finally {
@@ -1183,7 +1189,7 @@ describe.runIf(process.platform === 'win32')('Windows update script action dispa
   it('rejects a foreign task before any stop or start', async () => {
     const fixture = await createWindowsScriptFixture()
     try {
-      const result = runWindowsScript(fixture, 'stop', { KK_TEST_OWNERSHIP: 'foreign' })
+      const result = await runWindowsScript(fixture, 'stop', { KK_TEST_OWNERSHIP: 'foreign' })
       expect(result.status).not.toBe(0)
       expect(result.stderr).toContain('managed scheduled task is not owned by the installer')
       expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Ready'])
