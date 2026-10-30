@@ -61,11 +61,13 @@ class HarnessRuntimeStopLocalCancellationTest {
               modelCalls.add(invocationId);
               // 本地取消回调在 Stop 事务提交后执行：Model 行已被 stopModel 物理删除。
               assertTrue(
-                  store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).isEmpty());
+                  store
+                      .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
+                      .isEmpty());
               assertFalse(
                   store
                       .transaction(
-                          tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, invocationId)))
+                          tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, invocationId)))
                       .isPresent());
             },
             toolCalls::add);
@@ -102,11 +104,11 @@ class HarnessRuntimeStopLocalCancellationTest {
             invocationId -> {
               toolCalls.add(invocationId);
               // 本地取消回调在 Stop 事务提交后执行：stopTools 已删除全部 child Tool 行。
-              assertTrue(store.transaction(tx -> tx.findToolInvocation(invocationId)).isEmpty());
+              assertTrue(store.transaction(tx -> tx.tools().find(invocationId)).isEmpty());
               assertFalse(
                   store
                       .transaction(
-                          tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, invocationId)))
+                          tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, invocationId)))
                       .isPresent());
             });
 
@@ -116,8 +118,9 @@ class HarnessRuntimeStopLocalCancellationTest {
     assertTrue(modelCalls.isEmpty());
     assertEquals(List.of(ids.get(0), ids.get(1)), toolCalls);
     // 已 terminal 的 SUCCEEDED sibling 不在取消列表中；其 ToolResult Entry 仍然存在并标记 SUCCEEDED。
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(thread.headEntryId()));
     List<Entry> toolResults =
         path.entries().stream()
             .filter(
@@ -160,10 +163,11 @@ class HarnessRuntimeStopLocalCancellationTest {
     assertEquals(baseline.toolIds(), calls);
     // 本地取消失败仅记日志：durable Stop 仍然删除全部 child Tool 行并 append CANCELLED ToolResult Entries。
     for (UUID id : baseline.toolIds()) {
-      assertTrue(store.transaction(tx -> tx.findToolInvocation(id)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.tools().find(id)).isEmpty());
     }
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(thread.headEntryId()));
     List<ToolResultStatus> statuses =
         path.entries().stream()
             .filter(

@@ -19,7 +19,7 @@ public final class ThreadInputDemand {
 
   /** 本 Thread 是否存在需要驱动的输入需求。 */
   public static boolean hasInputDemand(HarnessStore.Transaction tx, ThreadState thread) {
-    if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
+    if (hasQueuedDemand(tx.commands().loadQueued(thread.id()))) {
       return true;
     }
     return hasUnconsumedNotification(tx, thread);
@@ -37,6 +37,6 @@ public final class ThreadInputDemand {
 
   /** 已物化但位于输入水位之后的 APPLIED 系统通知是否仍待 INPUT 接纳。 */
   public static boolean hasUnconsumedNotification(HarnessStore.Transaction tx, ThreadState thread) {
-    return tx.hasAppliedNotificationAfter(thread.id(), thread.inputThroughSequence());
+    return tx.commands().hasAppliedNotificationAfter(thread.id(), thread.inputThroughSequence());
   }
 }

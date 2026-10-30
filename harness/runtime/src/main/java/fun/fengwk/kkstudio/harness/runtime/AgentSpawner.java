@@ -32,7 +32,7 @@ public final class AgentSpawner {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
     if (request.parentThreadId() != null && request.delivery() == JoinDelivery.NOTIFY_PARENT) {
-      tx.lockJoinAdmission();
+      tx.joins().lockAdmission();
     }
     if (request.continuation() != null) {
       AcceptCommandsControl.lockTreeAndAncestors(tx, request.threadId(), false, null);
@@ -59,7 +59,8 @@ public final class AgentSpawner {
     ThreadState parent = null;
     if (parentId != null) {
       parent =
-          tx.findThread(parentId)
+          tx.threads()
+              .find(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
     }
     UUID rootThreadId = parent == null ? request.threadId() : parent.rootThreadId();
@@ -75,7 +76,7 @@ public final class AgentSpawner {
             request.trigger(),
             request.constraints(),
             request.commands());
-    ThreadState existing = tx.findThread(request.threadId()).orElse(null);
+    ThreadState existing = tx.threads().find(request.threadId()).orElse(null);
     if (existing != null) {
       return SpawnTickets.attach(
           tx,
@@ -110,7 +111,8 @@ public final class AgentSpawner {
   private static AcceptedCommands spawnOnExisting(
       HarnessStore.Transaction tx, SpawnRequest request) {
     ThreadState thread =
-        tx.lockThread(request.threadId())
+        tx.threads()
+            .lock(request.threadId())
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException(

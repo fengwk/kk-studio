@@ -105,7 +105,7 @@ class ExecutionExitSettlementTest {
         driveTerminal(fixture, leafId);
         EntryPath closed =
             fixture.store.transaction(
-                tx -> tx.loadEntryPath(tx.findThread(leafId).orElseThrow().headEntryId()));
+                tx -> tx.entries().loadPath(tx.threads().find(leafId).orElseThrow().headEntryId()));
         assertTrue(
             closed.head().payload() instanceof TurnEndPayload end && end.continueModel(),
             () -> "head=" + closed.head().payload().type() + " payload=" + closed.head().payload());
@@ -115,7 +115,7 @@ class ExecutionExitSettlementTest {
             ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         UUID executionId =
             fixture.store.transaction(
-                tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
+                tx -> tx.exits().loadUnconfirmed(leafId).get(0).executionId());
         long versionBeforeExit = version(fixture.store, leafId);
 
         held.release().countDown();
@@ -126,12 +126,12 @@ class ExecutionExitSettlementTest {
         assertEquals(versionBeforeExit + 1, version(fixture.store, leafId));
         assertEquals(
             ExecutionExitState.STUDIO_EXITED,
-            fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()));
+            fixture.store.transaction(tx -> tx.exits().find(executionId).orElseThrow().state()));
         assertEquals(
             ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         Optional<Work> continuation =
             fixture.store.transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, leafId)));
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, leafId)));
         assertTrue(continuation.isPresent(), "continueModel obligation must request THREAD work");
       }
     }
@@ -157,7 +157,7 @@ class ExecutionExitSettlementTest {
         UUID leafId = fixture.baseline.threadId();
         UUID parentId = parentOf(fixture.store, leafId);
         UUID rootId =
-            fixture.store.transaction(tx -> tx.findThread(leafId).orElseThrow().rootThreadId());
+            fixture.store.transaction(tx -> tx.threads().find(leafId).orElseThrow().rootThreadId());
         UUID leafJoinId = UUID.randomUUID();
         UUID parentJoinId = UUID.randomUUID();
         insertAppliedJoin(fixture.store, leafId, leafJoinId);
@@ -261,7 +261,7 @@ class ExecutionExitSettlementTest {
         assertEquals(0, delegate.closes.get(), "close is still held after the real body returned");
         executionId =
             fixture.store.transaction(
-                tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
+                tx -> tx.exits().loadUnconfirmed(leafId).get(0).executionId());
         assertEquals(0, confirmAttempts.get(), "Stop must not attempt exit confirmation");
         ThreadSnapshot before = runtime.getThreadSnapshot(leafId);
         assertEquals(ThreadRuntimeStatus.RUNNING, before.runtimeStatus());
@@ -271,23 +271,21 @@ class ExecutionExitSettlementTest {
         runtime.stop(new StopCommand(leafId, TestIds.id(71), before.thread().version()));
 
         assertTrue(
-            fixture
-                .store
-                .transaction(tx -> tx.findToolInvocation(fixture.toolInvocationId))
-                .isEmpty(),
+            fixture.store.transaction(tx -> tx.tools().find(fixture.toolInvocationId)).isEmpty(),
             "Stop deletes the terminal Tool invocation");
         assertTrue(
             fixture
                 .store
                 .transaction(
                     tx ->
-                        tx.findWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId)))
+                        tx.work()
+                            .find(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId)))
                 .isEmpty());
         UUID heldExecutionId = executionId;
         assertEquals(
             ExecutionExitState.UNCONFIRMED,
             fixture.store.transaction(
-                tx -> tx.findExecution(heldExecutionId).orElseThrow().state()));
+                tx -> tx.exits().find(heldExecutionId).orElseThrow().state()));
         assertEquals(
             ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
         assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
@@ -302,8 +300,7 @@ class ExecutionExitSettlementTest {
         ThreadSnapshot after = runtime.getThreadSnapshot(leafId);
         ThreadJoin join = runtime.findJoin(joinId).orElseThrow();
         ExecutionExitState state =
-            fixture.store.transaction(
-                tx -> tx.findExecution(heldExecutionId).orElseThrow().state());
+            fixture.store.transaction(tx -> tx.exits().find(heldExecutionId).orElseThrow().state());
         if (failConfirm) {
           assertAll(
               () ->
@@ -345,8 +342,8 @@ class ExecutionExitSettlementTest {
       insertAppliedJoin(fixture.store, leafId, UUID.randomUUID());
       fixture.store.transaction(
           tx -> {
-            ThreadState parent = tx.lockThread(parentId).orElseThrow();
-            tx.updateThread(parent.changeExecutionControl(ThreadExecutionControl.STOPPED, NOW));
+            ThreadState parent = tx.threads().lock(parentId).orElseThrow();
+            tx.threads().update(parent.changeExecutionControl(ThreadExecutionControl.STOPPED, NOW));
             return null;
           });
       AcceptCommandsCommand resume =
@@ -441,11 +438,11 @@ class ExecutionExitSettlementTest {
   }
 
   private static UUID parentOf(HarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().parentThreadId());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().parentThreadId());
   }
 
   private static long version(HarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().version());
   }
 
   /**
@@ -457,8 +454,8 @@ class ExecutionExitSettlementTest {
   private static void insertAppliedJoin(HarnessStore store, UUID childId, UUID joinId) {
     store.transaction(
         tx -> {
-          ThreadState child = tx.lockThread(childId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(child.headEntryId());
+          ThreadState child = tx.threads().lock(childId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(child.headEntryId());
           Entry start =
               path.entries().stream()
                   .filter(
@@ -493,28 +490,29 @@ class ExecutionExitSettlementTest {
                   null,
                   null,
                   NOW);
-          tx.updateThread(child.reserveCommandSequences(1, NOW));
-          tx.insertCommands(List.of(source));
-          tx.updateCommands(List.of(source.markApplied(start.id())));
-          child = tx.lockThread(child.id()).orElseThrow();
-          tx.updateThread(child.advanceInputThroughSequence(1L, NOW));
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  child.parentThreadId(),
-                  child.id(),
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().update(child.reserveCommandSequences(1, NOW));
+          tx.commands().insert(List.of(source));
+          tx.commands().update(List.of(source.markApplied(start.id())));
+          child = tx.threads().lock(child.id()).orElseThrow();
+          tx.threads().update(child.advanceInputThroughSequence(1L, NOW));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      child.parentThreadId(),
+                      child.id(),
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -530,7 +528,8 @@ class ExecutionExitSettlementTest {
                   ((NotificationCommandPayload) command.payload()).notificationId());
             }
           }
-          EntryPath path = tx.loadEntryPath(tx.findThread(parentId).orElseThrow().headEntryId());
+          EntryPath path =
+              tx.entries().loadPath(tx.threads().find(parentId).orElseThrow().headEntryId());
           for (Entry entry : path.entries()) {
             if (entry.payload() instanceof NotificationPayload notification) {
               notificationIds.add(notification.notificationId());

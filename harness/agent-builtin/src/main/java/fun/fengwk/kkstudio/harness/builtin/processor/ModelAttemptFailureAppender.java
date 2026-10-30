@@ -38,7 +38,8 @@ public final class ModelAttemptFailureAppender {
     UUID parent = parentEntryId;
     for (ModelAttemptFailure failure : invocation.failedAttempts()) {
       UUID entryId = tx.nextId();
-      tx.insertEntry(new Entry(entryId, sessionId, parent, payload(failure), failure.failedAt()));
+      tx.entries()
+          .insert(new Entry(entryId, sessionId, parent, payload(failure), failure.failedAt()));
       parent = entryId;
     }
     return parent;

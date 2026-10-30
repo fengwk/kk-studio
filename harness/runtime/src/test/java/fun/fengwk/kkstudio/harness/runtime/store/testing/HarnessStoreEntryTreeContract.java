@@ -73,18 +73,21 @@ public abstract class HarnessStoreEntryTreeContract {
                 inTransaction(
                     store,
                     tx ->
-                        tx.insertThread(
-                            thread(duplicateId, baseline.sessionId(), baseline.rootEntryId()))));
+                        tx.threads()
+                            .insert(
+                                thread(
+                                    duplicateId, baseline.sessionId(), baseline.rootEntryId()))));
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, insert.reason());
-    assertTrue(store.transaction(tx -> tx.findThread(duplicateId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(duplicateId)).isEmpty());
     UUID siblingId = TestIds.id(102);
     inTransaction(
         store,
         tx ->
-            tx.insertThread(
-                StoreTestSupport.siblingRoot(
-                    siblingId, baseline.sessionId(), baseline.rootEntryId(), "branch")));
-    ThreadState before = store.transaction(tx -> tx.findThread(siblingId).orElseThrow());
+            tx.threads()
+                .insert(
+                    StoreTestSupport.siblingRoot(
+                        siblingId, baseline.sessionId(), baseline.rootEntryId(), "branch")));
+    ThreadState before = store.transaction(tx -> tx.threads().find(siblingId).orElseThrow());
     HarnessRuntimeConflictException rename =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -92,13 +95,13 @@ public abstract class HarnessStoreEntryTreeContract {
                 inTransaction(
                     store,
                     tx -> {
-                      ThreadState locked = tx.lockThread(siblingId).orElseThrow();
-                      tx.updateThread(locked.renameThread("main", T1));
+                      ThreadState locked = tx.threads().lock(siblingId).orElseThrow();
+                      tx.threads().update(locked.renameThread("main", T1));
                     }));
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, rename.reason());
-    assertEquals(before, store.transaction(tx -> tx.findThread(siblingId).orElseThrow()));
-    inTransaction(store, tx -> tx.updateThread(tx.lockThread(siblingId).orElseThrow()));
-    assertEquals(before, store.transaction(tx -> tx.findThread(siblingId).orElseThrow()));
+    assertEquals(before, store.transaction(tx -> tx.threads().find(siblingId).orElseThrow()));
+    inTransaction(store, tx -> tx.threads().update(tx.threads().lock(siblingId).orElseThrow()));
+    assertEquals(before, store.transaction(tx -> tx.threads().find(siblingId).orElseThrow()));
     // 非 name 约束（重复主键）不能误分类为名称冲突。
     assertThrows(
         IllegalArgumentException.class,
@@ -106,12 +109,13 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx ->
-                    tx.insertThread(
-                        StoreTestSupport.siblingRoot(
-                            baseline.threadId(),
-                            baseline.sessionId(),
-                            baseline.rootEntryId(),
-                            "unused-name"))));
+                    tx.threads()
+                        .insert(
+                            StoreTestSupport.siblingRoot(
+                                baseline.threadId(),
+                                baseline.sessionId(),
+                                baseline.rootEntryId(),
+                                "unused-name"))));
   }
 
   @Test
@@ -119,7 +123,7 @@ public abstract class HarnessStoreEntryTreeContract {
     Baseline first = seedThreadBaseline(store);
     Baseline second = seedThreadBaseline(store);
     assertEquals(
-        "main", store.transaction(tx -> tx.findThread(second.threadId()).orElseThrow()).name());
+        "main", store.transaction(tx -> tx.threads().find(second.threadId()).orElseThrow()).name());
     UUID childId = TestIds.id(101);
     ThreadState root = thread(childId, first.sessionId(), first.rootEntryId());
     ThreadState child =
@@ -140,8 +144,8 @@ public abstract class HarnessStoreEntryTreeContract {
             root.version(),
             root.createdAt(),
             root.updatedAt());
-    inTransaction(store, tx -> tx.insertThread(child));
-    assertEquals(child, store.transaction(tx -> tx.findThread(childId).orElseThrow()));
+    inTransaction(store, tx -> tx.threads().insert(child));
+    assertEquals(child, store.transaction(tx -> tx.threads().find(childId).orElseThrow()));
   }
 
   @Test
@@ -150,13 +154,14 @@ public abstract class HarnessStoreEntryTreeContract {
     store.transaction(
         tx -> {
           assertEquals(
-              session(baseline.sessionId()), tx.findSession(baseline.sessionId()).orElseThrow());
+              session(baseline.sessionId()),
+              tx.sessions().find(baseline.sessionId()).orElseThrow());
           assertEquals(
               rootEntry(baseline.rootEntryId(), baseline.sessionId()),
-              tx.findEntry(baseline.rootEntryId()).orElseThrow());
+              tx.entries().find(baseline.rootEntryId()).orElseThrow());
           assertEquals(
               thread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()),
-              tx.findThread(baseline.threadId()).orElseThrow());
+              tx.threads().find(baseline.threadId()).orElseThrow());
           return null;
         });
   }
@@ -165,8 +170,8 @@ public abstract class HarnessStoreEntryTreeContract {
   void sessionRoundTripPreservesCreatedAt() {
     UUID sessionId = TestIds.id(1);
     Session session = session(sessionId);
-    inTransaction(store, tx -> tx.insertSession(session));
-    assertEquals(session, store.transaction(tx -> tx.findSession(sessionId).orElseThrow()));
+    inTransaction(store, tx -> tx.sessions().insert(session));
+    assertEquals(session, store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow()));
   }
 
   @Test
@@ -174,21 +179,22 @@ public abstract class HarnessStoreEntryTreeContract {
     // 测试意图：updateSession 是唯一受支持的 Session 行变更——锁内仅替换 name，id/createdAt 不可变；
     // 未锁、行不存在、身份改变都抛对应异常且行不被改动。
     UUID sessionId = TestIds.id(10);
-    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
-    Session stored = store.transaction(tx -> tx.findSession(sessionId)).orElseThrow();
+    inTransaction(store, tx -> tx.sessions().insert(session(sessionId)));
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId)).orElseThrow();
     Session renamed = new Session(sessionId, "renamed session", stored.createdAt());
 
     // 未锁定时更新被拒。
     assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.updateSession(renamed)));
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.sessions().update(renamed)));
     // 锁定后更新成功且只替换名称。
     inTransaction(
         store,
         tx -> {
-          tx.lockSessionForKeyShare(sessionId).orElseThrow();
-          tx.updateSession(renamed);
+          tx.sessions().lockForKeyShare(sessionId).orElseThrow();
+          tx.sessions().update(renamed);
         });
-    assertEquals(renamed, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+    assertEquals(renamed, store.transaction(tx -> tx.sessions().find(sessionId)).orElseThrow());
 
     // 行不存在：lock 返回 empty（不产生锁），未锁定更新抛 IllegalStateException。
     UUID ghostId = TestIds.id(11);
@@ -198,8 +204,8 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockSessionForKeyShare(ghostId);
-                  tx.updateSession(new Session(ghostId, "ghost", stored.createdAt()));
+                  tx.sessions().lockForKeyShare(ghostId);
+                  tx.sessions().update(new Session(ghostId, "ghost", stored.createdAt()));
                 }));
 
     // createdAt 身份字段改变被共享校验拒绝（updateSession 按候选 id 定位存储行，id 恒等于行 id）。
@@ -211,26 +217,26 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockSessionForKeyShare(sessionId).orElseThrow();
-                  tx.updateSession(movedCreatedAt);
+                  tx.sessions().lockForKeyShare(sessionId).orElseThrow();
+                  tx.sessions().update(movedCreatedAt);
                 }));
     // 拒绝后行保持原名。
-    assertEquals(renamed, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+    assertEquals(renamed, store.transaction(tx -> tx.sessions().find(sessionId)).orElseThrow());
   }
 
   @Test
   void updateSessionAcceptsExactReplayAndForUpdateLock() {
     // 测试意图：updateSession 支持 lockSessionForUpdate（rename 控制面用）且 exact replay 是合法迁移。
     UUID sessionId = TestIds.id(13);
-    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
-    Session stored = store.transaction(tx -> tx.findSession(sessionId)).orElseThrow();
+    inTransaction(store, tx -> tx.sessions().insert(session(sessionId)));
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId)).orElseThrow();
     inTransaction(
         store,
         tx -> {
-          tx.lockSessionForUpdate(sessionId).orElseThrow();
-          tx.updateSession(stored);
+          tx.sessions().lockForUpdate(sessionId).orElseThrow();
+          tx.sessions().update(stored);
         });
-    assertEquals(stored, store.transaction(tx -> tx.findSession(sessionId)).orElseThrow());
+    assertEquals(stored, store.transaction(tx -> tx.sessions().find(sessionId)).orElseThrow());
   }
 
   @Test
@@ -239,8 +245,8 @@ public abstract class HarnessStoreEntryTreeContract {
     Session session = new Session(sessionId, "session-" + sessionId, T0.plusNanos(1));
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertSession(session)));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
+        () -> inTransaction(store, tx -> tx.sessions().insert(session)));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isEmpty()));
 
     Baseline baseline = seedThreadBaseline(store);
     assertThrows(
@@ -249,12 +255,13 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx ->
-                    tx.insertEntry(
-                        turnStartEntry(
-                            TestIds.id(100),
-                            baseline.sessionId(),
-                            baseline.rootEntryId(),
-                            T1.plusNanos(1)))));
+                    tx.entries()
+                        .insert(
+                            turnStartEntry(
+                                TestIds.id(100),
+                                baseline.sessionId(),
+                                baseline.rootEntryId(),
+                                T1.plusNanos(1)))));
     ThreadState thread =
         StoreTestSupport.threadState(
             TestIds.id(101),
@@ -265,16 +272,17 @@ public abstract class HarnessStoreEntryTreeContract {
             T0.plusNanos(1),
             T0.plusNanos(1));
     assertThrows(
-        IllegalArgumentException.class, () -> inTransaction(store, tx -> tx.insertThread(thread)));
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.threads().insert(thread)));
   }
 
   @Test
   void duplicateSessionIdIsRejected() {
     UUID sessionId = TestIds.id(1);
-    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
+    inTransaction(store, tx -> tx.sessions().insert(session(sessionId)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertSession(session(sessionId))));
+        () -> inTransaction(store, tx -> tx.sessions().insert(session(sessionId))));
   }
 
   @Test
@@ -282,7 +290,8 @@ public abstract class HarnessStoreEntryTreeContract {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            inTransaction(store, tx -> tx.insertEntry(rootEntry(TestIds.id(1), TestIds.id(999)))));
+            inTransaction(
+                store, tx -> tx.entries().insert(rootEntry(TestIds.id(1), TestIds.id(999)))));
   }
 
   @Test
@@ -292,7 +301,8 @@ public abstract class HarnessStoreEntryTreeContract {
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store, tx -> tx.insertEntry(rootEntry(TestIds.id(100), baseline.sessionId()))));
+                store,
+                tx -> tx.entries().insert(rootEntry(TestIds.id(100), baseline.sessionId()))));
   }
 
   @Test
@@ -304,8 +314,8 @@ public abstract class HarnessStoreEntryTreeContract {
                 store,
                 tx -> {
                   UUID sessionId = tx.nextId();
-                  tx.insertSession(session(sessionId));
-                  tx.insertEntry(turnStartEntry(TestIds.id(5), sessionId, TestIds.id(1), T1));
+                  tx.sessions().insert(session(sessionId));
+                  tx.entries().insert(turnStartEntry(TestIds.id(5), sessionId, TestIds.id(1), T1));
                 }));
   }
 
@@ -319,9 +329,10 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx ->
-                    tx.insertEntry(
-                        turnStartEntry(
-                            TestIds.id(10), baseline.sessionId(), TestIds.id(999), T1))));
+                    tx.entries()
+                        .insert(
+                            turnStartEntry(
+                                TestIds.id(10), baseline.sessionId(), TestIds.id(999), T1))));
     // parent 属于其他 session
     assertThrows(
         IllegalArgumentException.class,
@@ -331,10 +342,10 @@ public abstract class HarnessStoreEntryTreeContract {
                 tx -> {
                   UUID otherSession = tx.nextId();
                   UUID otherRoot = tx.nextId();
-                  tx.insertSession(session(otherSession));
-                  tx.insertEntry(rootEntry(otherRoot, otherSession));
-                  tx.insertEntry(
-                      turnStartEntry(TestIds.id(11), baseline.sessionId(), otherRoot, T1));
+                  tx.sessions().insert(session(otherSession));
+                  tx.entries().insert(rootEntry(otherRoot, otherSession));
+                  tx.entries()
+                      .insert(turnStartEntry(TestIds.id(11), baseline.sessionId(), otherRoot, T1));
                 }));
   }
 
@@ -345,12 +356,13 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
     store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(turnStartEntryId);
+          EntryPath path = tx.entries().loadPath(turnStartEntryId);
           assertEquals(
               List.of(baseline.rootEntryId(), turnStartEntryId),
               path.entries().stream().map(Entry::id).toList());
@@ -361,7 +373,7 @@ public abstract class HarnessStoreEntryTreeContract {
     // 单个 ROOT 也是一个合法的截断 path
     store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(baseline.rootEntryId());
+          EntryPath path = tx.entries().loadPath(baseline.rootEntryId());
           assertEquals(
               List.of(baseline.rootEntryId()), path.entries().stream().map(Entry::id).toList());
           return null;
@@ -379,38 +391,41 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID turnStartId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      turnStartId,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      new TurnStartPayload(
-                          TurnStartReason.STOP, branchSettings(), baseline.threadId()),
-                      T1));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          turnStartId,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          new TurnStartPayload(
+                              TurnStartReason.STOP, branchSettings(), baseline.threadId()),
+                          T1));
               UUID barrierId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      barrierId,
-                      baseline.sessionId(),
-                      turnStartId,
-                      new AssistantErrorPayload(
-                          new AssistantError("CANCELLED", "Cancelled by user"), null),
-                      T1));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          barrierId,
+                          baseline.sessionId(),
+                          turnStartId,
+                          new AssistantErrorPayload(
+                              new AssistantError("CANCELLED", "Cancelled by user"), null),
+                          T1));
               UUID closeRequestId = tx.nextId();
               UUID turnEndId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      turnEndId,
-                      baseline.sessionId(),
-                      barrierId,
-                      new TurnEndPayload(
-                          turnStartId,
-                          TurnEndOutcome.STOPPED,
-                          false,
-                          TurnEndReason.USER_STOP,
-                          closeRequestId),
-                      T1));
-              return tx.loadEntryPath(turnEndId);
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          turnEndId,
+                          baseline.sessionId(),
+                          barrierId,
+                          new TurnEndPayload(
+                              turnStartId,
+                              TurnEndOutcome.STOPPED,
+                              false,
+                              TurnEndReason.USER_STOP,
+                              closeRequestId),
+                          T1));
+              return tx.entries().loadPath(turnEndId);
             });
 
     assertEquals(4, reloaded.entries().size());
@@ -442,22 +457,33 @@ public abstract class HarnessStoreEntryTreeContract {
                 UUID userId = tx.nextId();
                 UUID assistantId = tx.nextId();
                 UUID turnEndId = tx.nextId();
-                tx.insertEntry(
-                    turnStartEntry(turnStartId, baseline.sessionId(), parentId, turnTime));
-                tx.insertEntry(
-                    new Entry(
-                        userId, baseline.sessionId(), turnStartId, userMessagePayload(), turnTime));
-                tx.insertEntry(
-                    new Entry(
-                        assistantId, baseline.sessionId(), userId, assistantPayload(), turnTime));
-                tx.insertEntry(
-                    new Entry(
-                        turnEndId,
-                        baseline.sessionId(),
-                        assistantId,
-                        new TurnEndPayload(
-                            turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                        turnTime));
+                tx.entries()
+                    .insert(turnStartEntry(turnStartId, baseline.sessionId(), parentId, turnTime));
+                tx.entries()
+                    .insert(
+                        new Entry(
+                            userId,
+                            baseline.sessionId(),
+                            turnStartId,
+                            userMessagePayload(),
+                            turnTime));
+                tx.entries()
+                    .insert(
+                        new Entry(
+                            assistantId,
+                            baseline.sessionId(),
+                            userId,
+                            assistantPayload(),
+                            turnTime));
+                tx.entries()
+                    .insert(
+                        new Entry(
+                            turnEndId,
+                            baseline.sessionId(),
+                            assistantId,
+                            new TurnEndPayload(
+                                turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                            turnTime));
                 return new UUID[] {turnStartId, userId, assistantId, turnEndId};
               });
       expectedIds.add(turnIds[0]);
@@ -470,7 +496,7 @@ public abstract class HarnessStoreEntryTreeContract {
     UUID deepHeadId = currentParentId;
     store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(deepHeadId);
+          EntryPath path = tx.entries().loadPath(deepHeadId);
           assertEquals(expectedIds, path.entries().stream().map(Entry::id).toList());
           assertEquals(baseline.rootEntryId(), path.root().id());
           assertEquals(deepHeadId, path.head().id());
@@ -482,7 +508,7 @@ public abstract class HarnessStoreEntryTreeContract {
   void loadEntryPathRejectsUnknownHead() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.loadEntryPath(TestIds.id(42))));
+        () -> inTransaction(store, tx -> tx.entries().loadPath(TestIds.id(42))));
   }
 
   @Test
@@ -493,8 +519,8 @@ public abstract class HarnessStoreEntryTreeContract {
             tx -> {
               UUID sessionId = tx.nextId();
               UUID rootId = tx.nextId();
-              tx.insertSession(session(sessionId));
-              tx.insertEntry(rootEntry(rootId, sessionId));
+              tx.sessions().insert(session(sessionId));
+              tx.entries().insert(rootEntry(rootId, sessionId));
               return sessionId;
             });
     UUID sameTimeLarge = new UUID(0x8000000000000000L, 2L);
@@ -503,35 +529,46 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
     inTransaction(
         store,
         tx -> {
           // 同 createdAt 先写入较大 UUID，再写入较小 UUID，证明排序不是插入序。
-          tx.insertEntry(
-              new Entry(
-                  sameTimeLarge, baseline.sessionId(), laterTurnStartId, userMessagePayload(), T2));
-          tx.insertEntry(
-              new Entry(
-                  sameTimeSmall, baseline.sessionId(), laterTurnStartId, userMessagePayload(), T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      sameTimeLarge,
+                      baseline.sessionId(),
+                      laterTurnStartId,
+                      userMessagePayload(),
+                      T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      sameTimeSmall,
+                      baseline.sessionId(),
+                      laterTurnStartId,
+                      userMessagePayload(),
+                      T2));
         });
 
     store.transaction(
         tx -> {
-          List<Entry> entries = tx.loadEntriesBySessionId(baseline.sessionId());
+          List<Entry> entries = tx.entries().loadBySession(baseline.sessionId());
           assertEquals(
               List.of(baseline.rootEntryId(), laterTurnStartId, sameTimeSmall, sameTimeLarge),
               entries.stream().map(Entry::id).toList());
           assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
           assertEquals(
-              1, tx.loadEntriesBySessionId(otherSessionId).size(), "must filter by session");
+              1, tx.entries().loadBySession(otherSessionId).size(), "must filter by session");
           return null;
         });
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.loadEntriesBySessionId(TestIds.id(999))));
+        () -> inTransaction(store, tx -> tx.entries().loadBySession(TestIds.id(999))));
   }
 
   @Test
@@ -541,7 +578,9 @@ public abstract class HarnessStoreEntryTreeContract {
         () ->
             inTransaction(
                 store,
-                tx -> tx.insertThread(thread(TestIds.id(100), TestIds.id(888), TestIds.id(999)))));
+                tx ->
+                    tx.threads()
+                        .insert(thread(TestIds.id(100), TestIds.id(888), TestIds.id(999)))));
   }
 
   @Test
@@ -553,16 +592,19 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx ->
-                    tx.insertThread(
-                        thread(
-                            baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()))));
+                    tx.threads()
+                        .insert(
+                            thread(
+                                baseline.threadId(),
+                                baseline.sessionId(),
+                                baseline.rootEntryId()))));
   }
 
   @Test
   void findAndLockThreadReturnEmptyForMissingIds() {
     UUID missingId = TestIds.id(1);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(missingId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.lockThread(missingId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(missingId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().lock(missingId).isEmpty()));
   }
 
   @Test
@@ -574,9 +616,12 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx ->
-                    tx.updateThread(
-                        thread(
-                            baseline.threadId(), baseline.sessionId(), baseline.rootEntryId()))));
+                    tx.threads()
+                        .update(
+                            thread(
+                                baseline.threadId(),
+                                baseline.sessionId(),
+                                baseline.rootEntryId()))));
   }
 
   @Test
@@ -585,20 +630,21 @@ public abstract class HarnessStoreEntryTreeContract {
     inTransaction(
         store,
         tx -> {
-          ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(
-              StoreTestSupport.threadState(
-                  locked.id(),
-                  locked.sessionId(),
-                  locked.headEntryId(),
-                  true,
-                  3,
-                  locked.version() + 1,
-                  locked.createdAt(),
-                  T2));
+          ThreadState locked = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads()
+              .update(
+                  StoreTestSupport.threadState(
+                      locked.id(),
+                      locked.sessionId(),
+                      locked.headEntryId(),
+                      true,
+                      3,
+                      locked.version() + 1,
+                      locked.createdAt(),
+                      T2));
         });
     ThreadState committed =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertTrue(committed.yoloEnabled());
     assertEquals(3L, committed.nextCommandSequence());
     assertEquals(1L, committed.version());
@@ -610,16 +656,17 @@ public abstract class HarnessStoreEntryTreeContract {
     // 测试意图：rename 复用 updateThread 既有路径——仅 name 变化（version 精确 +1、updatedAt 推进）可落库；
     // head / sequence / creationRequestHash / createdAt 不变；exact replay 被接受。
     Baseline baseline = seedThreadBaseline(store);
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId())).orElseThrow();
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().find(baseline.threadId())).orElseThrow();
     ThreadState renamed = stored.renameThread("branch 分析", T2);
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(renamed);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(renamed);
         });
     ThreadState committed =
-        store.transaction(tx -> tx.findThread(baseline.threadId())).orElseThrow();
+        store.transaction(tx -> tx.threads().find(baseline.threadId())).orElseThrow();
     assertEquals(renamed, committed);
     assertEquals("branch 分析", committed.name());
     assertEquals(stored.version() + 1L, committed.version());
@@ -639,17 +686,18 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
-                  tx.updateThread(
-                      StoreTestSupport.threadState(
-                          locked.id(),
-                          locked.sessionId(),
-                          locked.headEntryId(),
-                          locked.yoloEnabled(),
-                          locked.nextCommandSequence(),
-                          locked.version(),
-                          T1,
-                          T2));
+                  ThreadState locked = tx.threads().lock(baseline.threadId()).orElseThrow();
+                  tx.threads()
+                      .update(
+                          StoreTestSupport.threadState(
+                              locked.id(),
+                              locked.sessionId(),
+                              locked.headEntryId(),
+                              locked.yoloEnabled(),
+                              locked.nextCommandSequence(),
+                              locked.version(),
+                              T1,
+                              T2));
                 }));
   }
 
@@ -663,18 +711,19 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
-                  tx.updateThread(
-                      StoreTestSupport.threadState(
-                          locked.id(),
-                          locked.sessionId(),
-                          locked.headEntryId(),
-                          "branch 分析",
-                          locked.yoloEnabled(),
-                          locked.nextCommandSequence(),
-                          locked.version(),
-                          locked.createdAt(),
-                          T2));
+                  ThreadState locked = tx.threads().lock(baseline.threadId()).orElseThrow();
+                  tx.threads()
+                      .update(
+                          StoreTestSupport.threadState(
+                              locked.id(),
+                              locked.sessionId(),
+                              locked.headEntryId(),
+                              "branch 分析",
+                              locked.yoloEnabled(),
+                              locked.nextCommandSequence(),
+                              locked.version(),
+                              locked.createdAt(),
+                              T2));
                 }));
   }
 
@@ -685,25 +734,27 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
-              ThreadState inserted = tx.findThread(id).orElseThrow();
-              tx.updateThread(
-                  StoreTestSupport.threadState(
-                      inserted.id(),
-                      inserted.sessionId(),
-                      inserted.headEntryId(),
-                      "sibling",
-                      true,
-                      inserted.nextCommandSequence(),
-                      inserted.version() + 1,
-                      inserted.createdAt(),
-                      T2));
+              tx.threads()
+                  .insert(
+                      StoreTestSupport.siblingRoot(
+                          id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
+              ThreadState inserted = tx.threads().find(id).orElseThrow();
+              tx.threads()
+                  .update(
+                      StoreTestSupport.threadState(
+                          inserted.id(),
+                          inserted.sessionId(),
+                          inserted.headEntryId(),
+                          "sibling",
+                          true,
+                          inserted.nextCommandSequence(),
+                          inserted.version() + 1,
+                          inserted.createdAt(),
+                          T2));
               return id;
             });
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.findThread(threadId).orElseThrow().yoloEnabled()));
+        store.<Boolean>transaction(tx -> tx.threads().find(threadId).orElseThrow().yoloEnabled()));
   }
 
   @Test
@@ -717,13 +768,14 @@ public abstract class HarnessStoreEntryTreeContract {
                 store,
                 tx -> {
                   UUID id = tx.nextId();
-                  tx.insertEntry(
-                      new Entry(
-                          id,
-                          baseline.sessionId(),
-                          baseline.rootEntryId(),
-                          userMessagePayload(),
-                          T1));
+                  tx.entries()
+                      .insert(
+                          new Entry(
+                              id,
+                              baseline.sessionId(),
+                              baseline.rootEntryId(),
+                              userMessagePayload(),
+                              T1));
                 }));
     // INPUT turn 必须在 assistant result 之前有 USER/CUSTOM message
     assertThrows(
@@ -733,13 +785,19 @@ public abstract class HarnessStoreEntryTreeContract {
                 store,
                 tx -> {
                   UUID turnStartId = tx.nextId();
-                  tx.insertEntry(
-                      turnStartEntry(
-                          turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
+                  tx.entries()
+                      .insert(
+                          turnStartEntry(
+                              turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
                   UUID assistantId = tx.nextId();
-                  tx.insertEntry(
-                      new Entry(
-                          assistantId, baseline.sessionId(), turnStartId, assistantPayload(), T1));
+                  tx.entries()
+                      .insert(
+                          new Entry(
+                              assistantId,
+                              baseline.sessionId(),
+                              turnStartId,
+                              assistantPayload(),
+                              T1));
                 }));
     // 合法的 TURN_START -> USER -> ASSISTANT 链会被接受并以 path 形式读出
     UUID[] ids =
@@ -748,17 +806,22 @@ public abstract class HarnessStoreEntryTreeContract {
               UUID turnStartId = tx.nextId();
               UUID userId = tx.nextId();
               UUID assistantId = tx.nextId();
-              tx.insertEntry(
-                  turnStartEntry(turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
-              tx.insertEntry(
-                  new Entry(userId, baseline.sessionId(), turnStartId, userMessagePayload(), T1));
-              tx.insertEntry(
-                  new Entry(assistantId, baseline.sessionId(), userId, assistantPayload(), T1));
+              tx.entries()
+                  .insert(
+                      turnStartEntry(
+                          turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          userId, baseline.sessionId(), turnStartId, userMessagePayload(), T1));
+              tx.entries()
+                  .insert(
+                      new Entry(assistantId, baseline.sessionId(), userId, assistantPayload(), T1));
               return new UUID[] {turnStartId, userId, assistantId};
             });
     store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(ids[2]);
+          EntryPath path = tx.entries().loadPath(ids[2]);
           assertEquals(
               List.of(baseline.rootEntryId(), ids[0], ids[1], ids[2]),
               path.entries().stream().map(Entry::id).toList());
@@ -776,35 +839,38 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockThread(baseline.threadId());
-                  tx.updateThread(
-                      StoreTestSupport.threadState(
-                          baseline.threadId(),
-                          baseline.sessionId(),
-                          TestIds.id(999),
-                          1,
-                          1,
-                          T0,
-                          T2));
+                  tx.threads().lock(baseline.threadId());
+                  tx.threads()
+                      .update(
+                          StoreTestSupport.threadState(
+                              baseline.threadId(),
+                              baseline.sessionId(),
+                              TestIds.id(999),
+                              1,
+                              1,
+                              T0,
+                              T2));
                 }));
     // 将 head 迁移到一个已存在 entry 是允许的
     UUID turnStartEntryId =
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
+              tx.entries()
+                  .insert(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.updateThread(
-              StoreTestSupport.threadState(
-                  baseline.threadId(), baseline.sessionId(), turnStartEntryId, 1, 1, T0, T2));
+          tx.threads().lock(baseline.threadId());
+          tx.threads()
+              .update(
+                  StoreTestSupport.threadState(
+                      baseline.threadId(), baseline.sessionId(), turnStartEntryId, 1, 1, T0, T2));
         });
     UUID committedHead =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().headEntryId());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow().headEntryId());
     assertEquals(turnStartEntryId, committedHead);
   }
 
@@ -814,7 +880,7 @@ public abstract class HarnessStoreEntryTreeContract {
     Baseline baseline = seedThreadBaseline(store);
     store.transaction(
         tx -> {
-          Entry root = tx.findRootEntry(baseline.sessionId()).orElseThrow();
+          Entry root = tx.entries().findRoot(baseline.sessionId()).orElseThrow();
           assertEquals(baseline.rootEntryId(), root.id());
           assertEquals(baseline.sessionId(), root.sessionId());
           assertTrue(root.payload().type().isRoot());
@@ -828,8 +894,8 @@ public abstract class HarnessStoreEntryTreeContract {
     UUID sessionId = TestIds.id(1);
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
-          assertTrue(tx.findRootEntry(sessionId).isEmpty());
+          tx.sessions().insert(session(sessionId));
+          assertTrue(tx.entries().findRoot(sessionId).isEmpty());
           return null;
         });
   }
@@ -840,7 +906,7 @@ public abstract class HarnessStoreEntryTreeContract {
     UUID unknownSessionId = TestIds.id(999);
     store.transaction(
         tx -> {
-          assertTrue(tx.findRootEntry(unknownSessionId).isEmpty());
+          assertTrue(tx.entries().findRoot(unknownSessionId).isEmpty());
           return null;
         });
   }
@@ -848,7 +914,8 @@ public abstract class HarnessStoreEntryTreeContract {
   /** 测试意图：findRootEntry 拒绝 null sessionId 入参。 */
   @Test
   void findRootEntryRejectsNullSessionId() {
-    assertThrows(NullPointerException.class, () -> store.transaction(tx -> tx.findRootEntry(null)));
+    assertThrows(
+        NullPointerException.class, () -> store.transaction(tx -> tx.entries().findRoot(null)));
   }
 
   /** 测试意图：loadContributorCustomEntriesOnPath 覆盖同一路径多个匹配时，严格保持 root-to-head 顺序，且返回不可变列表。 */
@@ -876,7 +943,7 @@ public abstract class HarnessStoreEntryTreeContract {
 
     store.transaction(
         tx -> {
-          List<Entry> entries = tx.loadContributorCustomEntriesOnPath(custom2, "test.contributor");
+          List<Entry> entries = tx.entries().loadContributorCustom(custom2, "test.contributor");
           assertEquals(2, entries.size());
           assertEquals(List.of(custom1, custom2), entries.stream().map(Entry::id).toList());
           assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
@@ -916,19 +983,19 @@ public abstract class HarnessStoreEntryTreeContract {
     store.transaction(
         tx -> {
           List<Entry> branch1AlphaEntries =
-              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.alpha");
+              tx.entries().loadContributorCustom(branch1Alpha, "contributor.alpha");
           assertEquals(
               List.of(sharedAlpha, branch1Alpha),
               branch1AlphaEntries.stream().map(Entry::id).toList());
 
           List<Entry> branch2AlphaEntries =
-              tx.loadContributorCustomEntriesOnPath(branch2Alpha, "contributor.alpha");
+              tx.entries().loadContributorCustom(branch2Alpha, "contributor.alpha");
           assertEquals(
               List.of(sharedAlpha, branch2Alpha),
               branch2AlphaEntries.stream().map(Entry::id).toList());
 
           List<Entry> branch1BetaEntries =
-              tx.loadContributorCustomEntriesOnPath(branch1Alpha, "contributor.beta");
+              tx.entries().loadContributorCustom(branch1Alpha, "contributor.beta");
           assertEquals(List.of(sharedBeta), branch1BetaEntries.stream().map(Entry::id).toList());
           return null;
         });
@@ -941,7 +1008,7 @@ public abstract class HarnessStoreEntryTreeContract {
     store.transaction(
         tx -> {
           List<Entry> onRoot =
-              tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), "any.contributor");
+              tx.entries().loadContributorCustom(baseline.rootEntryId(), "any.contributor");
           assertTrue(onRoot.isEmpty());
           assertThrows(UnsupportedOperationException.class, () -> onRoot.add(null));
           return null;
@@ -957,7 +1024,7 @@ public abstract class HarnessStoreEntryTreeContract {
     store.transaction(
         tx -> {
           List<Entry> onOther =
-              tx.loadContributorCustomEntriesOnPath(otherCustom, "target.contributor");
+              tx.entries().loadContributorCustom(otherCustom, "target.contributor");
           assertTrue(onOther.isEmpty());
           return null;
         });
@@ -970,7 +1037,7 @@ public abstract class HarnessStoreEntryTreeContract {
         IllegalArgumentException.class,
         () ->
             store.transaction(
-                tx -> tx.loadContributorCustomEntriesOnPath(TestIds.id(99999), "any.contributor")));
+                tx -> tx.entries().loadContributorCustom(TestIds.id(99999), "any.contributor")));
   }
 
   /** 测试意图：loadContributorCustomEntriesOnPath 拒绝 null headEntryId 与 null contributorId。 */
@@ -979,14 +1046,12 @@ public abstract class HarnessStoreEntryTreeContract {
     Baseline baseline = seedThreadBaseline(store);
     assertThrows(
         NullPointerException.class,
-        () ->
-            store.transaction(
-                tx -> tx.loadContributorCustomEntriesOnPath(null, "any.contributor")));
+        () -> store.transaction(tx -> tx.entries().loadContributorCustom(null, "any.contributor")));
     assertThrows(
         NullPointerException.class,
         () ->
             store.transaction(
-                tx -> tx.loadContributorCustomEntriesOnPath(baseline.rootEntryId(), null)));
+                tx -> tx.entries().loadContributorCustom(baseline.rootEntryId(), null)));
   }
 
   /** 测试意图：head 本身为不匹配的 CUSTOM Entry 时只作为 sentinel 参与路径完整性验证，绝不泄漏至结果中。 */
@@ -1010,17 +1075,17 @@ public abstract class HarnessStoreEntryTreeContract {
         tx -> {
           // 查询 target.contributor：应只包含 targetCustom，不泄漏 head (otherHeadCustom)
           List<Entry> targetEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "target.contributor");
+              tx.entries().loadContributorCustom(otherHeadCustom, "target.contributor");
           assertEquals(List.of(targetCustom), targetEntries.stream().map(Entry::id).toList());
 
           // 查询第三方 contributor：两者的 entry 均不应泄漏，返回空
           List<Entry> thirdEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "third.contributor");
+              tx.entries().loadContributorCustom(otherHeadCustom, "third.contributor");
           assertTrue(thirdEntries.isEmpty());
 
           // 查询 other.contributor：此时 head 本身是匹配的，应正确包含 head
           List<Entry> otherEntries =
-              tx.loadContributorCustomEntriesOnPath(otherHeadCustom, "other.contributor");
+              tx.entries().loadContributorCustom(otherHeadCustom, "other.contributor");
           assertEquals(List.of(otherHeadCustom), otherEntries.stream().map(Entry::id).toList());
           return null;
         });
@@ -1035,7 +1100,8 @@ public abstract class HarnessStoreEntryTreeContract {
     Baseline baseline = seedThreadBaseline(store);
     UUID firstGoal = TestIds.id(41L);
     UUID secondGoal = TestIds.id(42L);
-    BranchSettings root = store.transaction(tx -> tx.loadBranchSettings(baseline.rootEntryId()));
+    BranchSettings root =
+        store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId()));
     assertEquals(branchSettings(), root);
 
     UUID firstTurnEnd =
@@ -1051,9 +1117,11 @@ public abstract class HarnessStoreEntryTreeContract {
     store.transaction(
         tx -> {
           // 中间节点也命中最近的 TURN_START settings。
-          assertEquals(goalSettings(firstGoal, "first goal"), tx.loadBranchSettings(firstTurnEnd));
           assertEquals(
-              goalSettings(secondGoal, "second goal"), tx.loadBranchSettings(secondTurnEnd));
+              goalSettings(firstGoal, "first goal"), tx.entries().loadBranchSettings(firstTurnEnd));
+          assertEquals(
+              goalSettings(secondGoal, "second goal"),
+              tx.entries().loadBranchSettings(secondTurnEnd));
           return null;
         });
   }
@@ -1072,31 +1140,34 @@ public abstract class HarnessStoreEntryTreeContract {
             tx -> {
               UUID id = tx.nextId();
               BranchSettings compactionSettings = goalSettings(TestIds.id(44L), "compaction goal");
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      inputTurnEnd,
-                      new TurnStartPayload(
-                          TurnStartReason.COMPACTION,
-                          compactionSettings,
-                          StoreTestSupport.OWNER_THREAD_ID,
-                          StoreTestSupport.CONTEXT_WINDOW,
-                          StoreTestSupport.MAX_OUTPUT_TOKENS,
-                          CompactionStart.pending(
-                              CompactionPhase.FULL,
-                              CompactionTrigger.MANUAL,
-                              inputTurnEnd,
-                              null,
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          inputTurnEnd,
+                          new TurnStartPayload(
+                              TurnStartReason.COMPACTION,
+                              compactionSettings,
+                              StoreTestSupport.OWNER_THREAD_ID,
+                              StoreTestSupport.CONTEXT_WINDOW,
+                              StoreTestSupport.MAX_OUTPUT_TOKENS,
+                              CompactionStart.pending(
+                                  CompactionPhase.FULL,
+                                  CompactionTrigger.MANUAL,
+                                  inputTurnEnd,
+                                  null,
+                                  null),
                               null),
-                          null),
-                      T2));
+                          T2));
               return id;
             });
 
     store.transaction(
         tx -> {
-          assertEquals(goalSettings(goal, "user goal"), tx.loadBranchSettings(compactionTurnStart));
+          assertEquals(
+              goalSettings(goal, "user goal"),
+              tx.entries().loadBranchSettings(compactionTurnStart));
           return null;
         });
   }
@@ -1116,8 +1187,10 @@ public abstract class HarnessStoreEntryTreeContract {
 
     store.transaction(
         tx -> {
-          assertEquals(goalSettings(goalA, "branch A goal"), tx.loadBranchSettings(branchAEnd));
-          assertEquals(goalSettings(goalB, "branch B goal"), tx.loadBranchSettings(branchBEnd));
+          assertEquals(
+              goalSettings(goalA, "branch A goal"), tx.entries().loadBranchSettings(branchAEnd));
+          assertEquals(
+              goalSettings(goalB, "branch B goal"), tx.entries().loadBranchSettings(branchBEnd));
           return null;
         });
   }
@@ -1131,22 +1204,24 @@ public abstract class HarnessStoreEntryTreeContract {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      new TurnStartPayload(
-                          TurnStartReason.INPUT,
-                          goalSettings(goal, "open turn goal"),
-                          StoreTestSupport.OWNER_THREAD_ID),
-                      T1));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          new TurnStartPayload(
+                              TurnStartReason.INPUT,
+                              goalSettings(goal, "open turn goal"),
+                              StoreTestSupport.OWNER_THREAD_ID),
+                          T1));
               return id;
             });
 
     store.transaction(
         tx -> {
-          assertEquals(goalSettings(goal, "open turn goal"), tx.loadBranchSettings(openTurnStart));
+          assertEquals(
+              goalSettings(goal, "open turn goal"), tx.entries().loadBranchSettings(openTurnStart));
           return null;
         });
   }
@@ -1156,9 +1231,10 @@ public abstract class HarnessStoreEntryTreeContract {
   void loadBranchSettingsRejectsUnknownHeadAndNullArguments() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> store.transaction(tx -> tx.loadBranchSettings(TestIds.id(99999))));
+        () -> store.transaction(tx -> tx.entries().loadBranchSettings(TestIds.id(99999))));
     assertThrows(
-        NullPointerException.class, () -> store.transaction(tx -> tx.loadBranchSettings(null)));
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.entries().loadBranchSettings(null)));
   }
 
   /** 插入一个已关闭的 INPUT turn（TURN_START -> USER -> ASSISTANT -> TURN_END），返回其 TURN_END Entry id。 */
@@ -1170,24 +1246,27 @@ public abstract class HarnessStoreEntryTreeContract {
           UUID userId = tx.nextId();
           UUID assistantId = tx.nextId();
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  sessionId,
-                  parentId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT, settings, StoreTestSupport.OWNER_THREAD_ID),
-                  createdAt));
-          tx.insertEntry(
-              new Entry(userId, sessionId, turnStartId, userMessagePayload(), createdAt));
-          tx.insertEntry(new Entry(assistantId, sessionId, userId, assistantPayload(), createdAt));
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  assistantId,
-                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  createdAt));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      parentId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT, settings, StoreTestSupport.OWNER_THREAD_ID),
+                      createdAt));
+          tx.entries()
+              .insert(new Entry(userId, sessionId, turnStartId, userMessagePayload(), createdAt));
+          tx.entries()
+              .insert(new Entry(assistantId, sessionId, userId, assistantPayload(), createdAt));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      sessionId,
+                      assistantId,
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      createdAt));
           return turnEndId;
         });
   }

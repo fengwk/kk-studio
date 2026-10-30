@@ -99,7 +99,8 @@ class HarnessRenameTest {
     HarnessRuntimeTestSupport.TestClock clock = new HarnessRuntimeTestSupport.TestClock(T0);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
     Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
-    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState before =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals("main", before.name());
     Instant beforeUpdatedAt = before.updatedAt();
     clock.advance(T0.plusMillis(5));
@@ -116,24 +117,25 @@ class HarnessRenameTest {
     assertEquals(before.nextCommandSequence(), renamed.nextCommandSequence());
     assertEquals(before.createdAt(), renamed.createdAt());
 
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(renamed, stored);
     // Thread rename 是 isolated metadata mutation：Command / Work / Entry tree 全部保持 rename 前状态。
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
     assertTrue(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isEmpty());
     assertTrue(
         store
-            .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1))))
+            .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1))))
             .isEmpty());
-    List<Entry> entries = store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId()));
+    List<Entry> entries = store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId()));
     assertEquals(1, entries.size());
     assertEquals(baseline.rootEntryId(), entries.getFirst().id());
     List<ThreadState> threads =
-        store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId()));
+        store.transaction(tx -> tx.threads().listBySession(baseline.sessionId()));
     assertEquals(1, threads.size());
     assertEquals(baseline.threadId(), threads.getFirst().id());
     assertEquals("new name", threads.getFirst().name());
@@ -143,7 +145,8 @@ class HarnessRenameTest {
   void renameThreadSameNameIsNoOpWithoutTouchingVersion() {
     // 同名（规范化后相同）重命名必须 no-op：version / updatedAt 一律不动。
     Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
-    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState before =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     ThreadState again = runtime.renameThread(new RenameThreadCommand(baseline.threadId(), "main"));
     assertEquals(before, again);
     assertEquals(before.version(), again.version());

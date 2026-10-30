@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -269,7 +270,7 @@ class ToolProcessorExecutionTest {
       assertTrue(
           Boolean.TRUE.equals(
               fixture.store.transaction(
-                  tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+                  tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty())));
     }
   }
 
@@ -302,7 +303,7 @@ class ToolProcessorExecutionTest {
     assertTrue(
         Boolean.TRUE.equals(
             fixture.store.transaction(
-                tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+                tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty())));
   }
 
   /** claim lease 剩余不足：admission 之前 renew 出完整 margin。 */
@@ -558,10 +559,11 @@ class ToolProcessorExecutionTest {
         progress -> {
           fixture.store.transaction(
               tx -> {
-                tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+                tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
                 assertTrue(
-                    tx.deleteWork(
-                        new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
+                    tx.work()
+                        .delete(
+                            new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
                 return null;
               });
           return ToolProcessorTestSupport.succeeded("call-1");
@@ -736,8 +738,7 @@ class ToolProcessorExecutionTest {
       assertEquals(1, closes.get());
       assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
       List<ExecutionExitFact> unconfirmed =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+          fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
       assertEquals(1, unconfirmed.size());
       assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
       exitLogs.assertSingleSafeFailure(
@@ -941,24 +942,21 @@ class ToolProcessorExecutionTest {
                 return delegate.transaction(
                     tx ->
                         callback.apply(
-                            (HarnessStore.Transaction)
-                                Proxy.newProxyInstance(
-                                    HarnessStore.Transaction.class.getClassLoader(),
-                                    new Class<?>[] {HarnessStore.Transaction.class},
-                                    (ignored, txMethod, txArgs) -> {
-                                      if ("updateToolInvocations".equals(txMethod.getName())) {
-                                        @SuppressWarnings("unchecked")
-                                        List<ToolInvocation> invocations =
-                                            (List<ToolInvocation>) txArgs[0];
-                                        if (invocations.stream()
-                                            .anyMatch(
-                                                invocation -> invocation.status().isTerminal())) {
-                                          throw new IllegalStateException(
-                                              "injected terminal persistence failure");
-                                        }
-                                      }
-                                      return invokeUnchecked(tx, txMethod, txArgs);
-                                    })));
+                            wrap(
+                                tx,
+                                (call, next) -> {
+                                  if ("tools.update".equals(call.operation())) {
+                                    @SuppressWarnings("unchecked")
+                                    List<ToolInvocation> invocations =
+                                        (List<ToolInvocation>) call.argument(0);
+                                    if (invocations.stream()
+                                        .anyMatch(invocation -> invocation.status().isTerminal())) {
+                                      throw new IllegalStateException(
+                                          "injected terminal persistence failure");
+                                    }
+                                  }
+                                  return next.invoke();
+                                })));
               }
               return invokeUnchecked(delegate, method, args);
             });
@@ -978,26 +976,24 @@ class ToolProcessorExecutionTest {
                 return delegate.transaction(
                     tx ->
                         callback.apply(
-                            (HarnessStore.Transaction)
-                                Proxy.newProxyInstance(
-                                    HarnessStore.Transaction.class.getClassLoader(),
-                                    new Class<?>[] {HarnessStore.Transaction.class},
-                                    (ignored, txMethod, txArgs) -> {
-                                      if ("updateToolInvocations".equals(txMethod.getName())) {
-                                        @SuppressWarnings("unchecked")
-                                        List<ToolInvocation> invocations =
-                                            (List<ToolInvocation>) txArgs[0];
-                                        if (invocations.stream()
-                                            .anyMatch(
-                                                invocation ->
-                                                    invocation.status()
-                                                        == ToolInvocationStatus.RUNNING)) {
-                                          throw new IllegalStateException(
-                                              "injected running persistence failure");
-                                        }
-                                      }
-                                      return invokeUnchecked(tx, txMethod, txArgs);
-                                    })));
+                            wrap(
+                                tx,
+                                (call, next) -> {
+                                  if ("tools.update".equals(call.operation())) {
+                                    @SuppressWarnings("unchecked")
+                                    List<ToolInvocation> invocations =
+                                        (List<ToolInvocation>) call.argument(0);
+                                    if (invocations.stream()
+                                        .anyMatch(
+                                            invocation ->
+                                                invocation.status()
+                                                    == ToolInvocationStatus.RUNNING)) {
+                                      throw new IllegalStateException(
+                                          "injected running persistence failure");
+                                    }
+                                  }
+                                  return next.invoke();
+                                })));
               }
               return invokeUnchecked(delegate, method, args);
             });

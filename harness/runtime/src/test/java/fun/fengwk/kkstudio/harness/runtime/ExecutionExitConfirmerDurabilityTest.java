@@ -57,7 +57,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertEquals(1, journal.loadAll().records().size());
       assertEquals(
           ExecutionExitState.UNCONFIRMED,
-          store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow().state()));
+          store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow().state()));
     }
 
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -68,7 +68,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertEquals(0, journal.loadAll().records().size());
     }
     ExecutionExitFact confirmed =
-        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
     assertEquals(T0, confirmed.confirmedAt());
   }
@@ -89,8 +89,8 @@ class ExecutionExitConfirmerDurabilityTest {
     }
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
-          return tx.abandonExecution(fact, T0.plusMillis(1)).orElseThrow();
+          tx.threads().lock(baseline.threadId());
+          return tx.exits().abandon(fact, T0.plusMillis(1)).orElseThrow();
         });
 
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -101,7 +101,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertTrue(journal.loadAll().records().isEmpty());
     }
     ExecutionExitFact confirmed =
-        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
     assertEquals(T0, confirmed.confirmedAt());
     assertEquals(T0.plusMillis(1), confirmed.abandonedAt());
@@ -169,9 +169,9 @@ class ExecutionExitConfirmerDurabilityTest {
     ExecutionExitFact deleted = register(store, baseline.threadId(), TestIds.id(3), T0);
     store.transaction(
         tx -> {
-          tx.lockTree(baseline.threadId());
-          tx.lockThread(baseline.threadId());
-          tx.deleteThreads(List.of(baseline.threadId()));
+          tx.threads().lockTree(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
+          tx.threads().delete(List.of(baseline.threadId()));
           return null;
         });
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -202,7 +202,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertEquals(missing.executionId(), journal.loadAll().records().getFirst().executionId());
     }
     ExecutionExitFact confirmed =
-        store.transaction(tx -> tx.findExecution(present.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(present.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
   }
 
@@ -251,7 +251,7 @@ class ExecutionExitConfirmerDurabilityTest {
           ExecutionExitState.NOT_STARTED, journal.loadAll().records().getFirst().targetState());
     }
     ExecutionExitFact confirmed =
-        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
     assertEquals(1L, threadVersion(store, baseline.threadId()));
   }
@@ -325,10 +325,10 @@ class ExecutionExitConfirmerDurabilityTest {
           ExecutionExitConfirmer.Outcome.CONFIRMED, second.get(5, TimeUnit.SECONDS).outcome());
     }
     ExecutionExitFact confirmed =
-        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
     long version =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow().version());
     assertEquals(1L, version);
   }
 
@@ -354,14 +354,14 @@ class ExecutionExitConfirmerDurabilityTest {
     ExecutionExitFact fact = expected(threadId, invocationId, registeredAt);
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.registerExecution(fact);
+          tx.threads().lock(threadId);
+          return tx.exits().register(fact);
         });
     return fact;
   }
 
   private static long threadVersion(InMemoryHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().version());
   }
 
   private static ExecutionExitJournalRecord recordFor(ExecutionExitFact fact) {

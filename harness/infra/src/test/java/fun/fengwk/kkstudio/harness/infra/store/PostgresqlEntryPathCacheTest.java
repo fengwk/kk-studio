@@ -59,17 +59,19 @@ class PostgresqlEntryPathCacheTest {
 
     store.transaction(
         tx -> {
-          EntryPath loaded1 = tx.loadEntryPath(turnStartId);
-          EntryPath loaded2 = tx.loadEntryPath(turnStartId);
+          EntryPath loaded1 = tx.entries().loadPath(turnStartId);
+          EntryPath loaded2 = tx.entries().loadPath(turnStartId);
           assertEquals(1, cteCounter.get(), "首次加载执行 1 次 CTE，重复读取不增加计数");
           assertEquals(List.of(baseline.rootEntryId(), turnStartId), entryIds(loaded1));
           assertEquals(entryIds(loaded1), entryIds(loaded2));
 
           UUID userMsgId = tx.nextId();
-          tx.insertEntry(
-              new Entry(userMsgId, baseline.sessionId(), turnStartId, userMessagePayload(), T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userMsgId, baseline.sessionId(), turnStartId, userMessagePayload(), T2));
 
-          EntryPath childPath = tx.loadEntryPath(userMsgId);
+          EntryPath childPath = tx.entries().loadPath(userMsgId);
           assertEquals(1, cteCounter.get(), "从已缓存 parent append child 后读取 child 不增加 CTE");
           assertEquals(
               List.of(baseline.rootEntryId(), turnStartId, userMsgId), entryIds(childPath));
@@ -89,15 +91,20 @@ class PostgresqlEntryPathCacheTest {
               UUID turnStartId = tx.nextId();
               UUID userMsgId = tx.nextId();
 
-              tx.insertSession(session(sessionId));
-              tx.insertEntry(rootEntry(rootId, sessionId));
-              tx.insertEntry(
-                  new Entry(
-                      turnStartId, sessionId, rootId, resolvedTurnStartPayload(tx.nextId()), T1));
-              tx.insertEntry(
-                  new Entry(userMsgId, sessionId, turnStartId, userMessagePayload(), T2));
+              tx.sessions().insert(session(sessionId));
+              tx.entries().insert(rootEntry(rootId, sessionId));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          turnStartId,
+                          sessionId,
+                          rootId,
+                          resolvedTurnStartPayload(tx.nextId()),
+                          T1));
+              tx.entries()
+                  .insert(new Entry(userMsgId, sessionId, turnStartId, userMessagePayload(), T2));
 
-              EntryPath path = tx.loadEntryPath(userMsgId);
+              EntryPath path = tx.entries().loadPath(userMsgId);
               assertEquals(0, cteCounter.get(), "同事务连续写入并读取全程 0 CTE");
               assertEquals(List.of(rootId, turnStartId, userMsgId), entryIds(path));
               return List.of(rootId, turnStartId, userMsgId);
@@ -107,9 +114,9 @@ class PostgresqlEntryPathCacheTest {
     UUID headId = createdIds.get(createdIds.size() - 1);
     store.transaction(
         tx -> {
-          EntryPath first = tx.loadEntryPath(headId);
+          EntryPath first = tx.entries().loadPath(headId);
           assertEquals(1, cteCounter.get(), "新事务首次读取独立执行 1 次 CTE");
-          EntryPath second = tx.loadEntryPath(headId);
+          EntryPath second = tx.entries().loadPath(headId);
           assertEquals(1, cteCounter.get(), "新事务内部重复读取命中自身缓存，不增加 CTE");
           assertEquals(createdIds, entryIds(first));
           assertEquals(createdIds, entryIds(second));
@@ -124,19 +131,19 @@ class PostgresqlEntryPathCacheTest {
     UUID rootId = UUID.randomUUID();
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
           return null;
         });
 
     store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(rootId);
+          EntryPath path = tx.entries().loadPath(rootId);
           assertEquals(rootId, path.head().id());
 
-          int deleted = tx.deleteEntries(sessionId);
+          int deleted = tx.entries().delete(sessionId);
           assertEquals(1, deleted);
-          assertThrows(IllegalArgumentException.class, () -> tx.loadEntryPath(rootId));
+          assertThrows(IllegalArgumentException.class, () -> tx.entries().loadPath(rootId));
           return null;
         });
   }

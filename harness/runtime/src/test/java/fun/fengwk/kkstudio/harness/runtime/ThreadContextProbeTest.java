@@ -57,16 +57,18 @@ class ThreadContextProbeTest {
             NOW);
     store.transaction(
         tx -> {
-          tx.insertSession(new Session(SESSION_ID, "session-" + SESSION_ID, NOW));
-          tx.insertEntry(
-              new Entry(
-                  ROOT_ID,
-                  SESSION_ID,
-                  null,
-                  new RootPayload(
-                      new BranchSettings("agent", ModelSelection.model("model", "variant"), null)),
-                  NOW));
-          tx.insertThread(thread);
+          tx.sessions().insert(new Session(SESSION_ID, "session-" + SESSION_ID, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      ROOT_ID,
+                      SESSION_ID,
+                      null,
+                      new RootPayload(
+                          new BranchSettings(
+                              "agent", ModelSelection.model("model", "variant"), null)),
+                      NOW));
+          tx.threads().insert(thread);
           return null;
         });
 
@@ -74,7 +76,7 @@ class ThreadContextProbeTest {
         store.transaction(
             tx ->
                 new ThreadContextProbe(new FakeAgentDriver())
-                    .probe(tx, tx.lockThread(THREAD_ID).orElseThrow()));
+                    .probe(tx, tx.threads().lock(THREAD_ID).orElseThrow()));
 
     assertInstanceOf(ThreadContext.IdleOrHistorical.class, context);
   }
@@ -89,7 +91,7 @@ class ThreadContextProbeTest {
         store.transaction(
             tx ->
                 new ThreadContextProbe(new FakeAgentDriver())
-                    .probe(tx, tx.lockThread(baseline.threadId()).orElseThrow()));
+                    .probe(tx, tx.threads().lock(baseline.threadId()).orElseThrow()));
 
     assertInstanceOf(ThreadContext.ToolActive.class, context);
   }

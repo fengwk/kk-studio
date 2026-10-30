@@ -154,7 +154,7 @@ class HarnessWorkDispatcherDrainTest {
           claims.add(claim);
           store.transaction(
               tx -> {
-                tx.completeWork(claim);
+                tx.work().complete(claim);
                 return null;
               });
         };
@@ -206,7 +206,7 @@ class HarnessWorkDispatcherDrainTest {
           claims.add(claim);
           store.transaction(
               tx -> {
-                tx.completeWork(claim);
+                tx.work().complete(claim);
                 return null;
               });
         };

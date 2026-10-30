@@ -33,7 +33,7 @@ final class ThreadContextLock {
 
   static LockedThreadContext load(
       HarnessStore.Transaction tx, ThreadState thread, AgentDriver driver) {
-    return load(tx, thread, tx.loadEntryPath(thread.headEntryId()), driver);
+    return load(tx, thread, tx.entries().loadPath(thread.headEntryId()), driver);
   }
 
   static LockedThreadContext load(
@@ -43,7 +43,7 @@ final class ThreadContextLock {
     List<ToolInvocation> siblings = List.of();
     if (path.openTurnStart().isPresent() && assistantHead(path)) {
       siblings =
-          tx.lockToolInvocationsByAssistantEntryId(path.head().id()).stream()
+          tx.tools().lockByAssistantEntry(path.head().id()).stream()
               .filter(
                   sibling ->
                       sibling.threadId().equals(thread.id())
@@ -59,10 +59,10 @@ final class ThreadContextLock {
 
   /** 公共 Tool 分类：只加载并锁定 Thread 与 Tool siblings，不读取 Driver。 */
   static LockedThreadContext loadTools(HarnessStore.Transaction tx, ThreadState thread) {
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    EntryPath path = tx.entries().loadPath(thread.headEntryId());
     List<ToolInvocation> siblings =
         path.openTurnStart().isPresent() && assistantHead(path)
-            ? tx.lockToolInvocationsByAssistantEntryId(path.head().id()).stream()
+            ? tx.tools().lockByAssistantEntry(path.head().id()).stream()
                 .filter(
                     sibling ->
                         sibling.threadId().equals(thread.id())

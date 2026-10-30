@@ -87,26 +87,28 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertSession(new Session(sessionId, "test-session", T0));
-          tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), T0));
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  VALID_HASH,
-                  "test-thread",
-                  childThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.sessions().insert(new Session(sessionId, "test-session", T0));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      VALID_HASH,
+                      "test-thread",
+                      childThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return null;
         });
   }
@@ -180,24 +182,27 @@ class ThreadJoinProjectorTest {
     store.transaction(
         tx -> {
           // 第 1 轮正常完成
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "first prompt", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistant1, sessionId, user1, assistantPayload("older assistant reply"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user1, sessionId, turnStart1, "first prompt", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant1, sessionId, user1, assistantPayload("older assistant reply"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
           // 命令 1（已应用）与 命令 2（执行前已取消）
           seedAppliedCommand(tx, childThreadId, 1L, "first prompt", turnStart1);
@@ -287,24 +292,32 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStartOrphan,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(userOrphan, sessionId, turnStartOrphan, "task prompt", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistantOrphan, sessionId, userOrphan, assistantPayload("orphan reply"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEndOrphan,
-                  sessionId,
-                  assistantOrphan,
-                  new TurnEndPayload(turnStartOrphan, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartOrphan,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(userOrphan, sessionId, turnStartOrphan, "task prompt", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantOrphan,
+                      sessionId,
+                      userOrphan,
+                      assistantPayload("orphan reply"),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndOrphan,
+                      sessionId,
+                      assistantOrphan,
+                      new TurnEndPayload(
+                          turnStartOrphan, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "task prompt", turnStartOrphan);
           return null;
@@ -349,45 +362,51 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart1, "implement feature", T0));
-          tx.insertEntry(
-              new Entry(draftAssistant, sessionId, user, assistantPayload("first draft"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  draftAssistant,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnStartContinuation,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, childThreadId),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  finalAssistant,
-                  sessionId,
-                  turnStartContinuation,
-                  assistantPayload("final solution"),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  finalAssistant,
-                  new TurnEndPayload(
-                      turnStartContinuation, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart1, "implement feature", T0));
+          tx.entries()
+              .insert(
+                  new Entry(draftAssistant, sessionId, user, assistantPayload("first draft"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      draftAssistant,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartContinuation,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, childThreadId),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      finalAssistant,
+                      sessionId,
+                      turnStartContinuation,
+                      assistantPayload("final solution"),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      finalAssistant,
+                      new TurnEndPayload(
+                          turnStartContinuation, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
 
           seedAppliedCommand(tx, childThreadId, 1L, "implement feature", turnStart1);
           return null;
@@ -442,23 +461,27 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "do work", T0));
-          tx.insertEntry(
-              new Entry(draftAssistant, sessionId, user, assistantPayload("old draft answer"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  draftAssistant,
-                  new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "do work", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      draftAssistant, sessionId, user, assistantPayload("old draft answer"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      draftAssistant,
+                      new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
           seedAppliedCommand(tx, childThreadId, 1L, "do work", turnStart);
           return null;
         });
@@ -509,47 +532,61 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "run task", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistant1, sessionId, user1, assistantPayload("partial draft solution"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnStart2,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, childThreadId),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  assistantError,
-                  sessionId,
-                  turnStart2,
-                  new AssistantErrorPayload(
-                      new AssistantError("TURN_FAILED", "rate limit exceeded"), null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  assistantError,
-                  new TurnEndPayload(
-                      turnStart2, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user1, sessionId, turnStart1, "run task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant1,
+                      sessionId,
+                      user1,
+                      assistantPayload("partial draft solution"),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart2,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, childThreadId),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantError,
+                      sessionId,
+                      turnStart2,
+                      new AssistantErrorPayload(
+                          new AssistantError("TURN_FAILED", "rate limit exceeded"), null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      assistantError,
+                      new TurnEndPayload(
+                          turnStart2,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.TURN_FAILED,
+                          null),
+                      T1));
 
           seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart1);
           return null;
@@ -598,29 +635,33 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "run task", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistantError,
-                  sessionId,
-                  user,
-                  new AssistantErrorPayload(new AssistantError("TURN_FAILED", "rate limit"), null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistantError,
-                  new TurnEndPayload(
-                      turnStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "run task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantError,
+                      sessionId,
+                      user,
+                      new AssistantErrorPayload(
+                          new AssistantError("TURN_FAILED", "rate limit"), null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistantError,
+                      new TurnEndPayload(
+                          turnStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart);
           return null;
@@ -670,29 +711,32 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "run task", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistantError,
-                  sessionId,
-                  user,
-                  new AssistantErrorPayload(new AssistantError("TURN_FAILED", longError), null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistantError,
-                  new TurnEndPayload(
-                      turnStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "run task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantError,
+                      sessionId,
+                      user,
+                      new AssistantErrorPayload(new AssistantError("TURN_FAILED", longError), null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistantError,
+                      new TurnEndPayload(
+                          turnStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart);
           return null;
@@ -740,33 +784,36 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "run task", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistant,
-                  sessionId,
-                  user,
-                  assistantPayload("partial progress", GenerationStopReason.LENGTH),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistant,
-                  new TurnEndPayload(
+          tx.entries()
+              .insert(
+                  new Entry(
                       turnStart,
-                      TurnEndOutcome.FAILED,
-                      false,
-                      TurnEndReason.OUTPUT_TRUNCATED,
-                      null),
-                  T0));
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "run task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant,
+                      sessionId,
+                      user,
+                      assistantPayload("partial progress", GenerationStopReason.LENGTH),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistant,
+                      new TurnEndPayload(
+                          turnStart,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.OUTPUT_TRUNCATED,
+                          null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart);
           return null;
@@ -815,32 +862,39 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "long task", T0));
-          tx.insertEntry(
-              new Entry(
-                  aborted,
-                  sessionId,
-                  user,
-                  new AssistantAbortedPayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("halfway done")))),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  aborted,
-                  new TurnEndPayload(
-                      turnStart, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(888)),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "long task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      aborted,
+                      sessionId,
+                      user,
+                      new AssistantAbortedPayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("halfway done")))),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      aborted,
+                      new TurnEndPayload(
+                          turnStart,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          id(888)),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "long task", turnStart);
           return null;
@@ -892,46 +946,56 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "long task", T0));
-          tx.insertEntry(
-              new Entry(assistant1, sessionId, user1, assistantPayload("halfway done"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnStart2,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(TurnStartReason.STOP, SETTINGS, childThreadId),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  assistantError,
-                  sessionId,
-                  turnStart2,
-                  new AssistantErrorPayload(
-                      new AssistantError("CANCELLED", "Stopped by admin."), null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  assistantError,
-                  new TurnEndPayload(
-                      turnStart2, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(888)),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user1, sessionId, turnStart1, "long task", T0));
+          tx.entries()
+              .insert(
+                  new Entry(assistant1, sessionId, user1, assistantPayload("halfway done"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart2,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(TurnStartReason.STOP, SETTINGS, childThreadId),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantError,
+                      sessionId,
+                      turnStart2,
+                      new AssistantErrorPayload(
+                          new AssistantError("CANCELLED", "Stopped by admin."), null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      assistantError,
+                      new TurnEndPayload(
+                          turnStart2,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          id(888)),
+                      T1));
 
           seedAppliedCommand(tx, childThreadId, 1L, "long task", turnStart1);
           return null;
@@ -980,24 +1044,30 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "task x", T0));
-          tx.insertEntry(
-              new Entry(assistant, sessionId, user, assistantPayload("some progress"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistant,
-                  new TurnEndPayload(
-                      turnStart, TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "task x", T0));
+          tx.entries()
+              .insert(new Entry(assistant, sessionId, user, assistantPayload("some progress"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistant,
+                      new TurnEndPayload(
+                          turnStart,
+                          TurnEndOutcome.CANCELLED,
+                          false,
+                          TurnEndReason.CANCELLED,
+                          null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "task x", turnStart);
           return null;
@@ -1052,42 +1122,48 @@ class ThreadJoinProjectorTest {
     store.transaction(
         tx -> {
           // 轮次 1 (T0)
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "prompt 1", T0));
-          tx.insertEntry(
-              new Entry(assistant1, sessionId, user1, assistantPayload("reply turn 1"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user1, sessionId, turnStart1, "prompt 1", T0));
+          tx.entries()
+              .insert(
+                  new Entry(assistant1, sessionId, user1, assistantPayload("reply turn 1"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
           // 轮次 2 (T1)
-          tx.insertEntry(
-              new Entry(
-                  turnStart2,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T1));
-          tx.insertEntry(userEntry(user2, sessionId, turnStart2, "prompt 2", T1));
-          tx.insertEntry(
-              new Entry(assistant2, sessionId, user2, assistantPayload("reply turn 2"), T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  assistant2,
-                  new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart2,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T1));
+          tx.entries().insert(userEntry(user2, sessionId, turnStart2, "prompt 2", T1));
+          tx.entries()
+              .insert(
+                  new Entry(assistant2, sessionId, user2, assistantPayload("reply turn 2"), T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      assistant2,
+                      new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
 
           seedAppliedCommand(tx, childThreadId, 1L, "prompt 1", turnStart1);
           seedAppliedCommand(tx, childThreadId, 2L, "prompt 2", turnStart2);
@@ -1140,23 +1216,26 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "task 1", T0));
-          tx.insertEntry(
-              new Entry(assistant1, sessionId, user1, assistantPayload("first answer"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user1, sessionId, turnStart1, "task 1", T0));
+          tx.entries()
+              .insert(
+                  new Entry(assistant1, sessionId, user1, assistantPayload("first answer"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
           seedAppliedCommand(tx, childThreadId, 1L, "task 1", turnStart1);
           return null;
@@ -1184,23 +1263,26 @@ class ThreadJoinProjectorTest {
     // 子线程后续继续执行了第 2 轮并推进了 head (T2)
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart2,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T2));
-          tx.insertEntry(userEntry(user2, sessionId, turnStart2, "task 2", T2));
-          tx.insertEntry(
-              new Entry(assistant2, sessionId, user2, assistantPayload("second answer"), T2));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  assistant2,
-                  new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, false, null, null),
-                  T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart2,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T2));
+          tx.entries().insert(userEntry(user2, sessionId, turnStart2, "task 2", T2));
+          tx.entries()
+              .insert(
+                  new Entry(assistant2, sessionId, user2, assistantPayload("second answer"), T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      assistant2,
+                      new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, false, null, null),
+                      T2));
 
           seedAppliedCommand(tx, childThreadId, 2L, "task 2", turnStart2);
           return null;
@@ -1226,51 +1308,55 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  user,
-                  sessionId,
-                  turnStart,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(
-                              new TextMessageContent("multi text "),
-                              new JsonMessageContent("{\"input\":1}"))),
-                      null,
-                      null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  assistant,
-                  sessionId,
-                  user,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent("part A "),
-                              new JsonMessageContent("{\"key\":\"value\"}"))),
-                      assistantMetadata(),
-                      null),
-                  T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistant,
-                  new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      user,
+                      sessionId,
+                      turnStart,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent("multi text "),
+                                  new JsonMessageContent("{\"input\":1}"))),
+                          null,
+                          null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant,
+                      sessionId,
+                      user,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent("part A "),
+                                  new JsonMessageContent("{\"key\":\"value\"}"))),
+                          assistantMetadata(),
+                          null),
+                      T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistant,
+                      new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
           // 包含多段内容的 USER 命令、CUSTOM_MESSAGE 命令与 GOAL 命令
-          tx.lockThread(childThreadId);
+          tx.threads().lock(childThreadId);
           ThreadCommand cmdUser =
               new ThreadCommand(
                   childThreadId,
@@ -1312,12 +1398,13 @@ class ThreadJoinProjectorTest {
                   null,
                   null,
                   T0);
-          tx.insertCommands(List.of(cmdUser, cmdCustom, cmdGoal));
-          tx.updateCommands(
-              List.of(
-                  cmdUser.markApplied(turnStart),
-                  cmdCustom.markApplied(turnStart),
-                  cmdGoal.markApplied(turnStart)));
+          tx.commands().insert(List.of(cmdUser, cmdCustom, cmdGoal));
+          tx.commands()
+              .update(
+                  List.of(
+                      cmdUser.markApplied(turnStart),
+                      cmdCustom.markApplied(turnStart),
+                      cmdGoal.markApplied(turnStart)));
           return null;
         });
 
@@ -1401,26 +1488,29 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "ignored", T0));
-          tx.insertEntry(
-              new Entry(
-                  assistant, sessionId, user, assistantPayload("report after agent set"), T0));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd,
-                  sessionId,
-                  assistant,
-                  new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "ignored", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant, sessionId, user, assistantPayload("report after agent set"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd,
+                      sessionId,
+                      assistant,
+                      new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T0));
 
-          tx.lockThread(childThreadId);
+          tx.threads().lock(childThreadId);
           ThreadCommand cmdAgent =
               new ThreadCommand(
                   childThreadId,
@@ -1432,8 +1522,8 @@ class ThreadJoinProjectorTest {
                   null,
                   null,
                   T0);
-          tx.insertCommands(List.of(cmdAgent));
-          tx.updateCommands(List.of(cmdAgent.markApplied(turnStart)));
+          tx.commands().insert(List.of(cmdAgent));
+          tx.commands().update(List.of(cmdAgent.markApplied(turnStart)));
           return null;
         });
 
@@ -1474,16 +1564,17 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          tx.insertEntry(
-              new Entry(
-                  turnStart,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
-                  T0));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, "task", T0));
-          tx.insertEntry(
-              new Entry(assistant, sessionId, user, assistantPayload("hanging reply"), T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                      T0));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, "task", T0));
+          tx.entries()
+              .insert(new Entry(assistant, sessionId, user, assistantPayload("hanging reply"), T0));
           seedAppliedCommand(tx, childThreadId, 1L, "task", turnStart);
           return null;
         });
@@ -1545,7 +1636,7 @@ class ThreadJoinProjectorTest {
 
   private static void seedAppliedCommand(
       HarnessStore.Transaction tx, UUID threadId, long sequence, String prompt, UUID turnStartId) {
-    tx.lockThread(threadId);
+    tx.threads().lock(threadId);
     ThreadCommand queued =
         new ThreadCommand(
             threadId,
@@ -1558,13 +1649,13 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0);
-    tx.insertCommands(List.of(queued));
-    tx.updateCommands(List.of(queued.markApplied(turnStartId)));
+    tx.commands().insert(List.of(queued));
+    tx.commands().update(List.of(queued.markApplied(turnStartId)));
   }
 
   private static void seedQueuedCommand(
       HarnessStore.Transaction tx, UUID threadId, long sequence, String prompt) {
-    tx.lockThread(threadId);
+    tx.threads().lock(threadId);
     ThreadCommand queued =
         new ThreadCommand(
             threadId,
@@ -1577,7 +1668,7 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0);
-    tx.insertCommands(List.of(queued));
+    tx.commands().insert(List.of(queued));
   }
 
   private static void seedCancelledCommand(
@@ -1586,7 +1677,7 @@ class ThreadJoinProjectorTest {
       long sequence,
       String prompt,
       UUID stopRequestId) {
-    tx.lockThread(threadId);
+    tx.threads().lock(threadId);
     ThreadCommand queued =
         new ThreadCommand(
             threadId,
@@ -1599,8 +1690,8 @@ class ThreadJoinProjectorTest {
             null,
             null,
             T0);
-    tx.insertCommands(List.of(queued));
-    tx.updateCommands(List.of(queued.cancel(stopRequestId, T0)));
+    tx.commands().insert(List.of(queued));
+    tx.commands().update(List.of(queued.cancel(stopRequestId, T0)));
   }
 
   private static AssistantMessageMetadata assistantMetadata() {

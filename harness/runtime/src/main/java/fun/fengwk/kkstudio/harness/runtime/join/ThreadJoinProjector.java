@@ -60,7 +60,8 @@ public final class ThreadJoinProjector {
     }
 
     ThreadCommand sourceCommand =
-        tx.findCommand(join.childThreadId(), join.sourceCommandSequence())
+        tx.commands()
+            .find(join.childThreadId(), join.sourceCommandSequence())
             .orElseThrow(
                 () ->
                     new IllegalStateException(
@@ -92,7 +93,7 @@ public final class ThreadJoinProjector {
               + " has no appliedEntryId and is not cancelled");
     }
 
-    EntryPath path = tx.loadEntryPath(join.terminalEntryId());
+    EntryPath path = tx.entries().loadPath(join.terminalEntryId());
     int startIndex = indexOf(path, appliedStart);
     if (startIndex < 0) {
       throw new IllegalStateException(

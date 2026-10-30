@@ -202,17 +202,16 @@ class ExecutionExitConfirmerGovernanceTest {
 
       fixture.store.transaction(
           tx -> {
-            tx.lockTree(fixture.baseline.threadId());
-            tx.lockThread(fixture.baseline.threadId());
-            tx.deleteThreads(List.of(fixture.baseline.threadId()));
+            tx.threads().lockTree(fixture.baseline.threadId());
+            tx.threads().lock(fixture.baseline.threadId());
+            tx.threads().delete(List.of(fixture.baseline.threadId()));
             return null;
           });
       fixture.clock.advance(Duration.ofSeconds(30));
       confirmer.replayPending();
       assertEquals(3, transactions.get(), "deep deletion must be observed before journal cleanup");
       assertTrue(journal.delegate.loadAll().records().isEmpty());
-      assertTrue(
-          fixture.store.transaction(tx -> tx.findExecution(missing.executionId())).isEmpty());
+      assertTrue(fixture.store.transaction(tx -> tx.exits().find(missing.executionId())).isEmpty());
       assertEquals(1, logs.matching("reason=FACT_MISSING").size());
     }
   }
@@ -531,13 +530,13 @@ class ExecutionExitConfirmerGovernanceTest {
   private static void register(InMemoryHarnessStore store, ExecutionExitFact fact) {
     store.transaction(
         tx -> {
-          tx.lockThread(fact.threadId());
-          return tx.registerExecution(fact);
+          tx.threads().lock(fact.threadId());
+          return tx.exits().register(fact);
         });
   }
 
   private static ExecutionExitFact execution(HarnessStore store, UUID executionId) {
-    return store.transaction(tx -> tx.findExecution(executionId).orElseThrow());
+    return store.transaction(tx -> tx.exits().find(executionId).orElseThrow());
   }
 
   private static ExecutionExitFact expected(

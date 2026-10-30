@@ -156,15 +156,16 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(TestIds.id(101), result.session().id());
     assertEquals(TestIds.id(102), result.thread().id());
 
-    Session session = store.transaction(tx -> tx.findSession(TestIds.id(101)).orElseThrow());
+    Session session = store.transaction(tx -> tx.sessions().find(TestIds.id(101)).orElseThrow());
     assertEquals(T0, session.createdAt());
 
-    Entry root = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()).head());
+    Entry root =
+        store.transaction(tx -> tx.entries().loadPath(result.thread().headEntryId()).head());
     assertEquals(EntryType.ROOT, root.payload().type());
     assertEquals(TestIds.id(101), root.sessionId());
     assertEquals(settings(), ((RootPayload) root.payload()).settings());
 
-    ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
+    ThreadState thread = store.transaction(tx -> tx.threads().find(TestIds.id(102)).orElseThrow());
     assertEquals(TestIds.id(101), thread.sessionId());
     assertEquals(root.id(), thread.headEntryId());
     assertEquals(CREATION_REQUEST_HASH.length(), thread.creationRequestHash().length());
@@ -184,7 +185,9 @@ class HarnessRuntimeAcceptInitialTest {
     Work work =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(102))).orElseThrow());
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, TestIds.id(102)))
+                    .orElseThrow());
     assertEquals(1L, work.wakeVersion());
     assertEquals(T0, work.availableAt());
   }
@@ -200,8 +203,8 @@ class HarnessRuntimeAcceptInitialTest {
                 (tx, session, commands) -> {
                   throw new IllegalStateException("preflight failed");
                 }));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(101)).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(102)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(TestIds.id(101)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(TestIds.id(102)).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(tx -> loadCommandsByThread(tx, TestIds.id(102)).isEmpty()));
   }
@@ -245,7 +248,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(first.thread().headEntryId(), replay.thread().headEntryId());
     assertEquals(first.thread().version(), replay.thread().version());
     // replay 不创建第二条命令。
-    ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
+    ThreadState thread = store.transaction(tx -> tx.threads().find(TestIds.id(102)).orElseThrow());
     assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
   }
@@ -268,7 +271,7 @@ class HarnessRuntimeAcceptInitialTest {
             new AcceptCommandsTarget.Thread(TestIds.id(102)),
             List.of(userMessageCommand(TestIds.id(2), "c"))),
         AcceptancePreflight.IDENTITY);
-    ThreadState before = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());
+    ThreadState before = store.transaction(tx -> tx.threads().find(TestIds.id(102)).orElseThrow());
     assertEquals(2L, before.version());
 
     AcceptedCommands replay = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
@@ -284,7 +287,7 @@ class HarnessRuntimeAcceptInitialTest {
             .allMatch(command -> command.state() == ThreadCommandState.QUEUED));
     // 无 version mutation：replay 后 projection 与 stored 均未推进。
     assertEquals(before, replay.thread());
-    assertEquals(before, store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow()));
+    assertEquals(before, store.transaction(tx -> tx.threads().find(TestIds.id(102)).orElseThrow()));
   }
 
   /** 同 threadId + 不同初始创建请求 → THREAD_ID_REUSED。 */
@@ -531,14 +534,14 @@ class HarnessRuntimeAcceptInitialTest {
     assertFalse(result.replayed());
     assertEquals(baseline.sessionId(), result.session().id());
     assertEquals(baseline.rootEntryId(), result.rootEntry().id());
-    ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
+    ThreadState thread = store.transaction(tx -> tx.threads().find(TestIds.id(203)).orElseThrow());
     // head 是 FORK 事实节点：parent 指向既有 start Entry，不复制共享前缀。
-    Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+    Entry fork = store.transaction(tx -> tx.entries().find(thread.headEntryId())).orElseThrow();
     ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
     assertEquals(ForkMode.BRANCH, forkPayload.mode());
     assertEquals(baseline.rootEntryId(), forkPayload.sourceEntryId());
     assertEquals(baseline.rootEntryId(), fork.parentEntryId());
-    List<Entry> entries = store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId()));
+    List<Entry> entries = store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId()));
     assertEquals(2, entries.size());
     assertEquals(1L, thread.version());
     assertEquals(2L, thread.nextCommandSequence());
@@ -546,7 +549,9 @@ class HarnessRuntimeAcceptInitialTest {
         store
             .<Boolean>transaction(
                 tx ->
-                    tx.findWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(203))).isPresent())
+                    tx.work()
+                        .find(new WorkTarget(WorkTargetType.THREAD, TestIds.id(203)))
+                        .isPresent())
             .equals(Boolean.TRUE));
   }
 
@@ -583,7 +588,7 @@ class HarnessRuntimeAcceptInitialTest {
                         List.of(userMessageCommand(TestIds.id(1), "hello"))),
                     AcceptancePreflight.IDENTITY));
     assertEquals("session " + missingSessionId + " does not exist", error.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(TestIds.id(203)).isEmpty()));
   }
 
   /** ENTRY：start Entry 不在给定 Session 内是非法请求。 */
@@ -595,9 +600,9 @@ class HarnessRuntimeAcceptInitialTest {
             tx -> {
               UUID sessionId = tx.nextId();
               UUID rootEntryId = tx.nextId();
-              tx.insertSession(new Session(sessionId, "session-" + sessionId, T0));
-              tx.insertEntry(
-                  new Entry(rootEntryId, sessionId, null, new RootPayload(settings()), T0));
+              tx.sessions().insert(new Session(sessionId, "session-" + sessionId, T0));
+              tx.entries()
+                  .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(settings()), T0));
               return rootEntryId;
             });
     assertThrows(
@@ -609,7 +614,7 @@ class HarnessRuntimeAcceptInitialTest {
                     foreignRoot,
                     List.of(userMessageCommand(TestIds.id(1), "hello"))),
                 AcceptancePreflight.IDENTITY));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(TestIds.id(203)).isEmpty()));
   }
 
   /**
@@ -647,7 +652,8 @@ class HarnessRuntimeAcceptInitialTest {
     }
 
     // 源 Thread 的 head / version / commands / Work 完全不变。
-    ThreadState source = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState source =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(baseline.rootEntryId(), source.headEntryId());
     assertEquals(0L, source.version());
     assertTrue(
@@ -655,7 +661,9 @@ class HarnessRuntimeAcceptInitialTest {
     assertTrue(
         store.<Boolean>transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())).isEmpty()));
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .isEmpty()));
   }
 
   /**
@@ -669,7 +677,7 @@ class HarnessRuntimeAcceptInitialTest {
     UUID failedBoundary = seedFailedTurn(baseline);
     UUID stoppedBoundary = seedStopTurn(baseline, true).getLast();
     long entriesBefore =
-        store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size();
+        store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId())).size();
 
     List<UUID> boundaries =
         List.of(baseline.rootEntryId(), completed.turnEndId(), failedBoundary, stoppedBoundary);
@@ -685,8 +693,8 @@ class HarnessRuntimeAcceptInitialTest {
                   List.of(userMessageCommand(TestIds.id(1), "hello"))),
               AcceptancePreflight.IDENTITY);
       assertFalse(result.replayed());
-      ThreadState thread = store.transaction(tx -> tx.findThread(threadId).orElseThrow());
-      Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+      ThreadState thread = store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
+      Entry fork = store.transaction(tx -> tx.entries().find(thread.headEntryId())).orElseThrow();
       ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
       assertEquals(ForkMode.BRANCH, forkPayload.mode());
       assertEquals(boundary, forkPayload.sourceEntryId());
@@ -698,7 +706,7 @@ class HarnessRuntimeAcceptInitialTest {
     // 每次 fork 只追加一个 FORK 事实节点，绝不复制共享前缀。
     assertEquals(
         entriesBefore + boundaries.size(),
-        store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size());
+        store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId())).size());
   }
 
   /** 正常关闭的 STOPPED 边界不是未闭合屏障：fork 到该边界照常成立，并追加 FORK 事实节点。 */
@@ -716,8 +724,8 @@ class HarnessRuntimeAcceptInitialTest {
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
-    ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
-    Entry fork = store.transaction(tx -> tx.findEntry(thread.headEntryId())).orElseThrow();
+    ThreadState thread = store.transaction(tx -> tx.threads().find(TestIds.id(203)).orElseThrow());
+    Entry fork = store.transaction(tx -> tx.entries().find(thread.headEntryId())).orElseThrow();
     ForkPayload forkPayload = assertInstanceOf(ForkPayload.class, fork.payload());
     assertEquals(ForkMode.BRANCH, forkPayload.mode());
     assertEquals(boundary, forkPayload.sourceEntryId());
@@ -730,48 +738,52 @@ class HarnessRuntimeAcceptInitialTest {
     return store.transaction(
         tx -> {
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  baseline.sessionId(),
-                  baseline.rootEntryId(),
-                  new TurnStartPayload(TurnStartReason.STOP, settings(), baseline.threadId()),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      new TurnStartPayload(TurnStartReason.STOP, settings(), baseline.threadId()),
+                      T0));
           UUID barrierId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  barrierId,
-                  baseline.sessionId(),
-                  turnStartId,
-                  new AssistantErrorPayload(
-                      new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      barrierId,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new AssistantErrorPayload(
+                          new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"),
+                          null),
+                      T0));
           if (!closed) {
             return List.of(turnStartId, barrierId);
           }
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  baseline.sessionId(),
-                  barrierId,
-                  new TurnEndPayload(
-                      turnStartId,
-                      TurnEndOutcome.STOPPED,
-                      false,
-                      TurnEndReason.USER_STOP,
-                      TestIds.id(9)),
-                  T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      baseline.sessionId(),
+                      barrierId,
+                      new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          TestIds.id(9)),
+                      T0));
           return List.of(turnStartId, barrierId, turnEndId);
         });
   }
 
   private void assertNoNewThreadFacts(UUID threadId) {
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(threadId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> loadCommandsByThread(tx, threadId).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty()));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty()));
   }
 
   private record SeededTurn(
@@ -790,25 +802,27 @@ class HarnessRuntimeAcceptInitialTest {
     return store.transaction(
         tx -> {
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  baseline.sessionId(),
-                  baseline.rootEntryId(),
-                  new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
+                      T1));
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  baseline.sessionId(),
-                  turnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
-                      null,
-                      null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                          null,
+                          null),
+                      T1));
           List<String> toolCallIds = new ArrayList<>();
           for (int i = 0; i < toolCallCount; i++) {
             toolCallIds.add("call-" + i);
@@ -820,29 +834,31 @@ class HarnessRuntimeAcceptInitialTest {
                   userEntryId,
                   T1,
                   toolCallIds.toArray(String[]::new));
-          tx.insertEntry(assistant);
+          tx.entries().insert(assistant);
           UUID parentId = assistant.id();
           List<UUID> toolResultIds = new ArrayList<>();
           for (int i = 0; i < toolCallCount; i++) {
             UUID toolResultId = tx.nextId();
-            tx.insertEntry(
-                new Entry(
-                    toolResultId,
-                    baseline.sessionId(),
-                    parentId,
-                    toolResultPayload(tx.nextId(), assistant.id(), i, "call-" + i),
-                    T1));
+            tx.entries()
+                .insert(
+                    new Entry(
+                        toolResultId,
+                        baseline.sessionId(),
+                        parentId,
+                        toolResultPayload(tx.nextId(), assistant.id(), i, "call-" + i),
+                        T1));
             toolResultIds.add(toolResultId);
             parentId = toolResultId;
           }
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  baseline.sessionId(),
-                  parentId,
-                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      baseline.sessionId(),
+                      parentId,
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
           return new SeededTurn(turnStartId, userEntryId, assistant.id(), toolResultIds, turnEndId);
         });
   }
@@ -852,43 +868,51 @@ class HarnessRuntimeAcceptInitialTest {
     return store.transaction(
         tx -> {
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  baseline.sessionId(),
-                  baseline.rootEntryId(),
-                  new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
-                  T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
+                      T2));
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  baseline.sessionId(),
-                  turnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
-                      null,
-                      null),
-                  T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                          null,
+                          null),
+                      T2));
           UUID errorId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  errorId,
-                  baseline.sessionId(),
-                  userEntryId,
-                  new AssistantErrorPayload(
-                      new AssistantError("MODEL_ERROR", "model failed"), null),
-                  T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      errorId,
+                      baseline.sessionId(),
+                      userEntryId,
+                      new AssistantErrorPayload(
+                          new AssistantError("MODEL_ERROR", "model failed"), null),
+                      T2));
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  baseline.sessionId(),
-                  errorId,
-                  new TurnEndPayload(
-                      turnStartId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      baseline.sessionId(),
+                      errorId,
+                      new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.TURN_FAILED,
+                          null),
+                      T2));
           return turnEndId;
         });
   }
@@ -924,8 +948,8 @@ class HarnessRuntimeAcceptInitialTest {
                         sessionId, threadId, List.of(userMessageCommand(TestIds.id(1), "hello"))),
                     preflight));
     assertEquals(expectedMessage, error.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(threadId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> loadCommandsByThread(tx, threadId).isEmpty()));
   }
 }

@@ -62,7 +62,7 @@ class PlatformResourceContentReaderTest {
     UUID id = UUID.randomUUID();
     assertThrows(PlatformReadException.class, () -> read(null, id));
     assertThrows(PlatformReadException.class, () -> read(id, null));
-    when(transaction.findThread(id)).thenReturn(Optional.empty());
+    when(transaction.threads().find(id)).thenReturn(Optional.empty());
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(id, id))
             .getMessage()
@@ -233,7 +233,7 @@ class PlatformResourceContentReaderTest {
   private void authorize(UUID threadId, UUID sessionId, UUID blobId, boolean allowed) {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
-    when(transaction.findThread(threadId)).thenReturn(Optional.of(thread));
+    when(transaction.threads().find(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(allowed);
   }
 

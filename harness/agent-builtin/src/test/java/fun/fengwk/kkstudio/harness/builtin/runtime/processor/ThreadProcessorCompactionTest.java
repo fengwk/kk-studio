@@ -128,7 +128,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), baseline.turnStartEntryId()))
             .isEmpty());
@@ -150,8 +150,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     Boolean inputStillQueued =
         fixture.store.transaction(
             tx -> {
-              tx.lockThread(baseline.threadId());
-              return tx.loadQueuedCommands(baseline.threadId()).stream()
+              tx.threads().lock(baseline.threadId());
+              return tx.commands().loadQueued(baseline.threadId()).stream()
                   .anyMatch(c -> c.idempotencyKey().equals(userCommand));
             });
     assertTrue(inputStillQueued);
@@ -176,27 +176,27 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(9).id()))
             .isEmpty());
 
     // 3. store 里确实创建了子 Session / ROOT / 子 Thread / 第一条摘要 command / COMPACTION join
     fixture.store.transaction(
         tx -> {
-          ThreadState childThread = tx.lockThread(compaction.childThreadId()).orElseThrow();
+          ThreadState childThread = tx.threads().lock(compaction.childThreadId()).orElseThrow();
           assertEquals(baseline.threadId(), childThread.parentThreadId());
-          Session childSession = tx.findSession(childThread.sessionId()).orElseThrow();
+          Session childSession = tx.sessions().find(childThread.sessionId()).orElseThrow();
           assertNotNull(childSession);
-          Entry rootEntry = tx.findEntry(childThread.headEntryId()).orElseThrow();
+          Entry rootEntry = tx.entries().find(childThread.headEntryId()).orElseThrow();
           assertInstanceOf(RootPayload.class, rootEntry.payload());
 
           // 第一条 command 是 CustomMessageCommand，带压缩 prompts
-          List<ThreadCommand> commands = tx.loadQueuedCommands(compaction.childThreadId());
+          List<ThreadCommand> commands = tx.commands().loadQueued(compaction.childThreadId());
           assertEquals(1, commands.size());
           assertInstanceOf(CustomMessageCommandPayload.class, commands.getFirst().payload());
 
           // COMPACTION join
-          ThreadJoin join = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
+          ThreadJoin join = tx.joins().find(compaction.joinInvocationId()).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
           assertEquals(new ThreadConstraints(4096, true, false), childThread.constraints());
@@ -262,7 +262,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), inputStartEntry.id()))
             .orElseThrow();
 
@@ -316,7 +316,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // 公共 spawn 不能接管 owner 的唯一结算票据，且拒绝发生在任何命令写入之前。
     fixture.store.transaction(
         tx -> {
-          ThreadState child = tx.findThread(compaction.childThreadId()).orElseThrow();
+          ThreadState child = tx.threads().find(compaction.childThreadId()).orElseThrow();
           var payload = new UserMessageCommandPayload(userMessage("ordinary continuation"));
           String hash = ThreadCommandPayloadJsonCodec.requestHash(payload);
           SpawnRequest request =
@@ -337,18 +337,18 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   id(99001),
                   hash);
           AgentSpawner.lockForSpawn(tx, request);
-          List<ThreadCommand> before = tx.loadQueuedCommands(child.id());
+          List<ThreadCommand> before = tx.commands().loadQueued(child.id());
           IllegalArgumentException rejected =
               assertThrows(IllegalArgumentException.class, () -> AgentSpawner.spawn(tx, request));
           assertEquals("child has an unfinished owner settlement", rejected.getMessage());
-          assertEquals(before, tx.loadQueuedCommands(child.id()));
-          assertEquals(child, tx.findThread(child.id()).orElseThrow());
-          ThreadJoin owner = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
+          assertEquals(before, tx.commands().loadQueued(child.id()));
+          assertEquals(child, tx.threads().find(child.id()).orElseThrow());
+          ThreadJoin owner = tx.joins().find(compaction.joinInvocationId()).orElseThrow();
           assertNull(owner.supersededByInvocationId());
-          assertEquals(List.of(owner), tx.loadIncompleteJoins(child.id()));
+          assertEquals(List.of(owner), tx.joins().loadIncomplete(child.id()));
           ThreadCommand original = before.getFirst();
           RootPayload root =
-              (RootPayload) tx.findEntry(child.headEntryId()).orElseThrow().payload();
+              (RootPayload) tx.entries().find(child.headEntryId()).orElseThrow().payload();
           SpawnRequest replay =
               new SpawnRequest(
                   child.id(),
@@ -369,7 +369,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   owner.invocationId(),
                   owner.requestHash());
           assertTrue(AgentSpawner.spawn(tx, replay).replayed());
-          assertEquals(before, tx.loadQueuedCommands(child.id()));
+          assertEquals(before, tx.commands().loadQueued(child.id()));
           return null;
         });
 
@@ -473,7 +473,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
@@ -499,7 +500,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), ids[0]))
+            .transaction(
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), ids[0]))
             .isEmpty());
 
     requestThreadWork(fixture.store, baseline.threadId());
@@ -515,7 +519,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), path.entries().get(12).id()))
             .isEmpty());
@@ -597,7 +601,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         inTx(
             fixture,
             tx -> {
-              ThreadState parent = tx.lockThread(baseline.threadId()).orElseThrow();
+              ThreadState parent = tx.threads().lock(baseline.threadId()).orElseThrow();
               CompactionStart c =
                   CompactionChildSpawn.start(
                       tx,
@@ -610,14 +614,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           compResolved.childSettings()),
                       historyPrep);
               UUID tsId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      tsId,
-                      baseline.sessionId(),
-                      baseline.turnEndEntryId(),
-                      resolvedCompactionTurnStart(baseline.threadId(), c),
-                      NOW));
-              tx.updateThread(parent.advanceHead(tsId, NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          tsId,
+                          baseline.sessionId(),
+                          baseline.turnEndEntryId(),
+                          resolvedCompactionTurnStart(baseline.threadId(), c),
+                          NOW));
+              tx.threads().update(parent.advanceHead(tsId, NOW));
               return c;
             });
 
@@ -656,7 +661,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), planned.entries().get(12).id()))
             .isEmpty());
@@ -676,7 +681,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), baseline.turnStartEntryId()))
             .isEmpty());
@@ -751,7 +756,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
@@ -804,47 +809,57 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID rejectedStart = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  rejectedStart,
-                  baseline.sessionId(),
-                  baseline.turnEndEntryId(),
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT, branchSettings(), baseline.threadId()),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rejectedStart,
+                      baseline.sessionId(),
+                      baseline.turnEndEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT, branchSettings(), baseline.threadId()),
+                      NOW));
           UUID userId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  userId,
-                  baseline.sessionId(),
-                  rejectedStart,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER, List.of(new TextMessageContent("rejected input"))),
-                      null,
-                      null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userId,
+                      baseline.sessionId(),
+                      rejectedStart,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("rejected input"))),
+                          null,
+                          null),
+                      NOW));
           UUID errorId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  errorId,
-                  baseline.sessionId(),
-                  userId,
-                  new AssistantErrorPayload(
-                      new AssistantError("PLANNING_FAILED", "missing model"), null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      errorId,
+                      baseline.sessionId(),
+                      userId,
+                      new AssistantErrorPayload(
+                          new AssistantError("PLANNING_FAILED", "missing model"), null),
+                      NOW));
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  baseline.sessionId(),
-                  errorId,
-                  new TurnEndPayload(
-                      rejectedStart, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  NOW));
-          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      baseline.sessionId(),
+                      errorId,
+                      new TurnEndPayload(
+                          rejectedStart,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.TURN_FAILED,
+                          null),
+                      NOW));
+          tx.threads()
+              .update(tx.threads().find(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
     seedCommand(
@@ -946,7 +961,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           fixture
               .store
               .transaction(
-                  tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
+                  tx ->
+                      builtin(fixture.store, tx)
+                          .findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
               .isPresent());
     } else {
       assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
@@ -971,7 +988,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
@@ -1002,7 +1019,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture
             .store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
   }
 
@@ -1035,7 +1054,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture
             .store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
   }
 
@@ -1050,37 +1071,50 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // FAILED TURN_END，失败压缩事实只由 immutable Entry 承载，不 seed/保留 ModelInvocation。
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  sessionId,
-                  headId,
-                  resolvedCompactionTurnStart(baseline.threadId(), fullStart(headId)),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      headId,
+                      resolvedCompactionTurnStart(baseline.threadId(), fullStart(headId)),
+                      NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START，再追加错误结果与 FAILED TURN_END。
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnStartId, NOW));
+          tx.threads()
+              .update(
+                  tx.threads()
+                      .find(baseline.threadId())
+                      .orElseThrow()
+                      .advanceHead(turnStartId, NOW));
           UUID errorId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  errorId,
-                  sessionId,
-                  turnStartId,
-                  new AssistantErrorPayload(
-                      new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "boom"), null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      errorId,
+                      sessionId,
+                      turnStartId,
+                      new AssistantErrorPayload(
+                          new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "boom"),
+                          null),
+                      NOW));
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  sessionId,
-                  errorId,
-                  new TurnEndPayload(
-                      turnStartId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-                  NOW));
-          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      sessionId,
+                      errorId,
+                      new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.TURN_FAILED,
+                          null),
+                      NOW));
+          tx.threads()
+              .update(tx.threads().find(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
 
@@ -1106,7 +1140,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
@@ -1256,77 +1291,85 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       boolean failed) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  baseline.sessionId(),
-                  baseline.turnEndEntryId(),
-                  new TurnStartPayload(
-                      TurnStartReason.CONTINUATION,
-                      branchSettings(),
-                      baseline.threadId(),
-                      CONTEXT_WINDOW,
-                      MAX_OUTPUT_TOKENS,
-                      null,
-                      null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      baseline.sessionId(),
+                      baseline.turnEndEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.CONTINUATION,
+                          branchSettings(),
+                          baseline.threadId(),
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
+                          null,
+                          null),
+                      NOW));
           UUID assistantEntryId = tx.nextId();
           String callId = "large-result";
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  baseline.sessionId(),
-                  turnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new ToolCallMessageContent(callId, "bash", "bash", "{}"),
-                              new TextMessageContent("working"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
-                      null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(callId, "bash", "bash", "{}"),
+                                  new TextMessageContent("working"))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
+                          null),
+                      NOW));
           UUID toolResultEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  toolResultEntryId,
-                  baseline.sessionId(),
-                  assistantEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.TOOL,
-                          List.of(
-                              new ToolResultMessageContent(
-                                  callId,
-                                  "bash",
-                                  "bash",
-                                  List.of(new TextMessageContent(toolResultText)),
-                                  failed,
-                                  "{}"))),
-                      null,
-                      new ToolResultMetadata(
-                          new UUID(0L, 8888L),
-                          assistantEntryId,
-                          callId,
-                          0,
-                          failed ? ToolResultStatus.FAILED : ToolResultStatus.SUCCEEDED,
-                          false,
+          tx.entries()
+              .insert(
+                  new Entry(
+                      toolResultEntryId,
+                      baseline.sessionId(),
+                      assistantEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.TOOL,
+                              List.of(
+                                  new ToolResultMessageContent(
+                                      callId,
+                                      "bash",
+                                      "bash",
+                                      List.of(new TextMessageContent(toolResultText)),
+                                      failed,
+                                      "{}"))),
                           null,
-                          null,
-                          null)),
-                  NOW));
+                          new ToolResultMetadata(
+                              new UUID(0L, 8888L),
+                              assistantEntryId,
+                              callId,
+                              0,
+                              failed ? ToolResultStatus.FAILED : ToolResultStatus.SUCCEEDED,
+                              false,
+                              null,
+                              null,
+                              null)),
+                      NOW));
           UUID turnEndEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  baseline.sessionId(),
-                  toolResultEntryId,
-                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, true, null, null),
-                  NOW));
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnEndEntryId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      baseline.sessionId(),
+                      toolResultEntryId,
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.threads()
+              .update(
+                  tx.threads()
+                      .find(baseline.threadId())
+                      .orElseThrow()
+                      .advanceHead(turnEndEntryId, NOW));
           return null;
         });
   }
@@ -1358,18 +1401,20 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         successResponse("history summary", List.of(), GenerationStopReason.COMPLETE);
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           ids[0] = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  ids[0],
-                  sessionId,
-                  headId,
-                  resolvedCompactionTurnStart(baseline.threadId(), frozenStart),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      ids[0],
+                      sessionId,
+                      headId,
+                      resolvedCompactionTurnStart(baseline.threadId(), frozenStart),
+                      NOW));
           // 与真实 commit 一致：head 先推进到 TURN_START。
-          tx.updateThread(
-              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
+          tx.threads()
+              .update(
+                  tx.threads().find(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
           return null;
         });
     // result payload 由同一 request 的冻结切分事实 + 真实 apply 前缀路径经 assembler 机械派生（HISTORY 前缀即
@@ -1379,18 +1424,20 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             path(fixture.store, baseline.threadId()), frozenStart, response.text());
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           ids[1] = tx.nextId();
-          tx.insertEntry(new Entry(ids[1], sessionId, ids[0], resultPayload, NOW));
+          tx.entries().insert(new Entry(ids[1], sessionId, ids[0], resultPayload, NOW));
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  sessionId,
-                  ids[1],
-                  new TurnEndPayload(ids[0], TurnEndOutcome.COMPLETED, true, null, null),
-                  NOW));
-          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      sessionId,
+                      ids[1],
+                      new TurnEndPayload(ids[0], TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.threads()
+              .update(tx.threads().find(baseline.threadId()).orElseThrow().advanceHead(endId, NOW));
           return null;
         });
     return ids;
@@ -1416,88 +1463,104 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID errorEntryId = tx.nextId();
           UUID secondTurnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("historical user " + "h".repeat(50_000)))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent(
-                                  "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  sessionId,
-                  assistantEntryId,
-                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondTurnStartId,
-                  sessionId,
-                  turnEndEntryId,
-                  resolvedInputTurnStart(threadId),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondUserEntryId,
-                  sessionId,
-                  secondTurnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent(compactionUserText()))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  errorEntryId,
-                  sessionId,
-                  secondUserEntryId,
-                  new AssistantErrorPayload(
-                      new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondTurnEndEntryId,
-                  sessionId,
-                  errorEntryId,
-                  new TurnEndPayload(
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent("historical user " + "h".repeat(50_000)))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent(
+                                      "historical assistant " + "a".repeat(50_000)))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      assistantEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
                       secondTurnStartId,
-                      TurnEndOutcome.FAILED,
-                      false,
-                      TurnEndReason.TURN_FAILED,
-                      null),
-                  NOW));
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(
-                  threadId, sessionId, secondTurnEndEntryId, NOW));
+                      sessionId,
+                      turnEndEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondUserEntryId,
+                      sessionId,
+                      secondTurnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent(compactionUserText()))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      errorEntryId,
+                      sessionId,
+                      secondUserEntryId,
+                      new AssistantErrorPayload(
+                          new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondTurnEndEntryId,
+                      sessionId,
+                      errorEntryId,
+                      new TurnEndPayload(
+                          secondTurnStartId,
+                          TurnEndOutcome.FAILED,
+                          false,
+                          TurnEndReason.TURN_FAILED,
+                          null),
+                      NOW));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(
+                      threadId, sessionId, secondTurnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1519,39 +1582,45 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID abortedEntryId = tx.nextId();
           UUID turnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  resolvedCompactionTurnStart(threadId, fullStart(rootEntryId)),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  abortedEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  new AssistantAbortedPayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("partial")))),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  sessionId,
-                  abortedEntryId,
-                  new TurnEndPayload(
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
                       turnStartEntryId,
-                      TurnEndOutcome.STOPPED,
-                      false,
-                      TurnEndReason.USER_STOP,
-                      id(1L)),
-                  NOW));
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(threadId, sessionId, turnEndEntryId, NOW));
+                      sessionId,
+                      rootEntryId,
+                      resolvedCompactionTurnStart(threadId, fullStart(rootEntryId)),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      abortedEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      new AssistantAbortedPayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("partial")))),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      abortedEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          id(1L)),
+                      NOW));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(threadId, sessionId, turnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1584,91 +1653,110 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID secondTurnEndId = tx.nextId();
           UUID threadId = tx.nextId(); // 被处理的 thread
           UUID otherThreadId = tx.nextId(); // 拥有 turn2 的 thread（仅由 TURN_START ownerThreadId 表达）
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant reply"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  sessionId,
-                  assistantEntryId,
-                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondTurnStartId,
-                  sessionId,
-                  turnEndEntryId,
-                  resolvedInputTurnStart(otherThreadId),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondUserEntryId,
-                  sessionId,
-                  secondTurnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent(compactionUserText()))),
-                      null,
-                      null),
-                  NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant reply"))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      assistantEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondTurnStartId,
+                      sessionId,
+                      turnEndEntryId,
+                      resolvedInputTurnStart(otherThreadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondUserEntryId,
+                      sessionId,
+                      secondTurnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent(compactionUserText()))),
+                          null,
+                          null),
+                      NOW));
           // 两个 Thread 都指向同一 closed head（共享历史由 immutable Entry 事实承载，而非 foreign active model）。
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(threadId, sessionId, secondUserEntryId, NOW));
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(
-                  otherThreadId, sessionId, secondUserEntryId, "other-thread", NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondAssistantEntryId,
-                  sessionId,
-                  secondUserEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant reply"))),
-                      new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondTurnEndId,
-                  sessionId,
-                  secondAssistantEntryId,
-                  new TurnEndPayload(
-                      secondTurnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  NOW));
-          tx.updateThread(tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
-          tx.updateThread(
-              tx.findThread(otherThreadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(
+                      threadId, sessionId, secondUserEntryId, NOW));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(
+                      otherThreadId, sessionId, secondUserEntryId, "other-thread", NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondAssistantEntryId,
+                      sessionId,
+                      secondUserEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant reply"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondTurnEndId,
+                      sessionId,
+                      secondAssistantEntryId,
+                      new TurnEndPayload(
+                          secondTurnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
+          tx.threads()
+              .update(tx.threads().find(threadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
+          tx.threads()
+              .update(
+                  tx.threads().find(otherThreadId).orElseThrow().advanceHead(secondTurnEndId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1702,7 +1790,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // 子执行期间 owner 被置为 STOPPED（durable 执行控制）。
     setStopped(fixture.store, baseline.threadId());
     long versionBeforeSettlement =
-        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+        fixture.store.transaction(
+            tx -> tx.threads().find(baseline.threadId()).orElseThrow().version());
 
     settleCompactionChildSuccess(
         fixture,
@@ -1715,10 +1804,11 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture
             .store
-            .transaction(tx -> tx.findJoin(compaction.joinInvocationId()).orElseThrow())
+            .transaction(tx -> tx.joins().find(compaction.joinInvocationId()).orElseThrow())
             .matched());
     long versionAfterSettlement =
-        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+        fixture.store.transaction(
+            tx -> tx.threads().find(baseline.threadId()).orElseThrow().version());
     assertEquals(versionBeforeSettlement + 1, versionAfterSettlement);
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     EntryPath afterSettlement = path(fixture.store, baseline.threadId());
@@ -1868,7 +1958,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     BranchSettings childSettings =
         fixture.store.transaction(
             tx ->
-                tx.loadEntryPath(tx.findThread(frozen.childThreadId()).orElseThrow().headEntryId())
+                tx.entries()
+                    .loadPath(tx.threads().find(frozen.childThreadId()).orElseThrow().headEntryId())
                     .baseSettings());
     fixture.resolver.results.add(
         new TurnResolver.Resolved(
@@ -1981,7 +2072,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture.store.transaction(
             tx ->
                 (TurnStartPayload)
-                    tx.findEntry(invocation.turnStartEntryId()).orElseThrow().payload());
+                    tx.entries().find(invocation.turnStartEntryId()).orElseThrow().payload());
     assertEquals(CONTEXT_WINDOW, start.contextWindow());
     assertEquals(expectedMax, start.maxOutputTokens());
     assertEquals(base.toolBindings(), start.capabilities().toolBindings());
@@ -2011,9 +2102,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       InMemoryBuiltinHarnessStore store, UUID childThreadId) {
     return store.transaction(
         tx -> {
-          ThreadState child = tx.findThread(childThreadId).orElseThrow();
-          UUID turn = tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
-          return builtin(tx).findModelInvocationByTurn(childThreadId, turn).orElseThrow();
+          ThreadState child = tx.threads().find(childThreadId).orElseThrow();
+          UUID turn = tx.entries().loadPath(child.headEntryId()).openTurnStart().orElseThrow().id();
+          return builtin(store, tx).findModelInvocationByTurn(childThreadId, turn).orElseThrow();
         });
   }
 
@@ -2022,14 +2113,18 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       InMemoryBuiltinHarnessStore store, UUID turnStartEntryId) {
     return store.transaction(
         tx ->
-            ((TurnStartPayload) tx.findEntry(turnStartEntryId).orElseThrow().payload())
+            ((TurnStartPayload) tx.entries().find(turnStartEntryId).orElseThrow().payload())
                 .maxOutputTokens());
   }
 
   private static long compactionFailureCount(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
         tx ->
-            tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()).entries().stream()
+            tx
+                .entries()
+                .loadPath(tx.threads().find(threadId).orElseThrow().headEntryId())
+                .entries()
+                .stream()
                 .filter(
                     entry ->
                         entry.payload() instanceof AssistantErrorPayload error
@@ -2039,30 +2134,32 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
   private static boolean forbidsAutoCompaction(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> !tx.findThread(threadId).orElseThrow().constraints().allowAutoCompaction());
+        tx -> !tx.threads().find(threadId).orElseThrow().constraints().allowAutoCompaction());
   }
 
   private static void setStopped(InMemoryBuiltinHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(
-              thread.changeExecutionControl(ThreadExecutionControl.STOPPED, thread.updatedAt()));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.threads()
+              .update(
+                  thread.changeExecutionControl(
+                      ThreadExecutionControl.STOPPED, thread.updatedAt()));
           return null;
         });
   }
 
   private static ThreadExecutionControl executionControl(
       InMemoryBuiltinHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().executionControl());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().executionControl());
   }
 
   private static boolean isQueued(
       InMemoryBuiltinHarnessStore store, UUID threadId, UUID commandId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.loadQueuedCommands(threadId).stream()
+          tx.threads().lock(threadId);
+          return tx.commands().loadQueued(threadId).stream()
               .anyMatch(command -> command.idempotencyKey().equals(commandId));
         });
   }
@@ -2071,10 +2168,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       InMemoryBuiltinHarnessStore store, UUID childThreadId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(childThreadId);
+          tx.threads().lock(childThreadId);
           CustomMessageCommandPayload payload =
               (CustomMessageCommandPayload)
-                  tx.loadQueuedCommands(childThreadId).getFirst().payload();
+                  tx.commands().loadQueued(childThreadId).getFirst().payload();
           return payload.message().contents().stream()
               .map(content -> content instanceof TextMessageContent text ? text.text() : "")
               .reduce("", String::concat);
@@ -2090,15 +2187,16 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       InMemoryBuiltinHarnessStore store, UUID parentThreadId, ThreadConstraints constraints) {
     return store.transaction(
         tx -> {
-          tx.lockThread(parentThreadId);
+          tx.threads().lock(parentThreadId);
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           UUID invocationId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "child-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          ThreadState parent = tx.findThread(parentThreadId).orElseThrow();
+          tx.sessions().insert(new Session(sessionId, "child-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          ThreadState parent = tx.threads().find(parentThreadId).orElseThrow();
           UUID rootThreadId = parent.rootThreadId();
           ThreadState child =
               new ThreadState(
@@ -2118,31 +2216,41 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   0L,
                   NOW,
                   NOW);
-          tx.insertThread(child);
+          tx.threads().insert(child);
           CustomMessageCommandPayload payload =
               new CustomMessageCommandPayload(AgentMessage.user("child instruction"));
           String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId, 1L, payload, invocationId, requestHash, null, null, null, NOW)));
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  requestHash,
-                  parentThreadId,
-                  threadId,
-                  1L,
-                  "child",
-                  null,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          1L,
+                          payload,
+                          invocationId,
+                          requestHash,
+                          null,
+                          null,
+                          null,
+                          NOW)));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      requestHash,
+                      parentThreadId,
+                      threadId,
+                      1L,
+                      "child",
+                      null,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return threadId;
         });
   }
@@ -2171,14 +2279,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       ModelUsage usage) {
     fixture.store.transaction(
         tx -> {
-          UUID parentThreadId = tx.findThread(childThreadId).orElseThrow().parentThreadId();
+          UUID parentThreadId = tx.threads().find(childThreadId).orElseThrow().parentThreadId();
           ThreadTreeLocks.lockForThread(tx, childThreadId);
           ThreadState child = null;
           for (UUID threadId :
               List.of(childThreadId, parentThreadId).stream()
                   .sorted(UuidOrder.COMPARATOR)
                   .toList()) {
-            ThreadState locked = tx.lockThread(threadId).orElseThrow();
+            ThreadState locked = tx.threads().lock(threadId).orElseThrow();
             if (threadId.equals(childThreadId)) {
               child = locked;
             }
@@ -2187,57 +2295,62 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID inputMsgId = tx.nextId();
           UUID asstId = tx.nextId();
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  startId,
-                  child.sessionId(),
-                  child.headEntryId(),
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      childThreadId,
-                      CONTEXT_WINDOW,
-                      MAX_OUTPUT_TOKENS,
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  inputMsgId,
-                  child.sessionId(),
-                  startId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("compaction instruction"))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  asstId,
-                  child.sessionId(),
-                  inputMsgId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(summaryText))),
-                      new AssistantMessageMetadata(stopReason, usage),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  child.sessionId(),
-                  asstId,
-                  new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, false, null, null),
-                  NOW));
-          tx.loadQueuedCommands(childThreadId);
-          ThreadCommand sourceCmd = tx.findCommand(childThreadId, 1L).orElse(null);
+          tx.entries()
+              .insert(
+                  new Entry(
+                      startId,
+                      child.sessionId(),
+                      child.headEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          childThreadId,
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      inputMsgId,
+                      child.sessionId(),
+                      startId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("compaction instruction"))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      asstId,
+                      child.sessionId(),
+                      inputMsgId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent(summaryText))),
+                          new AssistantMessageMetadata(stopReason, usage),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      child.sessionId(),
+                      asstId,
+                      new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
+          tx.commands().loadQueued(childThreadId);
+          ThreadCommand sourceCmd = tx.commands().find(childThreadId, 1L).orElse(null);
           ThreadState advanced = child.advanceHead(endId, NOW);
           if (sourceCmd != null) {
-            tx.updateCommands(List.of(sourceCmd.markApplied(startId)));
+            tx.commands().update(List.of(sourceCmd.markApplied(startId)));
           }
-          tx.updateThread(advanced);
+          tx.threads().update(advanced);
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
               tx, advanced, endId, asstId, NOW, true);
           return null;
@@ -2253,14 +2366,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       String errorMessage) {
     fixture.store.transaction(
         tx -> {
-          UUID parentThreadId = tx.findThread(childThreadId).orElseThrow().parentThreadId();
+          UUID parentThreadId = tx.threads().find(childThreadId).orElseThrow().parentThreadId();
           ThreadTreeLocks.lockForThread(tx, childThreadId);
           ThreadState child = null;
           for (UUID threadId :
               List.of(childThreadId, parentThreadId).stream()
                   .sorted(UuidOrder.COMPARATOR)
                   .toList()) {
-            ThreadState locked = tx.lockThread(threadId).orElseThrow();
+            ThreadState locked = tx.threads().lock(threadId).orElseThrow();
             if (threadId.equals(childThreadId)) {
               child = locked;
             }
@@ -2269,59 +2382,63 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           UUID inputMsgId = tx.nextId();
           UUID errId = tx.nextId();
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  startId,
-                  child.sessionId(),
-                  child.headEntryId(),
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      childThreadId,
-                      CONTEXT_WINDOW,
-                      MAX_OUTPUT_TOKENS,
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  inputMsgId,
-                  child.sessionId(),
-                  startId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("compaction instruction"))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  errId,
-                  child.sessionId(),
-                  inputMsgId,
-                  new AssistantErrorPayload(new AssistantError(errorCode, errorMessage), null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      startId,
+                      child.sessionId(),
+                      child.headEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          childThreadId,
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      inputMsgId,
+                      child.sessionId(),
+                      startId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("compaction instruction"))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      errId,
+                      child.sessionId(),
+                      inputMsgId,
+                      new AssistantErrorPayload(new AssistantError(errorCode, errorMessage), null),
+                      NOW));
           // STOPPED 终态必须携带 stop request id（与 seedStoppedCompactionTurn 一致）。
           TurnEndReason reason =
               outcome == TurnEndOutcome.STOPPED
                   ? TurnEndReason.USER_STOP
                   : TurnEndReason.TURN_FAILED;
           UUID closeRequestId = outcome == TurnEndOutcome.STOPPED ? id(1L) : null;
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  child.sessionId(),
-                  errId,
-                  new TurnEndPayload(startId, outcome, false, reason, closeRequestId),
-                  NOW));
-          tx.loadQueuedCommands(childThreadId);
-          ThreadCommand sourceCmd = tx.findCommand(childThreadId, 1L).orElse(null);
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      child.sessionId(),
+                      errId,
+                      new TurnEndPayload(startId, outcome, false, reason, closeRequestId),
+                      NOW));
+          tx.commands().loadQueued(childThreadId);
+          ThreadCommand sourceCmd = tx.commands().find(childThreadId, 1L).orElse(null);
           ThreadState advanced = child.advanceHead(endId, NOW);
           if (sourceCmd != null) {
-            tx.updateCommands(List.of(sourceCmd.markApplied(startId)));
+            tx.commands().update(List.of(sourceCmd.markApplied(startId)));
           }
-          tx.updateThread(advanced);
+          tx.threads().update(advanced);
           ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
               tx, advanced, endId, null, NOW, true);
           return null;

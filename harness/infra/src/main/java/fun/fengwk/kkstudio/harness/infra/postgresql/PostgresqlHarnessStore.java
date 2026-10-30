@@ -56,7 +56,7 @@ public final class PostgresqlHarnessStore implements HarnessStore, BuiltinStore 
   /** 把同一 Runtime 事务投影为 Builtin 领域窄视图。 */
   @Override
   public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
-    return requireTransaction(tx);
+    return requireTransaction(tx).builtin();
   }
 
   private PostgresqlHarnessTransaction requireTransaction(HarnessStore.Transaction tx) {

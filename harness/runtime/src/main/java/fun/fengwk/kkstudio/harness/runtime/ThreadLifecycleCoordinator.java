@@ -64,7 +64,7 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
     ThreadTreeLocks.lockForThread(tx, threadId);
-    ThreadState thread = tx.findThread(threadId).orElse(null);
+    ThreadState thread = tx.threads().find(threadId).orElse(null);
     if (thread == null) {
       // 目标线程在取得树锁前已被并发删除：合法缺失，不抛异常也不重试。
       return null;
@@ -72,7 +72,7 @@ public final class ThreadLifecycleCoordinator {
     List<ThreadState> snapshots = new ArrayList<>(2);
     snapshots.add(thread);
     if (thread.parentThreadId() != null) {
-      ThreadState parent = tx.findThread(thread.parentThreadId()).orElse(null);
+      ThreadState parent = tx.threads().find(thread.parentThreadId()).orElse(null);
       if (parent == null) {
         return null;
       }
@@ -85,7 +85,7 @@ public final class ThreadLifecycleCoordinator {
             .sorted(UuidOrder.COMPARATOR)
             .toList();
     for (UUID sessionId : sessionIds) {
-      if (tx.lockSessionForKeyShare(sessionId).isEmpty()) {
+      if (tx.sessions().lockForKeyShare(sessionId).isEmpty()) {
         return null;
       }
     }
@@ -95,7 +95,7 @@ public final class ThreadLifecycleCoordinator {
             .toList();
     ThreadState lockedTarget = null;
     for (ThreadState snapshot : sortedThreads) {
-      ThreadState locked = tx.lockThread(snapshot.id()).orElse(null);
+      ThreadState locked = tx.threads().lock(snapshot.id()).orElse(null);
       if (locked == null) {
         return null;
       }
@@ -131,7 +131,7 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(child, "child");
     Objects.requireNonNull(terminalEntryId, "terminalEntryId");
     Objects.requireNonNull(now, "now");
-    List<ThreadJoin> incomplete = tx.loadIncompleteJoins(child.id());
+    List<ThreadJoin> incomplete = tx.joins().loadIncomplete(child.id());
     if (incomplete.isEmpty()) {
       return;
     }
@@ -145,7 +145,7 @@ public final class ThreadLifecycleCoordinator {
     for (ThreadJoin join : incomplete) {
       if (!includeUnappliedSource) {
         ThreadCommand source =
-            tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
+            tx.commands().find(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
         if (source == null || source.appliedEntryId() == null) {
           // 输入尚未应用时，旧回合完成不能结算新 Join。
           continue;
@@ -155,10 +155,10 @@ public final class ThreadLifecycleCoordinator {
       switch (current.delivery()) {
         case NOTIFY_PARENT -> notifyMatches.add(current);
         case SETTLE_OWNER_TURN -> {
-          tx.updateJoin(current);
+          tx.joins().update(current);
           settleMatches.add(current);
         }
-        case RECEIPT_ONLY -> tx.updateJoin(current);
+        case RECEIPT_ONLY -> tx.joins().update(current);
       }
     }
     if (!notifyMatches.isEmpty()) {
@@ -176,9 +176,9 @@ public final class ThreadLifecycleCoordinator {
    * <p>状态与结算共用同一事实判据，不把本地单轮 TURN_END 冒充为整段委派的完成。直接子 Join 自身也遵循同一判据，自底向上自然收敛。
    */
   private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
-    int incompleteChildJoins = tx.countIncompleteChildJoins(child.id());
+    int incompleteChildJoins = tx.joins().countIncompleteChildren(child.id());
     boolean hasInputDemand = ThreadInputDemand.hasInputDemand(tx, child);
-    EntryPath path = tx.loadEntryPath(child.headEntryId());
+    EntryPath path = tx.entries().loadPath(child.headEntryId());
     boolean hasLiveContext = path.openTurnStart().isPresent();
     if (!hasLiveContext
         && path.headIgnoringTrailingControlEntries().payload() instanceof TurnEndPayload end
@@ -200,7 +200,7 @@ public final class ThreadLifecycleCoordinator {
                         && child.id().equals(start.ownerThreadId()))
             .orElse(false);
     boolean hasCompactionObligation =
-        hasOpenCompaction || tx.hasIncompleteOwnerChildJoin(child.id());
+        hasOpenCompaction || tx.joins().hasIncompleteOwnerChild(child.id());
     return ThreadActivityEvaluator.isQuiescent(
         child.executionControl(),
         hasLiveContext,
@@ -225,7 +225,8 @@ public final class ThreadLifecycleCoordinator {
       ThreadState parent = parents.get(parentId);
       if (parent == null) {
         parent =
-            tx.findThread(parentId)
+            tx.threads()
+                .find(parentId)
                 .orElseThrow(
                     () ->
                         new IllegalStateException(
@@ -249,10 +250,10 @@ public final class ThreadLifecycleCoordinator {
         commands.add(delivery.command());
       }
     }
-    tx.insertCommands(commands);
+    tx.commands().insert(commands);
     for (List<ThreadJoinCompletion.Delivery> deliveries : deliveriesByParent.values()) {
       for (ThreadJoinCompletion.Delivery delivery : deliveries) {
-        tx.updateJoin(delivery.delivered());
+        tx.joins().update(delivery.delivered());
       }
     }
     for (Map.Entry<UUID, List<ThreadJoinCompletion.Delivery>> entry :
@@ -264,8 +265,8 @@ public final class ThreadLifecycleCoordinator {
         materializeNotifications(tx, parent, deliveries, count, now);
       } else {
         ThreadState advanced = parent.reserveCommandSequences(count, now);
-        tx.updateThread(advanced);
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parent.id()));
+        tx.threads().update(advanced);
+        tx.work().request(new WorkTarget(WorkTargetType.THREAD, parent.id()));
       }
     }
   }
@@ -283,25 +284,26 @@ public final class ThreadLifecycleCoordinator {
       NotificationCommandPayload payload =
           (NotificationCommandPayload) delivery.command().payload();
       UUID entryId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              entryId,
-              parent.sessionId(),
-              head,
-              new NotificationPayload(
-                  payload.notificationId(),
-                  payload.kind(),
-                  payload.sourceThreadId(),
-                  payload.message()),
-              now));
+      tx.entries()
+          .insert(
+              new Entry(
+                  entryId,
+                  parent.sessionId(),
+                  head,
+                  new NotificationPayload(
+                      payload.notificationId(),
+                      payload.kind(),
+                      payload.sourceThreadId(),
+                      payload.message()),
+                  now));
       applied.add(delivery.command().markApplied(entryId));
       head = entryId;
     }
-    tx.updateCommands(applied);
+    tx.commands().update(applied);
     long watermark = parent.nextCommandSequence() + count - 1L;
     ThreadState advanced =
         parent.reserveCommandSequencesAdvanceHeadAndInput(count, head, watermark, now);
-    tx.updateThread(advanced);
+    tx.threads().update(advanced);
   }
 
   /**
@@ -316,11 +318,11 @@ public final class ThreadLifecycleCoordinator {
       }
     }
     for (UUID parentId : parents) {
-      ThreadState parent = tx.lockThread(parentId).orElseThrow();
+      ThreadState parent = tx.threads().lock(parentId).orElseThrow();
       if (parent.executionControl().isStopped()) {
-        tx.updateThread(parent.touchVersion(tx.now()));
+        tx.threads().update(parent.touchVersion(tx.now()));
       } else {
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parentId));
+        tx.work().request(new WorkTarget(WorkTargetType.THREAD, parentId));
       }
     }
   }
@@ -333,7 +335,7 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(now, "now");
 
-    List<ThreadJoin> joins = tx.loadIncompleteJoins(thread.id());
+    List<ThreadJoin> joins = tx.joins().loadIncomplete(thread.id());
     if (joins.isEmpty()) {
       return thread;
     }
@@ -368,13 +370,13 @@ public final class ThreadLifecycleCoordinator {
                       AgentMessageRole.USER,
                       List.of(new TextMessageContent(DEFAULT_MAX_TURNS_REMINDER_TEXT)))),
               now);
-      tx.insertEntry(entry);
+      tx.entries().insert(entry);
       current = current.advanceHead(entryId, now);
-      tx.updateThread(current);
+      tx.threads().update(current);
       List<Entry> extended = new ArrayList<>(currentPath.entries());
       extended.add(entry);
       currentPath = new EntryPath(extended);
-      tx.updateJoin(join.remind(actualTurns, now));
+      tx.joins().update(join.remind(actualTurns, now));
     }
     return current;
   }
@@ -396,7 +398,7 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(join, "join");
 
     ThreadCommand sourceCommand =
-        tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
+        tx.commands().find(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
     if (sourceCommand == null || sourceCommand.appliedEntryId() == null) {
       return 0;
     }

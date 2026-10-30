@@ -129,7 +129,8 @@ final class StopControl {
     ThreadTreeLocks.lockForThread(tx, command.threadId());
 
     ThreadState targetThread =
-        tx.findThread(command.threadId())
+        tx.threads()
+            .find(command.threadId())
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException(
@@ -149,7 +150,7 @@ final class StopControl {
     while (!frontier.isEmpty()) {
       UUID parentId = frontier.remove(0);
       UUID parentStopId = stopRequestIds.get(parentId);
-      List<ThreadState> children = tx.listChildren(parentId);
+      List<ThreadState> children = tx.threads().listChildren(parentId);
       for (ThreadState child : children) {
         if (visited.add(child.id())) {
           UUID childStopId = deriveChildStopRequestId(parentStopId, child.id());
@@ -165,7 +166,7 @@ final class StopControl {
     List<UUID> parentSessionIds = new ArrayList<>();
     UUID parentThreadId = targetThread.parentThreadId();
     if (parentThreadId != null) {
-      ThreadState parent = tx.findThread(parentThreadId).orElse(null);
+      ThreadState parent = tx.threads().find(parentThreadId).orElse(null);
       if (parent != null) {
         parentThreadIds.add(parent.id());
         parentSessionIds.add(parent.sessionId());
@@ -182,7 +183,7 @@ final class StopControl {
     List<UUID> sessionIds =
         sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sessionIds) {
-      tx.lockSessionForKeyShare(sessionId).orElseThrow();
+      tx.sessions().lockForKeyShare(sessionId).orElseThrow();
     }
 
     List<UUID> threadIdsToLock = new ArrayList<>();
@@ -195,7 +196,8 @@ final class StopControl {
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
     for (UUID threadId : sortedThreadIds) {
       ThreadState locked =
-          tx.lockThread(threadId)
+          tx.threads()
+              .lock(threadId)
               .orElseThrow(
                   () ->
                       new HarnessRuntimeNotFoundException(
@@ -208,12 +210,12 @@ final class StopControl {
     // durable receipt replay 先于 version CAS：按 (rootThreadId, rootStopRequestId) 返回持久保存的旧范围，不以当前树重算，
     // 也不停止其后启动的新工作。
     List<StoppedThreadReceipt> stored =
-        tx.loadStopReceiptsByRootRequest(command.threadId(), command.stopRequestId());
+        tx.stops().loadByRootRequest(command.threadId(), command.stopRequestId());
     if (!stored.isEmpty()) {
       return new Commit(new StopResult(true, lockedTarget, stored), List.of(), List.of());
     }
     // 单节点回执命中但没有该 root 对：该派生 stopRequestId 已被其它 root 使用，派生身份不得伪装成新的 root。
-    if (tx.findStopReceipt(command.threadId(), command.stopRequestId()).isPresent()) {
+    if (tx.stops().findReceipt(command.threadId(), command.stopRequestId()).isPresent()) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
           "stopRequestId "
@@ -239,7 +241,7 @@ final class StopControl {
     List<ThreadStopCandidate> toStop = new ArrayList<>(candidates.size());
     for (ThreadStopCandidate candidate : candidates) {
       ThreadState locked = lockedThreads.get(candidate.thread().id());
-      if (tx.findStopReceipt(locked.id(), candidate.stopRequestId()).isPresent()) {
+      if (tx.stops().findReceipt(locked.id(), candidate.stopRequestId()).isPresent()) {
         throw conflict(
             HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
             "stop identity ("
@@ -255,9 +257,9 @@ final class StopControl {
     Map<UUID, List<ThreadCommand>> queuedByThread = new HashMap<>();
     Map<UUID, EntryPath> pathsByThread = new HashMap<>();
     for (ThreadStopCandidate candidate : toStop) {
-      EntryPath path = tx.loadEntryPath(candidate.thread().headEntryId());
+      EntryPath path = tx.entries().loadPath(candidate.thread().headEntryId());
       pathsByThread.put(candidate.thread().id(), path);
-      List<ThreadCommand> queued = tx.loadQueuedCommands(candidate.thread().id());
+      List<ThreadCommand> queued = tx.commands().loadQueued(candidate.thread().id());
       queuedByThread.put(candidate.thread().id(), queued);
     }
 
@@ -304,10 +306,10 @@ final class StopControl {
     }
     allWorkTargets.sort(WORK_TARGET_ORDER);
     for (WorkTarget target : allWorkTargets) {
-      tx.lockWork(target);
+      tx.work().lock(target);
     }
     for (WorkTarget target : allWorkTargets) {
-      tx.deleteWork(target);
+      tx.work().delete(target);
     }
 
     // Stage 8: 自底向上收敛。每节点重新读取最新 ThreadState 并按最新事实分类（子节点收敛不改动父节点自身
@@ -323,9 +325,9 @@ final class StopControl {
     for (ThreadStopContext original : contexts.reversed()) {
       // 不在此阶段新增 Commands/Models/Tools 行锁（Stage 4-7 已按规范顺序取得，WORK 之后禁止再取），
       // 直接复用已锁定的 model / siblings；Thread 状态重新读取以保证基于 tx 内最新事实 mutation。
-      ThreadState thread = tx.findThread(original.thread().id()).orElseThrow();
+      ThreadState thread = tx.threads().find(original.thread().id()).orElseThrow();
       UUID stopRequestId = original.stopRequestId();
-      EntryPath path = tx.loadEntryPath(thread.headEntryId());
+      EntryPath path = tx.entries().loadPath(thread.headEntryId());
       List<ThreadCommand> queued = original.queued();
       LockedDriverState driverState = original.driverState();
       List<ToolInvocation> siblings = original.toolSiblings();
@@ -338,13 +340,13 @@ final class StopControl {
           committedTerminals.add(materialized);
         }
         thread = materialized.thread();
-        path = tx.loadEntryPath(thread.headEntryId());
+        path = tx.entries().loadPath(thread.headEntryId());
         driverState = driver.lockState(tx, thread, path);
         siblings = loadAssistantSiblings(tx, thread, path, driverState);
         context = CLASSIFIER.classify(thread, path, driverState, siblings);
       } else if (context instanceof ThreadContext.ToolTerminalPending pending) {
         thread = materializeTerminalToolBatch(tx, thread, path, driverState, pending.siblings());
-        path = tx.loadEntryPath(thread.headEntryId());
+        path = tx.entries().loadPath(thread.headEntryId());
         driverState = driver.lockState(tx, thread, path);
         siblings = List.of();
         context = CLASSIFIER.classify(thread, path, driverState, siblings);
@@ -361,7 +363,7 @@ final class StopControl {
               .map(commandToCancel -> commandToCancel.cancel(stopRequestId, now))
               .toList();
       if (!cancelledCommands.isEmpty()) {
-        tx.updateCommands(cancelledCommands);
+        tx.commands().update(cancelledCommands);
       }
       List<CancelledThreadInput> cancelledInputs = cancelledInputs(cancelledCommands);
       List<ThreadCommand> queuedNotifications =
@@ -441,10 +443,10 @@ final class StopControl {
           tx, stopped, boundary, null, now, true);
     }
 
-    tx.insertStopReceipts(command.threadId(), command.stopRequestId(), receipts);
+    tx.stops().insertReceipts(command.threadId(), command.stopRequestId(), receipts);
 
     receipts.sort(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR));
-    ThreadState target = tx.findThread(command.threadId()).orElse(lockedTarget);
+    ThreadState target = tx.threads().find(command.threadId()).orElse(lockedTarget);
     return new Commit(
         new StopResult(false, target, receipts),
         List.copyOf(modelExecutionIds),
@@ -490,7 +492,7 @@ final class StopControl {
       return appendStopBoundaryTurn(
           tx,
           thread,
-          tx.loadEntryPath(notifications.headEntryId()),
+          tx.entries().loadPath(notifications.headEntryId()),
           stopRequestId,
           now,
           notifications.inputThroughSequence());
@@ -527,11 +529,12 @@ final class StopControl {
       parentId = insertCancelBarrier(tx, sessionId, parentId, now);
     }
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId, sessionId, parentId, stoppedTurnEnd(openTurn.id(), stopRequestId), now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId, sessionId, parentId, stoppedTurnEnd(openTurn.id(), stopRequestId), now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
-    tx.updateThread(stopped);
+    tx.threads().update(stopped);
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -540,9 +543,9 @@ final class StopControl {
       HarnessStore.Transaction tx, EntryPath path, Instant now) {
     List<Entry> suffix = HistoryNormalization.suffix(path, tx::nextId, now);
     for (Entry entry : suffix) {
-      tx.insertEntry(entry);
+      tx.entries().insert(entry);
     }
-    return tx.loadEntryPath(suffix.getLast().id());
+    return tx.entries().loadPath(suffix.getLast().id());
   }
 
   /**
@@ -568,20 +571,22 @@ final class StopControl {
       long inputThroughSequence) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnStartId,
-            sessionId,
-            path.head().id(),
-            new TurnStartPayload(TurnStartReason.STOP, path.baseSettings(), thread.id()),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnStartId,
+                sessionId,
+                path.head().id(),
+                new TurnStartPayload(TurnStartReason.STOP, path.baseSettings(), thread.id()),
+                now));
     UUID barrierId = insertCancelBarrier(tx, sessionId, turnStartId, now);
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
     ThreadState stopped = advanceStopped(thread, turnEndId, inputThroughSequence, now);
-    tx.updateThread(stopped);
+    tx.threads().update(stopped);
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -589,14 +594,15 @@ final class StopControl {
   private static UUID insertCancelBarrier(
       HarnessStore.Transaction tx, UUID sessionId, UUID parentId, Instant now) {
     UUID barrierId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            barrierId,
-            sessionId,
-            parentId,
-            new AssistantErrorPayload(
-                new AssistantError(AssistantError.CANCELLED_CODE, CANCELLED_MESSAGE), null),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                barrierId,
+                sessionId,
+                parentId,
+                new AssistantErrorPayload(
+                    new AssistantError(AssistantError.CANCELLED_CODE, CANCELLED_MESSAGE), null),
+                now));
     return barrierId;
   }
 
@@ -611,7 +617,7 @@ final class StopControl {
       return thread;
     }
     ThreadState stopped = advanceStopped(thread, thread.headEntryId(), now);
-    tx.updateThread(stopped);
+    tx.threads().update(stopped);
     return stopped;
   }
 
@@ -627,23 +633,30 @@ final class StopControl {
       Instant now) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnStartId, sessionId, path.head().id(), continuationBarrierStart(path, thread), now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnStartId,
+                sessionId,
+                path.head().id(),
+                continuationBarrierStart(path, thread),
+                now));
     UUID barrierId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            barrierId,
-            sessionId,
-            turnStartId,
-            new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                barrierId,
+                sessionId,
+                turnStartId,
+                new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null),
+                now));
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
-    tx.updateThread(stopped);
+    tx.threads().update(stopped);
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -719,15 +732,16 @@ final class StopControl {
       barrierId = path.head().id();
     }
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            path.root().sessionId(),
-            barrierId,
-            stoppedTurnEnd(turn.id(), stopRequestId),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId,
+                path.root().sessionId(),
+                barrierId,
+                stoppedTurnEnd(turn.id(), stopRequestId),
+                now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
-    tx.updateThread(stopped);
+    tx.threads().update(stopped);
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -757,16 +771,17 @@ final class StopControl {
       parentId = applied.headEntryId();
     }
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            path.root().sessionId(),
-            parentId,
-            stoppedTurnEnd(turnStartEntryId, stopRequestId),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId,
+                path.root().sessionId(),
+                parentId,
+                stoppedTurnEnd(turnStartEntryId, stopRequestId),
+                now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
-    tx.updateThread(stopped);
-    tx.deleteToolInvocationsByIds(active.siblings().stream().map(ToolInvocation::id).toList());
+    tx.threads().update(stopped);
+    tx.tools().deleteByIds(active.siblings().stream().map(ToolInvocation::id).toList());
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -831,7 +846,7 @@ final class StopControl {
     ThreadState advanced =
         thread.advanceHeadAndInputThroughSequence(
             materialized.headEntryId(), materialized.inputThroughSequence(), now);
-    tx.updateThread(advanced);
+    tx.threads().update(advanced);
     return advanced;
   }
 
@@ -846,23 +861,24 @@ final class StopControl {
     for (ThreadCommand command : notifications) {
       NotificationCommandPayload payload = (NotificationCommandPayload) command.payload();
       UUID entryId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              entryId,
-              thread.sessionId(),
-              head,
-              new NotificationPayload(
-                  payload.notificationId(),
-                  payload.kind(),
-                  payload.sourceThreadId(),
-                  payload.message()),
-              now));
+      tx.entries()
+          .insert(
+              new Entry(
+                  entryId,
+                  thread.sessionId(),
+                  head,
+                  new NotificationPayload(
+                      payload.notificationId(),
+                      payload.kind(),
+                      payload.sourceThreadId(),
+                      payload.message()),
+                  now));
       applied.add(command.markApplied(entryId));
       head = entryId;
       inputThroughSequence = Math.max(inputThroughSequence, command.sequence());
     }
     if (!applied.isEmpty()) {
-      tx.updateCommands(applied);
+      tx.commands().update(applied);
     }
     return new MaterializedNotifications(head, inputThroughSequence);
   }
@@ -878,7 +894,7 @@ final class StopControl {
       LockedDriverState driverState) {
     Instant mutationNow = tx.now();
     DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
-    ThreadState current = tx.findThread(thread.id()).orElseThrow();
+    ThreadState current = tx.threads().find(thread.id()).orElseThrow();
     ThreadState advanced;
     if (current.headEntryId().equals(applied.headEntryId())) {
       advanced = current;
@@ -888,7 +904,7 @@ final class StopControl {
             "driver changed the thread without applying its declared head");
       }
       advanced = thread.advanceHead(applied.headEntryId(), mutationNow);
-      tx.updateThread(advanced);
+      tx.threads().update(advanced);
     }
     return new Materialized(
         advanced, applied.terminal() ? applied.headEntryId() : null, applied.finalAnswerEntryId());
@@ -913,16 +929,17 @@ final class StopControl {
               .headEntryId();
     }
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            path.root().sessionId(),
-            parentId,
-            new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, true, null, null),
-            mutationNow));
-    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId,
+                path.root().sessionId(),
+                parentId,
+                new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, true, null, null),
+                mutationNow));
+    tx.tools().deleteByIds(siblings.stream().map(ToolInvocation::id).toList());
     ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
-    tx.updateThread(advanced);
+    tx.threads().update(advanced);
     driver.completeToolBatch(tx, thread, path, driverState, siblings, commit(tx));
     return advanced;
   }
@@ -940,7 +957,7 @@ final class StopControl {
         || message.message().role() != AgentMessageRole.ASSISTANT) {
       return List.of();
     }
-    return tx.lockToolInvocationsByAssistantEntryId(semanticHead.id());
+    return tx.tools().lockByAssistantEntry(semanticHead.id());
   }
 
   private static DriverCommit commit(HarnessStore.Transaction tx) {
@@ -957,7 +974,7 @@ final class StopControl {
 
       @Override
       public void insertEntry(Entry entry) {
-        tx.insertEntry(entry);
+        tx.entries().insert(entry);
       }
     };
   }

@@ -59,7 +59,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   @BeforeEach
   void configureThreadWithoutProjectOwner() {
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
-    when(transaction.findThread(any())).thenReturn(Optional.empty());
+    when(transaction.threads().find(any())).thenReturn(Optional.empty());
     when(harnessStore.transaction(any()))
         .thenAnswer(
             invocation -> {

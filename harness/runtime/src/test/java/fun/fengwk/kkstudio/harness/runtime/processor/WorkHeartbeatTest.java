@@ -215,8 +215,8 @@ class WorkHeartbeatTest {
 
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.claimed.target().id()).orElseThrow();
-          tx.deleteWork(fixture.claimed.target());
+          tx.threads().lock(fixture.claimed.target().id()).orElseThrow();
+          tx.work().delete(fixture.claimed.target());
           return null;
         });
     Runnable beat = fixture.scheduler.periodicTasks.get(0);
@@ -531,7 +531,7 @@ class WorkHeartbeatTest {
 
   private static Instant leaseUntil(Fixture fixture) {
     return fixture.store.transaction(
-        tx -> tx.findWork(fixture.claimed.target()).orElseThrow().leaseUntil());
+        tx -> tx.work().find(fixture.claimed.target()).orElseThrow().leaseUntil());
   }
 
   /** 最小可控 fixture：一个 THREAD work claim（heartbeat 与 target 类型无关）。 */
@@ -548,34 +548,37 @@ class WorkHeartbeatTest {
                 UUID sessionId = tx.nextId();
                 UUID rootEntryId = tx.nextId();
                 UUID threadIdValue = tx.nextId();
-                tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-                tx.insertEntry(
-                    new Entry(
-                        rootEntryId,
-                        sessionId,
-                        null,
-                        new RootPayload(
-                            new BranchSettings("agent", ModelSelection.model("model", "v1"), null)),
-                        NOW));
-                tx.insertThread(
-                    new ThreadState(
-                        threadIdValue,
-                        sessionId,
-                        null,
-                        rootEntryId,
-                        HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                        "main",
-                        threadIdValue,
-                        false,
-                        SpawnTrigger.USER,
-                        ThreadConstraints.NONE,
-                        ThreadExecutionControl.RUNNABLE,
-                        0L,
-                        1,
-                        0,
-                        NOW,
-                        NOW));
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadIdValue));
+                tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+                tx.entries()
+                    .insert(
+                        new Entry(
+                            rootEntryId,
+                            sessionId,
+                            null,
+                            new RootPayload(
+                                new BranchSettings(
+                                    "agent", ModelSelection.model("model", "v1"), null)),
+                            NOW));
+                tx.threads()
+                    .insert(
+                        new ThreadState(
+                            threadIdValue,
+                            sessionId,
+                            null,
+                            rootEntryId,
+                            HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                            "main",
+                            threadIdValue,
+                            false,
+                            SpawnTrigger.USER,
+                            ThreadConstraints.NONE,
+                            ThreadExecutionControl.RUNNABLE,
+                            0L,
+                            1,
+                            0,
+                            NOW,
+                            NOW));
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadIdValue));
                 return threadIdValue;
               });
       // claim lease 剩余（60s - 15s = 15s）必须小于 leaseDuration（30s），beat 的 renew 才能真实成功
@@ -584,8 +587,9 @@ class WorkHeartbeatTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "token-" + threadId, Duration.ofSeconds(15)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, "token-" + threadId, Duration.ofSeconds(15)))
               .orElseThrow();
       this.heartbeat = new WorkHeartbeat(store, scheduler, Runnable::run, LEASE_CONFIG, () -> {});
     }

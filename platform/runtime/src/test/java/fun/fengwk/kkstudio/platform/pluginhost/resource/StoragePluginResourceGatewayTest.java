@@ -1364,7 +1364,7 @@ class StoragePluginResourceGatewayTest {
             invocation -> {
               Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
               HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              when(tx.findThread(threadId)).thenReturn(Optional.of(thread));
+              when(tx.threads().find(threadId)).thenReturn(Optional.of(thread));
               return callback.apply(tx);
             });
   }
@@ -1375,7 +1375,7 @@ class StoragePluginResourceGatewayTest {
             invocation -> {
               Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
               HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              when(tx.findThread(threadId)).thenReturn(Optional.empty());
+              when(tx.threads().find(threadId)).thenReturn(Optional.empty());
               return callback.apply(tx);
             });
   }
