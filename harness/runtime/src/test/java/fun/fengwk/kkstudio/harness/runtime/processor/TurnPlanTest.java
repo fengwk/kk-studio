@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.NOW;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.command;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.path;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.seedCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,13 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -38,7 +38,7 @@ class TurnPlanTest {
 
   @Test
   void validPlanIsAcceptedAndListsAreDefensivelyCopied() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath candidatePath = path(store, baseline.threadId());
     List<Entry> entries = candidatePath.entries();
@@ -67,13 +67,13 @@ class TurnPlanTest {
 
   @Test
   void hasDeferredUserMessagesDerivesFromPlannedMinusConsumed() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     UUID messageCommandId =
         seedCommand(
             store,
             baseline.threadId(),
-            new UserMessageCommandPayload(ThreadProcessorTestBase.userMessage("hi")));
+            new UserMessageCommandPayload(TurnPlanTestSupport.userMessage("hi")));
     ThreadCommand message = command(store, baseline.threadId(), messageCommandId);
     EntryPath candidatePath = path(store, baseline.threadId());
     // continuation 保留 message 命令（未消费）-> deferred wake。
@@ -147,7 +147,7 @@ class TurnPlanTest {
   /** 测试意图：STOP Turn 只由 StopControl 在其停止事务内完整写入，planner 对 STOP 必须 fail closed，绝不生成模型工作计划。 */
   @Test
   void stopReasonIsNeverPlannedByTheProcessor() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath sourcePath = path(store, baseline.threadId());
 
@@ -173,7 +173,7 @@ class TurnPlanTest {
   /** 测试意图：INPUT 计划把被消费的 CUSTOM_MESSAGE 冻结为 CORE CustomMessagePayload Entry，且不改写 settings 快照。 */
   @Test
   void consumedCustomMessageIsFrozenAsCoreCustomEntryWithoutChangingSettings() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath sourcePath = path(store, baseline.threadId());
     UUID key =
@@ -216,7 +216,7 @@ class TurnPlanTest {
 
   @Test
   void rejectsNonPositiveIdsAndNegativeCutoff() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath candidatePath = path(store, baseline.threadId());
     UUID threadId = baseline.threadId();
@@ -228,7 +228,7 @@ class TurnPlanTest {
 
   @Test
   void rejectsNullReferences() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath candidatePath = path(store, baseline.threadId());
     assertThrows(

@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.NOW;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.command;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.path;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanTestSupport.seedCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -22,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
@@ -44,7 +44,7 @@ class TurnPlanBuilderContributorStateTest {
       names = {"INPUT", "CONTINUATION"})
   void materializesContributorStatesInOrderWithoutConsumingContinuationInputs(
       TurnStartReason reason) {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     UUID threadId = seedBaseline(store).threadId();
     CustomEntryPayload opened = new CustomEntryPayload("project", "run", 1, "{\"active\":true}");
     CustomEntryPayload closed = new CustomEntryPayload("project", "run", 1, "{\"active\":false}");
@@ -103,7 +103,7 @@ class TurnPlanBuilderContributorStateTest {
 
   @Test
   void contributorStateAloneCannotStartAnInputTurn() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     UUID threadId = seedBaseline(store).threadId();
     UUID key =
         seedCommand(
