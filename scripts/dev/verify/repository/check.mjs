@@ -666,6 +666,7 @@ const packageDocumentedModules = {
   'harness/environment': 'docs/modules/harness-environment.md',
   'harness/model': 'docs/modules/harness-model.md',
   'harness/runtime': 'docs/modules/harness-runtime.md',
+  'harness/agent-builtin': 'docs/modules/harness-agent-builtin.md',
   'harness/infra': 'docs/modules/harness-infra.md',
 }
 

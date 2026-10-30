@@ -19,7 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p>仅用于验证退出边界日志只包含固定 phase 与异常简单类名；不修改 root logger、不复用静态日志实现、不触碰标准输出。
  */
-final class ExitLogCapture extends AppenderBase<ILoggingEvent> implements AutoCloseable {
+public final class ExitLogCapture extends AppenderBase<ILoggingEvent> implements AutoCloseable {
 
   private final Logger logger;
   private final Level previousLevel;
@@ -32,7 +32,7 @@ final class ExitLogCapture extends AppenderBase<ILoggingEvent> implements AutoCl
     this.previousAdditivity = previousAdditivity;
   }
 
-  static ExitLogCapture attach(Class<?> owner) {
+  public static ExitLogCapture attach(Class<?> owner) {
     Logger logger = (Logger) LoggerFactory.getLogger(owner);
     ExitLogCapture capture = new ExitLogCapture(logger, logger.getLevel(), logger.isAdditive());
     capture.setContext(logger.getLoggerContext());
@@ -49,7 +49,7 @@ final class ExitLogCapture extends AppenderBase<ILoggingEvent> implements AutoCl
   }
 
   /** 成功路径不应出现该退出边界的失败日志。 */
-  void assertNoFailure(String messageMarker) {
+  public void assertNoFailure(String messageMarker) {
     assertEquals(
         0,
         matching(messageMarker).size(),
@@ -57,7 +57,7 @@ final class ExitLogCapture extends AppenderBase<ILoggingEvent> implements AutoCl
   }
 
   /** 断言该边界恰有一条失败日志：固定 phase、异常简单类名、无 Throwable，且 formatted/raw 参数都不含 synthetic secret。 */
-  void assertSingleSafeFailure(
+  public void assertSingleSafeFailure(
       String messageMarker, String phase, Class<? extends Throwable> failureType, String secret) {
     List<ILoggingEvent> matched = matching(messageMarker);
     assertEquals(
