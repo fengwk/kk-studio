@@ -88,7 +88,7 @@ class PostgresqlAssistantErrorSettlementTest {
               tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
               ModelRequestSpec request = modelRequest();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -106,10 +106,10 @@ class PostgresqlAssistantErrorSettlementTest {
                           T2,
                           T2));
               // 与生产一致：dispatch 已开始、上游返回 HTTP 404，invocation 终结为 FAILED(INVALID_REQUEST)。
-              var model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.markRunning(T2));
-              model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.fail(error, T2));
+              var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+              model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.fail(error, T2));
               tx.work().request(target);
               return id;
             });
@@ -138,7 +138,8 @@ class PostgresqlAssistantErrorSettlementTest {
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claimed));
 
       assertFalse(resolved.get());
-      assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
+      assertTrue(
+          store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
       assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
       EntryPath path = loadPath(store, baseline.threadId());
       TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());

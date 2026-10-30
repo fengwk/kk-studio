@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,8 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -147,11 +146,11 @@ class ExecutionTreeLockRegressionTest {
     assertFalse(recordingStore.recordedOperations().isEmpty());
     assertEquals(
         List.of(
-            "lockThread",
+            "threads.lock",
             "lockModelInvocation",
-            "lockClaimedWork",
+            "work.lockClaimed",
             "updateModelInvocation",
-            "updateThread"),
+            "threads.update"),
         recordingStore.recordedOperations().get(0));
 
     recordingStore.clearLogs();
@@ -162,7 +161,7 @@ class ExecutionTreeLockRegressionTest {
             new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "invalid input")));
 
     ModelInvocation terminalModel =
-        store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).orElseThrow();
+        store.transaction(tx -> builtin(store, tx).findModelInvocation(invocationId)).orElseThrow();
     assertEquals(ModelInvocationStatus.FAILED, terminalModel.status());
 
     // commitTerminal 事务只锁本 Thread 的 Thread/Model/Work 并完成 Work
@@ -171,16 +170,16 @@ class ExecutionTreeLockRegressionTest {
     List<String> terminalTx = txLogs.get(txLogs.size() - 1);
     assertEquals(
         List.of(
-            "lockThread",
+            "threads.lock",
             "lockModelInvocation",
-            "requestWork",
-            "lockClaimedWork",
+            "work.request",
+            "work.lockClaimed",
             "updateModelInvocation",
-            "updateThread",
-            "completeWork"),
+            "threads.update",
+            "work.complete"),
         terminalTx);
     assertTrue(
-        txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+        txLogs.stream().flatMap(List::stream).noneMatch("threads.lockTree"::equals),
         "single-thread execution state commits must not take the tree lock");
   }
 
@@ -254,7 +253,7 @@ class ExecutionTreeLockRegressionTest {
     assertEquals(1, txLogs.size(), "exactly one checkpoint transaction");
     List<String> checkpointTx = txLogs.get(0);
     assertEquals(
-        List.of("lockModelInvocation", "lockClaimedWork", "updateModelInvocation"),
+        List.of("lockModelInvocation", "work.lockClaimed", "updateModelInvocation"),
         checkpointTx,
         "checkpoint must lock Model then Work only, with no tree lock");
   }
@@ -314,23 +313,23 @@ class ExecutionTreeLockRegressionTest {
       assertEquals(
           List.of(
               List.of(
-                  "lockThread",
-                  "lockToolInvocation",
-                  "lockClaimedWork",
-                  "updateToolInvocations",
-                  "updateThread"),
+                  "threads.lock",
+                  "tools.lock",
+                  "work.lockClaimed",
+                  "tools.update",
+                  "threads.update"),
               List.of(
-                  "lockThread",
-                  "lockToolInvocation",
-                  "requestWork",
-                  "lockClaimedWork",
-                  "updateToolInvocations",
-                  "updateThread",
-                  "completeWork"),
-              List.of("lockThread", "updateThread")),
+                  "threads.lock",
+                  "tools.lock",
+                  "work.request",
+                  "work.lockClaimed",
+                  "tools.update",
+                  "threads.update",
+                  "work.complete"),
+              List.of("threads.lock", "threads.update")),
           txLogs);
       assertTrue(
-          txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+          txLogs.stream().flatMap(List::stream).noneMatch("threads.lockTree"::equals),
           "a RUNNABLE execution without incomplete joins must confirm without tree locks");
     } finally {
       try {
@@ -385,25 +384,22 @@ class ExecutionTreeLockRegressionTest {
             List<String> ops = new ArrayList<>();
             recordedOperations.add(ops);
             HarnessStore.Transaction proxy =
-                (HarnessStore.Transaction)
-                    Proxy.newProxyInstance(
-                        HarnessStore.Transaction.class.getClassLoader(),
-                        new Class<?>[] {BuiltinStore.Transaction.class},
-                        (p, method, args) -> {
-                          String name = method.getName();
-                          if (name.startsWith("lock")
-                              || name.startsWith("request")
-                              || name.startsWith("update")
-                              || name.startsWith("complete")
-                              || name.startsWith("reschedule")) {
-                            ops.add(name);
-                          }
-                          try {
-                            return method.invoke(tx, args);
-                          } catch (InvocationTargetException e) {
-                            throw e.getCause();
-                          }
-                        });
+                wrap(
+                    tx,
+                    (call, next) -> {
+                      String name = call.operation();
+                      if (name.contains(".lock")
+                          || name.equals("threads.findAncestorChain")
+                          || name.equals("work.request")
+                          || name.equals("work.complete")
+                          || name.equals("work.reschedule")
+                          || name.equals("lockModelInvocation")
+                          || name.startsWith("update")
+                          || name.endsWith(".update")) {
+                        ops.add(name);
+                      }
+                      return next.invoke();
+                    });
             return callback.apply(proxy);
           });
     }

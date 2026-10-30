@@ -681,11 +681,14 @@ class PostgresqlJoinAcceptanceRollbackTest {
                         .loadPath(tx.threads().find(childThreadId).orElseThrow().headEntryId());
                 UUID turnStartId = path.openTurnStart().orElseThrow().id();
                 ModelInvocation found =
-                    builtin(tx).findModelInvocationByTurn(childThreadId, turnStartId).orElseThrow();
-                ModelInvocation model = builtin(tx).lockModelInvocation(found.id()).orElseThrow();
-                builtin(tx).updateModelInvocation(model.markRunning(T2));
-                model = builtin(tx).lockModelInvocation(found.id()).orElseThrow();
-                builtin(tx)
+                    builtin(store, tx)
+                        .findModelInvocationByTurn(childThreadId, turnStartId)
+                        .orElseThrow();
+                ModelInvocation model =
+                    builtin(store, tx).lockModelInvocation(found.id()).orElseThrow();
+                builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+                model = builtin(store, tx).lockModelInvocation(found.id()).orElseThrow();
+                builtin(store, tx)
                     .updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
                 tx.work().request(new WorkTarget(WorkTargetType.THREAD, childThreadId));
                 return found.id();

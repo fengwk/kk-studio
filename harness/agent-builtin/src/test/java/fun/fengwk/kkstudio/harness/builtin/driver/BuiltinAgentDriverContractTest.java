@@ -221,7 +221,7 @@ class BuiltinAgentDriverContractTest {
           tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.entries().insert(userEntry(requestHeadEntryId, sessionId, turnStartEntryId));
           tx.threads().insert(thread(threadId, sessionId, requestHeadEntryId, "owner"));
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   model(modelId, threadId, turnStartEntryId, requestHeadEntryId));
           return new Seed(
@@ -271,7 +271,7 @@ class BuiltinAgentDriverContractTest {
           tx.entries().insert(userEntry(firstUserEntryId, sessionId, firstTurnStartEntryId));
           ThreadState thread = thread(threadId, sessionId, firstUserEntryId, "two-turns");
           tx.threads().insert(thread);
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   model(modelId, threadId, firstTurnStartEntryId, firstUserEntryId));
           tx.entries().insert(assistantEntry(assistantEntryId, sessionId, firstUserEntryId));

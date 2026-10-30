@@ -118,7 +118,7 @@ class InMemoryHarnessStoreTransactionTest {
                                   userMessagePayload(),
                                   T2));
                       tx.threads().update(thread.advanceHead(inputEntryId, T2));
-                      builtin(tx)
+                      builtin(store, tx)
                           .insertModelInvocation(
                               modelInvocation(
                                   modelId,
@@ -135,7 +135,8 @@ class InMemoryHarnessStoreTransactionTest {
     assertSame(failure, thrown);
     assertTrue(store.<Boolean>transaction(tx -> tx.entries().find(inputEntryId).isEmpty()));
     assertTrue(
-        store.<Boolean>transaction(tx -> builtin(tx).findModelInvocation(modelId).isEmpty()));
+        store.<Boolean>transaction(
+            tx -> builtin(store, tx).findModelInvocation(modelId).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
             tx ->

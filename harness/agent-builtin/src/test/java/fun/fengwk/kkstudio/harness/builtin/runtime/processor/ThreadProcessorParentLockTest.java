@@ -108,23 +108,23 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
     List<List<String>> locked = recording.threadLockTransactions();
     assertEquals(1, locked.size(), "single rejection transaction locks the thread rows");
     List<String> ops = locked.getFirst();
-    assertEquals("lockTree:" + rootId, ops.get(0));
+    assertEquals("threads.lockTree:" + rootId, ops.get(0));
     assertFalse(
-        ops.stream().anyMatch(op -> op.startsWith("findAncestorChain")),
+        ops.stream().anyMatch(op -> op.startsWith("threads.findAncestorChain")),
         "processor must not walk the ancestor chain: " + ops);
     assertEquals(
         List.of(
-            "lockTree:" + rootId,
-            "lockSessionForKeyShare:" + parentSession,
-            "lockSessionForKeyShare:" + childSession,
-            "lockThread:" + childId,
-            "lockThread:" + parentId),
+            "threads.lockTree:" + rootId,
+            "sessions.lockForKeyShare:" + parentSession,
+            "sessions.lockForKeyShare:" + childSession,
+            "threads.lock:" + childId,
+            "threads.lock:" + parentId),
         ops.stream()
             .filter(
                 op ->
-                    op.startsWith("lockTree:")
-                        || op.startsWith("lockSessionForKeyShare:")
-                        || op.startsWith("lockThread:"))
+                    op.startsWith("threads.lockTree:")
+                        || op.startsWith("sessions.lockForKeyShare:")
+                        || op.startsWith("threads.lock:"))
             .toList());
 
     ThreadJoin join = fixture.store.transaction(tx -> tx.joins().find(joinId).orElseThrow());

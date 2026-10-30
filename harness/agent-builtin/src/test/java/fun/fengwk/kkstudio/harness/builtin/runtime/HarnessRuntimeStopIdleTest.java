@@ -8,6 +8,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -404,7 +405,8 @@ class HarnessRuntimeStopIdleTest {
     ThreadState ownerBefore =
         store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow());
     ModelInvocation ownerModel =
-        store.transaction(tx -> builtin(tx).findModelInvocation(owner.modelId()).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(owner.modelId()).orElseThrow());
     ToolInvocation ownerTool =
         store.transaction(tx -> tx.tools().find(owner.toolId()).orElseThrow());
     UUID sibling = HarnessRuntimeTestSupport.seedThreadAt(store, owner.assistantEntryId());
@@ -422,7 +424,8 @@ class HarnessRuntimeStopIdleTest {
         ownerBefore, store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow()));
     assertEquals(
         ownerModel,
-        store.transaction(tx -> builtin(tx).findModelInvocation(owner.modelId()).orElseThrow()));
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(owner.modelId()).orElseThrow()));
     assertEquals(ownerTool, store.transaction(tx -> tx.tools().find(owner.toolId()).orElseThrow()));
   }
 
@@ -456,8 +459,8 @@ class HarnessRuntimeStopIdleTest {
               UUID modelId = tx.nextId();
               ModelInvocation model =
                   HarnessRuntimeTestSupport.modelInvocation(modelId, owner.threadId(), id, id, T3);
-              builtin(tx).insertModelInvocation(model);
-              builtin(tx).updateModelInvocation(model.markRunning(T3));
+              builtin(store, tx).insertModelInvocation(model);
+              builtin(store, tx).updateModelInvocation(model.markRunning(T3));
               return id;
             });
     ThreadState ownerBefore =
@@ -465,7 +468,7 @@ class HarnessRuntimeStopIdleTest {
     ModelInvocation ownerModel =
         store.transaction(
             tx ->
-                builtin(tx)
+                builtin(store, tx)
                     .findModelInvocationByTurn(owner.threadId(), continuationId)
                     .orElseThrow());
     UUID sibling = HarnessRuntimeTestSupport.seedThreadAt(store, continuationId);
@@ -523,7 +526,8 @@ class HarnessRuntimeStopIdleTest {
         ownerBefore, store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow()));
     assertEquals(
         ownerModel,
-        store.transaction(tx -> builtin(tx).findModelInvocation(ownerModel.id()).orElseThrow()));
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(ownerModel.id()).orElseThrow()));
     assertEquals(continuationId, pathOf(owner.threadId()).head().id());
     StopResult replay = runtime.stop(command);
     assertTrue(replay.replayed());
@@ -579,16 +583,14 @@ class HarnessRuntimeStopIdleTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    if (transactionMethod.getName().equals("deleteWork")) {
-                                      throw new IllegalStateException("fenced delete failure");
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                if (call.operation().equals("work.delete")) {
+                                  throw new IllegalStateException("fenced delete failure");
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }

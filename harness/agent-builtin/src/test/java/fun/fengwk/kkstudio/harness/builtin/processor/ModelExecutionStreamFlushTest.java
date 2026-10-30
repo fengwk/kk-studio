@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -68,7 +69,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -637,7 +637,9 @@ class ModelExecutionStreamFlushTest {
             tx -> {
               tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
               ModelInvocation model =
-                  builtin(tx).lockModelInvocation(fixture.invocationId).orElseThrow();
+                  builtin(fixture.store.delegate(), tx)
+                      .lockModelInvocation(fixture.invocationId)
+                      .orElseThrow();
               ModelInvocationError error =
                   new ModelInvocationError(ProviderErrorKind.TRANSIENT, "superseded");
               model =
@@ -653,9 +655,9 @@ class ModelExecutionStreamFlushTest {
                           NOW,
                           NOW),
                       NOW);
-              builtin(tx).updateModelInvocation(model);
+              builtin(fixture.store.delegate(), tx).updateModelInvocation(model);
               model = model.markRunning(NOW);
-              builtin(tx).updateModelInvocation(model);
+              builtin(fixture.store.delegate(), tx).updateModelInvocation(model);
               return null;
             });
   }
@@ -949,7 +951,7 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation committedModel =
         store
             .delegate()
-            .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+            .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
             .orElseThrow();
     assertNotNull(committedModel.streamCheckpoint(), "checkpoint must be committed");
     assertEquals("sensitive content", committedModel.streamCheckpoint().text());
@@ -970,7 +972,7 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation finalModel =
         store
             .delegate()
-            .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+            .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
     assertNull(finalModel.streamCheckpoint(), "checkpoint must be withdrawn/cleared on FILTERED");
@@ -1028,7 +1030,7 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation finalModel =
         store
             .delegate()
-            .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+            .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
     assertNull(finalModel.streamCheckpoint(), "checkpoint must be null");
@@ -1079,7 +1081,7 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation finalModel =
         store
             .delegate()
-            .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+            .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.FAILED, finalModel.status());
     assertNotNull(finalModel.error());
@@ -1314,7 +1316,7 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation currentModel() {
       return store
           .delegate()
-          .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+          .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
           .orElseThrow();
     }
   }
@@ -1555,7 +1557,7 @@ class ModelExecutionStreamFlushTest {
         tx -> {
           tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -1758,37 +1760,24 @@ class ModelExecutionStreamFlushTest {
       return delegate.transaction(
           tx -> {
             HarnessStore.Transaction proxyTx =
-                (HarnessStore.Transaction)
-                    Proxy.newProxyInstance(
-                        HarnessStore.Transaction.class.getClassLoader(),
-                        new Class<?>[] {BuiltinStore.Transaction.class},
-                        (proxy, method, args) -> {
-                          if ("updateModelInvocation".equals(method.getName())) {
-                            if (threadRecord != null) {
-                              threadRecord.set(Thread.currentThread().getName());
-                            }
-                            modelInvocationUpdateCount.incrementAndGet();
-                            if (updateInvocationFailure != null) {
-                              throw updateInvocationFailure;
-                            }
-                          } else if ("lockModelInvocation".equals(method.getName())) {
-                            modelInvocationLockCount.incrementAndGet();
-                          } else if ("lockClaimedWork".equals(method.getName())) {
-                            claimedWorkLockCount.incrementAndGet();
-                          }
-                          try {
-                            return method.invoke(tx, args);
-                          } catch (InvocationTargetException ite) {
-                            Throwable cause = ite.getCause();
-                            if (cause instanceof RuntimeException re) {
-                              throw re;
-                            }
-                            if (cause instanceof Error err) {
-                              throw err;
-                            }
-                            throw ite;
-                          }
-                        });
+                wrap(
+                    tx,
+                    (call, next) -> {
+                      if ("updateModelInvocation".equals(call.operation())) {
+                        if (threadRecord != null) {
+                          threadRecord.set(Thread.currentThread().getName());
+                        }
+                        modelInvocationUpdateCount.incrementAndGet();
+                        if (updateInvocationFailure != null) {
+                          throw updateInvocationFailure;
+                        }
+                      } else if ("lockModelInvocation".equals(call.operation())) {
+                        modelInvocationLockCount.incrementAndGet();
+                      } else if ("work.lockClaimed".equals(call.operation())) {
+                        claimedWorkLockCount.incrementAndGet();
+                      }
+                      return next.invoke();
+                    });
             return callback.apply(proxyTx);
           });
     }

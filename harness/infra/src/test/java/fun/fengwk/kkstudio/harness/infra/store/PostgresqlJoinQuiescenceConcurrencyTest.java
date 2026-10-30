@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
@@ -309,7 +310,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
-  private static void insertSucceededModel(
+  private void insertSucceededModel(
       HarnessStore.Transaction tx, UUID threadId, UUID turnStart, UUID requestHead, Instant now) {
     ModelInvocation model =
         new ModelInvocation(
@@ -327,15 +328,15 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
             List.of(),
             now,
             now);
-    builtin(tx).insertModelInvocation(model);
+    builtin(store, tx).insertModelInvocation(model);
     succeedModel(tx, model, assistantResponse(), now);
   }
 
-  private static void succeedModel(
+  private void succeedModel(
       HarnessStore.Transaction tx, ModelInvocation model, ProviderResponse response, Instant now) {
     ModelInvocation running = model.markRunning(now);
-    builtin(tx).updateModelInvocation(running);
-    builtin(tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx).updateModelInvocation(running);
+    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
   }
 
   /** 不调用外部 Gateway，沿真实模型状态转换提交响应，再让 Processor 应用终态。 */
@@ -346,8 +347,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           UUID start =
               tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
-              builtin(tx).findModelInvocationByTurn(threadId, start).orElseThrow();
-          builtin(tx).lockModelInvocation(model.id());
+              builtin(store, tx).findModelInvocationByTurn(threadId, start).orElseThrow();
+          builtin(store, tx).lockModelInvocation(model.id());
           succeedModel(tx, model, assistantResponse(), now);
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
@@ -446,16 +447,14 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   (Function<HarnessStore.Transaction, Object>) args[0];
               return delegate.transaction(
                   tx -> {
-                    ((BuiltinStore) delegate).in(tx);
                     AtomicBoolean paused = new AtomicBoolean(false);
                     BuiltinStore.Transaction wrapped =
                         (BuiltinStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (txProxy, txMethod, txArgs) -> {
-                                  Object result = invokeUnwrapped(txMethod, tx, txArgs);
-                                  if (txMethod.getName().equals("updateJoin")
+                            wrap(
+                                ((BuiltinStore) delegate).in(tx),
+                                (call, next) -> {
+                                  Object result = next.invoke();
+                                  if ("joins.update".equals(call.operation())
                                       && paused.compareAndSet(false, true)) {
                                     matched.countDown();
                                     if (failInsteadOfBlock) {

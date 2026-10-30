@@ -17,21 +17,23 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Stop 回执聚合的 PostgreSQL 实现。 */
-final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements StopReceiptStore {
+final class PostgresqlStopReceiptStore implements StopReceiptStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
 
   PostgresqlStopReceiptStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public void insertReceipts(
       UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
     Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
-    requireLocked(LockKey.thread(rootThreadId));
+    tx.requireLocked(LockKey.thread(rootThreadId));
     List<StoppedThreadReceipt> copied = List.copyOf(receipts);
     if (copied.isEmpty()) {
       throw new IllegalArgumentException("stop receipts must not be empty");
@@ -39,7 +41,7 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
     Set<StopReceiptKey> keys = new HashSet<>();
     boolean rootReceiptPresent = false;
     for (StoppedThreadReceipt receipt : copied) {
-      requireLocked(LockKey.thread(receipt.threadId()));
+      tx.requireLocked(LockKey.thread(receipt.threadId()));
       if (!keys.add(new StopReceiptKey(receipt.threadId(), receipt.stopRequestId()))) {
         throw new IllegalArgumentException(
             "duplicate stop receipt " + receipt.threadId() + "/" + receipt.stopRequestId());
@@ -61,7 +63,7 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
           "stop receipt set must contain the root thread receipt " + rootThreadId);
     }
     for (StoppedThreadReceipt receipt : copied) {
-      updateJdbc(
+      tx.updateJdbc(
           """
           insert into harness_thread_stop_receipt (
               root_thread_id, thread_id, stop_request_id, root_stop_request_id,
@@ -99,7 +101,7 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
             .find(threadId)
             .orElseThrow(
                 () -> new IllegalArgumentException("thread " + threadId + " does not exist"));
-    Entry turnEnd = requireExistingEntry(stoppedTurnEndEntryId);
+    Entry turnEnd = tx.requireExistingEntry(stoppedTurnEndEntryId);
     if (!turnEnd.sessionId().equals(thread.sessionId())) {
       throw new IllegalArgumentException(
           "stopped turn end must be in the receipt thread's session");
@@ -109,7 +111,7 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
       throw new IllegalArgumentException(
           "stopped turn end must be a STOPPED TurnEnd entry: " + stoppedTurnEndEntryId);
     }
-    Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+    Entry turnStart = tx.requireExistingEntry(end.turnStartEntryId());
     if (!(turnStart.payload() instanceof TurnStartPayload start)
         || !threadId.equals(start.ownerThreadId())) {
       throw new IllegalArgumentException(
@@ -119,10 +121,10 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
 
   @Override
   public Optional<StoppedThreadReceipt> findReceipt(UUID threadId, UUID stopRequestId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(stopRequestId, "stopRequestId");
-    return queryOne(
+    return tx.queryOne(
         """
         select * from harness_thread_stop_receipt
         where thread_id = ? and stop_request_id = ?
@@ -134,9 +136,9 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
 
   @Override
   public List<StoppedThreadReceipt> loadByThread(UUID threadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    return queryList(
+    return tx.queryList(
         """
         select * from harness_thread_stop_receipt
         where thread_id = ?
@@ -148,10 +150,10 @@ final class PostgresqlStopReceiptStore extends PostgresqlHarnessView implements 
 
   @Override
   public List<StoppedThreadReceipt> loadByRootRequest(UUID rootThreadId, UUID rootStopRequestId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
     Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
-    return queryList(
+    return tx.queryList(
         """
         select * from harness_thread_stop_receipt
         where root_thread_id = ? and root_stop_request_id = ?
