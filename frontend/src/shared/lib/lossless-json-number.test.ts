@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   canonicalJsonNumber,
   parseJsonPreservingPathEqualsNumbers,
-  stringifyJsonPreservingNumbers,
   supportsLosslessJsonNumbers,
   wireJsonNumber,
 } from '@/shared/lib/lossless-json-number'
@@ -41,22 +40,14 @@ describe('lossless-json-number', () => {
       .toBe('{"equals":9007199254740993}')
   })
 
-  it('serializes cloned raw-number markers and internal sentinels as JSON numbers', () => {
-    expect(stringifyJsonPreservingNumbers({
-      path: '/n',
-      equals: { rawJson: '9007199254740993' },
-      native: { rawJSON: '2.500' },
-      escaped: 'a\n"b',
-    })).toBe(
-      '{"path":"/n","equals":9007199254740993,"native":2.5,"escaped":"a\\n\\"b"}',
-    )
-    expect(() => stringifyJsonPreservingNumbers({
-      self: (() => {
-        const value: Record<string, unknown> = {}
-        value.self = value
-        return value
-      })(),
-    })).toThrow(/circular/)
+  it('leaves non-requestBody objects and existing raw markers unchanged', () => {
+    expect(parseJsonPreservingPathEqualsNumbers(
+      '{"plain":{"path":"/x","equals":2},"rawJson":{"rawJson":"2"},"rawJSON":{"rawJSON":"2"}}',
+    )).toEqual({
+      plain: { path: '/x', equals: 2 },
+      rawJson: { rawJson: '2' },
+      rawJSON: { rawJSON: '2' },
+    })
   })
 
   it('explicitly rejects number conditions when JSON.parse source access is unavailable', () => {

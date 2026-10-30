@@ -41,8 +41,14 @@ describe('apiClient', () => {
     expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: '/api', timeout: 60000 })
     await apiClient.post('/git', {}, { timeout: 0 })
     await apiClient.put('/git', {}, { timeout: 0 })
-    expect(axiosMock.client.post).toHaveBeenCalledWith('/git', {}, { timeout: 0 })
-    expect(axiosMock.client.put).toHaveBeenCalledWith('/git', {}, { timeout: 0 })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/git', '{}', {
+      timeout: 0,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    expect(axiosMock.client.put).toHaveBeenCalledWith('/git', '{}', {
+      timeout: 0,
+      headers: { 'Content-Type': 'application/json' },
+    })
   })
   it('adds the current locale to every request', () => {
     const [withLocale] = axiosMock.client.interceptors.request.use.mock.calls[0]
@@ -140,8 +146,12 @@ describe('apiClient', () => {
     await expect(apiClient.delete('/agents/default-assistant')).resolves.toBeUndefined()
 
     expect(axiosMock.client.get).toHaveBeenCalledWith('/agents', { params: { pageNumber: 1 } })
-    expect(axiosMock.client.post).toHaveBeenCalledWith('/ai/chat', { agentName: 'assistant' })
-    expect(axiosMock.client.put).toHaveBeenCalledWith('/agents/default-assistant', { name: 'Default' })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/ai/chat', '{"agentName":"assistant"}', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    expect(axiosMock.client.put).toHaveBeenCalledWith('/agents/default-assistant', '{"name":"Default"}', {
+      headers: { 'Content-Type': 'application/json' },
+    })
     expect(axiosMock.client.delete).toHaveBeenCalledWith('/agents/default-assistant')
   })
 })

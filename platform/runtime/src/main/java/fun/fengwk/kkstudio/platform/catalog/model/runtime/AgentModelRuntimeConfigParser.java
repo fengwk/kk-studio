@@ -503,8 +503,8 @@ public final class AgentModelRuntimeConfigParser {
       return ModelPricingCondition.RequestBody.stringValue(pathValue, equals.stringValue());
     }
     if (equals.isNumber()) {
-      return ModelPricingCondition.RequestBody.numberValue(
-          pathValue, equals.decimalValue().toPlainString());
+      // 保留指数文本交给 RequestBody 先检查 precision/scale，避免展开巨大指数后才失败。
+      return ModelPricingCondition.RequestBody.numberValue(pathValue, equals.toString());
     }
     if (equals.isBoolean()) {
       return ModelPricingCondition.RequestBody.booleanValue(pathValue, equals.booleanValue());

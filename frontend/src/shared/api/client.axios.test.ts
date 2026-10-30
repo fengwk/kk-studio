@@ -3,7 +3,7 @@ import type { AxiosAdapter } from 'axios'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
-import { wireJsonNumber } from '@/shared/lib/lossless-json-number'
+import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 
 const adapter = vi.fn<AxiosAdapter>()
 let apiClient: HttpClient
@@ -73,33 +73,53 @@ describe('apiClient with real axios', () => {
     expect(config.headers.get('Content-Type')).toBe('application/json')
   })
 
-  it('preserves exact request-body numbers from GET parsing through PUT serialization', async () => {
+  it('leaves ordinary path/equals and raw marker objects unchanged when lossless parsing is opted in', async () => {
     adapter.mockImplementation(async (config) => ({
       config,
       status: 200,
       statusText: 'OK',
       headers: new AxiosHeaders(),
-      // 直接构造 JSON 原文：先经 JSON.stringify(number) 就已经丢精度，不能再验证读取链路。
-      data: '{"status":200,"data":{"config":{"pricing":{"overrides":['
-        + '{"when":{"requestBody":{"path":"/n","equals":9007199254740993}}}'
-        + ']}}}}',
+      data: JSON.stringify({
+        status: 200,
+        data: {
+          plain: { path: '/x', equals: 2 },
+          rawJson: { rawJson: '2' },
+          rawJSON: { rawJSON: '2' },
+        },
+      }),
     }))
 
-    const response = await apiClient.get<{
-      config: { pricing: { overrides: Array<{ when: { requestBody: { equals: unknown } } }> } }
-    }>('/models/example')
-    const exact = response.config.pricing.overrides[0].when.requestBody.equals
-    expect(exact).toEqual({ rawJson: '9007199254740993' })
-
-    const raw = wireJsonNumber(exact as { rawJson: string }, 'equals')
-    expect(JSON.stringify({ equals: raw })).toBe('{"equals":9007199254740993}')
-    await apiClient.put('/models/example', {
-      expectedVersion: '1',
-      equals: raw,
+    await expect(apiClient.get('/catalog', {
+      jsonParser: parseJsonPreservingPathEqualsNumbers,
+    })).resolves.toEqual({
+      plain: { path: '/x', equals: 2 },
+      rawJson: { rawJson: '2' },
+      rawJSON: { rawJSON: '2' },
     })
-    expect(adapter.mock.calls[1][0].data).toBe(
-      '{"expectedVersion":"1","equals":9007199254740993}',
-    )
+  })
+
+  it('rejects a numeric requestBody when JSON.parse source access is unavailable', async () => {
+    adapter.mockImplementation(async (config) => ({
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: new AxiosHeaders(),
+      data: '{"status":200,"data":{"requestBody":{"path":"/n","equals":2}}}',
+    }))
+    const original = JSON.parse
+    const spy = vi.spyOn(JSON, 'parse').mockImplementation(((
+      input: string,
+      reviver?: (this: unknown, key: string, value: unknown) => unknown,
+    ) => original(input, function (this: unknown, key: string, value: unknown) {
+      return reviver ? reviver.call(this, key, value) : value
+    })) as typeof JSON.parse)
+    try {
+      await expect(apiClient.get('/models/example', {
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      })).rejects.toThrow(/source text access/)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('transforms HTTP error bodies before normalizing backend error context', async () => {
