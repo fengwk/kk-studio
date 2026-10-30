@@ -34,6 +34,7 @@ public class IssueStageBudgetService {
   private final IssueRunRepository issueRunRepository;
   private final IssueMutationSupport mutationSupport;
 
+  /** 首次自动执行接受时授权阶段额度（工作阶段必须是启用且有 Agent 的阶段）。 */
   @Transactional
   public StageBudgetView authorizeStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
@@ -80,6 +81,7 @@ public class IssueStageBudgetService {
     return view(budget);
   }
 
+  /** 重置阶段额度：高水位取服务端当前 {@code nextRunOrdinal - 1}，不得回退而重新授权历史 Run。 */
   @Transactional
   public StageBudgetView resetStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {

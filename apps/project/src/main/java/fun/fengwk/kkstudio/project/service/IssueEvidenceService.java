@@ -49,7 +49,8 @@ public class IssueEvidenceService {
     Objects.requireNonNull(issueId, "issueId");
     Objects.requireNonNull(uploadId, "uploadId");
 
-    // 与 IssueService/RunService 统一的锁序：Project FOR KEY SHARE -> Issue FOR UPDATE。Issue 行锁同时保证事实流游标
+    // 与 Issue 编辑/生命周期用例及 RunService 统一的锁序：Project FOR KEY SHARE -> Issue FOR UPDATE。Issue
+    // 行锁同时保证事实流游标
     // （next_activity_sequence）在并发发布下单调且只推进一次。
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
