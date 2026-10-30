@@ -10,7 +10,6 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -77,8 +76,6 @@ public final class AgentModelRuntimeConfigParser {
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            // equals 的 JSON number 必须保留十进制原文精度，不能先变 double。
-            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .withCoercionConfig(
                 LogicalType.Integer,
                 config ->

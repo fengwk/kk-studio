@@ -42,6 +42,20 @@ class ModelRequestBodyPricingTest {
     assertVector(RequestBody.stringValue("/n", "x"), "{\"n\":{}}", false);
   }
 
+  /** 真实 Jackson3 body 解析下，长小数与大整数的 actual 值必须精确比较且邻值不相等。 */
+  @Test
+  void comparesActualLongDecimalAndBigIntegerExactly() {
+    RequestBody decimal = RequestBody.numberValue("/n", "0.123456789012345678");
+    assertVector(decimal, "{\"n\":0.123456789012345678}", true);
+    assertVector(decimal, "{\"n\":0.123456789012345679}", false);
+    assertVector(decimal, "{\"n\":0.1234567890123456780}", true);
+
+    RequestBody bigInteger = RequestBody.numberValue("/n", "9007199254740993");
+    assertVector(bigInteger, "{\"n\":9007199254740993}", true);
+    assertVector(bigInteger, "{\"n\":9007199254740992}", false);
+    assertVector(bigInteger, "{\"n\":9007199254740994}", false);
+  }
+
   /** 指纹只由 path/type/规范值决定；rule ID、价格与重复规则不改变身份。 */
   @Test
   void fingerprintIgnoresRuleIdentityAndRates() {
