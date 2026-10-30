@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.store;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +27,15 @@ public interface EntryStore {
 
   /** 从 head Entry 向上回溯并返回 root-to-head 的不可变路径；head 不存在抛 {@link IllegalArgumentException}。 */
   EntryPath loadPath(UUID headEntryId);
+
+  /**
+   * 读取 head 相对游标的增量链。
+   *
+   * <p>{@code afterEntryId} 可为 null。命中当前祖先时 {@code baseEntryId} 等于游标且不含游标本身，游标即 head
+   * 时列表为空。游标不是该祖先、属于另一 Session 或未知时返回完整链且 {@code baseEntryId} 为 null。head 缺失沿 {@link
+   * #loadPath(UUID)} 抛 {@link IllegalArgumentException}。
+   */
+  EntrySlice loadSlice(UUID headEntryId, UUID afterEntryId);
 
   /** 读取祖先链上指定 contributor 的 Custom Entry，保持 root-to-head 顺序。 */
   List<Entry> loadContributorCustom(UUID headEntryId, String contributorId);
