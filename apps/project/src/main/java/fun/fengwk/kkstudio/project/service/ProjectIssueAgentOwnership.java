@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.service.impl;
+package fun.fengwk.kkstudio.project.service;
 
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;

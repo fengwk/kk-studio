@@ -20,9 +20,11 @@ import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.project.service.IssueService;
-import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
+import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
@@ -61,7 +63,9 @@ public class StudioIssueController {
   private static final int DEFAULT_ACTIVITY_LIMIT = 50;
   private static final int MAX_ACTIVITY_LIMIT = 200;
 
-  private final IssueService issueService;
+  private final IssueEditingService issueEditingService;
+  private final IssueLifecycleService issueLifecycleService;
+  private final IssueStageBudgetService issueStageBudgetService;
   private final IssueEvidenceService issueEvidenceService;
   private final ProjectDtoMapper mapper;
   private final IssueActivityRepository issueActivityRepository;
@@ -69,12 +73,18 @@ public class StudioIssueController {
 
   @Autowired
   public StudioIssueController(
-      IssueService issueService,
+      IssueEditingService issueEditingService,
+      IssueLifecycleService issueLifecycleService,
+      IssueStageBudgetService issueStageBudgetService,
       IssueEvidenceService issueEvidenceService,
       ProjectDtoMapper mapper,
       IssueActivityRepository issueActivityRepository,
       IssueDetailAssembler issueDetailAssembler) {
-    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueEditingService = Objects.requireNonNull(issueEditingService, "issueEditingService");
+    this.issueLifecycleService =
+        Objects.requireNonNull(issueLifecycleService, "issueLifecycleService");
+    this.issueStageBudgetService =
+        Objects.requireNonNull(issueStageBudgetService, "issueStageBudgetService");
     this.issueEvidenceService =
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
@@ -89,7 +99,7 @@ public class StudioIssueController {
     Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     Issue created =
-        issueService.createIssue(projectId, request.getTitle(), request.getDescription());
+        issueEditingService.createIssue(projectId, request.getTitle(), request.getDescription());
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -114,9 +124,9 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
-    issueService.getIssue(issueId);
+    issueEditingService.getIssue(issueId);
     List<IssueActivity> activities =
-        issueService.listActivities(issueId, afterSequence, activityLimit);
+        issueEditingService.listActivities(issueId, afterSequence, activityLimit);
     return Results.ok(activities.stream().map(mapper::toDto).toList());
   }
 
@@ -128,7 +138,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
-        issueService.updateIssue(
+        issueEditingService.updateIssue(
             issueId, expectedVersion, request.getTitle(), request.getDescription());
     return Results.ok(mapper.toDto(updated));
   }
@@ -141,7 +151,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
-        issueService.transition(
+        issueLifecycleService.transition(
             issueId, expectedVersion, request.getRequestKey(), request.getToState());
     return Results.ok(mapper.toDto(updated));
   }
@@ -154,7 +164,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue blocked =
-        issueService.blockIssue(
+        issueLifecycleService.blockIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getReason());
     return Results.ok(mapper.toDto(blocked));
   }
@@ -166,7 +176,8 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue recovered = issueService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
+    Issue recovered =
+        issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
     return Results.ok(mapper.toDto(recovered));
   }
 
@@ -179,7 +190,7 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     PauseReason reason = parseEnum(request.getReason(), PauseReason.class, "reason");
     Issue paused =
-        issueService.pauseIssue(
+        issueLifecycleService.pauseIssue(
             issueId, expectedVersion, request.getRequestKey(), reason, request.getDetail());
     return Results.ok(mapper.toDto(paused));
   }
@@ -191,7 +202,8 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue resumed = issueService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
+    Issue resumed =
+        issueLifecycleService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
     return Results.ok(mapper.toDto(resumed));
   }
 
@@ -203,7 +215,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue stopped =
-        issueService.stopIssue(
+        issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
     return Results.ok(mapper.toDto(stopped));
   }
@@ -217,7 +229,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue resolved =
-        issueService.resolveUnknown(
+        issueLifecycleService.resolveUnknown(
             issueId, expectedVersion, request.getRequestKey(), request.getVerification());
     return Results.ok(mapper.toDto(resolved));
   }
@@ -229,7 +241,7 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
-    issueService.deleteIssue(issueId, expectedVersion);
+    issueLifecycleService.deleteIssue(issueId, expectedVersion);
     return ResponseEntity.noContent().build();
   }
 
@@ -240,7 +252,8 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue reopened = issueService.reopen(issueId, expectedVersion, request.getRequestKey());
+    Issue reopened =
+        issueLifecycleService.reopen(issueId, expectedVersion, request.getRequestKey());
     return Results.ok(mapper.toDto(reopened));
   }
 
@@ -255,7 +268,7 @@ public class StudioIssueController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     StageBudgetView view =
-        issueService.resetStageBudget(
+        issueStageBudgetService.resetStageBudget(
             issueId,
             expectedVersion,
             request.getRequestKey(),
@@ -271,7 +284,7 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue archived = issueService.archiveIssue(issueId, expectedVersion);
+    Issue archived = issueLifecycleService.archiveIssue(issueId, expectedVersion);
     return Results.ok(mapper.toDto(archived));
   }
 
@@ -282,7 +295,7 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue unarchived = issueService.unarchiveIssue(issueId, expectedVersion);
+    Issue unarchived = issueLifecycleService.unarchiveIssue(issueId, expectedVersion);
     return Results.ok(mapper.toDto(unarchived));
   }
 
@@ -299,10 +312,10 @@ public class StudioIssueController {
     }
     String kind = request.getKind();
     if ("INSTRUCTION".equalsIgnoreCase(kind)) {
-      issueService.appendInstruction(
+      issueEditingService.appendInstruction(
           issueId, expectedVersion, request.getRequestKey(), request.getBody());
     } else if (kind == null || kind.isBlank() || "COMMENT".equalsIgnoreCase(kind)) {
-      issueService.appendComment(
+      issueEditingService.appendComment(
           issueId, expectedVersion, request.getRequestKey(), request.getBody());
     } else {
       throw new IllegalArgumentException("kind is invalid");
@@ -316,7 +329,8 @@ public class StudioIssueController {
       activity = issueActivityRepository.findByIdempotencyKey(issueId, activityKey);
     }
     if (activity == null) {
-      List<IssueActivity> recent = issueService.listActivities(issueId, 0, MAX_ACTIVITY_LIMIT);
+      List<IssueActivity> recent =
+          issueEditingService.listActivities(issueId, 0, MAX_ACTIVITY_LIMIT);
       for (IssueActivity a : recent) {
         if (Objects.equals(activityKey, a.getIdempotencyKey())) {
           activity = a;
@@ -334,7 +348,7 @@ public class StudioIssueController {
   @GetMapping("/api/issues/{issueId}/evidence")
   public Result<List<IssueEvidenceDTO>> listEvidence(@PathVariable("issueId") String issueIdStr) {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    issueService.getIssue(issueId);
+    issueEditingService.getIssue(issueId);
     return Results.ok(
         issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
   }

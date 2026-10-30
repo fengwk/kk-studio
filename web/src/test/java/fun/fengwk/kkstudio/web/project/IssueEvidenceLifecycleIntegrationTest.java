@@ -39,9 +39,10 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
@@ -84,7 +85,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MockMvc mockMvc;
   @Autowired private ProjectService projectService;
-  @Autowired private IssueService issueService;
+  @Autowired private IssueEditingService issueEditingService;
+  @Autowired private IssueLifecycleService issueLifecycleService;
   @Autowired private IssueEvidenceService issueEvidenceService;
   @Autowired private IssueRunService issueRunService;
   @Autowired private PlatformTransactionManager transactionManager;
@@ -109,7 +111,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
   void appendInstructionReturnsPersistedActivityAndReplaysWithoutDuplicate() throws Exception {
     Fixture fixture = createIssue(createTestAgent());
     IssueRun run = issueRunService.acceptRun(fixture.issueId(), "req:accept:" + UUID.randomUUID());
-    Issue issue = issueService.getIssue(fixture.issueId());
+    Issue issue = issueEditingService.getIssue(fixture.issueId());
     String requestKey = "instruction-" + UUID.randomUUID();
     String body =
         "{\"expectedVersion\":\""
@@ -137,7 +139,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             Long.class,
             fixture.issueId(),
             "instruction:" + requestKey));
-    assertEquals(issue.getVersion() + 1, issueService.getIssue(fixture.issueId()).getVersion());
+    assertEquals(
+        issue.getVersion() + 1, issueEditingService.getIssue(fixture.issueId()).getVersion());
 
     String commentKey = "comment-" + UUID.randomUUID();
     mockMvc
@@ -203,8 +206,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     UUID blobId = publishHumanEvidence(fixture.issueId(), "issue-evidence.txt");
     assertEquals(1L, support.refCount(blobId));
 
-    Issue issue = issueService.getIssue(fixture.issueId());
-    issueService.deleteIssue(issue.getId(), issue.getVersion());
+    Issue issue = issueEditingService.getIssue(fixture.issueId());
+    issueLifecycleService.deleteIssue(issue.getId(), issue.getVersion());
 
     assertEquals(0, support.count("project_issue_evidence", "issue_id", fixture.issueId()));
     assertEquals(0, support.count("project_issue", "id", fixture.issueId()));
@@ -268,8 +271,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
                 fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
 
     // 人工核查后解除 UNKNOWN
-    Issue unkIssue = issueService.getIssue(fixture.issueId());
-    issueService.resolveUnknown(
+    Issue unkIssue = issueEditingService.getIssue(fixture.issueId());
+    issueLifecycleService.resolveUnknown(
         unkIssue.getId(),
         unkIssue.getVersion(),
         "req:res:" + UUID.randomUUID(),
@@ -354,8 +357,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             + "]}";
     Project project = projectService.createProject("Evidence Project", "Desc", false);
     projectService.updateWorkflow(project.getId(), project.getVersion(), workflowJson);
-    Issue issue = issueService.createIssue(project.getId(), "Evidence Task", "Desc");
-    issueService.transition(
+    Issue issue = issueEditingService.createIssue(project.getId(), "Evidence Task", "Desc");
+    issueLifecycleService.transition(
         issue.getId(), issue.getVersion(), "req:trans:" + UUID.randomUUID(), "DESIGN");
     return new Fixture(project.getId(), issue.getId(), executor);
   }

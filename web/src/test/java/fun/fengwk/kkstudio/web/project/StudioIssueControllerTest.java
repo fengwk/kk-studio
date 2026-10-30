@@ -33,11 +33,13 @@ import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
-import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
@@ -63,7 +65,9 @@ import java.util.UUID;
 /** 验证 StudioIssueController 的全部 15 个 REST 接口端点与 CAS 409 处理。 */
 class StudioIssueControllerTest {
 
-  private IssueService issueService;
+  private IssueEditingService issueEditingService;
+  private IssueLifecycleService issueLifecycleService;
+  private IssueStageBudgetService issueStageBudgetService;
   private IssueRunService issueRunService;
   private IssueEvidenceService issueEvidenceService;
   private ProjectService projectService;
@@ -78,7 +82,9 @@ class StudioIssueControllerTest {
 
   @BeforeEach
   void setUp() {
-    issueService = mock(IssueService.class);
+    issueEditingService = mock(IssueEditingService.class);
+    issueLifecycleService = mock(IssueLifecycleService.class);
+    issueStageBudgetService = mock(IssueStageBudgetService.class);
     issueRunService = mock(IssueRunService.class);
     issueEvidenceService = mock(IssueEvidenceService.class);
     projectService = mock(ProjectService.class);
@@ -87,14 +93,17 @@ class StudioIssueControllerTest {
     // ProjectDtoMapper 的依赖在测试 fixture 显式提供，与生产注入同一 Jackson 3 mapper 实例。
     IssueDetailAssembler issueDetailAssembler =
         new IssueDetailAssembler(
-            issueService,
+            issueEditingService,
+            issueStageBudgetService,
             issueRunService,
             projectService,
             new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
             codec);
     StudioIssueController controller =
         new StudioIssueController(
-            issueService,
+            issueEditingService,
+            issueLifecycleService,
+            issueStageBudgetService,
             issueEvidenceService,
             new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
             issueActivityRepository,
@@ -121,7 +130,7 @@ class StudioIssueControllerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.createIssue(projectId, "Task", "Desc")).thenReturn(created);
+    when(issueEditingService.createIssue(projectId, "Task", "Desc")).thenReturn(created);
 
     CreateIssueRequestDTO req =
         CreateIssueRequestDTO.builder().title("Task").description("Desc").build();
@@ -150,10 +159,10 @@ class StudioIssueControllerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.getIssue(issueId)).thenReturn(issue);
-    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
+    when(issueEditingService.getIssue(issueId)).thenReturn(issue);
+    when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
     UUID threadId = UUID.randomUUID();
-    when(issueService.listAgentThreads(issueId))
+    when(issueEditingService.listAgentThreads(issueId))
         .thenReturn(List.of(new IssueAgentThread(issueId, "coder", threadId)));
 
     IssueRun run =
@@ -191,9 +200,9 @@ class StudioIssueControllerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.getIssue(issueId)).thenReturn(issue);
-    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
-    when(issueService.listAgentThreads(issueId)).thenReturn(List.of());
+    when(issueEditingService.getIssue(issueId)).thenReturn(issue);
+    when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
+    when(issueEditingService.listAgentThreads(issueId)).thenReturn(List.of());
     when(issueRunService.listRuns(issueId)).thenReturn(List.of());
 
     mockMvc
@@ -216,7 +225,7 @@ class StudioIssueControllerTest {
             .body("Hello")
             .createdAt(now)
             .build();
-    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of(act));
+    when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of(act));
 
     mockMvc
         .perform(get("/api/issues/" + issueId + "/activities"))
@@ -235,7 +244,7 @@ class StudioIssueControllerTest {
             .build();
     Issue updated =
         Issue.builder().id(issueId).version(2L).title("New Title").description("New Desc").build();
-    when(issueService.updateIssue(issueId, 1L, "New Title", "New Desc")).thenReturn(updated);
+    when(issueEditingService.updateIssue(issueId, 1L, "New Title", "New Desc")).thenReturn(updated);
 
     mockMvc
         .perform(
@@ -256,7 +265,7 @@ class StudioIssueControllerTest {
             .toState("DONE")
             .build();
     Issue updated = Issue.builder().id(issueId).version(2L).state("DONE").build();
-    when(issueService.transition(issueId, 1L, "k1", "DONE")).thenReturn(updated);
+    when(issueLifecycleService.transition(issueId, 1L, "k1", "DONE")).thenReturn(updated);
 
     mockMvc
         .perform(
@@ -283,7 +292,7 @@ class StudioIssueControllerTest {
             .blockedFromState("WORK")
             .blockReason("need review")
             .build();
-    when(issueService.blockIssue(issueId, 1L, "k1", "need review")).thenReturn(blocked);
+    when(issueLifecycleService.blockIssue(issueId, 1L, "k1", "need review")).thenReturn(blocked);
 
     mockMvc
         .perform(
@@ -300,7 +309,7 @@ class StudioIssueControllerTest {
     RecoverIssueRequestDTO req =
         RecoverIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
     Issue recovered = Issue.builder().id(issueId).version(2L).state("WORK").build();
-    when(issueService.recoverIssue(issueId, 1L, "k1")).thenReturn(recovered);
+    when(issueLifecycleService.recoverIssue(issueId, 1L, "k1")).thenReturn(recovered);
 
     mockMvc
         .perform(
@@ -327,7 +336,7 @@ class StudioIssueControllerTest {
             .pauseReason("USER")
             .pauseDetail("manual pause")
             .build();
-    when(issueService.pauseIssue(issueId, 1L, "k1", PauseReason.USER, "manual pause"))
+    when(issueLifecycleService.pauseIssue(issueId, 1L, "k1", PauseReason.USER, "manual pause"))
         .thenReturn(paused);
 
     mockMvc
@@ -344,7 +353,7 @@ class StudioIssueControllerTest {
     ResumeIssueRequestDTO req =
         ResumeIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
     Issue resumed = Issue.builder().id(issueId).version(2L).build();
-    when(issueService.resumeIssue(issueId, 1L, "k1")).thenReturn(resumed);
+    when(issueLifecycleService.resumeIssue(issueId, 1L, "k1")).thenReturn(resumed);
 
     mockMvc
         .perform(
@@ -360,7 +369,7 @@ class StudioIssueControllerTest {
     ReopenIssueRequestDTO req =
         ReopenIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
     Issue reopened = Issue.builder().id(issueId).version(2L).state("INIT").build();
-    when(issueService.reopen(issueId, 1L, "k1")).thenReturn(reopened);
+    when(issueLifecycleService.reopen(issueId, 1L, "k1")).thenReturn(reopened);
 
     mockMvc
         .perform(
@@ -381,7 +390,7 @@ class StudioIssueControllerTest {
             .maxRuns(10)
             .build();
     StageBudgetView view = new StageBudgetView("WORK", 10, 5L, 0L, 10L);
-    when(issueService.resetStageBudget(issueId, 1L, "k1", "WORK", 10)).thenReturn(view);
+    when(issueStageBudgetService.resetStageBudget(issueId, 1L, "k1", "WORK", 10)).thenReturn(view);
 
     mockMvc
         .perform(
@@ -398,7 +407,7 @@ class StudioIssueControllerTest {
   void testArchive() throws Exception {
     ArchiveIssueRequestDTO req = ArchiveIssueRequestDTO.builder().expectedVersion("1").build();
     Issue archived = Issue.builder().id(issueId).version(2L).archivedAt(now).build();
-    when(issueService.archiveIssue(issueId, 1L)).thenReturn(archived);
+    when(issueLifecycleService.archiveIssue(issueId, 1L)).thenReturn(archived);
 
     mockMvc
         .perform(
@@ -413,7 +422,7 @@ class StudioIssueControllerTest {
   void testUnarchive() throws Exception {
     UnarchiveIssueRequestDTO req = UnarchiveIssueRequestDTO.builder().expectedVersion("1").build();
     Issue unarchived = Issue.builder().id(issueId).version(2L).archivedAt(null).build();
-    when(issueService.unarchiveIssue(issueId, 1L)).thenReturn(unarchived);
+    when(issueLifecycleService.unarchiveIssue(issueId, 1L)).thenReturn(unarchived);
 
     mockMvc
         .perform(
@@ -454,7 +463,7 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.body").value("A human comment"))
         .andExpect(jsonPath("$.data.kind").value("COMMENT"));
 
-    verify(issueService).appendComment(issueId, 1L, "k1", "A human comment");
+    verify(issueEditingService).appendComment(issueId, 1L, "k1", "A human comment");
   }
 
   @Test
@@ -487,7 +496,7 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.body").value("A human instruction"))
         .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"));
 
-    verify(issueService).appendInstruction(issueId, 1L, "k2", "A human instruction");
+    verify(issueEditingService).appendInstruction(issueId, 1L, "k2", "A human instruction");
   }
 
   @Test
@@ -533,7 +542,7 @@ class StudioIssueControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].blobId").value(blobId.toString()))
         .andExpect(jsonPath("$.data[0].name").value("deliverable.txt"));
-    verify(issueService).getIssue(issueId);
+    verify(issueEditingService).getIssue(issueId);
   }
 
   @Test
@@ -558,7 +567,7 @@ class StudioIssueControllerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.stopIssue(issueId, 1L, "stop-1", "Manual stop")).thenReturn(stopped);
+    when(issueLifecycleService.stopIssue(issueId, 1L, "stop-1", "Manual stop")).thenReturn(stopped);
 
     mockMvc
         .perform(
@@ -569,7 +578,7 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.pauseReason").value("USER"))
         .andExpect(jsonPath("$.data.pauseDetail").value("Manual stop"));
 
-    verify(issueService).stopIssue(issueId, 1L, "stop-1", "Manual stop");
+    verify(issueLifecycleService).stopIssue(issueId, 1L, "stop-1", "Manual stop");
   }
 
   @Test
@@ -594,7 +603,8 @@ class StudioIssueControllerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.resolveUnknown(issueId, 2L, "res-1", "Verified clean")).thenReturn(resolved);
+    when(issueLifecycleService.resolveUnknown(issueId, 2L, "res-1", "Verified clean"))
+        .thenReturn(resolved);
 
     mockMvc
         .perform(
@@ -605,7 +615,7 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.pauseReason").value("USER"))
         .andExpect(jsonPath("$.data.pauseDetail").value("Verified clean"));
 
-    verify(issueService).resolveUnknown(issueId, 2L, "res-1", "Verified clean");
+    verify(issueLifecycleService).resolveUnknown(issueId, 2L, "res-1", "Verified clean");
   }
 
   @Test
@@ -614,14 +624,14 @@ class StudioIssueControllerTest {
         .perform(delete("/api/issues/" + issueId).param("expectedVersion", "3"))
         .andExpect(status().isNoContent());
 
-    verify(issueService).deleteIssue(issueId, 3L);
+    verify(issueLifecycleService).deleteIssue(issueId, 3L);
   }
 
   @Test
   void testVersionConflict() throws Exception {
     UpdateIssueRequestDTO req =
         UpdateIssueRequestDTO.builder().expectedVersion("1").title("T").build();
-    when(issueService.updateIssue(eq(issueId), eq(1L), any(), any()))
+    when(issueEditingService.updateIssue(eq(issueId), eq(1L), any(), any()))
         .thenThrow(new ProjectVersionConflictException("issue", "1", "2"));
 
     mockMvc

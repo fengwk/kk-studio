@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.service.impl;
+package fun.fengwk.kkstudio.project.service;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
@@ -30,6 +30,9 @@ public final class ProjectValidationUtils {
 
   /** {@code project_issue_activity.body}/{@code project_issue.description} 的字节上限（1 MiB）。 */
   public static final int MAX_LARGE_TEXT_BYTES = 1048576;
+
+  /** 幂等请求键的字符上限。 */
+  public static final int MAX_REQUEST_KEY_LENGTH = 128;
 
   private ProjectValidationUtils() {}
 
@@ -89,6 +92,11 @@ public final class ProjectValidationUtils {
       throw new ProjectValidationException(field, field + " must not be blank");
     }
     return optionalUtf8Text(value, field, maxBytes);
+  }
+
+  /** 幂等请求键：非空白、无首尾空白且不超过 {@link #MAX_REQUEST_KEY_LENGTH} 个码点。 */
+  public static String requireRequestKey(String requestKey) {
+    return requireDisplayName(requestKey, "requestKey", MAX_REQUEST_KEY_LENGTH);
   }
 
   /** 执行领域校验动作，把确定性领域拒绝翻译为平台校验错误。 */

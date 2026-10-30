@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
 import java.util.UUID;
 
@@ -29,7 +29,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("跨阶段", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
     assertEquals(1L, first.getOrdinal());
@@ -51,10 +51,10 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
             appendHistoryEntry(firstThread),
             null,
             "REVIEW");
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals("COMPLETED", completed.getStatus().name());
 
-    Issue inReview = issueService.getIssue(issue.getId());
+    Issue inReview = issueEditingService.getIssue(issue.getId());
     IssueRun second = issueRunService.acceptRun(inReview.getId(), key("accept"));
     assertEquals(2L, second.getOrdinal());
     assertEquals(firstThread, second.getThreadId(), "same Agent must reuse the stable Thread");
@@ -74,7 +74,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agentB = createAgent();
     UUID projectId = createProjectWithStages("换 Agent", agentA, agentA, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun runA = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.completeRun(
@@ -93,7 +93,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertNotEquals(runA.getThreadId(), runB.getThreadId(), "different Agent uses its own Thread");
     assertEquals(2L, runB.getOrdinal());
 
-    StageBudgetView budget = issueService.getStageBudget(issue.getId(), "DESIGN");
+    StageBudgetView budget = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
     assertEquals(2L, budget.usedRuns(), "stage budget is shared across agents");
     assertEquals(1L, budget.remainingRuns());
     assertEquals(
@@ -107,7 +107,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("额度耗尽", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.completeRun(
@@ -118,7 +118,8 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         null,
         null);
 
-    assertEquals(0L, issueService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
+    assertEquals(
+        0L, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
     assertThrows(
         ProjectValidationException.class,
         () -> issueRunService.acceptRun(issue.getId(), key("accept")));
@@ -132,7 +133,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("重置额度", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.completeRun(
         run.getId(),
@@ -142,9 +143,9 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         null,
         null);
 
-    Issue before = issueService.getIssue(issue.getId());
+    Issue before = issueEditingService.getIssue(issue.getId());
     StageBudgetView reset =
-        issueService.resetStageBudget(
+        issueStageBudgetService.resetStageBudget(
             before.getId(), before.getVersion(), key("reset"), "DESIGN", 2);
 
     assertEquals(2, reset.maxRuns());
@@ -166,19 +167,19 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueService.authorizeStageBudget(
+            issueStageBudgetService.authorizeStageBudget(
                 issue.getId(), issue.getVersion(), key("auth"), "INIT", 1));
 
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     StageBudgetView view =
-        issueService.authorizeStageBudget(
+        issueStageBudgetService.authorizeStageBudget(
             fresh.getId(), fresh.getVersion(), key("auth"), "DESIGN", 2);
     assertEquals(2, view.maxRuns());
-    Issue afterAuth = issueService.getIssue(issue.getId());
+    Issue afterAuth = issueEditingService.getIssue(issue.getId());
     assertThrows(
         ProjectDuplicateException.class,
         () ->
-            issueService.authorizeStageBudget(
+            issueStageBudgetService.authorizeStageBudget(
                 afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));
   }
 
@@ -189,7 +190,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agentB = createAgent();
     UUID projectId = createProjectWithStages("跨 Agent 计数", agentA, agentA, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     issueRunService.acceptRun(issue.getId(), key("accept"));
 
     long usedByState =
@@ -199,7 +200,8 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, usedByState);
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
-    assertEquals(2, issueService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
+    assertEquals(
+        2, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
     assertNotEquals(agentA, agentB, "fixtures must be two distinct agents");
   }
 
@@ -214,7 +216,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("终态消耗", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.failRun(
@@ -225,11 +227,11 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         "boom");
     assertEquals(
         1L,
-        issueService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
+        issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
         "FAILED run consumes one");
 
-    Issue afterFail = issueService.getIssue(issue.getId());
-    issueService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
+    Issue afterFail = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
 
     IssueRun cancelledRun = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.cancelRun(
@@ -239,11 +241,11 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         appendHistoryEntry(cancelledRun.getThreadId()));
     assertEquals(
         2L,
-        issueService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
+        issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
         "CANCELLED run consumes one");
 
-    Issue afterCancel = issueService.getIssue(issue.getId());
-    issueService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
+    Issue afterCancel = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
 
     IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueRunService.markUnknown(
@@ -252,16 +254,17 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         key("unknown"),
         appendHistoryEntry(unknownRun.getThreadId()),
         "side effect lost");
-    StageBudgetView exhausted = issueService.getStageBudget(issue.getId(), "DESIGN");
+    StageBudgetView exhausted = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
     assertEquals(3L, exhausted.usedRuns(), "UNKNOWN run consumes one");
     assertEquals(0L, exhausted.remainingRuns());
 
     // UNKNOWN 门禁先由人工核查解除再恢复；此后唯一阻塞新 Run 的因素是额度耗尽。
-    Issue afterUnknown = issueService.getIssue(issue.getId());
-    issueService.resolveUnknown(
+    Issue afterUnknown = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resolveUnknown(
         afterUnknown.getId(), afterUnknown.getVersion(), key("resolve"), "checked");
-    Issue afterResolve = issueService.getIssue(issue.getId());
-    issueService.resumeIssue(afterResolve.getId(), afterResolve.getVersion(), key("resume"));
+    Issue afterResolve = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(
+        afterResolve.getId(), afterResolve.getVersion(), key("resume"));
 
     ProjectValidationException budgetExhausted =
         assertThrows(

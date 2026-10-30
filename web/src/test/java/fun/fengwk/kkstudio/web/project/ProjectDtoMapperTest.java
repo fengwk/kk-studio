@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
 import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;

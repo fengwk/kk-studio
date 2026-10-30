@@ -42,7 +42,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
       tx.executeWithoutResult(
           status -> {
-            issueService.appendComment(
+            issueEditingService.appendComment(
                 issue.getId(), issue.getVersion(), "notify-commit", "comment");
             try {
               assertNoNotification(pg);
@@ -55,17 +55,18 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
 
       tx.executeWithoutResult(
           status -> {
-            issueService.appendComment(
+            issueEditingService.appendComment(
                 issue.getId(),
-                issueService.getIssue(issue.getId()).getVersion(),
+                issueEditingService.getIssue(issue.getId()).getVersion(),
                 "notify-rollback",
                 "comment");
             status.setRollbackOnly();
           });
       assertNoNotification(pg);
-      assertEquals(1, issueService.listActivities(issue.getId(), 0, 50).size());
+      assertEquals(1, issueEditingService.listActivities(issue.getId(), 0, 50).size());
 
-      issueService.deleteIssue(issue.getId(), issueService.getIssue(issue.getId()).getVersion());
+      issueLifecycleService.deleteIssue(
+          issue.getId(), issueEditingService.getIssue(issue.getId()).getVersion());
       assertNotification(pg, projectId);
     }
   }

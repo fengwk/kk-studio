@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.service.impl;
+package fun.fengwk.kkstudio.project.service;
 
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
