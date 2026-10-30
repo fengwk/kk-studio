@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
 import { aiExtension } from '@/app/ai-console/ai-extension.definition'
@@ -16,6 +17,32 @@ function resolvePath(relativePath: string): string {
 }
 
 describe('Frontend architecture and entry contracts', () => {
+  it('rejects unregistered cross-feature imports through the actual lint configuration', async () => {
+    // 直接运行 ESLint，保证别名、相对路径、类型和动态导入不能绕过允许清单。
+    const eslint = new ESLint()
+    const filePath = 'src/features/canvas/guard-probe.ts'
+    for (const source of [
+      "import '@/features/chat/runtime/AgentPane'",
+      "import '../chat/runtime/AgentPane'",
+      "export * from '@/features/chat/runtime/AgentPane'",
+      "import type { AgentPane } from '@/features/chat/runtime/AgentPane'",
+      "void import('@/features/chat/runtime/AgentPane')",
+      "type Probe = import('@/features/chat/runtime/AgentPane')",
+    ]) {
+      const [result] = await eslint.lintText(source, { filePath })
+      expect(result.messages.some((message) => message.ruleId === 'architecture/feature-dependencies')).toBe(true)
+    }
+    for (const source of [
+      "import '@/features/chat/composer'",
+      "import '../chat/composer'",
+      "import '@/features/canvas/types'",
+      "import '@/shared/api/client'",
+    ]) {
+      const [result] = await eslint.lintText(source, { filePath })
+      expect(result.messages.filter((message) => message.ruleId === 'architecture/feature-dependencies')).toEqual([])
+    }
+  })
+
   it('exposes canonical Project API and routing contracts through features/projects', () => {
     // 测试意图：验证 features/projects 作为 Project 领域的唯一公开入口，
     // 对外提供完整的 CRUD、工作流、快照与 Issue 治理生命周期方法，并保持清晰的路由契约。
