@@ -7,21 +7,13 @@ import { resolveHelperPath } from './helper-path.js'
 import { verifyPrivateFile } from './private-fs.js'
 import * as state from './state.js'
 import { jobNameFor, openJob, type WindowsJobScope } from './win32.js'
-
-/** 等待 helper 发布范围并确认的预算。 */
-const PREPARE_BUDGET_MILLIS = 20_000
-
-/** Job 收敛的预算。 */
-const CONVERGENCE_BUDGET_MILLIS = 4_000
-
-/** 强杀 helper 之后的等待预算。 */
-const FORCE_KILL_BUDGET_MILLIS = 1_000
-
-/** 轮询步长。 */
-const POLL_INTERVAL_MILLIS = 5
-
-/** 对外错误里附加的 helper 自述长度上限：单行短记录，绝不整段外泄。 */
-const MESSAGE_LIMIT = 300
+import {
+  CONVERGENCE_BUDGET_MILLIS,
+  FORCE_KILL_BUDGET_MILLIS,
+  POLL_INTERVAL_MILLIS,
+  PREPARE_BUDGET_MILLIS,
+  SUPERVISOR_MESSAGE_LIMIT,
+} from './supervisor-limits.js'
 
 /**
  * Windows 执行范围的父进程侧：先确认 helper 建立的范围，再登记父进程自己的 Job 句柄，然后放行用户命令。
@@ -264,7 +256,7 @@ export class WindowsManagedProcess implements ManagedProcess {
   private startupFailure(): string {
     const reported = state.read(this.stateDir, state.ERROR_FILE)
     if (reported !== null) {
-      return reported.replace(/\s+/g, ' ').slice(0, MESSAGE_LIMIT)
+      return reported.replace(/\s+/g, ' ').slice(0, SUPERVISOR_MESSAGE_LIMIT)
     }
     return `the process scope helper exited with code ${this.helperCloseCode} before establishing the OS scope`
   }
@@ -397,7 +389,7 @@ export class WindowsManagedProcess implements ManagedProcess {
 
 function describe(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
-  return message.replace(/\s+/g, ' ').slice(0, MESSAGE_LIMIT)
+  return message.replace(/\s+/g, ' ').slice(0, SUPERVISOR_MESSAGE_LIMIT)
 }
 
 function delay(millis: number): Promise<void> {

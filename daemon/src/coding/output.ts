@@ -3,6 +3,7 @@ import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityResult, ResultContent } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
+import { writeAll as writeAllBytes } from '../native/write-all.js'
 
 /**
  * 有界输出捕获与受控临时产物：内联小输出，本地落盘大文本，从不因为输出体积终止进程。
@@ -140,25 +141,16 @@ function incompleteSuffixLength(bytes: Uint8Array, length: number): number {
   return available < expected ? available : 0
 }
 
-/** 允许短写的写入端口：Node 的 `FileHandle.write` 可能只写入一部分。 */
-interface PartialWriter {
-  write(buffer: Uint8Array, offset: number, length: number): Promise<{ bytesWritten: number }>
-}
-
 /**
  * 真正写满整个缓冲区：短写会让 durable 全文丢失尾部，而调用方仍可能声称全部捕获。
  *
- * <p>循环补齐前绝不认为已经写完；`bytesWritten <= 0` 视为无法推进并显式失败。
+ * <p>实现只有一份，见 native/write-all；这里保留捕获层的失败文案。
  */
-export async function writeAll(writer: PartialWriter, bytes: Uint8Array): Promise<void> {
-  let offset = 0
-  while (offset < bytes.length) {
-    const { bytesWritten } = await writer.write(bytes, offset, bytes.length - offset)
-    if (bytesWritten <= 0) {
-      throw new Error('file write made no progress')
-    }
-    offset += bytesWritten
-  }
+export async function writeAll(
+  writer: { write(buffer: Uint8Array, offset: number, length: number): Promise<{ bytesWritten: number }> },
+  bytes: Uint8Array,
+): Promise<void> {
+  await writeAllBytes(writer, bytes, 'file write made no progress')
 }
 
 /** 简易异步互斥：串行化临时产物创建登记、in-use 获取与清扫的关键段。 */

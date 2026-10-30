@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { processScopePhase } from './host.js'
 import * as posix from './posix-session.js'
 import * as state from './state.js'
 import * as win from './win32.js'
@@ -48,8 +49,8 @@ async function main(): Promise<void> {
     if (spec === null) {
       throw new Error('the process scope helper launch spec is missing')
     }
-    phase = process.platform === 'win32' ? 'windows' : 'posix'
-    const code = process.platform === 'win32' ? await runWindows(stateDir, spec) : await runPosix(stateDir, spec)
+    phase = processScopePhase()
+    const code = phase === 'windows' ? await runWindows(stateDir, spec) : await runPosix(stateDir, spec)
     process.exit(code)
   } catch (error) {
     // 对外只发布**固定阶段代码**：命令路径、参数与环境一律不进入父进程可见的失败说明。

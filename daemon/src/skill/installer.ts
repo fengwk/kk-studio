@@ -20,6 +20,7 @@ import {
   isAbortError,
 } from './http.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
+import { isPosixHost } from '../native/host.js'
 
 const SHA1_PATTERN = /^[0-9a-f]{40}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
@@ -638,7 +639,7 @@ export class SkillPackageInstaller {
 
         // For executable entries (mode 100755):
         // ONLY on POSIX, set the exec bit (chmod 0o700); on Windows rely on writePrivateFile DACL.
-        if (mode === 0o100755 && process.platform !== 'win32') {
+        if (mode === 0o100755 && isPosixHost()) {
           await fs.promises.chmod(targetFile, 0o700)
         }
 
