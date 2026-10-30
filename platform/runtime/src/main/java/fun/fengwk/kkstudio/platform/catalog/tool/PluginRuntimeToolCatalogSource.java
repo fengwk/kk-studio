@@ -4,8 +4,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

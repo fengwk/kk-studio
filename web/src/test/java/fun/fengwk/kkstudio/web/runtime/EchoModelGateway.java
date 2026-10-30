@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -9,7 +10,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.util.List;
 import java.util.Map;

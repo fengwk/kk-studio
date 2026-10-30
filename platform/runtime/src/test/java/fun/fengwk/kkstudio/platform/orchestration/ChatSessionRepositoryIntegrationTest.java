@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
-import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.ChatSession;
+import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 
 import java.util.List;
 import java.util.UUID;

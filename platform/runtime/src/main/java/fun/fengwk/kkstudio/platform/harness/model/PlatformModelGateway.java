@@ -1,14 +1,18 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -31,12 +35,16 @@ import java.util.function.Supplier;
  * sink 抛出的异常）或 Provider 在没有终态时返回，以 {@link Unknown} 返回，因为结果无法确认。线程被中断即取消：Provider 关闭连接并无终态返回，此时返回
  * {@code CANCELLED} 失败，调用方通常已 abandon 并忽略它。名额在 {@code run} 返回或 {@code close} 时释放。gateway 绝不读写
  * HarnessStore。
+ *
+ * <p>每次 {@link #admit} 按实际模型名读取当前 pricing 并冻结独立的 request-body 条件计划；Provider 在真实发送路径上回调最终编码 body
+ * 后，本类立即把计划求值为只含指纹与布尔值的快照，并随成功 completion 返回。请求体字节只在回调栈内存在，不写日志或存储。
  */
 public final class PlatformModelGateway implements ModelGateway {
 
   private final ProviderResolutionService providerResolution;
   private final Supplier<Duration> busyRetryDelay;
   private final ConcurrencyAdmission admission;
+  private final ModelPricingPlanSource pricingPlans;
 
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} 在每次 {@code Busy} 判定时现读，由装配方决定来源——生产装配传入
@@ -46,10 +54,12 @@ public final class PlatformModelGateway implements ModelGateway {
   PlatformModelGateway(
       ProviderResolutionService providerResolution,
       Supplier<Duration> busyRetryDelay,
-      ConcurrencyAdmission admission) {
+      ConcurrencyAdmission admission,
+      ModelPricingPlanSource pricingPlans) {
     this.providerResolution = Objects.requireNonNull(providerResolution, "providerResolution");
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     this.admission = Objects.requireNonNull(admission, "admission");
+    this.pricingPlans = Objects.requireNonNull(pricingPlans, "pricingPlans");
   }
 
   @Override
@@ -73,7 +83,14 @@ public final class PlatformModelGateway implements ModelGateway {
     if (acquired.isEmpty()) {
       return new Busy(busyRetryDelay.get());
     }
-    return new AdmittedExecution(resolved, acquired.orElseThrow());
+    // 计划按 attempt 冻结：组回退或并发执行各自使用当前实际模型的 pricing，不共享条件集合。
+    ModelRequestBodyPricing.Plan plan;
+    try {
+      plan = pricingPlans.plan(execution.request().model().modelName());
+    } catch (RuntimeException pricingFailure) {
+      plan = ModelRequestBodyPricing.plan(ModelPricing.ZERO);
+    }
+    return new AdmittedExecution(resolved, acquired.orElseThrow(), plan);
   }
 
   /** 持有并发名额的准入；{@link #run} 与 {@link #close} 都释放它。 */
@@ -81,11 +98,15 @@ public final class PlatformModelGateway implements ModelGateway {
 
     private final ProviderResolutionService.ResolvedExecution resolved;
     private final ConcurrencyAdmission.Lease lease;
+    private final ModelRequestBodyPricing.Plan plan;
 
     private AdmittedExecution(
-        ProviderResolutionService.ResolvedExecution resolved, ConcurrencyAdmission.Lease lease) {
+        ProviderResolutionService.ResolvedExecution resolved,
+        ConcurrencyAdmission.Lease lease,
+        ModelRequestBodyPricing.Plan plan) {
       this.resolved = resolved;
       this.lease = lease;
+      this.plan = plan;
     }
 
     @Override
@@ -112,7 +133,7 @@ public final class PlatformModelGateway implements ModelGateway {
             "cannot create provider for model invocation: "
                 + message(setupFailure, "setup failure"));
       }
-      OutcomeHandler handler = new OutcomeHandler(sink);
+      OutcomeHandler handler = new OutcomeHandler(sink, plan);
       try {
         provider.stream(resolved.effectiveRequest(), handler);
       } catch (ProviderException classified) {
@@ -138,10 +159,21 @@ public final class PlatformModelGateway implements ModelGateway {
   private static final class OutcomeHandler implements ProviderStreamHandler {
 
     private final Sink sink;
+    private final ModelRequestBodyPricing.Plan plan;
+    private RequestBodyPricingSnapshot requestBodyPricing;
     private Outcome outcome;
 
-    private OutcomeHandler(Sink sink) {
+    private OutcomeHandler(Sink sink, ModelRequestBodyPricing.Plan plan) {
       this.sink = sink;
+      this.plan = plan;
+    }
+
+    @Override
+    public void onRequestBody(byte[] bodyUtf8Bytes) {
+      if (outcome != null || !plan.hasConditions()) {
+        return;
+      }
+      requestBodyPricing = plan.evaluate(bodyUtf8Bytes);
     }
 
     @Override
@@ -161,10 +193,18 @@ public final class PlatformModelGateway implements ModelGateway {
       if (outcome != null) {
         return;
       }
+      if (completion == null) {
+        outcome = invalid("provider returned a null completion");
+        return;
+      }
+      ProviderResponse response = completion.response();
+      ProviderResponse observedResponse = response.withRequestBodyPricing(requestBodyPricing);
+      // 观察回调是唯一权威：adapter 自行注入的快照即使在缺失观察时也必须被清除；相同响应保留 completion 身份。
       outcome =
-          completion == null
-              ? invalid("provider returned a null completion")
-              : new Succeeded(completion);
+          new Succeeded(
+              observedResponse == response
+                  ? completion
+                  : new ProviderCompletion(observedResponse, completion.replayState()));
     }
 
     @Override

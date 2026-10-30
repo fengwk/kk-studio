@@ -132,7 +132,7 @@ Thread claim 只归约一个持久化动作；Model / Tool claim 驱动一次外
 
 [`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 的短事务只锁 own Thread -> Model -> Tool -> Work。执行根开启 YOLO 时直接放行，否则在事务外调用 `ToolGateway.preflight`：`Allow` 进入执行，`Ask` 转 `WAITING_APPROVAL`（可附带编辑审查），`Deny` 转 `FAILED`。放行后同样经 `admit` 准入、先持久化 RUNNING，再由 [`ToolExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java) 在独占虚拟线程上执行；终态提交之后才释放并发租约与目录租用，因此取消只需 interrupt。只有 `retryable` 且工具为 `READ_ONLY` / `IDEMPOTENT` 的失败才重试；`UNKNOWN` 是终态，与其它终态一样物化为失败结果交给下一轮模型，不阻塞 Thread。工具增量只支持文本与 JSON，作为有损 `TOOL_PARTIAL` 发布。
 
-Model / Tool Processor 的本地准入与 execution 登记由同一类级强类型 `ClaimAdmissionGuard` 按 invocation 原子协调。准入操作在原子计算中复核数据库 claim 所有权，不同有效 token 可替换旧 execution，捕获后在锁外执行 abandon；相同 token 去重，失权 claim 不得取消当前执行。关闭守卫确保 close 期间迟到准入不创建 slot 执行，未 attach 的 ticket 在 close 或 cancel 后拒绝 attach；准备与外部调用均在准入锁外进行，最终持久化仍须通过 durable ownership fence。
+Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimedExecutionSupport.java)（Driver SPI）：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询只实现一次，Processor 自己只负责请求物化、Gateway 准入与终态提交。具体准入由同一类级强类型 `ClaimAdmissionGuard` 按 invocation 原子协调，事务内最终所有权围栏失败一律抛出唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimLostSignal.java)。准入操作在原子计算中复核数据库 claim 所有权，不同有效 token 可替换旧 execution，捕获后在锁外执行 abandon；相同 token 去重，失权 claim 不得取消当前执行。关闭守卫确保 close 期间迟到准入不创建 slot 执行，未 attach 的 ticket 在 close 或 cancel 后拒绝 attach；准备与外部调用均在准入锁外进行，最终持久化仍须通过 durable ownership fence。
 
 每个具体执行代次在进入 body 或发出远端调用前登记为独立的退出事实，不依赖逻辑 Invocation 行是否仍存在。admission 取得的每个 run 在失权、取消或离场时都恰 close 一次；body 返回且本地 admission close 成功后，执行线程才确认 `STUDIO_EXITED`；远端子执行在完整 identity 匹配后确认 `REMOTE_ACKNOWLEDGED`。已登记但确定未进入 body 的代次，只在 close 成功后确认 `NOT_STARTED`；close 失败保留 `UNCONFIRMED`，不得偷偷二次 close 或确认。取消、lease 丢失与逻辑终态本身都不等于退出：body 开始后仍须等待真实返回并完成资源释放，未进入 body 的已排队任务也由统一 finally 收敛。最后一次真正改变退出事实的 ACK 在同一事务递增 Thread version；若普通终态已物化则直接补结算 Join，否则只有存在源命令已应用的未完成 Join 才请求 THREAD Work。重复 ACK 不重复 version、wake 或通知；STOPPED Thread 在 ACK 事务内递归结算已收敛祖先。
 
@@ -313,7 +313,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.join` | Join 票据、一次终态冻结、回执投影与完成通知渲染的纯函数 |
 | `runtime.permission` | 权限规则模型与求值、Bash 命令面分析；只产出策略候选 |
 | `runtime.port` | 内核对外部设施的窄端口：Tool 网关、结果物化、历史动作与实时事件；Model/Turn 端口在 driver 模块 |
-| `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置；MODEL Work 在 driver 模块 |
+| `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置；同时向 Driver 暴露公开的已认领执行骨架 `ClaimedExecutionSupport`（所有权校验、准入、租约 margin、取消 / 关闭、唯一的 `ClaimLostSignal`），MODEL Work 在 driver 模块 |
 | `runtime.realtime` | 有损实时事件及其编解码；恢复以 durable 快照为准 |
 | `runtime.retry` | 调用重试与 HTTP 状态策略，只计算可行性与延迟 |
 | `runtime.session` | Session 实体、不可变消息内容块与 Assistant 元数据 |
@@ -336,13 +336,10 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 ## 源码与测试
 
-- 模块边界：[`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java) 校验公共 runtime 不反向依赖具体 Driver 实现。
-- Runtime 业务测试随实现迁移集中在 [`harness/agent-builtin` 测试目录](../../harness/agent-builtin/src/test/java/)：控制面与 Store 契约见 [`HarnessRuntimeAcceptInitialTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java) 与 [`HarnessStoreContractTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStoreContractTest.java)。
-- 历史、Thread、邮箱、委派与 Join：[`EntryPathTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPathTest.java)、[`ThreadContextClassifierTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`CommandHarvestReducerTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/command/CommandHarvestReducerTest.java)、[`HarnessRuntimeJoinAcceptanceTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeJoinAcceptanceTest.java)。
-- Work、Tool 与权限：[`WorkTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTest.java)、[`ToolInvocationTransitionTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationTransitionTest.java)、[`PermissionEvaluatorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluatorTest.java)。
-- 扩展契约：[`ToolContractTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java)、[`HarnessCatalogTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)、[`BuiltinHarnessContributorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)、[`PromptTemplateTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/prompt/PromptTemplateTest.java)。
-
-Builtin 的模型状态、MODEL Work 与自动压缩测试见 [Harness Agent Builtin](harness-agent-builtin.md#源码与测试)。公共 Runtime 与 Builtin 的关键类由 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml) 中官方 JaCoCo Ant report/check 在同一 `verify` 内联合门禁；Runtime 不再保留失效的本地 check。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
+- 内核测试集中在 [`harness/runtime/src/test`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/)：控制面、Thread/Join、历史与 Store 契约都在本模块内运行，`mvn -pl harness/runtime -am verify` 可独立完成测试与覆盖门禁。
+- Runtime test-jar 是唯一中立 kernel 测试基座：提供 `InMemoryHarnessStore`、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `infra` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
+- `FakeAgentDriver` 是 `AgentDriver` 的最小确定性实现：默认 no-op，可配置 turn resolution、活动投影、响应物化与停止结果。其私有状态只存在内存、不参与 Store 事务回滚，因此只用于不验证 Driver 私有持久化的内核测试。
+- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 27 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 
 ---
 

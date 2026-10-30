@@ -1,12 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -24,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 
 import java.util.ArrayList;
@@ -50,13 +45,10 @@ import java.util.TreeMap;
  */
 final class AnthropicStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final String USAGE_INTEGER_FORMAT = "usage %s must be an integer";
+  private static final String USAGE_NEGATIVE_FORMAT = "usage %s must not be negative";
 
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(
@@ -125,7 +117,8 @@ final class AnthropicStreamAccumulator {
       return;
     }
     if ("error".equals(eventName)) {
-      JsonNode node = parseJson(data);
+      JsonNode node =
+          ProviderJsonHelper.parseSseJson(data, "failed to parse SSE event JSON payload");
       throw AnthropicErrorMapper.mapSseErrorEnvelope(node);
     }
     if (!KNOWN_SSE_EVENTS.contains(eventName)) {
@@ -133,7 +126,7 @@ final class AnthropicStreamAccumulator {
       return;
     }
 
-    JsonNode node = parseJson(data);
+    JsonNode node = ProviderJsonHelper.parseSseJson(data, "failed to parse SSE event JSON payload");
     if (!node.isObject()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "SSE event data is not a JSON object");
@@ -257,7 +250,7 @@ final class AnthropicStreamAccumulator {
               }
             }
           } else {
-            JsonNode parsedArgs = tryParseJsonObject(argsStr);
+            JsonNode parsedArgs = ProviderJsonHelper.tryParseJsonObject(argsStr);
             if (parsedArgs != null) {
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, argsStr);
               toolCalls.add(call);
@@ -286,7 +279,8 @@ final class AnthropicStreamAccumulator {
         default -> {
           ObjectNode obj = block.rawBlock.deepCopy();
           if (block.nativeInputBuffer != null) {
-            JsonNode parsedInput = tryParseJsonObject(block.nativeInputBuffer.toString());
+            JsonNode parsedInput =
+                ProviderJsonHelper.tryParseJsonObject(block.nativeInputBuffer.toString());
             if (parsedInput == null) {
               if (stopReason == GenerationStopReason.LENGTH) {
                 // 截断的 native tool 输入无法组成合法对象：保留余下 normalized 语义，但不冻结 replay
@@ -372,7 +366,7 @@ final class AnthropicStreamAccumulator {
       }
       JsonNode thinking = outputDetails.get("thinking_tokens");
       if (thinking != null && !thinking.isNull()) {
-        reasoningTokens = parseNonNegativeLong(thinking, "thinking_tokens");
+        reasoningTokens = usageLong(thinking, "thinking_tokens");
         if (reasoningTokens > outputTokens) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "thinking tokens exceed output tokens");
@@ -465,8 +459,7 @@ final class AnthropicStreamAccumulator {
           this.cacheMissReasonType = type;
           if (missNode.has("cache_missed_input_tokens")) {
             this.cacheMissedInputTokens =
-                parseNonNegativeLong(
-                    missNode.get("cache_missed_input_tokens"), "cache_missed_input_tokens");
+                usageLong(missNode.get("cache_missed_input_tokens"), "cache_missed_input_tokens");
           }
         }
       }
@@ -842,19 +835,18 @@ final class AnthropicStreamAccumulator {
     }
 
     if (usageNode.has("input_tokens")) {
-      this.inputTokens = parseNonNegativeLong(usageNode.get("input_tokens"), "input_tokens");
+      this.inputTokens = usageLong(usageNode.get("input_tokens"), "input_tokens");
     }
     if (usageNode.has("output_tokens")) {
-      this.outputTokens = parseNonNegativeLong(usageNode.get("output_tokens"), "output_tokens");
+      this.outputTokens = usageLong(usageNode.get("output_tokens"), "output_tokens");
     }
     if (usageNode.has("cache_read_input_tokens")) {
       this.cacheReadInputTokens =
-          parseNonNegativeLong(usageNode.get("cache_read_input_tokens"), "cache_read_input_tokens");
+          usageLong(usageNode.get("cache_read_input_tokens"), "cache_read_input_tokens");
     }
     if (usageNode.has("cache_creation_input_tokens")) {
       this.cacheCreationInputTokens =
-          parseNonNegativeLong(
-              usageNode.get("cache_creation_input_tokens"), "cache_creation_input_tokens");
+          usageLong(usageNode.get("cache_creation_input_tokens"), "cache_creation_input_tokens");
     }
     if (usageNode.has("service_tier") && !usageNode.get("service_tier").isNull()) {
       JsonNode tierNode = usageNode.get("service_tier");
@@ -880,14 +872,11 @@ final class AnthropicStreamAccumulator {
             ProviderErrorKind.INVALID_RESPONSE, "cache_creation must be an object");
       }
       if (nested.has("ephemeral_5m_input_tokens")) {
-        m5 =
-            parseNonNegativeLong(
-                nested.get("ephemeral_5m_input_tokens"), "ephemeral_5m_input_tokens");
+        m5 = usageLong(nested.get("ephemeral_5m_input_tokens"), "ephemeral_5m_input_tokens");
         has5m = true;
       }
       if (nested.has("ephemeral_5m")) {
-        long alias5m =
-            parseNonNegativeLong(nested.get("ephemeral_5m"), "ephemeral_5m_input_tokens");
+        long alias5m = usageLong(nested.get("ephemeral_5m"), "ephemeral_5m_input_tokens");
         if (has5m && m5 != alias5m) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
@@ -896,14 +885,11 @@ final class AnthropicStreamAccumulator {
         has5m = true;
       }
       if (nested.has("ephemeral_1h_input_tokens")) {
-        h1 =
-            parseNonNegativeLong(
-                nested.get("ephemeral_1h_input_tokens"), "ephemeral_1h_input_tokens");
+        h1 = usageLong(nested.get("ephemeral_1h_input_tokens"), "ephemeral_1h_input_tokens");
         has1h = true;
       }
       if (nested.has("ephemeral_1h")) {
-        long alias1h =
-            parseNonNegativeLong(nested.get("ephemeral_1h"), "ephemeral_1h_input_tokens");
+        long alias1h = usageLong(nested.get("ephemeral_1h"), "ephemeral_1h_input_tokens");
         if (has1h && h1 != alias1h) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
@@ -915,7 +901,7 @@ final class AnthropicStreamAccumulator {
 
     if (usageNode.has("cache_creation_ephemeral_5m_input_tokens")) {
       long flat5m =
-          parseNonNegativeLong(
+          usageLong(
               usageNode.get("cache_creation_ephemeral_5m_input_tokens"),
               "cache_creation_ephemeral_5m_input_tokens");
       if (has5m && m5 != flat5m) {
@@ -927,7 +913,7 @@ final class AnthropicStreamAccumulator {
     }
     if (usageNode.has("cache_creation_ephemeral_1h_input_tokens")) {
       long flat1h =
-          parseNonNegativeLong(
+          usageLong(
               usageNode.get("cache_creation_ephemeral_1h_input_tokens"),
               "cache_creation_ephemeral_1h_input_tokens");
       if (has1h && h1 != flat1h) {
@@ -949,17 +935,9 @@ final class AnthropicStreamAccumulator {
     }
   }
 
-  private static long parseNonNegativeLong(JsonNode node, String fieldName) {
-    if (node == null || !node.isIntegralNumber() || !node.canConvertToLong()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "usage " + fieldName + " must be an integer");
-    }
-    long val = node.asLong(0L);
-    if (val < 0) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "usage " + fieldName + " must not be negative");
-    }
-    return val;
+  private static long usageLong(JsonNode node, String fieldName) {
+    return ProviderJsonHelper.parseNonNegativeLong(
+        node, fieldName, USAGE_INTEGER_FORMAT, USAGE_NEGATIVE_FORMAT);
   }
 
   private static GenerationStopReason mapStopReason(String reasonStr) {
@@ -976,27 +954,6 @@ final class AnthropicStreamAccumulator {
       default -> throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unsupported or missing stop_reason");
     };
-  }
-
-  private static JsonNode parseJson(String text) {
-    try {
-      return OBJECT_MAPPER.readTree(text);
-    } catch (JacksonException exception) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "failed to parse SSE event JSON payload");
-    }
-  }
-
-  private static JsonNode tryParseJsonObject(String text) {
-    if (text == null || text.isBlank()) {
-      return null;
-    }
-    try {
-      JsonNode node = OBJECT_MAPPER.readTree(text);
-      return node.isObject() ? node : null;
-    } catch (JacksonException exception) {
-      return null;
-    }
   }
 
   private enum BlockLifecycle {

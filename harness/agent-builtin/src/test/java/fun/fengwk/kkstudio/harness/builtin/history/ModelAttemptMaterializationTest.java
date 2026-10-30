@@ -1,0 +1,1069 @@
+package fun.fengwk.kkstudio.harness.builtin.history;
+
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
+
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Stream;
+
+/** terminal Model attempt 状态清空前的 EntryPath 精确物化契约。 */
+class ModelAttemptMaterializationTest {
+  private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
+
+  private static final Instant T0 = Instant.parse("2026-08-01T00:00:00Z");
+  private static final Instant T1 = T0.plusSeconds(1);
+  private static final Instant T2 = T0.plusSeconds(2);
+  private static final Instant T3 = T0.plusSeconds(3);
+  private static final Instant T4 = T0.plusSeconds(4);
+  private static final Instant T6 = T0.plusSeconds(6);
+  private static final EnvironmentId ENVIRONMENT =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  private static final BranchSettings SETTINGS =
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+
+  @Test
+  void acceptsExactFailedAttemptAndTerminalPartial() {
+    ModelAttemptFailure failure = failure();
+    ModelInvocation stored = failedInvocation(List.of(failure));
+    Entry failureEntry = failureEntry(id(4L), id(3L), failure, failure.failedAt(), failure.text());
+    Entry result =
+        assistantError(
+            id(5L),
+            failureEntry.id(),
+            stored.error(),
+            new ModelAttemptSnapshot(2, 7, "terminal partial", "terminal thinking"),
+            T6);
+    EntryPath path = inputPath(List.of(failureEntry, result));
+
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(result.id(), T6), path));
+  }
+
+  @Test
+  void rejectsMissingTamperedOrMisdatedFailedAttempt() {
+    ModelAttemptFailure failure = failure();
+    ModelInvocation stored = failedInvocation(List.of(failure));
+    Entry exactResult =
+        assistantError(
+            id(5L),
+            id(4L),
+            stored.error(),
+            new ModelAttemptSnapshot(2, 7, "terminal partial", "terminal thinking"),
+            T6);
+
+    Entry missingResult =
+        assistantError(
+            id(5L),
+            id(3L),
+            stored.error(),
+            new ModelAttemptSnapshot(2, 7, "terminal partial", "terminal thinking"),
+            T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(missingResult.id(), T6),
+                inputPath(missingResult)));
+
+    Entry tampered = failureEntry(id(4L), id(3L), failure, failure.failedAt(), "different partial");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(exactResult.id(), T6),
+                inputPath(List.of(tampered, exactResult))));
+
+    Entry misdated =
+        failureEntry(id(4L), id(3L), failure, failure.failedAt().plusMillis(1), failure.text());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(exactResult.id(), T6),
+                inputPath(List.of(misdated, exactResult))));
+  }
+
+  @Test
+  void rejectsTerminalErrorOrPartialThatDoesNotMatchInvocation() {
+    ModelInvocation stored = failedInvocation(List.of(failure()));
+    Entry failureEntry =
+        failureEntry(
+            id(4L),
+            id(3L),
+            stored.failedAttempts().get(0),
+            stored.failedAttempts().get(0).failedAt(),
+            stored.failedAttempts().get(0).text());
+    Entry wrongError =
+        assistantError(
+            id(5L),
+            failureEntry.id(),
+            new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "wrong error"),
+            new ModelAttemptSnapshot(2, 7, "terminal partial", "terminal thinking"),
+            T6);
+    Entry wrongPartial =
+        assistantError(
+            id(6L),
+            failureEntry.id(),
+            stored.error(),
+            new ModelAttemptSnapshot(2, 7, "different partial", "terminal thinking"),
+            T6);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(wrongError.id(), T6),
+                inputPath(List.of(failureEntry, wrongError))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(wrongPartial.id(), T6),
+                inputPath(List.of(failureEntry, wrongPartial))));
+  }
+
+  @Test
+  void acceptsOnlyTheExactDirectStopBarrier() {
+    StreamCheckpoint checkpoint = new StreamCheckpoint(1, 4, "partial", "thinking");
+    ModelInvocation running =
+        invocation(requestSpec(), ModelInvocationStatus.RUNNING, 1, checkpoint, null, List.of());
+    ModelInvocationError cancellation =
+        new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled");
+    Entry aborted =
+        new Entry(
+            id(4L),
+            id(100L),
+            id(3L),
+            new AssistantAbortedPayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ThinkingMessageContent("thinking"),
+                        new TextMessageContent("partial")))),
+            T6);
+    ModelInvocation attached = running.cancel(cancellation, T6).attachResultEntry(aborted.id(), T6);
+    assertDoesNotThrow(
+        () -> ModelAttemptMaterialization.validate(running, attached, inputPath(aborted)));
+
+    Entry droppedPartial = assistantError(id(4L), id(3L), cancellation, null, T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validate(running, attached, inputPath(droppedPartial)));
+
+    ModelInvocation ready =
+        invocation(requestSpec(), ModelInvocationStatus.READY, 0, null, null, List.of());
+    Entry cancellationBarrier = assistantError(id(4L), id(3L), cancellation, null, T6);
+    ModelInvocation stopped =
+        ready.cancel(cancellation, T6).attachResultEntry(cancellationBarrier.id(), T6);
+    assertDoesNotThrow(
+        () -> ModelAttemptMaterialization.validate(ready, stopped, inputPath(cancellationBarrier)));
+  }
+
+  /** validateAttached：Tool batch apply / Stop 删除 parent 前重放 attached durable 事实的最小严格校验。 */
+  @Test
+  void acceptsValidAttachedToolPhaseModel() {
+    ModelInvocation attached = succeededToolPhase();
+    EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
+
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validateAttached(attached, path));
+  }
+
+  @Test
+  void rejectsAttachedPreconditionViolations() {
+    ModelInvocation base = succeededToolPhase();
+    EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
+    // 非 terminal：RUNNING attached 形状被 precondition 拒绝。
+    ModelInvocation running =
+        new ModelInvocation(
+            base.id(),
+            base.threadId(),
+            base.turnStartEntryId(),
+            base.requestHeadEntryId(),
+            base.requestSpec(),
+            ModelInvocationStatus.RUNNING,
+            1,
+            new StreamCheckpoint(1, 0, "partial", ""),
+            null,
+            null,
+            null,
+            List.of(),
+            base.createdAt(),
+            base.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(running, path));
+    // resultEntryId 为 null 的 SUCCEEDED 形状也是 precondition 拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validateAttached(
+                new ModelInvocation(
+                    base.id(),
+                    base.threadId(),
+                    base.turnStartEntryId(),
+                    base.requestHeadEntryId(),
+                    base.requestSpec(),
+                    ModelInvocationStatus.SUCCEEDED,
+                    1,
+                    null,
+                    base.result(),
+                    null,
+                    null,
+                    List.of(),
+                    base.createdAt(),
+                    base.updatedAt()),
+                path));
+  }
+
+  /** requestHead 与 result 相同（attach 到 requestHead 自身）是非法的真实形状，必须被拒。 */
+  @Test
+  void rejectsAttachedResultEqualToBasis() {
+    ModelInvocation attached = succeededToolPhase(1, id(4L));
+    EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(attached, path));
+  }
+
+  @Test
+  void acceptsExactReplayStateMatchOnAssistantEntry() {
+    ProviderReplayState state = sampleReplayState();
+    ModelInvocation stored =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            state);
+
+    Entry assistant = new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, state);
+    ModelInvocation attached = stored.attachResultEntry(assistant.id(), T6);
+    EntryPath path = attachedToolPath(assistant);
+
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validate(stored, attached, path));
+    // 测试意图：attach 已把 replay state 转移到不可变 Entry，Tool batch 的二次校验不能把清空后的 Invocation 与 Entry 比较。
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validateAttached(attached, path));
+  }
+
+  @Test
+  void rejectsReplayStateMismatchOnAssistantEntry() {
+    ProviderReplayState state = sampleReplayState();
+    ModelInvocation storedWithReplay =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            state);
+
+    // 1. stored 有 replay 但 entry 没有
+    Entry assistantNoReplay = new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, null);
+    ModelInvocation attached1 = storedWithReplay.attachResultEntry(assistantNoReplay.id(), T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                storedWithReplay, attached1, attachedToolPath(assistantNoReplay)));
+
+    // 2. stored 没有 replay 但 entry 有
+    ModelInvocation storedNoReplay =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6,
+            null);
+    Entry assistantWithReplay =
+        new Entry(id(4L), id(100L), id(3L), assistantToolPayload(), T3, state);
+    ModelInvocation attached2 = storedNoReplay.attachResultEntry(assistantWithReplay.id(), T6);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                storedNoReplay, attached2, attachedToolPath(assistantWithReplay)));
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        new ProviderReplayAffinity(
+            ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
+        JsonNodeFactory.instance.objectNode().put("k", "v"));
+  }
+
+  @Test
+  void rejectsAttachedHeadNotResultEntryOrMissingBasis() {
+    ModelInvocation attached = succeededToolPhase();
+    // head != resultEntryId：assistant 结果后已追加匹配的 TOOL result，head 前进到 ToolResult Entry。
+    EntryPath extraHead =
+        new EntryPath(
+            List.of(
+                root(),
+                turnStart(),
+                userMessage(),
+                assistantToolMessage(id(4L), id(3L)),
+                toolResultMessage(id(5L), id(4L))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(attached, extraHead));
+
+    // requestHeadEntryId 不在 path 中。
+    ModelInvocation missingBasis =
+        new ModelInvocation(
+            attached.id(),
+            attached.threadId(),
+            attached.turnStartEntryId(),
+            id(99L),
+            attached.requestSpec(),
+            attached.status(),
+            attached.attempt(),
+            attached.streamCheckpoint(),
+            attached.result(),
+            attached.error(),
+            attached.resultEntryId(),
+            attached.failedAttempts(),
+            attached.createdAt(),
+            attached.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validateAttached(
+                missingBasis, attachedToolPath(assistantToolMessage(id(4L), id(3L)))));
+  }
+
+  @Test
+  void rejectsAttachedNonSucceededOrMissingResult() {
+    // FAILED terminal（有 error、无 result）挂在 ASSISTANT head 上不构成 tool phase。
+    ModelInvocationError termination =
+        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "boom");
+    ModelInvocation failed =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(4L),
+            requestSpec(),
+            ModelInvocationStatus.FAILED,
+            1,
+            null,
+            null,
+            termination,
+            id(4L),
+            List.of(),
+            T2,
+            T6);
+    EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(failed, path));
+
+    // head 不是 ASSISTANT 消息（turn head 为 USER 消息）时被拒。
+    ModelInvocation notAssistant =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(2L),
+            requestSpec(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            id(3L),
+            List.of(),
+            T2,
+            T6);
+    EntryPath userHead = new EntryPath(List.of(root(), turnStart(), userMessage()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(notAssistant, userHead));
+  }
+
+  @Test
+  void rejectsAttachedToolCallMismatch() {
+    ModelInvocation attached = succeededToolPhase();
+    EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
+
+    // response 只声明 1 个 call，assistant 消息声明 2 个 call -> size mismatch。
+    EntryPath twoCalls =
+        attachedToolPath(
+            new Entry(
+                id(4L),
+                id(100L),
+                id(3L),
+                new MessagePayload(
+                    new AgentMessage(
+                        AgentMessageRole.ASSISTANT,
+                        List.of(
+                            new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
+                            new ToolCallMessageContent("call-2", "bash", "bash", "{}"))),
+                    assistantMetadata(GenerationStopReason.COMPLETE),
+                    null),
+                T2));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(attached, twoCalls));
+
+    // response 与 assistant 逐字段不一致：same count 但 argumentsJson 不同。
+    ModelInvocation mismatchedArgs =
+        new ModelInvocation(
+            attached.id(),
+            attached.threadId(),
+            attached.turnStartEntryId(),
+            attached.requestHeadEntryId(),
+            attached.requestSpec(),
+            attached.status(),
+            attached.attempt(),
+            attached.streamCheckpoint(),
+            new ProviderResponse(
+                "",
+                "",
+                List.of(new ProviderToolCall("call-1", "bash", "{\"a\":1}")),
+                GenerationStopReason.COMPLETE,
+                usage(),
+                null,
+                null,
+                "{}"),
+            attached.error(),
+            attached.resultEntryId(),
+            attached.failedAttempts(),
+            attached.createdAt(),
+            attached.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(mismatchedArgs, path));
+  }
+
+  /** 遗漏失败 attempt 被拒：attempt=3 期待两次失败审计，但只物化了 attempt=1（数量 1 != 2）。 */
+  @Test
+  void rejectsAttachedMissingFailureAttempt() {
+    ModelInvocation attached = succeededToolPhase(3, id(3L));
+    // attempt=3 期待两次失败审计，但只物化了 attempt=1（真实可构造的短前缀）：数量 1 != 2 必须被拒。
+    EntryPath omitted =
+        retryAttachedToolPath(
+            List.of(attemptFailureEntry(1, id(5L), id(3L))),
+            assistantToolMessageAt(id(4L), id(5L), T6));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelAttemptMaterialization.validateAttached(attached, omitted));
+  }
+
+  /** 合法 retry tool phase 被接受：attempt=3 已在 requestHead 与 head 之间物化连续 failure(1)、failure(2)。 */
+  @Test
+  void acceptsAttachedRetryToolPhase() {
+    ModelInvocation attached = succeededToolPhase(3, id(3L));
+    EntryPath path =
+        retryAttachedToolPath(
+            List.of(attemptFailureEntry(1, id(5L), id(3L)), attemptFailureEntry(2, id(6L), id(5L))),
+            assistantToolMessageAt(id(4L), id(6L), T6));
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validateAttached(attached, path));
+  }
+
+  /** tool calls 与 result 一致但完整 payload 不同（text / metadata / renderer 任一）必须被拒。 */
+  @Test
+  void rejectsAttachedPayloadMismatchDespiteMatchingToolCalls() {
+    ModelInvocation attached = succeededToolPhase();
+    // text 差异：head 出现映射（text 为空）中没有的文本内容，tool call 仍与 result 一致。
+    Entry textDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
+                        new TextMessageContent("unexpected text"))),
+                assistantMetadata(GenerationStopReason.COMPLETE),
+                null));
+    // metadata 差异：tool call 相同但 stop reason / usage 不同。
+    Entry metadataDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
+                assistantMetadata(GenerationStopReason.LENGTH),
+                null));
+    // renderer 差异：冻结 binding 的 rendererKey=bash，head 却使用 fallback renderer=tool。
+    Entry rendererDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
+                assistantMetadata(GenerationStopReason.COMPLETE),
+                null));
+    for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> ModelAttemptMaterialization.validateAttached(attached, attachedToolPath(drifted)),
+          "attached assistant payload must match the mapper exactly");
+    }
+  }
+
+  /** attach 转换的普通成功结果不再直接 return：必须完整等于 mapper 重放的 assistant payload。 */
+  @Test
+  void acceptsExactSuccessResultAndRejectsDrift() {
+    ModelInvocation stored =
+        new ModelInvocation(
+            id(10L),
+            id(20L),
+            id(2L),
+            id(3L),
+            toolPhaseRequest(),
+            ModelInvocationStatus.SUCCEEDED,
+            1,
+            null,
+            toolResponse(),
+            null,
+            null,
+            List.of(),
+            T2,
+            T6);
+    Entry exactResult = assistantToolMessage(id(4L), id(3L));
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored,
+                stored.attachResultEntry(exactResult.id(), T6),
+                attachedToolPath(exactResult)));
+
+    // 相同类型但 text / metadata / renderer 任一漂移必须被拒（result 与 Assistant 完全一致才算成功物化）。
+    Entry textDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
+                        new TextMessageContent("unexpected text"))),
+                assistantMetadata(GenerationStopReason.COMPLETE),
+                null));
+    Entry metadataDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
+                assistantMetadata(GenerationStopReason.LENGTH),
+                null));
+    Entry rendererDrifted =
+        assistantToolMessageAt(
+            id(4L),
+            id(3L),
+            T2,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
+                assistantMetadata(GenerationStopReason.COMPLETE),
+                null));
+    for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              ModelAttemptMaterialization.validate(
+                  stored, stored.attachResultEntry(drifted.id(), T6), attachedToolPath(drifted)),
+          "success result must match the mapper-exact assistant payload");
+    }
+  }
+
+  @Test
+  void rejectsModelInvocationOnCompactionTurn() {
+    CompactionStart compaction = historyCompactionStart();
+    ModelInvocation stored = compactionSucceededInvocation();
+    Entry result = new Entry(id(4L), id(100L), id(2L), new CompactionPayload("summary", null), T6);
+    EntryPath path =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ModelAttemptMaterialization.validate(
+                    stored, stored.attachResultEntry(result.id(), T6), path));
+    assertEquals(
+        "a COMPACTION turn must not have model invocations; compaction runs in a child runtime"
+            + " thread",
+        error.getMessage());
+  }
+
+  /** SUCCEEDED compaction invocation：requestHead = TURN_START id(2)，result = 固定摘要文本快照。 */
+  private static ModelInvocation compactionSucceededInvocation() {
+    return new ModelInvocation(
+        id(10L),
+        id(20L),
+        id(2L),
+        id(2L),
+        requestSpec(),
+        ModelInvocationStatus.SUCCEEDED,
+        1,
+        null,
+        compactionResponse("final summary"),
+        null,
+        null,
+        List.of(),
+        T2,
+        T6);
+  }
+
+  private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {
+    return invocation(
+        requestSpec(),
+        ModelInvocationStatus.FAILED,
+        2,
+        new StreamCheckpoint(2, 7, "terminal partial", "terminal thinking"),
+        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "provider exploded"),
+        failures);
+  }
+
+  private static ModelInvocation invocation(
+      ModelRequestSpec requestSpec,
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint checkpoint,
+      ModelInvocationError error,
+      List<ModelAttemptFailure> failures) {
+    return new ModelInvocation(
+        id(10L),
+        id(20L),
+        id(2L),
+        id(3L),
+        requestSpec,
+        status,
+        attempt,
+        checkpoint,
+        null,
+        error,
+        null,
+        failures,
+        T2,
+        T6);
+  }
+
+  private static ModelAttemptFailure failure() {
+    return new ModelAttemptFailure(
+        1,
+        3,
+        "retry partial",
+        "retry thinking",
+        ModelSelection.model("model", "v1"),
+        null,
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
+        T3,
+        T4);
+  }
+
+  private static Entry failureEntry(
+      UUID entryId, UUID parentId, ModelAttemptFailure failure, Instant createdAt, String text) {
+    return new Entry(
+        entryId,
+        id(100L),
+        parentId,
+        new ModelAttemptFailurePayload(
+            new ModelAttemptSnapshot(
+                failure.attempt(), failure.sequence(), text, failure.thinking()),
+            failure.model(),
+            failure.requestedAt(),
+            new AssistantError(failure.error().kind().name(), failure.error().message()),
+            failure.retryAt()),
+        createdAt);
+  }
+
+  private static Entry assistantError(
+      UUID entryId,
+      UUID parentId,
+      ModelInvocationError error,
+      ModelAttemptSnapshot attempt,
+      Instant createdAt) {
+    return new Entry(
+        entryId,
+        id(100L),
+        parentId,
+        new AssistantErrorPayload(
+            new AssistantError(error.kind().name(), error.message()), attempt),
+        createdAt);
+  }
+
+  private static EntryPath inputPath(Entry suffix) {
+    return inputPath(List.of(suffix));
+  }
+
+  private static EntryPath inputPath(List<Entry> suffix) {
+    return new EntryPath(
+        Stream.concat(
+                List.of(
+                    root(),
+                    new Entry(
+                        id(2L),
+                        id(100L),
+                        id(1L),
+                        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+                        T1),
+                    new Entry(
+                        id(3L),
+                        id(100L),
+                        id(2L),
+                        new MessagePayload(
+                            new AgentMessage(
+                                AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                            null,
+                            null),
+                        T2))
+                    .stream(),
+                suffix.stream())
+            .toList());
+  }
+
+  private static Entry root() {
+    return new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), T0);
+  }
+
+  private static ModelRequestSpec requestSpec() {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        new UUID(0L, 1L),
+        modelDescriptor(),
+        new ModelVariant("v1"),
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+
+  private static ModelDescriptor modelDescriptor() {
+    return new ModelDescriptor(
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
+  }
+
+  /**
+   * 活跃 Tool phase 的 attached SUCCEEDED ModelInvocation：requestHead == USER head id(3)，result ==
+   * ASSISTANT id(4)（result 是 requestHead 的严格 descendant，真实合法形状）。
+   */
+  private static ModelInvocation succeededToolPhase() {
+    return succeededToolPhase(1, id(3L));
+  }
+
+  /** attached SUCCEEDED tool phase，可显式配置 attempt 与 requestHeadEntryId 以构造 retry 审计场景。 */
+  private static ModelInvocation succeededToolPhase(int attempt, UUID requestHeadEntryId) {
+    return new ModelInvocation(
+        id(10L),
+        id(20L),
+        id(2L),
+        requestHeadEntryId,
+        toolPhaseRequest(),
+        ModelInvocationStatus.SUCCEEDED,
+        attempt,
+        null,
+        toolResponse(),
+        null,
+        id(4L),
+        List.of(),
+        T2,
+        T6);
+  }
+
+  /** SUCCEEDED tool phase 的冻结请求：携带 rendererKey=bash 的 bash binding，使映射的 assistant payload 可复现。 */
+  private static ModelRequestSpec toolPhaseRequest() {
+    ToolBinding binding =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new ToolDescriptor(
+                    "bash",
+                    "description of bash",
+                    "bash",
+                    new InputSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        new UUID(0L, 1L),
+        modelDescriptor(),
+        new ModelVariant("v1"),
+        1024,
+        "Test system instruction.",
+        List.of(binding),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+
+  /** [root, TURN_START, USER, assistant] 且 requestHead == assistant == head 的 tool phase path。 */
+  private static EntryPath attachedToolPath(Entry assistant) {
+    return new EntryPath(List.of(root(), turnStart(), userMessage(), assistant));
+  }
+
+  /**
+   * retry 结构 path：[root, TURN_START, USER, failures..., assistant]，失败 entry 连续挂链、requestHead =
+   * USER。
+   */
+  private static EntryPath retryAttachedToolPath(List<Entry> failures, Entry assistant) {
+    List<Entry> entries = new ArrayList<>(List.of(root(), turnStart(), userMessage()));
+    entries.addAll(failures);
+    entries.add(assistant);
+    return new EntryPath(entries);
+  }
+
+  /** 第 {@code attempt} 个尝试失败的 ModelAttemptFailure entry；本校验只核对 attempt 前缀序号，详情字段不参与。 */
+  private static Entry attemptFailureEntry(int attempt, UUID entryId, UUID parentId) {
+    ModelAttemptFailure failure =
+        new ModelAttemptFailure(
+            attempt,
+            1,
+            "retry partial",
+            "retry thinking",
+            ModelSelection.model("model", "v1"),
+            null,
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
+            T3,
+            T4);
+    return failureEntry(entryId, parentId, failure, failure.failedAt(), failure.text());
+  }
+
+  /** call-1 的 assistant head（payload 与映射一致），可指定 created_at 以满足 retry 链的 parent 时间顺序。 */
+  private static Entry assistantToolMessageAt(UUID entryId, UUID parentId, Instant createdAt) {
+    return assistantToolMessageAt(entryId, parentId, createdAt, assistantToolPayload());
+  }
+
+  private static MessagePayload assistantToolPayload() {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
+        assistantMetadata(GenerationStopReason.COMPLETE),
+        null);
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
+    // Direct terminal fixtures have no confirmed RUNNING timestamp or provider-reported tier.
+    return new AssistantMessageMetadata(
+        stopReason, usage(), null, ModelSelection.model("model", "v1"), null, null);
+  }
+
+  /** call-1 的 assistant head，允许自定义完整 payload（供 payload 漂移场景）。 */
+  private static Entry assistantToolMessageAt(
+      UUID entryId, UUID parentId, Instant createdAt, MessagePayload payload) {
+    return new Entry(entryId, id(100L), parentId, payload, createdAt);
+  }
+
+  private static Entry userMessage() {
+    return new Entry(
+        id(3L),
+        id(100L),
+        id(2L),
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+            null,
+            null),
+        T2);
+  }
+
+  /** 与 assistant 的 call-1 匹配的 TOOL result（用于让 head 前进到 ToolResult Entry 的合法形状）。 */
+  private static Entry toolResultMessage(UUID entryId, UUID parentId) {
+    return new Entry(
+        entryId,
+        id(100L),
+        parentId,
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        "call-1",
+                        "bash",
+                        "bash",
+                        List.of(new TextMessageContent("done")),
+                        false,
+                        "{}"))),
+            null,
+            new ToolResultMetadata(
+                id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null)),
+        T3);
+  }
+
+  private static Entry turnStart() {
+    return new Entry(
+        id(2L),
+        id(100L),
+        id(1L),
+        new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER_THREAD_ID),
+        T1);
+  }
+
+  /** COMPACTION turn 的 TURN_START（compaction 结果 Entry 必须位于 compaction turn 内）。 */
+  private static Entry compactionTurnStart(
+      UUID entryId, UUID parentId, Instant createdAt, CompactionStart compaction) {
+    return new Entry(
+        entryId, id(100L), parentId, resolvedCompactionTurnStart(compaction), createdAt);
+  }
+
+  private static TurnStartPayload resolvedCompactionTurnStart(CompactionStart compaction) {
+    return new TurnStartPayload(
+        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction, null);
+  }
+
+  private static CompactionStart historyCompactionStart() {
+    return CompactionStart.pending(
+        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, id(1L), id(1L), null);
+  }
+
+  private static Entry assistantToolMessage(UUID entryId, UUID parentId) {
+    return new Entry(entryId, id(100L), parentId, assistantToolPayload(), T2);
+  }
+
+  private static ProviderResponse toolResponse() {
+    return new ProviderResponse(
+        "",
+        "",
+        List.of(new ProviderToolCall("call-1", "bash", "{}")),
+        GenerationStopReason.COMPLETE,
+        usage(),
+        null,
+        null,
+        "{}");
+  }
+
+  private static ProviderResponse compactionResponse(String text) {
+    return new ProviderResponse(
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage(), null, null, "{}");
+  }
+
+  private static ModelUsage usage() {
+    return new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
+  }
+
+  private static ModelCost cost() {
+    return new ModelCost(
+        "USD",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
+  }
+}

@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -19,7 +18,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
@@ -35,13 +33,13 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.environment.Environment;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -72,7 +70,6 @@ class EnvironmentUpdateServiceTest {
   private EnvironmentRegistry registry;
   private EnvironmentRepository environmentRepository;
   private DaemonReleaseProvider releaseProvider;
-  private JdbcTemplate jdbcTemplate;
   private EnvironmentUpdateService service;
 
   @BeforeEach
@@ -80,7 +77,6 @@ class EnvironmentUpdateServiceTest {
     server = mock(EnvironmentDaemonServer.class);
     registry = mock(EnvironmentRegistry.class);
     environmentRepository = mock(EnvironmentRepository.class);
-    jdbcTemplate = mock(JdbcTemplate.class);
     releaseProvider =
         (operatingSystem, architecture) ->
             Optional.of(
@@ -104,7 +100,6 @@ class EnvironmentUpdateServiceTest {
         environmentRepository,
         releaseProvider,
         new SystemSettingsSnapshot(SystemSettings.DEFAULT),
-        jdbcTemplate,
         CLOCK);
   }
 
@@ -174,8 +169,7 @@ class EnvironmentUpdateServiceTest {
 
   @Test
   void rejectsWhenDurableWorkRequiresEnvironment() {
-    when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), eq(ENV.value())))
-        .thenReturn(1);
+    when(environmentRepository.hasActiveWork(ENV.value())).thenReturn(true);
 
     assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
 

@@ -58,7 +58,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     String reviewAgent = createAgent();
     UUID projectId = createProjectWithStages(title, designAgent, reviewAgent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("start"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("start"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     return new RunFixture(issue.getId(), run);
   }
@@ -96,7 +96,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertEquals("REVIEW", accepted.toState());
     assertEquals(fixture.run().getId(), accepted.runId());
     assertEquals("REVIEW", nextState(fixture.run().getId()));
-    assertEquals("DESIGN", issueService.getIssue(fixture.issueId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(fixture.issueId()).getState());
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(fixture.run().getId()).getStatus());
   }
 

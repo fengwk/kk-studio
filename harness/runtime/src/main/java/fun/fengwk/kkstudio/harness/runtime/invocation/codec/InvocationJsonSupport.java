@@ -19,10 +19,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-/** durable Invocation value codec 共享的 feature-local 严格 JSON 原语。 */
-final class InvocationJsonSupport {
+/**
+ * durable Invocation value codec 共享的严格 JSON 原语：重复键、尾随内容、字段集合与标量类型都在这里统一拒绝。
+ *
+ * <p>依赖 Harness Environment 的 canonical id 校验，因此留在 runtime 而非 common；公开给 Driver 的 codec 复用同一套解析与
+ * 校验语义。
+ */
+public final class InvocationJsonSupport {
 
-  static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+  public static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
@@ -35,7 +40,7 @@ final class InvocationJsonSupport {
 
   private InvocationJsonSupport() {}
 
-  static JsonNode parse(String json, String context) {
+  public static JsonNode parse(String json, String context) {
     Objects.requireNonNull(json, "json");
     try {
       JsonNode value = MAPPER.readTree(json);
@@ -49,7 +54,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static String write(JsonNode node, String context) {
+  public static String write(JsonNode node, String context) {
     try {
       return MAPPER.writeValueAsString(node);
     } catch (JacksonException error) {
@@ -57,7 +62,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static ObjectNode object(JsonNode value, String context) {
+  public static ObjectNode object(JsonNode value, String context) {
     Objects.requireNonNull(value, "value");
     if (!(value instanceof ObjectNode object)) {
       throw new IllegalArgumentException(context + " must be an object");
@@ -65,14 +70,14 @@ final class InvocationJsonSupport {
     return object;
   }
 
-  static ArrayNode array(JsonNode value, String field) {
+  public static ArrayNode array(JsonNode value, String field) {
     if (!(value instanceof ArrayNode array)) {
       throw new IllegalArgumentException(field + " must be an array");
     }
     return array;
   }
 
-  static void requireFields(ObjectNode node, String context, String... names) {
+  public static void requireFields(ObjectNode node, String context, String... names) {
     Set<String> expected = Set.of(names);
     if (node.size() != expected.size()) {
       throw new IllegalArgumentException(context + " must declare exactly " + expected);
@@ -84,7 +89,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static JsonNode required(ObjectNode node, String field, String context) {
+  public static JsonNode required(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || value.isNull()) {
       throw new IllegalArgumentException(context + " must declare non-null " + field);
@@ -92,7 +97,7 @@ final class InvocationJsonSupport {
     return value;
   }
 
-  static JsonNode declared(ObjectNode node, String field, String context) {
+  public static JsonNode declared(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null) {
       throw new IllegalArgumentException(context + " must declare " + field);
@@ -100,7 +105,7 @@ final class InvocationJsonSupport {
     return value;
   }
 
-  static String text(ObjectNode node, String field, String context) {
+  public static String text(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
@@ -108,7 +113,7 @@ final class InvocationJsonSupport {
     return value.stringValue();
   }
 
-  static String nullableText(ObjectNode node, String field, String context) {
+  public static String nullableText(ObjectNode node, String field, String context) {
     JsonNode value = declared(node, field, context);
     if (value.isNull()) {
       return null;
@@ -119,7 +124,7 @@ final class InvocationJsonSupport {
     return value.stringValue();
   }
 
-  static boolean bool(ObjectNode node, String field, String context) {
+  public static boolean bool(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isBoolean()) {
       throw new IllegalArgumentException(context + "." + field + " must be boolean");
@@ -127,7 +132,7 @@ final class InvocationJsonSupport {
     return value.booleanValue();
   }
 
-  static int positiveInt(ObjectNode node, String field, String context) {
+  public static int positiveInt(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() <= 0) {
       throw new IllegalArgumentException(context + "." + field + " must be a positive integer");
@@ -135,7 +140,7 @@ final class InvocationJsonSupport {
     return value.intValue();
   }
 
-  static int nonNegativeInt(ObjectNode node, String field, String context) {
+  public static int nonNegativeInt(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
       throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
@@ -143,7 +148,7 @@ final class InvocationJsonSupport {
     return value.intValue();
   }
 
-  static long nonNegativeLong(ObjectNode node, String field, String context) {
+  public static long nonNegativeLong(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
       throw new IllegalArgumentException(
@@ -152,7 +157,7 @@ final class InvocationJsonSupport {
     return value.longValue();
   }
 
-  static <E extends Enum<E>> E nullableEnum(
+  public static <E extends Enum<E>> E nullableEnum(
       ObjectNode node, String field, Class<E> enumType, String context) {
     String value = nullableText(node, field, context);
     if (value == null) {
@@ -166,7 +171,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static <E extends Enum<E>> E requiredEnum(
+  public static <E extends Enum<E>> E requiredEnum(
       ObjectNode node, String field, Class<E> enumType, String context) {
     String value = text(node, field, context);
     try {
@@ -177,7 +182,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static Instant nullableInstant(ObjectNode node, String field, String context) {
+  public static Instant nullableInstant(ObjectNode node, String field, String context) {
     String value = nullableText(node, field, context);
     if (value == null) {
       return null;
@@ -190,7 +195,7 @@ final class InvocationJsonSupport {
     }
   }
 
-  static UUID nullableUuid(ObjectNode node, String field, String context) {
+  public static UUID nullableUuid(ObjectNode node, String field, String context) {
     String value = nullableText(node, field, context);
     if (value == null) {
       return null;
@@ -204,7 +209,7 @@ final class InvocationJsonSupport {
   }
 
   /** 读取 canonical EnvironmentId 文本字段；非 canonical UUID 文本拒绝。 */
-  static EnvironmentId environmentId(ObjectNode node, String field, String context) {
+  public static EnvironmentId environmentId(ObjectNode node, String field, String context) {
     String value = nullableText(node, field, context);
     if (value == null) {
       throw new IllegalArgumentException(context + " must declare non-null " + field);
@@ -218,7 +223,7 @@ final class InvocationJsonSupport {
   }
 
   /** 读取可空 canonical Environment id：null 表示未绑定，非 null 必须通过 {@link EnvironmentId} 校验。 */
-  static EnvironmentId nullableEnvironmentId(ObjectNode node, String field, String context) {
+  public static EnvironmentId nullableEnvironmentId(ObjectNode node, String field, String context) {
     JsonNode value = declared(node, field, context);
     if (value.isNull()) {
       return null;
@@ -226,7 +231,7 @@ final class InvocationJsonSupport {
     return environmentId(node, field, context);
   }
 
-  static UUID requiredUuid(ObjectNode node, String field, String context) {
+  public static UUID requiredUuid(ObjectNode node, String field, String context) {
     UUID value = nullableUuid(node, field, context);
     if (value == null) {
       throw new IllegalArgumentException(context + " must declare non-null " + field);
@@ -234,7 +239,7 @@ final class InvocationJsonSupport {
     return value;
   }
 
-  static void putNullable(ObjectNode node, String field, String value) {
+  public static void putNullable(ObjectNode node, String field, String value) {
     if (value == null) {
       node.putNull(field);
     } else {
@@ -242,20 +247,20 @@ final class InvocationJsonSupport {
     }
   }
 
-  static void putNullable(ObjectNode node, String field, Instant value) {
+  public static void putNullable(ObjectNode node, String field, Instant value) {
     putNullable(node, field, value == null ? null : value.toString());
   }
 
-  static void putNullable(ObjectNode node, String field, UUID value) {
+  public static void putNullable(ObjectNode node, String field, UUID value) {
     putNullable(node, field, value == null ? null : value.toString());
   }
 
   /** 编码可空 Environment id：null 输出显式 null；非 null 输出 canonical UUID 文本。 */
-  static void putNullable(ObjectNode node, String field, EnvironmentId value) {
+  public static void putNullable(ObjectNode node, String field, EnvironmentId value) {
     putNullable(node, field, value == null ? null : value.toString());
   }
 
-  static void putNullable(ObjectNode node, String field, Enum<?> value) {
+  public static void putNullable(ObjectNode node, String field, Enum<?> value) {
     putNullable(node, field, value == null ? null : value.name());
   }
 }

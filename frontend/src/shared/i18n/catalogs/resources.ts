@@ -354,6 +354,14 @@ export const resourcesCatalog = {
     'en-US': 'in {{input}} / out {{output}} / read {{cacheRead}} / write {{cacheWrite}} · {{overrides}} overrides · {{multipliers}} multipliers',
     'zh-CN': '输入 {{input}} / 输出 {{output}} / 缓存读 {{cacheRead}} / 缓存写 {{cacheWrite}} · 覆盖 {{overrides}} · 倍率 {{multipliers}}',
   },
+  'ai.catalog.catalog.issue.ignoredRegionMultiplier': {
+    'en-US': 'Region multipliers ignored; estimated costs may be lower than your actual bill',
+    'zh-CN': '已忽略地区倍率，统计费用可能低于实际账单',
+  },
+  'ai.catalog.catalog.issue.nonTokenCostWebSearch': {
+    'en-US': 'Web search surcharges are not included in token prices',
+    'zh-CN': '网页搜索附加费用未计入Token价格',
+  },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
     'zh-CN': 'Model ID',
@@ -758,6 +766,46 @@ export const resourcesCatalog = {
   'ai.catalog.form.conditionTime': {
     'en-US': 'Time',
     'zh-CN': '时间',
+  },
+  'ai.catalog.form.conditionRequestBody': {
+    'en-US': 'Request body',
+    'zh-CN': '请求体字段',
+  },
+  'ai.catalog.form.requestBodyPath': {
+    'en-US': 'JSON Pointer path',
+    'zh-CN': 'JSON Pointer 路径',
+  },
+  'ai.catalog.form.requestBodyType': {
+    'en-US': 'Value type',
+    'zh-CN': '值类型',
+  },
+  'ai.catalog.form.requestBodyType.string': {
+    'en-US': 'String',
+    'zh-CN': '字符串',
+  },
+  'ai.catalog.form.requestBodyType.number': {
+    'en-US': 'Number',
+    'zh-CN': '数字',
+  },
+  'ai.catalog.form.requestBodyType.boolean': {
+    'en-US': 'Boolean',
+    'zh-CN': '布尔值',
+  },
+  'ai.catalog.form.requestBodyType.null': {
+    'en-US': 'Null',
+    'zh-CN': '空值',
+  },
+  'ai.catalog.form.requestBodyValue': {
+    'en-US': 'Expected value',
+    'zh-CN': '期望值',
+  },
+  'ai.catalog.form.requestBodyHint': {
+    'en-US': 'Use RFC 6901 JSON Pointer (for example /speed or /options/0/mode). Strings are case-sensitive; numbers compare exactly.',
+    'zh-CN': '使用 RFC 6901 JSON Pointer（如 /speed 或 /options/0/mode）；字符串区分大小写，数字按精确十进制比较。',
+  },
+  'ai.catalog.form.requestBodySourceHint': {
+    'en-US': 'Matches the final encoded Provider JSON. Client-controlled values can affect price by administrator choice; they do not prove the upstream tier.',
+    'zh-CN': '匹配最终编码后的 Provider JSON；客户端可控值会按管理员配置影响价格，但不代表上游实际档位。',
   },
   'ai.catalog.form.condition.all': {
     'en-US': 'All of',

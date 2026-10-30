@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 
 import java.util.ArrayList;
@@ -45,7 +46,7 @@ import java.util.function.Consumer;
  * <p>每条 transport 帧在进入状态机之前先经 {@link ProviderStreamBridge#emitProtocolEvent} exactly-once
  * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
-final class OpenAiResponsesStreamAccumulator {
+public final class OpenAiResponsesStreamAccumulator {
 
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder()
@@ -54,6 +55,11 @@ final class OpenAiResponsesStreamAccumulator {
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final String USAGE_INTEGER_FORMAT =
+      "invalid usage token count in field %s: must be an integral number within long range";
+  private static final String USAGE_NEGATIVE_FORMAT =
+      "invalid usage token count in field %s: must be non-negative";
 
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(
@@ -141,7 +147,7 @@ final class OpenAiResponsesStreamAccumulator {
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
-  OpenAiResponsesStreamAccumulator(
+  public OpenAiResponsesStreamAccumulator(
       ProviderRequest request,
       ProviderDescriptor descriptor,
       Consumer<ProviderStreamEvent> eventConsumer) {
@@ -166,7 +172,7 @@ final class OpenAiResponsesStreamAccumulator {
         });
   }
 
-  void handleEvent(String eventName, String data) {
+  public void handleEvent(String eventName, String data) {
     if (bridge.isClosed()) {
       return;
     }
@@ -180,7 +186,7 @@ final class OpenAiResponsesStreamAccumulator {
       return;
     }
 
-    JsonNode node = parseJson(data);
+    JsonNode node = ProviderJsonHelper.parseSseJson(data, "SSE event data is not valid JSON");
     if (!node.isObject()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "SSE event data is not a JSON object");
@@ -201,7 +207,7 @@ final class OpenAiResponsesStreamAccumulator {
     if ("[DONE]".equals(payload.trim())) {
       return new ProviderProtocolEvent("done", payload);
     }
-    JsonNode node = tryParseJsonObject(payload);
+    JsonNode node = ProviderJsonHelper.tryParseJsonObject(payload);
     if (node != null) {
       JsonNode typeNode = node.get("type");
       if (typeNode != null && typeNode.isString() && !typeNode.stringValue().isBlank()) {
@@ -211,7 +217,7 @@ final class OpenAiResponsesStreamAccumulator {
     return new ProviderProtocolEvent(UNKNOWN_PROTOCOL_EVENT_TYPE, payload);
   }
 
-  void processEvent(JsonNode node) {
+  public void processEvent(JsonNode node) {
     if (node == null || !node.isObject()) {
       return;
     }
@@ -532,21 +538,9 @@ final class OpenAiResponsesStreamAccumulator {
     extractResponseData(responseNode, true);
   }
 
-  private static long parseNonNegativeLong(JsonNode node, String fieldName) {
-    if (node == null || !node.isIntegralNumber() || !node.canConvertToLong()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE,
-          "invalid usage token count in field "
-              + fieldName
-              + ": must be an integral number within long range");
-    }
-    long val = node.asLong(0L);
-    if (val < 0) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE,
-          "invalid usage token count in field " + fieldName + ": must be non-negative");
-    }
-    return val;
+  private static long usageToken(JsonNode node, String fieldName) {
+    return ProviderJsonHelper.parseNonNegativeLong(
+        node, fieldName, USAGE_INTEGER_FORMAT, USAGE_NEGATIVE_FORMAT);
   }
 
   private void resetUsage() {
@@ -589,13 +583,13 @@ final class OpenAiResponsesStreamAccumulator {
               ProviderErrorKind.INVALID_RESPONSE,
               "missing complete usage: OpenAI Responses model " + request.model().modelId());
         }
-        rawInputTokens = parseNonNegativeLong(usageNode.get("input_tokens"), "input_tokens");
-        rawOutputTokens = parseNonNegativeLong(usageNode.get("output_tokens"), "output_tokens");
+        rawInputTokens = usageToken(usageNode.get("input_tokens"), "input_tokens");
+        rawOutputTokens = usageToken(usageNode.get("output_tokens"), "output_tokens");
 
         JsonNode totalNode = usageNode.get("total_tokens");
         if (totalNode != null && !totalNode.isNull()) {
           hasRawTotalTokens = true;
-          rawTotalTokens = parseNonNegativeLong(totalNode, "total_tokens");
+          rawTotalTokens = usageToken(totalNode, "total_tokens");
         }
 
         JsonNode inDetails = usageNode.get("input_tokens_details");
@@ -606,11 +600,11 @@ final class OpenAiResponsesStreamAccumulator {
           }
           cachedTokens =
               inDetails.has("cached_tokens")
-                  ? parseNonNegativeLong(inDetails.get("cached_tokens"), "cached_tokens")
+                  ? usageToken(inDetails.get("cached_tokens"), "cached_tokens")
                   : 0L;
           cacheWriteTokens =
               inDetails.has("cache_write_tokens")
-                  ? parseNonNegativeLong(inDetails.get("cache_write_tokens"), "cache_write_tokens")
+                  ? usageToken(inDetails.get("cache_write_tokens"), "cache_write_tokens")
                   : 0L;
         }
 
@@ -621,8 +615,7 @@ final class OpenAiResponsesStreamAccumulator {
                 ProviderErrorKind.INVALID_RESPONSE, "output_tokens_details is not a JSON object");
           }
           if (outDetails.has("reasoning_tokens") && !outDetails.get("reasoning_tokens").isNull()) {
-            reasoningTokens =
-                parseNonNegativeLong(outDetails.get("reasoning_tokens"), "reasoning_tokens");
+            reasoningTokens = usageToken(outDetails.get("reasoning_tokens"), "reasoning_tokens");
           }
         }
       }
@@ -725,7 +718,9 @@ final class OpenAiResponsesStreamAccumulator {
         boolean isTextual = tool.argumentsTextual;
         String argsStr = tool.argumentsBuffer.toString();
         JsonNode parsedArgs =
-            (isTextual && hasArgs && !argsStr.isBlank()) ? tryParseJsonObject(argsStr) : null;
+            (isTextual && hasArgs && !argsStr.isBlank())
+                ? ProviderJsonHelper.tryParseJsonObject(argsStr)
+                : null;
 
         if (stopReason == GenerationStopReason.COMPLETE) {
           if (!hasValidId) {
@@ -857,11 +852,11 @@ final class OpenAiResponsesStreamAccumulator {
     }
   }
 
-  ProviderResponse response() {
+  public ProviderResponse response() {
     return finish().response();
   }
 
-  ProviderReplayState replayState() {
+  public ProviderReplayState replayState() {
     return finish().replayState();
   }
 
@@ -928,7 +923,7 @@ final class OpenAiResponsesStreamAccumulator {
             || tool.name == null
             || tool.name.isBlank()
             || args.isBlank()
-            || tryParseJsonObject(args) == null) {
+            || ProviderJsonHelper.tryParseJsonObject(args) == null) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
         }
@@ -1060,7 +1055,7 @@ final class OpenAiResponsesStreamAccumulator {
         || name.isBlank()
         || args == null
         || args.isBlank()
-        || tryParseJsonObject(args) == null) {
+        || ProviderJsonHelper.tryParseJsonObject(args) == null) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
     }
@@ -1169,26 +1164,5 @@ final class OpenAiResponsesStreamAccumulator {
       }
     }
     return reasoningItemSeen;
-  }
-
-  private static JsonNode parseJson(String data) {
-    try {
-      return OBJECT_MAPPER.readTree(data);
-    } catch (Exception e) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "SSE event data is not valid JSON");
-    }
-  }
-
-  private static JsonNode tryParseJsonObject(String str) {
-    if (str == null || str.isBlank()) {
-      return null;
-    }
-    try {
-      JsonNode node = OBJECT_MAPPER.readTree(str);
-      return node != null && node.isObject() ? node : null;
-    } catch (Exception e) {
-      return null;
-    }
   }
 }

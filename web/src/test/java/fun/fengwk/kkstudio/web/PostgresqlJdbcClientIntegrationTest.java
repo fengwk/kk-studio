@@ -12,32 +12,35 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.SQLExceptionTranslator;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.environment.repo.impl.model.EnvironmentDO;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
+import fun.fengwk.kkstudio.platform.environment.Environment;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 
 import java.util.UUID;
 
 class PostgresqlJdbcClientIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ConfigurableApplicationContext context;
-  @Autowired private EnvironmentJdbcStore store;
+  @Autowired private EnvironmentRepository repository;
   @Autowired private JdbcClient client;
   @Autowired private JdbcTemplate template;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @Test
-  void autoConfiguredJdbcClientAndStorePreservePostgresqlClassification() {
+  void autoConfiguredJdbcClientAndRepositoryPreservePostgresqlClassification() {
     // 完整宿主装配只注册一个 JdbcClient，并将 PostgreSQL 翻译器用于真实数据库操作。
     assertEquals(1, context.getBeansOfType(JdbcClient.class).size());
     assertSame(context.getBean(SQLExceptionTranslator.class), template.getExceptionTranslator());
 
-    EnvironmentDO row = new EnvironmentDO();
+    Environment row = new Environment();
     row.setId(UUID.randomUUID());
     row.setName("jdbc-client-test");
     row.setRegistrationTokenHash("0".repeat(64));
-    row.setInstallConfigJson("{}");
-    assertEquals(1, store.insert(row));
-    assertNotNull(store.getById(row.getId()));
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+    assertEquals(Boolean.TRUE, transaction.execute(status -> repository.create(row)));
+    assertNotNull(repository.getById(row.getId()));
     assertEquals(
         row.getName(),
         client
@@ -45,6 +48,7 @@ class PostgresqlJdbcClientIntegrationTest extends WebPostgresTestSupport {
             .param("id", row.getId())
             .query(String.class)
             .single());
-    assertThrows(DuplicateKeyException.class, () -> store.insert(row));
+    assertThrows(
+        DuplicateKeyException.class, () -> transaction.execute(status -> repository.create(row)));
   }
 }

@@ -32,13 +32,13 @@ import java.util.Set;
 
 /**
  * models.dev v2 适配器：{@code cost.text.input/output.price}、cache read/write、字段级 overrides、
- * multipliers 与 utc_hours/utc_days 条件；未知且可能影响 token 价格的条件拒绝导入该候选价格。
+ * multipliers 与 utc_hours/utc_days 条件；地区倍率整条忽略并提示，其他未知且可能影响 token 价格的条件拒绝导入该候选价格。
  */
 @Component
 public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
 
   private static final Set<String> COST_KEYS =
-      Set.of("text", "multipliers", "audio", "image", "video");
+      Set.of("text", "multipliers", "audio", "image", "video", "web_search");
   private static final Set<String> INPUT_KEYS = Set.of("price", "cache", "overrides", "unit");
   private static final Set<String> OUTPUT_KEYS = Set.of("price", "reasoning", "overrides", "unit");
   private static final Set<String> CACHE_KEYS = Set.of("read", "write", "explicit", "storage");
@@ -50,7 +50,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
   private static final Set<String> FACTOR_CACHE_KEYS = Set.of("read", "write");
   private static final Set<String> FACTOR_OUTPUT_KEYS = Set.of("price", "reasoning");
   private static final Set<String> CONTEXT_KEYS = Set.of("gt", "gte", "lt", "lte");
-  private static final Set<String> SERVICE_TIER_KEYS = Set.of("equals", "in");
+  private static final Set<String> STRING_FILTER_KEYS = Set.of("equals", "in");
   private static final Set<String> DATE_KEYS = Set.of("gte", "lt");
   private static final Set<String> UTC_HOURS_KEYS = Set.of("gte", "lt");
   private static final Set<String> UTC_DAYS_KEYS = Set.of("in", "equals");
@@ -436,16 +436,28 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     if (!array.isArray()) {
       throw new CatalogPriceException("cost.multipliers must be an array");
     }
+    List<AgentModelPricingMultiplierDTO> parsed = new ArrayList<>();
     int index = 0;
     for (JsonNode item : array) {
       JsonNode multiplier = CatalogJson.requireObject(item, "cost.multipliers[" + index + "]");
       validateKeys(multiplier, MULTIPLIER_KEYS, "multiplier");
       AgentModelPricingMultiplierDTO dto = new AgentModelPricingMultiplierDTO();
       dto.setId("multiplier-" + index);
-      dto.setWhen(condition(multiplier.get("when"), 0));
+      MultiplierImportContext context = new MultiplierImportContext();
+      dto.setWhen(condition(multiplier.get("when"), 0, context));
       dto.setFactors(factors(multiplier.get("factor"), issues));
-      multipliers.add(dto);
+      parsed.add(dto);
+      if (!context.hasRegion) {
+        multipliers.add(dto);
+      }
       index++;
+    }
+    if (parsed.size() != multipliers.size()) {
+      // 被忽略的规则也必须通过其余条件、倍率精度和数量校验；临时定义只校验，不用于计价。
+      AgentModelPricingDTO validation = new AgentModelPricingDTO();
+      validation.setMultipliers(parsed);
+      CatalogPricingValidator.validate(validation);
+      issues.add("ignored region multiplier");
     }
     return multipliers;
   }
@@ -478,6 +490,9 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     JsonNode text = factor.get("text");
     if (text == null || text.isNull()) {
       return factors;
+    }
+    if (text.isNumber()) {
+      return factors(text, issues);
     }
     JsonNode textFactor = CatalogJson.requireObject(text, "multiplier factor.text");
     validateKeys(textFactor, FACTOR_TEXT_KEYS, "multiplier factor.text");
@@ -514,6 +529,15 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
   }
 
   private static AgentModelPricingConditionDTO condition(JsonNode node, int depth) {
+    return condition(node, depth, null);
+  }
+
+  private static final class MultiplierImportContext {
+    private boolean hasRegion;
+  }
+
+  private static AgentModelPricingConditionDTO condition(
+      JsonNode node, int depth, MultiplierImportContext importContext) {
     if (depth > 8) {
       throw new CatalogPriceException("pricing condition nesting is too deep");
     }
@@ -524,8 +548,16 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     AgentModelPricingConditionDTO condition = new AgentModelPricingConditionDTO();
     for (String key : when.propertyNames()) {
       switch (key) {
+        case "region" -> {
+          if (importContext == null) {
+            throw new CatalogPriceException("unsupported pricing condition: region");
+          }
+          stringFilter(when.get("region"), "condition.region");
+          importContext.hasRegion = true;
+        }
         case "context" -> condition.setContext(context(when.get("context")));
-        case "service_tier" -> condition.setServiceTier(serviceTier(when.get("service_tier")));
+        case "service_tier" -> condition.setServiceTier(
+            stringFilter(when.get("service_tier"), "condition.service_tier"));
         case "date" -> condition.setDate(date(when.get("date")));
         case "utc_hours" -> {
           // utc_days and utc_hours jointly form one time window.
@@ -533,14 +565,14 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
         case "utc_days" -> {
           // handled with utc_hours below
         }
-        case "all" -> condition.setAll(conditions(when.get("all"), depth + 1));
-        case "any" -> condition.setAny(conditions(when.get("any"), depth + 1));
+        case "all" -> condition.setAll(conditions(when.get("all"), depth + 1, importContext));
+        case "any" -> condition.setAny(conditions(when.get("any"), depth + 1, importContext));
         case "not" -> {
           JsonNode child = when.get("not");
           if (child == null || child.isNull()) {
             throw new CatalogPriceException("condition.not must be an object");
           }
-          condition.setNot(condition(child, depth + 1));
+          condition.setNot(condition(child, depth + 1, importContext));
         }
         default -> throw new CatalogPriceException("unsupported pricing condition: " + key);
       }
@@ -562,27 +594,27 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     return dto;
   }
 
-  private static List<String> serviceTier(JsonNode node) {
-    JsonNode serviceTier = CatalogJson.requireObject(node, "condition.service_tier");
-    validateKeys(serviceTier, SERVICE_TIER_KEYS, "condition.service_tier");
-    List<String> tiers = new ArrayList<>();
-    JsonNode equals = serviceTier.get("equals");
+  private static List<String> stringFilter(JsonNode node, String name) {
+    JsonNode filter = CatalogJson.requireObject(node, name);
+    validateKeys(filter, STRING_FILTER_KEYS, name);
+    List<String> values = new ArrayList<>();
+    JsonNode equals = filter.get("equals");
     if (equals != null && !equals.isNull()) {
-      addUnique(tiers, requiredText(equals, "condition.service_tier.equals"));
+      addUnique(values, requiredText(equals, name + ".equals"));
     }
-    JsonNode in = serviceTier.get("in");
+    JsonNode in = filter.get("in");
     if (in != null && !in.isNull()) {
       if (!in.isArray()) {
-        throw new CatalogPriceException("condition.service_tier.in must be an array");
+        throw new CatalogPriceException(name + ".in must be an array");
       }
       for (JsonNode value : in) {
-        addUnique(tiers, requiredText(value, "condition.service_tier.in value"));
+        addUnique(values, requiredText(value, name + ".in value"));
       }
     }
-    if (tiers.isEmpty()) {
-      throw new CatalogPriceException("condition.service_tier requires equals or in");
+    if (values.isEmpty()) {
+      throw new CatalogPriceException(name + " requires equals or in");
     }
-    return tiers;
+    return values;
   }
 
   private static AgentModelPricingDateConditionDTO date(JsonNode node) {
@@ -695,7 +727,8 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     };
   }
 
-  private static List<AgentModelPricingConditionDTO> conditions(JsonNode node, int depth) {
+  private static List<AgentModelPricingConditionDTO> conditions(
+      JsonNode node, int depth, MultiplierImportContext importContext) {
     if (node == null || node.isNull()) {
       return null;
     }
@@ -704,7 +737,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     }
     List<AgentModelPricingConditionDTO> conditions = new ArrayList<>();
     for (JsonNode item : node) {
-      conditions.add(condition(item, depth));
+      conditions.add(condition(item, depth, importContext));
     }
     return conditions;
   }

@@ -155,6 +155,7 @@ export interface AgentModelPricingConditionDTO {
   serviceTier?: string[] | null
   date?: AgentModelPricingDateConditionDTO | null
   time?: AgentModelPricingTimeConditionDTO | null
+  requestBody?: AgentModelPricingRequestBodyConditionDTO | null
   all?: AgentModelPricingConditionDTO[] | null
   any?: AgentModelPricingConditionDTO[] | null
   not?: AgentModelPricingConditionDTO | null
@@ -202,6 +203,12 @@ export interface AgentModelPricingOverrideDTO {
   id: string
   when: AgentModelPricingConditionDTO
   rates: AgentModelRatePatchDTO
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRequestBodyConditionDTO */
+export interface AgentModelPricingRequestBodyConditionDTO {
+  path?: string | null
+  equals?: unknown | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO */

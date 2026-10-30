@@ -1,8 +1,13 @@
 package fun.fengwk.kkstudio.harness.infra.dispatch;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -17,14 +22,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -118,7 +119,7 @@ final class DispatcherTestSupport {
 
   /** 事务时间固定在 {@link #NOW} 的内存 store，与 {@link #clock()} 同一时间域。 */
   static InMemoryHarnessStore newStore() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     store.setNow(NOW);
     return store;
   }

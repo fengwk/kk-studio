@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatDO;
-import fun.fengwk.kkstudio.platform.chat.repo.impl.store.ChatJdbcStore;
+import fun.fengwk.kkstudio.platform.chat.Chat;
+import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.UUID;
@@ -27,17 +28,17 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
   private static final AtomicLong ISSUE_NUMBER = new AtomicLong();
 
   @Autowired protected JdbcTemplate jdbc;
-  @Autowired protected ChatJdbcStore chatJdbcStore;
+  @Autowired protected ChatRepository chatRepository;
 
   /** 建一个 Chat owner 行并返回 id。 */
   protected UUID chatOwner() {
     UUID id = uuid();
-    ChatDO chat = new ChatDO();
+    Chat chat = new Chat();
     chat.setId(id);
     chat.setTitle("owner-" + id);
     chat.setAgentName("schema-agent");
     chat.setVersion(0L);
-    assertEquals(1, chatJdbcStore.insert(chat));
+    assertTrue(chatRepository.create(chat));
     return id;
   }
 

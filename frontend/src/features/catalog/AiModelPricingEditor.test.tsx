@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
+import { normalizeCondition } from '@/features/catalog/ai-model-pricing-codec'
 import type { ModelPricingDraft } from '@/features/catalog/ai-console-types'
 import { setLocale } from '@/shared/i18n'
 
@@ -120,7 +121,16 @@ describe('ModelPricingEditor source controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
     const labels = screen.getAllByRole('option').map((option) => option.textContent)
-    expect(labels).toEqual(['Context tokens', 'Service tier', 'Date', 'Time', 'All of', 'Any of', 'Not'])
+    expect(labels).toEqual([
+      'Context tokens',
+      'Service tier',
+      'Date',
+      'Time',
+      'Request body',
+      'All of',
+      'Any of',
+      'Not',
+    ])
   })
 
   it('uses the same translated label on an added condition block', () => {
@@ -135,5 +145,80 @@ describe('ModelPricingEditor source controls', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Context tokens' }))
 
     expect(screen.getByRole('button', { name: 'Remove Context tokens' })).toBeInTheDocument()
+  })
+
+
+  it('edits request-body path, explicit type and value, preserving exact JSON numbers on save', () => {
+    setLocale('en-US')
+    const initial = pricing()
+    initial.overrides[0]!.when = {
+      requestBody: { path: '/speed', equals: 'fast' },
+    }
+    render(<PricingHarness initial={initial} />)
+    openFirstRule()
+
+    const path = screen.getByLabelText('JSON Pointer path')
+    const value = screen.getByLabelText('Expected value')
+    expect(path).toHaveValue('/speed')
+    expect(value).toHaveValue('fast')
+
+    fireEvent.change(path, { target: { value: '/n' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Value type' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Number' }))
+    fireEvent.change(screen.getByLabelText('Expected value'), {
+      target: { value: '9007199254740993' },
+    })
+
+    const draft = JSON.parse(screen.getByTestId('pricing-json').textContent!)
+    expect(draft.overrides[0].when.requestBody).toEqual({
+      path: '/n',
+      equals: { rawJson: '9007199254740993' },
+    })
+    expect(JSON.stringify(normalizeCondition(draft.overrides[0].when)))
+      .toContain('"equals":9007199254740993')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Value type' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Null' }))
+    expect(screen.queryByLabelText('Expected value')).not.toBeInTheDocument()
+    const nullDraft = JSON.parse(screen.getByTestId('pricing-json').textContent!)
+    expect(JSON.stringify(normalizeCondition(nullDraft.overrides[0].when)))
+      .toContain('"equals":null')
+  })
+
+  it('uses explicit boolean and null controls rather than coercing free text', () => {
+    setLocale('en-US')
+    const initial = pricing()
+    initial.overrides[0]!.when = {
+      requestBody: { path: '/enabled', equals: true },
+    }
+    render(<PricingHarness initial={initial} />)
+    openFirstRule()
+
+    const booleanValue = screen.getByRole('button', { name: 'Expected value' })
+    expect(booleanValue).toHaveTextContent('true')
+    fireEvent.click(booleanValue)
+    fireEvent.click(screen.getByRole('option', { name: 'false' }))
+    expect(JSON.parse(screen.getByTestId('pricing-json').textContent!)
+      .overrides[0].when.requestBody.equals).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Value type' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Null' }))
+    expect(screen.queryByRole('button', { name: 'Expected value' })).not.toBeInTheDocument()
+    expect(JSON.parse(screen.getByTestId('pricing-json').textContent!)
+      .overrides[0].when.requestBody.equals).toBeNull()
+  })
+
+  it('adds a request-body condition with a valid default path and string value', () => {
+    setLocale('en-US')
+    const initial = pricing()
+    initial.overrides[0]!.when = {}
+    render(<PricingHarness initial={initial} />)
+    openFirstRule()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Request body' }))
+    expect(screen.getByLabelText('JSON Pointer path')).toHaveValue('/')
+    expect(screen.getByLabelText('Expected value')).toHaveValue('')
+    expect(screen.getByText(/Matches the final encoded Provider JSON/)).toBeInTheDocument()
   })
 })

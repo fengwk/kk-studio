@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.cluster;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -20,13 +20,13 @@ public final class ClusterNodePresence {
       select exists(
           select 1
           from cluster_node
-          where instance_id <> ?
+          where instance_id <> :localNodeId
             and lease_until > statement_timestamp())
       """;
 
   private static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(1);
 
-  private final JdbcTemplate jdbcTemplate;
+  private final JdbcClient jdbcClient;
   private final UUID localNodeId;
   private final long cacheTtlNanos;
   private final LongSupplier nanoClock;
@@ -35,13 +35,13 @@ public final class ClusterNodePresence {
   private boolean initialized;
   private long refreshedAtNanos;
 
-  public ClusterNodePresence(JdbcTemplate jdbcTemplate, UUID localNodeId) {
-    this(jdbcTemplate, localNodeId, DEFAULT_CACHE_TTL, System::nanoTime);
+  public ClusterNodePresence(JdbcClient jdbcClient, UUID localNodeId) {
+    this(jdbcClient, localNodeId, DEFAULT_CACHE_TTL, System::nanoTime);
   }
 
   ClusterNodePresence(
-      JdbcTemplate jdbcTemplate, UUID localNodeId, Duration cacheTtl, LongSupplier nanoClock) {
-    this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
+      JdbcClient jdbcClient, UUID localNodeId, Duration cacheTtl, LongSupplier nanoClock) {
+    this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
     this.localNodeId = Objects.requireNonNull(localNodeId, "localNodeId");
     this.nanoClock = Objects.requireNonNull(nanoClock, "nanoClock");
     Objects.requireNonNull(cacheTtl, "cacheTtl");
@@ -60,7 +60,11 @@ public final class ClusterNodePresence {
       return cached;
     }
     Boolean active =
-        jdbcTemplate.queryForObject(HAS_OTHER_ACTIVE_NODES_SQL, Boolean.class, localNodeId);
+        jdbcClient
+            .sql(HAS_OTHER_ACTIVE_NODES_SQL)
+            .param("localNodeId", localNodeId)
+            .query(Boolean.class)
+            .single();
     cached = Boolean.TRUE.equals(active);
     refreshedAtNanos = now;
     initialized = true;

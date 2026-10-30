@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -27,9 +28,9 @@ import java.util.concurrent.TimeUnit;
 public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
 
   @Autowired private SystemSettingsRepository systemSettingsRepository;
-  @Autowired private SystemSettingsJdbcStore systemSettingsJdbcStore;
   @Autowired private SystemSettingsCodec systemSettingsCodec;
   @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private JdbcClient jdbcClient;
 
   @Test
   public void baselineRowDecodesToDefaultsWithVersionZero() {
@@ -45,7 +46,11 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   public void baselineRowConfigIsExactCanonicalJson() {
     // V1 直接定义当前最终结构，baseline 行必须等于当前 canonical 默认。
     // PostgreSQL jsonb 文本会插入空格，因此用 decode 比对语义。
-    String stored = systemSettingsJdbcStore.get().getConfigJson();
+    String stored =
+        jdbcClient
+            .sql("select config::text from system_setting where id = 1")
+            .query(String.class)
+            .single();
     assertFalse(
         stored.contains("\"maxMessageBytes\""),
         "V1 baseline must not persist environment.maxMessageBytes");

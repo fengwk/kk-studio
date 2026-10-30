@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { DAEMON_VERSION, REPOSITORY_ROOT } from './release-fixture.mjs'
+import { DAEMON_VERSION, REPOSITORY_ROOT, writeExecutable } from './release-fixture.mjs'
 import { treeEntries, writeTarGz } from './tar.mjs'
 
 export const hostOs = () => ({ linux: 'linux', darwin: 'macos' })[process.platform] ?? process.platform
@@ -30,6 +30,14 @@ const KOFFI = {
   'linux-arm64': 'koffi-linux-arm64',
   'macos-amd64': 'koffi-darwin-x64',
   'macos-arm64': 'koffi-darwin-arm64',
+}
+
+// Host npm/ripgrep naming: the archive must carry the rg binary for this host's architecture.
+const RIPGREP = {
+  'linux-amd64': 'ripgrep-linux-x64',
+  'linux-arm64': 'ripgrep-linux-arm64',
+  'macos-amd64': 'ripgrep-darwin-x64',
+  'macos-arm64': 'ripgrep-darwin-arm64',
 }
 
 // The installed koffi prebuilt paths: the real-probe regression copies one loadable host native from
@@ -167,6 +175,7 @@ export function buildArchive(
     includeRuntime = true,
     includeMain = true,
     includeKoffi = true,
+    includeRg = true,
     includeIde = true,
     includeEntry = true,
     includeNative = true,
@@ -174,9 +183,13 @@ export function buildArchive(
 ) {
   const build = path.join(path.dirname(file), 'build')
   rmSync(build, { recursive: true, force: true })
-  const koffiDir = path.join(build, 'node_modules/@koromix', KOFFI[`${hostOs()}-${hostArch()}`])
+  const host = `${hostOs()}-${hostArch()}`
+  const koffiDir = path.join(build, 'node_modules/@koromix', KOFFI[host])
   mkdirSync(koffiDir, { recursive: true })
   writeFileSync(path.join(koffiDir, 'index.js'), 'module.exports = {}\n')
+  const rgDir = path.join(build, 'node_modules/@vscode', RIPGREP[host], 'bin')
+  mkdirSync(rgDir, { recursive: true })
+  writeExecutable(path.join(rgDir, 'rg'), '#!/bin/sh\nprintf "ripgrep 15.0.0 (fixture)\\n"\n')
   if (includeIde) {
     mkdirSync(path.join(build, 'ide-extension'), { recursive: true })
     writeFileSync(path.join(build, 'ide-extension/extension.cjs'), 'module.exports = {}\n')
@@ -202,6 +215,9 @@ export function buildArchive(
   }
   if (!includeKoffi) {
     rmSync(koffiDir, { recursive: true })
+  }
+  if (!includeRg) {
+    rmSync(path.dirname(rgDir), { recursive: true })
   }
   writeFileSync(path.join(build, 'package.json'), `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}","type":"module"}\n`)
   writeFileSync(path.join(build, 'runtime-manifest.json'), '{"schemaVersion":1}\n')

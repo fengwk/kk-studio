@@ -17,9 +17,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 
 import java.time.Duration;
 import java.util.List;

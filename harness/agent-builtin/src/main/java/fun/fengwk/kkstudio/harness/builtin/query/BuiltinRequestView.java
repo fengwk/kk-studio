@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.query;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 
 import java.util.Objects;
 import java.util.UUID;

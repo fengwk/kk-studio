@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -34,6 +33,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
+import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 
@@ -60,7 +61,7 @@ import java.util.Set;
  * durable 语义矛盾时才回退语义编码。回退只丢弃 native 事实，绝不因为 payload 存在 opaque item 就拒绝整个请求。payload 的真实形状（顶层字段、已知
  * item 结构、与 durable 文本/思考/工具调用的一致性）始终严格校验，结构损坏一律 {@code INVALID_REQUEST}。
  */
-final class OpenAiResponsesRequestEncoder {
+public final class OpenAiResponsesRequestEncoder {
 
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder()
@@ -73,9 +74,6 @@ final class OpenAiResponsesRequestEncoder {
   /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
   private static final int OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
 
-  private static final Set<String> ALLOWED_IMAGE_TYPES =
-      Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
-  private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
   private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
 
   /** 可等价重建的 reasoning item 成员：超出这些成员的额外成员是 durable 语义无法表达的原生事实。 */
@@ -108,7 +106,7 @@ final class OpenAiResponsesRequestEncoder {
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
 
-  OpenAiResponsesRequestEncoder() {
+  public OpenAiResponsesRequestEncoder() {
     this(RequestBodySizeGuard.DEFAULT);
   }
 
@@ -116,7 +114,8 @@ final class OpenAiResponsesRequestEncoder {
     this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
   }
 
-  OpenAiResponsesEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
+  public OpenAiResponsesEncodedRequest encode(
+      ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
 
@@ -511,7 +510,8 @@ final class OpenAiResponsesRequestEncoder {
 
     for (ProviderToolCallBlock call : toolCalls) {
       ProviderToolCall tc = call.toolCall();
-      parseJsonObject(tc.argumentsJson(), "toolCall argumentsJson must be a JSON object");
+      ProviderJsonHelper.parseStrictJsonObject(
+          tc.argumentsJson(), "toolCall argumentsJson must be a JSON object");
       ObjectNode fc = inputItems.addObject();
       fc.put("type", "function_call");
       fc.put("call_id", tc.id());
@@ -853,7 +853,8 @@ final class OpenAiResponsesRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
           }
           String args = item.get("arguments").stringValue();
-          parseJsonObject(args, "function_call arguments must be a JSON object");
+          ProviderJsonHelper.parseStrictJsonObject(
+              args, "function_call arguments must be a JSON object");
           replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
         default -> {
@@ -874,7 +875,8 @@ final class OpenAiResponsesRequestEncoder {
         durableThinking.append(thb.thinking());
       } else if (block instanceof ProviderToolCallBlock tcb) {
         ProviderToolCall tc = tcb.toolCall();
-        parseJsonObject(tc.argumentsJson(), "durable tool call arguments must be a JSON object");
+        ProviderJsonHelper.parseStrictJsonObject(
+            tc.argumentsJson(), "durable tool call arguments must be a JSON object");
         durableToolCalls.add(tc);
       } else {
         throw new ProviderException(
@@ -964,18 +966,22 @@ final class OpenAiResponsesRequestEncoder {
   }
 
   private static void validateImageType(String mediaType) {
-    if (mediaType == null || !ALLOWED_IMAGE_TYPES.contains(mediaType.toLowerCase(Locale.ROOT))) {
+    if (mediaType == null
+        || !ProviderMediaValidator.isAllowedMediaType(
+            mediaType.toLowerCase(Locale.ROOT), ProviderMediaValidator.IMAGE_MEDIA_TYPES)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "Unsupported image media type: "
               + mediaType
               + ". Supported types: "
-              + ALLOWED_IMAGE_TYPES);
+              + ProviderMediaValidator.IMAGE_MEDIA_TYPES);
     }
   }
 
   private static void validateDocumentType(String mediaType) {
-    if (mediaType == null || !ALLOWED_DOCUMENT_TYPE.equalsIgnoreCase(mediaType)) {
+    if (!ProviderMediaValidator.isAllowedMediaType(
+        mediaType == null ? null : mediaType.toLowerCase(Locale.ROOT),
+        ProviderMediaValidator.DOCUMENT_MEDIA_TYPES)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "Unsupported document media type: " + mediaType + ". Only application/pdf is supported");
@@ -1009,21 +1015,6 @@ final class OpenAiResponsesRequestEncoder {
     } catch (IllegalArgumentException e) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "media source is not a valid URI");
-    }
-  }
-
-  private static JsonNode parseJsonObject(String json, String errorMessage) {
-    if (json == null || json.isBlank()) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
-    }
-    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
-      JsonNode node = OBJECT_MAPPER.readTree(parser);
-      if (node == null || !node.isObject() || parser.nextToken() != null) {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
-      }
-      return node;
-    } catch (Exception e) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
     }
   }
 }

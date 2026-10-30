@@ -666,6 +666,7 @@ const packageDocumentedModules = {
   'harness/environment': 'docs/modules/harness-environment.md',
   'harness/model': 'docs/modules/harness-model.md',
   'harness/runtime': 'docs/modules/harness-runtime.md',
+  'harness/agent-builtin': 'docs/modules/harness-agent-builtin.md',
   'harness/infra': 'docs/modules/harness-infra.md',
 }
 
@@ -714,6 +715,50 @@ function productionPackages(modulePath) {
       },
     ]
   })
+}
+
+/**
+ * 同名包按源集分别归属：生产包和测试包各自在 Maven 模块之间唯一。
+ * 同一模块的 main 与 test 可以同名，因为它们位于不同 classpath，不构成运行时冲突。
+ */
+function packageOwners(sourceSet) {
+  const owners = new Map()
+  function visitModule(modulePath) {
+    const pomPath = path.join(modulePath, 'pom.xml')
+    if (!existsSync(path.join(repositoryRoot, pomPath))) {
+      return
+    }
+    const sourceRoot = path.join(repositoryRoot, modulePath, 'src', sourceSet, 'java')
+    for (const file of walkFiles(sourceRoot).filter((file) => file.endsWith('.java'))) {
+      const match = readFileSync(file, 'utf8').match(/^\s*package\s+([\w.]+)\s*;/mu)
+      if (!match) {
+        continue
+      }
+      const name = match[1]
+      if (!owners.has(name)) {
+        owners.set(name, new Set())
+      }
+      owners.get(name).add(modulePath || '.')
+    }
+    for (const match of read(pomPath).matchAll(/<module>\s*([^<]+?)\s*<\/module>/gu)) {
+      visitModule(path.join(modulePath, match[1]))
+    }
+  }
+  visitModule('')
+  return owners
+}
+
+function checkUniquePackages() {
+  for (const sourceSet of ['main', 'test']) {
+    for (const [name, modules] of packageOwners(sourceSet)) {
+      if (modules.size < 2) {
+        continue
+      }
+      addError(
+        `Java ${sourceSet} package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`,
+      )
+    }
+  }
 }
 
 function checkPackageInfo() {
@@ -826,6 +871,7 @@ checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
 checkModuleBoundaries()
+checkUniquePackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()
 checkPackageArchitectureDocs()

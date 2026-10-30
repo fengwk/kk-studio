@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-harness</artifactId>
-        <version>5.0.0</version>
+        <version>5.0.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -75,61 +75,35 @@
                 </executions>
             </plugin>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
-                <dependencies>
-                    <dependency>
-                        <groupId>org.jacoco</groupId>
-                        <artifactId>org.jacoco.ant</artifactId>
-                        <version>0.8.11</version>
-                    </dependency>
-                </dependencies>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>
                     <execution>
                         <id>check-critical-class-line-coverage</id>
                         <phase>verify</phase>
                         <goals>
-                            <goal>run</goal>
+                            <goal>check</goal>
                         </goals>
                         <configuration>
-                            <target>
-                                <taskdef name="jacoco-report"
-                                         classname="org.jacoco.ant.ReportTask"
-                                         classpathref="maven.plugin.classpath"/>
-                                <mkdir dir="${project.build.directory}/jacoco-report"/>
-                                <jacoco-report>
-                                    <executiondata>
-                                        <file file="${project.build.directory}/jacoco.exec"/>
-                                    </executiondata>
-                                    <structure name="kk-studio-harness-agent-builtin">
-                                        <group name="harness-runtime">
-                                            <classfiles>
-                                                <fileset dir="${project.basedir}/../runtime/target/classes"/>
-                                            </classfiles>
-                                            <sourcefiles encoding="UTF-8">
-                                                <fileset dir="${project.basedir}/../runtime/src/main/java"/>
-                                            </sourcefiles>
-                                        </group>
-                                        <group name="harness-agent-builtin">
-                                            <classfiles>
-                                                <fileset dir="${project.build.directory}/classes"/>
-                                            </classfiles>
-                                            <sourcefiles encoding="UTF-8">
-                                                <fileset dir="${project.basedir}/src/main/java"/>
-                                            </sourcefiles>
-                                        </group>
-                                    </structure>
-                                    <xml destfile="${project.build.directory}/jacoco-report/jacoco.xml"/>
-                                    <csv destfile="${project.build.directory}/jacoco-report/jacoco.csv"/>
-                                    <html destdir="${project.build.directory}/jacoco-report/html"/>
-                                    <check failonviolation="true">
-                                        <rule element="CLASS" includes="fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl:fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot:fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory:fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe:fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding:fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec:fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl:fun.fengwk.kkstudio.harness.runtime.AgentSpawner:fun.fengwk.kkstudio.harness.runtime.SpawnRequest:fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Continuation:fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Budget:fun.fengwk.kkstudio.harness.runtime.SpawnTickets:fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn:fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin:fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints:fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl:fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts:fun.fengwk.kkstudio.harness.runtime.thread.ThreadState:fun.fengwk.kkstudio.harness.tool.ToolCall:fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec:fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec:fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec:fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog:fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor:fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec:fun.fengwk.kkstudio.harness.prompt.PromptTemplate:fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader:fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation:fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution:fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner:fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator:fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec">
-                                            <limit counter="LINE" value="COVEREDRATIO" minimum="0.90"/>
-                                        </rule>
-                                    </check>
-                                </jacoco-report>
-                            </target>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
                         </configuration>
                     </execution>
                 </executions>

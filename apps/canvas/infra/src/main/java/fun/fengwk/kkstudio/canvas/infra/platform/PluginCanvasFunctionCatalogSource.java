@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.canvas.infra.platform;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
