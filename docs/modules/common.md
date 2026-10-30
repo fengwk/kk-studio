@@ -11,6 +11,7 @@
 | `fun.fengwk.kkstudio.common.concurrent` | 与业务无关的有界调度骨架：合并 wake 的单 drain、bounded worker handoff、周期 poll 与 stop 生命周期 | 只做同步调度与容量计数；claim / execute / 未接手归还三个回调的语义与 executor 生命周期由调用方注入并持有 |
 | `fun.fengwk.kkstudio.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
 | `fun.fengwk.kkstudio.common.hash` | SHA-256 摘要与 64 位小写十六进制编码的唯一入口 | 只依赖 JDK；被哈希的字节与领域分隔由调用方决定 |
+| `fun.fengwk.kkstudio.common.id` | canonical UUID 文本解析的唯一入口 | 只依赖 JDK；要求与 `UUID.toString()` 往返一致，不做大小写归一 |
 | `fun.fengwk.kkstudio.common.io` | send 前冻结预算的响应体 deadline 包装：到期主动关闭底层流并把超时统一为超时失败 | 纯 JDK 流包装，不构造 HTTP 客户端、不持有凭据；协议与凭据分类由调用方适配 |
 | `fun.fengwk.kkstudio.common.page` | 共享分页值对象与安全 offset 计算 | 只保存分页元数据、当前结果集与逐项映射；不包含查询执行、排序或与存储相关的计算 |
 | `fun.fengwk.kkstudio.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
@@ -67,6 +68,7 @@
 - Resource：[`ResourceRef.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/resource/ResourceUriValidator.java)
 - Result：[`ResultContent.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputSchema.java)、[`InputValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodec.java)
+- 标识：[`Uuids.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析 canonical UUID，Canvas 与 Storage 的 HTTP 边界直接调用它
 - 调度骨架：[`BoundedWorkDispatcher.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)；插件响应体截止时间见 [Platform Plugin API](platform-plugin-api.md#公共辅助)。
 - [`ResourceRefTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/resource/ResourceRefTest.java) 覆盖各类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 

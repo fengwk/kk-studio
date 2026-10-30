@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO;
@@ -72,24 +73,6 @@ public class CanvasDtoMapper {
 
   public CanvasDtoMapper(StorageBlobManager blobManager) {
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
-  }
-
-  /** 解析 canonical UUID 实体 id（{@code UUID.fromString} 往返一致）。 */
-  public static UUID parseUuid(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
-    }
-    UUID parsed;
-    try {
-      parsed = UUID.fromString(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
-    }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
-    }
-    return parsed;
   }
 
   public CanvasDocumentDTO toDto(CanvasDocument document) {
@@ -262,42 +245,44 @@ public class CanvasDtoMapper {
   private CanvasCommand toCommand(CanvasCommandDTO command) {
     return switch (command) {
       case CanvasCommandDTO.CreateNode value -> new CanvasCommand.CreateNode(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           value.name(),
           toTransform(value.transform()),
           toResourceInputs(value.resources()));
       case CanvasCommandDTO.RenameNode value -> new CanvasCommand.RenameNode(
-          parseUuid(value.nodeId(), "nodeId"), value.expectedName(), value.name());
+          Uuids.parseCanonical(value.nodeId(), "nodeId"), value.expectedName(), value.name());
       case CanvasCommandDTO.SetNodeResources value -> new CanvasCommand.SetNodeResources(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           parseUuids(value.expectedResourceIds(), "expectedResourceIds"),
           toResourceInputs(value.resources()));
       case CanvasCommandDTO.SetNodeFunction value -> new CanvasCommand.SetNodeFunction(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           toFunction(value.expectedFunction()),
           toFunction(value.function()));
       case CanvasCommandDTO.SetNodeGroup value -> new CanvasCommand.SetNodeGroup(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           toNullableUuid(value.expectedGroupId(), "expectedGroupId"),
           toNullableUuid(value.groupId(), "groupId"));
       case CanvasCommandDTO.DeleteNode value -> new CanvasCommand.DeleteNode(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           parseUuids(value.expectedResourceIds(), "expectedResourceIds"),
           toFunction(value.expectedFunction()));
       case CanvasCommandDTO.UpdateNodeTransform value -> new CanvasCommand.UpdateNodeTransform(
-          parseUuid(value.nodeId(), "nodeId"),
+          Uuids.parseCanonical(value.nodeId(), "nodeId"),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.CreateGroup value -> new CanvasCommand.CreateGroup(
-          parseUuid(value.groupId(), "groupId"), value.title(), toTransform(value.transform()));
+          Uuids.parseCanonical(value.groupId(), "groupId"),
+          value.title(),
+          toTransform(value.transform()));
       case CanvasCommandDTO.RenameGroup value -> new CanvasCommand.RenameGroup(
-          parseUuid(value.groupId(), "groupId"), value.expectedTitle(), value.title());
+          Uuids.parseCanonical(value.groupId(), "groupId"), value.expectedTitle(), value.title());
       case CanvasCommandDTO.UpdateGroupTransform value -> new CanvasCommand.UpdateGroupTransform(
-          parseUuid(value.groupId(), "groupId"),
+          Uuids.parseCanonical(value.groupId(), "groupId"),
           toTransform(value.transform()),
           toNullableTransform(value.expectedTransform()));
       case CanvasCommandDTO.DeleteGroup value -> new CanvasCommand.DeleteGroup(
-          parseUuid(value.groupId(), "groupId"),
+          Uuids.parseCanonical(value.groupId(), "groupId"),
           parseUuids(value.expectedMemberNodeIds(), "expectedMemberNodeIds"));
     };
   }
@@ -369,7 +354,7 @@ public class CanvasDtoMapper {
   private static CanvasResourceInput toResourceInput(CanvasResourceInputDTO input) {
     return switch (input) {
       case CanvasResourceInputDTO.Keep keep -> new CanvasResourceInput.Keep(
-          parseUuid(keep.resourceId(), "resourceId"));
+          Uuids.parseCanonical(keep.resourceId(), "resourceId"));
       case CanvasResourceInputDTO.Text text -> {
         if (text.textContent() == null) {
           throw new IllegalArgumentException("textContent must not be null");
@@ -377,7 +362,7 @@ public class CanvasDtoMapper {
         yield new CanvasResourceInput.Text(text.name(), text.textContent());
       }
       case CanvasResourceInputDTO.Blob blob -> new CanvasResourceInput.Blob(
-          blob.name(), parseUuid(blob.blobId(), "blobId"));
+          blob.name(), Uuids.parseCanonical(blob.blobId(), "blobId"));
     };
   }
 
@@ -417,14 +402,14 @@ public class CanvasDtoMapper {
   }
 
   private static UUID toNullableUuid(String value, String field) {
-    return value == null ? null : parseUuid(value, field);
+    return value == null ? null : Uuids.parseCanonical(value, field);
   }
 
   private static List<UUID> parseUuids(List<String> ids, String field) {
     if (ids == null) {
       throw new IllegalArgumentException(field + " is required");
     }
-    return ids.stream().map(id -> parseUuid(id, field)).toList();
+    return ids.stream().map(id -> Uuids.parseCanonical(id, field)).toList();
   }
 
   /** wire 的任意 JSON object 转成 Core 的严格 args 值模型，并复用 Core 的深度与长度上限。 */

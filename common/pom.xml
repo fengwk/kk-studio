@@ -52,6 +52,7 @@
                                         <include>fun.fengwk.kkstudio.common.json.BoundedJsonWriter</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedOutputStream</include>
                                         <include>fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher</include>
+                                        <include>fun.fengwk.kkstudio.common.id.Uuids</include>
                                     </includes>
                                     <limits>
                                         <limit>
