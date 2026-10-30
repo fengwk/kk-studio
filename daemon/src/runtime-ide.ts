@@ -15,11 +15,10 @@ export interface ActiveIdeLeaseRound {
   consumed: boolean
 }
 
-export interface IdeCommandAdmission {
-  kind: 'ignore' | 'reply' | 'run'
-  replyJson?: string
-  controller?: AbortController
-}
+export type IdeCommandAdmission =
+  | { kind: 'ignore' }
+  | { kind: 'reply'; replyJson: string }
+  | { kind: 'run'; controller: AbortController }
 
 /**
  * 决定一条 IDE_COMMAND 是否执行。

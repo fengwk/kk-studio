@@ -1177,10 +1177,10 @@ export class Runtime {
       return
     }
     if (admission.kind === 'reply') {
-      this.send('IDE_RESULT', invocationId, admission.replyJson ?? '')
+      this.send('IDE_RESULT', invocationId, admission.replyJson)
       return
     }
-    const controller = admission.controller ?? new AbortController()
+    const controller = admission.controller
     this.ideInFlight.set(invocationId, controller)
     // 所有 IDE 管理命令都有固定 deadline；数据面逻辑流不占用 IDE_COMMAND 调用。
     const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
