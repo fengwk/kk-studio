@@ -284,7 +284,7 @@ class ModelExecutionDecodeDurationTest {
               tx -> {
                 tx.threads().lock(turn.threadId());
                 UUID id = tx.nextId();
-                builtin(tx)
+                builtin(store, tx)
                     .insertModelInvocation(
                         new ModelInvocation(
                             id,

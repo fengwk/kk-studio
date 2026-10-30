@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -280,8 +281,8 @@ public final class HarnessRuntimeTestSupport {
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -308,9 +309,9 @@ public final class HarnessRuntimeTestSupport {
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, userEntryId, T1);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           if (status == ModelInvocationStatus.RUNNING) {
-            builtin(tx).updateModelInvocation(model.markRunning(T2));
+            builtin(store, tx).updateModelInvocation(model.markRunning(T2));
           }
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
@@ -349,8 +350,8 @@ public final class HarnessRuntimeTestSupport {
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -371,8 +372,8 @@ public final class HarnessRuntimeTestSupport {
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.cancel(modelError(), T2));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.cancel(modelError(), T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -440,11 +441,12 @@ public final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
-          builtin(tx).updateModelInvocation(succeeded);
-          builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).updateModelInvocation(succeeded);
+          builtin(store, tx)
+              .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
           List<UUID> toolIds = new ArrayList<>(toolCount);
           for (int callIndex = 0; callIndex < toolCount; callIndex++) {
@@ -625,11 +627,12 @@ public final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
-          builtin(tx).updateModelInvocation(succeeded);
-          builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).updateModelInvocation(succeeded);
+          builtin(store, tx)
+              .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           UUID toolId = tx.nextId();
           tx.tools()
               .insert(
@@ -982,16 +985,14 @@ public final class HarnessRuntimeTestSupport {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {HarnessStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    if (transactionMethod.getName().equals("lockThread")) {
-                                      clock.advance(advanceTo);
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                if (call.operation().equals("threads.lock")) {
+                                  clock.advance(advanceTo);
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }
@@ -1040,7 +1041,7 @@ public final class HarnessRuntimeTestSupport {
   static void seedModelWork(InMemoryBuiltinHarnessStore store, UUID modelId) {
     store.transaction(
         tx -> {
-          ModelInvocation model = builtin(tx).findModelInvocation(modelId).orElseThrow();
+          ModelInvocation model = builtin(store, tx).findModelInvocation(modelId).orElseThrow();
           tx.threads().lock(model.threadId()).orElseThrow();
           tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
           return null;

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
@@ -76,8 +77,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -631,7 +630,7 @@ public final class ToolProcessorTestSupport {
           UUID toolId = tx.nextId();
           tx.threads().lock(baseline.threadId());
           ModelRequestSpec modelRequest = modelRequest(scenario);
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -648,18 +647,18 @@ public final class ToolProcessorTestSupport {
                       List.of(),
                       now,
                       now));
-          ModelInvocation current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(now));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx)
+          ModelInvocation current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(now));
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   current.succeed(
                       scenario == null
                           ? successResponse(request.call().id())
                           : successResponse(scenario, request.call().id()),
                       now));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx)
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
           tx.tools()
               .insert(
@@ -737,7 +736,7 @@ public final class ToolProcessorTestSupport {
 
   static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelInvocationId) {
     return store
-        .transaction(tx -> builtin(tx).findModelInvocation(modelInvocationId))
+        .transaction(tx -> builtin(store, tx).findModelInvocation(modelInvocationId))
         .orElseThrow();
   }
 
@@ -1121,7 +1120,7 @@ public final class ToolProcessorTestSupport {
 
     List<List<String>> threadLockTransactions() {
       return transactions.stream()
-          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("lockThread:")))
+          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("threads.lock:")))
           .toList();
     }
 
@@ -1143,24 +1142,23 @@ public final class ToolProcessorTestSupport {
             transactions.add(ops);
             Transaction recording =
                 (Transaction)
-                    Proxy.newProxyInstance(
-                        Transaction.class.getClassLoader(),
-                        new Class<?>[] {Transaction.class},
-                        (proxy, method, args) -> {
-                          String name = method.getName();
-                          if (name.startsWith("lock")
-                              || name.equals("findAncestorChain")
-                              || name.equals("requestWork")
-                              || name.equals("completeWork")
-                              || name.equals("rescheduleWork")
-                              || name.startsWith("update")) {
-                            ops.add(args == null || args.length == 0 ? name : name + ":" + args[0]);
+                    wrap(
+                        tx,
+                        (call, next) -> {
+                          String name = call.operation();
+                          if (name.contains(".lock")
+                              || name.equals("threads.findAncestorChain")
+                              || name.equals("work.request")
+                              || name.equals("work.complete")
+                              || name.equals("work.reschedule")
+                              || name.startsWith("update")
+                              || name.endsWith(".update")) {
+                            ops.add(
+                                call.arguments() == null || call.arguments().length == 0
+                                    ? name
+                                    : name + ":" + call.argument(0));
                           }
-                          try {
-                            return method.invoke(tx, args);
-                          } catch (InvocationTargetException error) {
-                            throw error.getCause();
-                          }
+                          return next.invoke();
                         });
             return callback.apply(recording);
           });

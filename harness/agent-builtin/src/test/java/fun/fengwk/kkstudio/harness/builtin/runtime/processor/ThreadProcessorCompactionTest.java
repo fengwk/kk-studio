@@ -128,7 +128,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), baseline.turnStartEntryId()))
             .isEmpty());
@@ -176,7 +176,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(9).id()))
             .isEmpty());
 
@@ -262,7 +262,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), inputStartEntry.id()))
             .orElseThrow();
 
@@ -473,7 +473,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
@@ -499,7 +500,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), ids[0]))
+            .transaction(
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), ids[0]))
             .isEmpty());
 
     requestThreadWork(fixture.store, baseline.threadId());
@@ -515,7 +519,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), path.entries().get(12).id()))
             .isEmpty());
@@ -657,7 +661,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), planned.entries().get(12).id()))
             .isEmpty());
@@ -677,7 +681,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), baseline.turnStartEntryId()))
             .isEmpty());
@@ -752,7 +756,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
@@ -957,7 +961,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           fixture
               .store
               .transaction(
-                  tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
+                  tx ->
+                      builtin(fixture.store, tx)
+                          .findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
               .isPresent());
     } else {
       assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
@@ -982,7 +988,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
@@ -1013,7 +1019,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture
             .store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
   }
 
@@ -1046,7 +1054,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         fixture
             .store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
+                tx ->
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputStart.id()))
             .isPresent());
   }
 
@@ -1130,7 +1140,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .store
             .transaction(
                 tx ->
-                    builtin(tx).findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
+                    builtin(fixture.store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
@@ -2093,7 +2104,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         tx -> {
           ThreadState child = tx.threads().find(childThreadId).orElseThrow();
           UUID turn = tx.entries().loadPath(child.headEntryId()).openTurnStart().orElseThrow().id();
-          return builtin(tx).findModelInvocationByTurn(childThreadId, turn).orElseThrow();
+          return builtin(store, tx).findModelInvocationByTurn(childThreadId, turn).orElseThrow();
         });
   }
 

@@ -92,7 +92,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     UUID modelId = seedRunningModelWithToolCall(turn, userId, request, response);
     UUID assistantId =
         store.transaction(
-            tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().resultEntryId());
+            tx -> builtin(store, tx).findModelInvocation(modelId).orElseThrow().resultEntryId());
     UUID toolId =
         store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId).getFirst().id());
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, toolId);
@@ -144,7 +144,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             .contains("cannot be confirmed"));
     TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
     assertTrue(batchEnd.continueModel());
-    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
+    assertTrue(store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId)).isEmpty());
     assertTrue(findWork(threadTarget).isPresent());
 
@@ -156,7 +156,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     ModelInvocation continuation =
         store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(turn.threadId(), continuationEntryId))
+                tx ->
+                    builtin(store, tx)
+                        .findModelInvocationByTurn(turn.threadId(), continuationEntryId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, continuation.status());
     assertNotEquals(modelId, continuation.id());
@@ -226,7 +228,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             tx -> {
               tx.threads().lock(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -248,9 +250,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     store.transaction(
         tx -> {
           var thread = tx.threads().lock(turn.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
+                  builtin(store, tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           UUID assistantId = tx.nextId();
           tx.entries()
               .insert(
@@ -260,15 +262,15 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                       requestHeadEntryId,
                       mappedAssistant(request, response, T3),
                       T3));
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx)
+                  builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .succeed(response, null, null, T3));
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx)
+                  builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .attachResultEntry(assistantId, T3));

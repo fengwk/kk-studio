@@ -156,11 +156,11 @@ class HarnessRuntimePendingInteractionTest {
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, createdAt);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ModelInvocation succeeded = model.markRunning(createdAt).succeed(response, createdAt);
-          builtin(tx).updateModelInvocation(model.markRunning(createdAt));
-          builtin(tx).updateModelInvocation(succeeded);
-          builtin(tx)
+          builtin(store, tx).updateModelInvocation(model.markRunning(createdAt));
+          builtin(store, tx).updateModelInvocation(succeeded);
+          builtin(store, tx)
               .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, createdAt));
           UUID toolId = tx.nextId();
           tx.tools()

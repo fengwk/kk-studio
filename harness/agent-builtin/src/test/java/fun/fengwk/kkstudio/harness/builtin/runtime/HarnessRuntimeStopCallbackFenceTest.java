@@ -50,7 +50,9 @@ class HarnessRuntimeStopCallbackFenceTest {
     assertTrue(store.transaction(tx -> tx.work().lockClaimed(claim)).isEmpty());
     // stopModel 关闭 turn 后 Model 行被物理删除；迟到 callback 的 claim 也因 Work 已删而 no-op。
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
   }
 
   @Test

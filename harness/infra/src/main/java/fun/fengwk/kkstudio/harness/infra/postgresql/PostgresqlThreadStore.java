@@ -20,26 +20,28 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Thread 聚合的 PostgreSQL 实现。 */
-final class PostgresqlThreadStore extends PostgresqlHarnessView implements ThreadStore {
+final class PostgresqlThreadStore implements ThreadStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   PostgresqlThreadStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public void insert(ThreadState thread) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(thread, "thread");
     requireThreadHeadInSession(thread);
     boolean joinedChild =
         thread.parentThreadId() != null
-            && hasLockedTrees()
-            && isLocked(LockKey.thread(thread.parentThreadId()));
+            && tx.hasLockedTrees()
+            && tx.isLocked(LockKey.thread(thread.parentThreadId()));
     if (!joinedChild) {
-      requireCanLockThread(thread.id());
+      tx.requireCanLockThread(thread.id());
     }
     try {
-      updateJdbc(
+      tx.updateJdbc(
           """
           insert into harness_thread (
               id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
@@ -64,17 +66,17 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
           PostgresqlHarnessRows.timestamp(thread.createdAt()),
           PostgresqlHarnessRows.timestamp(thread.updatedAt()));
     } catch (IllegalArgumentException error) {
-      throw translateThreadNameConflict(thread, error);
+      throw tx.translateThreadNameConflict(thread, error);
     }
     // 插入即视为 version 变化：同一位置发布 Thread version 与真实执行根 tree 两条失效信号。
-    notifyThreadVersion(thread.id(), thread.version());
-    notifyExecutionTree(thread.rootThreadId());
+    tx.notifyThreadVersion(thread.id(), thread.version());
+    tx.notifyExecutionTree(thread.rootThreadId());
     if (joinedChild) {
       // A newly created child has no pre-existing row to lock in UUID order. Its parent is
       // already locked inside the same tree transaction; no other tree writer can race it.
-      recordJoinedChildThreadLock(thread.id());
+      tx.recordJoinedChildThreadLock(thread.id());
     } else {
-      recordThreadLock(thread.id());
+      tx.recordThreadLock(thread.id());
     }
   }
 
@@ -84,7 +86,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
       throw new IllegalArgumentException("session " + thread.sessionId() + " does not exist");
     }
     Boolean sameSession =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -106,31 +108,32 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
   @Override
   public Optional<ThreadState> find(UUID id) {
-    checkOpen();
-    return queryOne("select * from harness_thread where id = ?", PostgresqlHarnessRows.THREAD, id);
+    tx.checkOpen();
+    return tx.queryOne(
+        "select * from harness_thread where id = ?", PostgresqlHarnessRows.THREAD, id);
   }
 
   @Override
   public Optional<ThreadState> lock(UUID id) {
-    checkOpen();
-    requireCanLockThread(id);
+    tx.checkOpen();
+    tx.requireCanLockThread(id);
     Optional<ThreadState> thread =
-        queryOne(
+        tx.queryOne(
             "select * from harness_thread where id = ? for update",
             PostgresqlHarnessRows.THREAD,
             id);
-    thread.ifPresent(ignored -> recordThreadLock(id));
+    thread.ifPresent(ignored -> tx.recordThreadLock(id));
     return thread;
   }
 
   @Override
   public List<ThreadState> listBySession(UUID sessionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
     if (tx.sessions().find(sessionId).isEmpty()) {
       throw new IllegalArgumentException("session " + sessionId + " does not exist");
     }
-    return queryList(
+    return tx.queryList(
         """
         select *
         from harness_thread
@@ -143,9 +146,9 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
   @Override
   public List<ThreadState> listChildren(UUID parentThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
-    return queryList(
+    return tx.queryList(
         """
         select *
         from harness_thread
@@ -158,9 +161,9 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
   @Override
   public void update(ThreadState thread) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(thread, "thread");
-    requireLocked(LockKey.thread(thread.id()));
+    tx.requireLocked(LockKey.thread(thread.id()));
     ThreadState stored =
         tx.threads()
             .find(thread.id())
@@ -171,7 +174,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
     int updated;
     try {
       updated =
-          updateJdbc(
+          tx.updateJdbc(
               """
               update harness_thread
               set head_entry_id = ?,
@@ -194,21 +197,21 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
               PostgresqlHarnessRows.timestamp(thread.updatedAt()),
               thread.id());
     } catch (IllegalArgumentException error) {
-      throw translateThreadNameConflict(thread, error);
+      throw tx.translateThreadNameConflict(thread, error);
     }
-    requireSingleUpdate(updated, "thread", thread.id());
+    tx.requireSingleUpdate(updated, "thread", thread.id());
     if (stored.version() != thread.version()) {
       // 仅以写前事实（stored）与成功写后事实（thread）比较：同 version 写入（exact replay）保持静默。
-      notifyThreadVersion(thread.id(), thread.version());
-      notifyExecutionTree(thread.rootThreadId());
+      tx.notifyThreadVersion(thread.id(), thread.version());
+      tx.notifyExecutionTree(thread.rootThreadId());
     }
   }
 
   @Override
   public List<UUID> findAncestorChain(UUID threadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    return queryList(
+    return tx.queryList(
         """
         with recursive ancestors as (
             select id, parent_thread_id, 0 as depth
@@ -225,9 +228,9 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
   @Override
   public List<ThreadState> listByRoot(UUID rootThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
-    return queryList(
+    return tx.queryList(
         "select * from harness_thread where root_thread_id = ?",
         PostgresqlHarnessRows.THREAD,
         rootThreadId);
@@ -235,15 +238,15 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
   @Override
   public void lockTree(UUID rootThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
-    acquireTreeLock(rootThreadId);
+    tx.lockTree(rootThreadId);
   }
 
   // ---------- 应用侧深删除原语 ----------
   @Override
   public int delete(List<UUID> threadIds) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");
     List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
     for (int i = 1; i < copied.size(); i++) {
@@ -253,8 +256,8 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
       }
     }
     for (UUID threadId : copied) {
-      requireLocked(LockKey.thread(threadId));
-      if (!isInLockedTree(threadId)) {
+      tx.requireLocked(LockKey.thread(threadId));
+      if (!tx.isInLockedTree(threadId)) {
         throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
       }
     }
@@ -271,7 +274,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
     for (UUID threadId : copied) {
       List<UUID> referencingJoinIds =
-          queryList(
+          tx.queryList(
               """
               select invocation_id
               from harness_thread_join
@@ -290,7 +293,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
     Set<UUID> threadIdSet = Set.copyOf(copied);
     for (UUID threadId : copied) {
       List<UUID> childIds =
-          queryList(
+          tx.queryList(
               """
               select id
               from harness_thread
@@ -312,7 +315,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
 
     for (UUID threadId : copied) {
       List<ThreadCommand> commands =
-          queryList(
+          tx.queryList(
               """
               select *
               from harness_thread_command
@@ -323,14 +326,14 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
               PostgresqlHarnessRows.COMMAND,
               threadId);
       for (ThreadCommand command : commands) {
-        lockResource(LockKey.command(command.threadId(), command.sequence()));
+        tx.lockResource(LockKey.command(command.threadId(), command.sequence()));
       }
     }
 
     List<ModelInvocation> models = new ArrayList<>();
     for (UUID threadId : copied) {
       models.addAll(
-          queryList(
+          tx.queryList(
               "select * from harness_model_invocation where thread_id = ?",
               PostgresqlHarnessRows.MODEL_INVOCATION,
               threadId));
@@ -344,7 +347,7 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
     List<ToolInvocation> tools = new ArrayList<>();
     for (UUID threadId : copied) {
       tools.addAll(
-          queryList(
+          tx.queryList(
               "select * from harness_tool_invocation where thread_id = ?",
               PostgresqlHarnessRows.TOOL_INVOCATION,
               threadId));
@@ -384,12 +387,12 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
       tx.work().delete(target);
     }
     for (UUID threadId : copied) {
-      updateJdbc("delete from harness_thread_command where thread_id = ?", threadId);
+      tx.updateJdbc("delete from harness_thread_command where thread_id = ?", threadId);
     }
     // Stop 回执只引用 Thread 与 Entry：与 Thread 同批物理删除，避免深删残留孤儿回执。
-    updateJdbc(
+    tx.updateJdbc(
         "delete from harness_thread_stop_receipt where thread_id in ("
-            + placeholders(copied.size())
+            + PostgresqlHarnessTransaction.placeholders(copied.size())
             + ")",
         copied.toArray());
     if (!lockedTools.isEmpty()) {
@@ -400,21 +403,23 @@ final class PostgresqlThreadStore extends PostgresqlHarnessView implements Threa
     }
     // 自引用 parent FK 为 NO ACTION（语句级校验）：同一条 DELETE 可同时包含父与子执行事实。
     // 删除只是 Thread 深删，不是执行退出；先删 execution facts，再删 Thread。
-    updateJdbc(
+    tx.updateJdbc(
         "delete from harness_execution_exit where thread_id in ("
-            + placeholders(copied.size())
+            + PostgresqlHarnessTransaction.placeholders(copied.size())
             + ")",
         copied.toArray());
     int deletedThreads =
-        updateJdbc(
-            "delete from harness_thread where id in (" + placeholders(copied.size()) + ")",
+        tx.updateJdbc(
+            "delete from harness_thread where id in ("
+                + PostgresqlHarnessTransaction.placeholders(copied.size())
+                + ")",
             copied.toArray());
     if (deletedThreads != copied.size()) {
       throw new IllegalStateException(
           "expected to delete " + copied.size() + " threads but deleted " + deletedThreads);
     }
     for (UUID root : deletedThreadRoots) {
-      notifyExecutionTree(root);
+      tx.notifyExecutionTree(root);
     }
     return copied.size();
   }

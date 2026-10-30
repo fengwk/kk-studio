@@ -21,21 +21,23 @@ import java.util.Set;
 import java.util.UUID;
 
 /** ThreadCommand 聚合的 PostgreSQL 实现。 */
-final class PostgresqlCommandStore extends PostgresqlHarnessView implements CommandStore {
+final class PostgresqlCommandStore implements CommandStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   private record CommandSequenceKey(UUID threadId, long sequence) {}
 
   private record CommandIdempotencyKey(UUID threadId, UUID idempotencyKey) {}
 
   PostgresqlCommandStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public Optional<ThreadCommand> findByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    return queryOne(
+    return tx.queryOne(
         """
         select *
         from harness_thread_command
@@ -48,11 +50,11 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
 
   @Override
   public List<ThreadCommand> loadQueued(UUID threadId) {
-    checkOpen();
-    requireLocked(LockKey.thread(threadId));
-    requireCanLockRank(LockRank.COMMAND, threadId);
+    tx.checkOpen();
+    tx.requireLocked(LockKey.thread(threadId));
+    tx.requireCanLockRank(LockRank.COMMAND, threadId);
     List<ThreadCommand> commands =
-        queryList(
+        tx.queryList(
             """
             select *
             from harness_thread_command
@@ -65,17 +67,17 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
             PostgresqlHarnessRows.COMMAND,
             threadId);
     for (ThreadCommand command : commands) {
-      lockResource(LockKey.command(command.threadId(), command.sequence()));
+      tx.lockResource(LockKey.command(command.threadId(), command.sequence()));
     }
     return commands;
   }
 
   @Override
   public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
     Boolean found =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists(
               select 1
@@ -92,10 +94,10 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
 
   @Override
   public List<ThreadCommand> loadCancelledByRequest(UUID threadId, UUID stopRequestId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(stopRequestId, "stopRequestId");
-    return queryList(
+    return tx.queryList(
         """
         select *
         from harness_thread_command
@@ -109,7 +111,7 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
 
   @Override
   public void insert(List<ThreadCommand> commands) {
-    checkOpen();
+    tx.checkOpen();
     List<ThreadCommand> copied =
         List.copyOf(commands).stream()
             .sorted(PostgresqlHarnessTransaction.COMMAND_LOCK_ORDER)
@@ -140,12 +142,12 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
       }
       // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
-      requireLocked(LockKey.thread(command.threadId()));
-      requireCanLockRank(LockRank.COMMAND, command.threadId());
+      tx.requireLocked(LockKey.thread(command.threadId()));
+      tx.requireCanLockRank(LockRank.COMMAND, command.threadId());
       requireUniqueCommandKey(command);
     }
     for (ThreadCommand command : copied) {
-      updateJdbc(
+      tx.updateJdbc(
           """
           insert into harness_thread_command (
               thread_id, sequence, command_type, payload, idempotency_key,
@@ -163,13 +165,13 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
           command.stopRequestId(),
           PostgresqlHarnessRows.timestamp(command.cancelledAt()),
           PostgresqlHarnessRows.timestamp(command.createdAt()));
-      lockResource(LockKey.command(command.threadId(), command.sequence()));
+      tx.lockResource(LockKey.command(command.threadId(), command.sequence()));
     }
   }
 
   @Override
   public void update(List<ThreadCommand> commands) {
-    checkOpen();
+    tx.checkOpen();
     List<ThreadCommand> copied =
         List.copyOf(commands).stream()
             .sorted(PostgresqlHarnessTransaction.COMMAND_LOCK_ORDER)
@@ -188,15 +190,15 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
                               + "/"
                               + command.sequence()
                               + " does not exist"));
-      requireLocked(LockKey.command(command.threadId(), command.sequence()));
+      tx.requireLocked(LockKey.command(command.threadId(), command.sequence()));
       requireSameCommandIdentity(stored, command);
-      requireLocked(LockKey.thread(command.threadId()));
+      tx.requireLocked(LockKey.thread(command.threadId()));
       requireValidCommandLifecycle(stored, command);
       requireValidAppliedEntry(command);
     }
     for (ThreadCommand command : copied) {
       int updated =
-          updateJdbc(
+          tx.updateJdbc(
               """
               update harness_thread_command
               set applied_entry_id = ?, stop_request_id = ?, cancelled_at = ?
@@ -207,15 +209,15 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
               PostgresqlHarnessRows.timestamp(command.cancelledAt()),
               command.threadId(),
               command.sequence());
-      requireSingleUpdate(updated, "command", command.threadId() + "/" + command.sequence());
+      tx.requireSingleUpdate(updated, "command", command.threadId() + "/" + command.sequence());
     }
   }
 
   @Override
   public Optional<ThreadCommand> find(UUID threadId, long sequence) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    return queryOne(
+    return tx.queryOne(
         "select * from harness_thread_command where thread_id = ? and sequence = ?",
         PostgresqlHarnessRows.COMMAND,
         threadId,
@@ -224,7 +226,7 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
 
   private void requireUniqueCommandKey(ThreadCommand command) {
     Boolean sequenceExists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -243,7 +245,7 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
               + command.threadId());
     }
     Boolean clientExists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -273,7 +275,7 @@ final class PostgresqlCommandStore extends PostgresqlHarnessView implements Comm
     if (appliedEntryId == null) {
       return;
     }
-    Entry applied = requireExistingEntry(appliedEntryId);
+    Entry applied = tx.requireExistingEntry(appliedEntryId);
     ThreadState thread =
         tx.threads()
             .find(command.threadId())

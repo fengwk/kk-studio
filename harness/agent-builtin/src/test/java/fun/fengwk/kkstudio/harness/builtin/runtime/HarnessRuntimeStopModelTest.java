@@ -88,7 +88,9 @@ class HarnessRuntimeStopModelTest {
     assertEquals(1, targetReceipt(result).cancelledCommandCount());
     // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 验证 barrier 与 STOPPED TURN_END。
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
 
     EntryPath path = pathOf(baseline.threadId());
     assertEquals(5, path.entries().size());
@@ -125,7 +127,9 @@ class HarnessRuntimeStopModelTest {
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertStopped(result);
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
     EntryPath path = pathOf(baseline.threadId());
     Entry barrier = path.entries().get(3);
     assertTrue(barrier.payload() instanceof AssistantErrorPayload);
@@ -169,7 +173,9 @@ class HarnessRuntimeStopModelTest {
     assertEquals(
         before, store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()));
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isPresent());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isPresent());
   }
 
   @Test
@@ -179,8 +185,9 @@ class HarnessRuntimeStopModelTest {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(baseline.modelId()).orElseThrow();
-          builtin(tx)
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(baseline.modelId()).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   model.checkpoint(
                       new StreamCheckpoint(1, 1, "partial text", "  partial thinking  "), T5));
@@ -188,7 +195,9 @@ class HarnessRuntimeStopModelTest {
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 校验 barrier 内容。
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
 
     EntryPath path = pathOf(baseline.threadId());
     Entry barrier = path.entries().get(3);
@@ -210,8 +219,8 @@ class HarnessRuntimeStopModelTest {
         store,
         tx -> {
           ModelInvocation model =
-              builtin(tx).lockModelInvocation(thinkingOnly.modelId()).orElseThrow();
-          builtin(tx)
+              builtin(store, tx).lockModelInvocation(thinkingOnly.modelId()).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   model.checkpoint(new StreamCheckpoint(1, 1, "", "only thinking"), T5));
         });
@@ -227,8 +236,9 @@ class HarnessRuntimeStopModelTest {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(textOnly.modelId()).orElseThrow();
-          builtin(tx)
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(textOnly.modelId()).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   model.checkpoint(new StreamCheckpoint(1, 1, "only text", ""), T5));
         });
@@ -267,8 +277,9 @@ class HarnessRuntimeStopModelTest {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(baseline.modelId()).orElseThrow();
-          builtin(tx).updateModelInvocation(model.cancel(modelError(), T5));
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(baseline.modelId()).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.cancel(modelError(), T5));
         });
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
@@ -278,7 +289,9 @@ class HarnessRuntimeStopModelTest {
     assertStopped(result);
     // Model 行在物化/停止后物理删除。
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
     EntryPath path = pathOf(baseline.threadId());
     // 已提交结果被保留：ASSISTANT_ERROR(CANCELLED) 与 FAILED TURN_END 在 STOP 边界之前。
     assertTrue(path.entries().stream().anyMatch(e -> e.payload() instanceof AssistantErrorPayload));
@@ -291,7 +304,9 @@ class HarnessRuntimeStopModelTest {
     TurnEndPayload stopEnd = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.STOPPED, stopEnd.outcome());
     assertNull(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).orElse(null));
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .orElse(null));
   }
 
   /** 已提交的 terminal Model 携带超大上游错误正文时，Stop 的历史物化必须完整落库并正常停止。 */
@@ -303,8 +318,9 @@ class HarnessRuntimeStopModelTest {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(baseline.modelId()).orElseThrow();
-          builtin(tx)
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(baseline.modelId()).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   model.fail(
                       new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, message), T5));
@@ -316,7 +332,9 @@ class HarnessRuntimeStopModelTest {
 
     assertStopped(result);
     assertTrue(
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isEmpty());
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
     EntryPath path = pathOf(baseline.threadId());
     // 完整上游错误正文被原样物化为 ASSISTANT_ERROR，而不是被截断或导致 Stop 抛异常。
     AssistantErrorPayload materialized =
@@ -331,7 +349,7 @@ class HarnessRuntimeStopModelTest {
   }
 
   private ModelInvocation storedModel(UUID modelId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(modelId).orElseThrow());
+    return store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId).orElseThrow());
   }
 
   private EntryPath pathOf(UUID threadId) {

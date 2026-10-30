@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
+
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
@@ -42,19 +44,17 @@ public final class ExecutionExitFailureStore {
               return delegate.transaction(
                   tx ->
                       callback.apply(
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (txProxy, txMethod, txArgs) -> {
-                                    if ("confirmExecution".equals(txMethod.getName())) {
-                                      confirmAttempts.incrementAndGet();
-                                      if (failConfirm) {
-                                        throw new InjectedPersistenceFailure(SYNTHETIC_SECRET);
-                                      }
-                                    }
-                                    return invoke(tx, txMethod, txArgs);
-                                  })));
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                if ("exits.confirm".equals(call.operation())) {
+                                  confirmAttempts.incrementAndGet();
+                                  if (failConfirm) {
+                                    throw new InjectedPersistenceFailure(SYNTHETIC_SECRET);
+                                  }
+                                }
+                                return next.invoke();
+                              })));
             });
   }
 

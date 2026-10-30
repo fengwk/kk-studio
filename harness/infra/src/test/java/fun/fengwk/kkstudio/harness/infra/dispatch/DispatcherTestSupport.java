@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -156,7 +157,7 @@ final class DispatcherTestSupport {
           tx.entries().insert(rootEntry(rootEntryId, sessionId));
           tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -223,13 +224,14 @@ final class DispatcherTestSupport {
                   assistantEntry(
                       assistantEntryId, sessionId, userEntryId, ready.markRunning(NOW), response));
           tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
-          builtin(tx).insertModelInvocation(ready);
-          ModelInvocation current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(NOW));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.succeed(response, NOW));
-          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
+          builtin(store, tx).insertModelInvocation(ready);
+          ModelInvocation current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(NOW));
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.succeed(response, NOW));
+          current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx)
+              .updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
           tx.tools()
               .insert(
                   List.of(
@@ -352,7 +354,7 @@ final class DispatcherTestSupport {
   /**
    * 可编程阻塞 store：armed 后阻塞所有事务（except arming 线程）直到 release，用于确定性地把 drain 线程钉在 claim / return 事务边界上。
    */
-  static final class BlockingStore implements HarnessStore {
+  static final class BlockingStore implements HarnessStore, BuiltinStore {
 
     private final HarnessStore delegate;
     private final AtomicBoolean armed = new AtomicBoolean();
@@ -362,6 +364,11 @@ final class DispatcherTestSupport {
 
     BlockingStore(HarnessStore delegate) {
       this.delegate = delegate;
+    }
+
+    @Override
+    public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
+      return ((BuiltinStore) delegate).in(tx);
     }
 
     @Override
@@ -375,7 +382,7 @@ final class DispatcherTestSupport {
     }
 
     @Override
-    public <T> T transaction(Function<Transaction, T> callback) {
+    public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
       if (armed.get() && Thread.currentThread() != armingThread) {
         entered.countDown();
         try {

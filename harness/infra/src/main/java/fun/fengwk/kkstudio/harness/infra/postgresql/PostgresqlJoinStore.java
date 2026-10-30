@@ -21,21 +21,23 @@ import java.util.Set;
 import java.util.UUID;
 
 /** ThreadJoin 聚合的 PostgreSQL 实现。 */
-final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinStore {
+final class PostgresqlJoinStore implements JoinStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   PostgresqlJoinStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public void lockAdmission() {
-    checkOpen();
-    acquireJoinAdmissionLock();
+    tx.checkOpen();
+    tx.lockJoinAdmission();
   }
 
   @Override
   public void insert(ThreadJoin join) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(join, "join");
     if (tx.threads().find(join.childThreadId()).isEmpty()) {
       throw new IllegalArgumentException("join child thread does not exist");
@@ -46,8 +48,8 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
     if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
       throw new IllegalArgumentException("new join must be unmatched");
     }
-    requireLocked(LockKey.thread(join.childThreadId()));
-    updateJdbc(
+    tx.requireLocked(LockKey.thread(join.childThreadId()));
+    tx.updateJdbc(
         """
         insert into harness_thread_join (
             invocation_id, request_hash, parent_thread_id, child_thread_id,
@@ -71,9 +73,9 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public Optional<ThreadJoin> find(UUID invocationId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(invocationId, "invocationId");
-    return queryOne(
+    return tx.queryOne(
         "select * from harness_thread_join where invocation_id = ?",
         PostgresqlHarnessRows.JOIN,
         invocationId);
@@ -81,9 +83,9 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public List<ThreadJoin> loadIncomplete(UUID childThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(childThreadId, "childThreadId");
-    return queryList(
+    return tx.queryList(
         """
         select * from harness_thread_join
         where child_thread_id = ? and terminal_entry_id is null
@@ -96,10 +98,10 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public int countIncompleteChildren(UUID parentThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
     Integer count =
-        queryForObject(
+        tx.queryForObject(
             """
             select count(*)
             from harness_thread_join
@@ -113,10 +115,10 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public boolean hasIncompleteOwnerChild(UUID parentThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
     Boolean found =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists(
               select 1
@@ -132,9 +134,9 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public int countIncompleteSubagent() {
-    checkOpen();
+    tx.checkOpen();
     Integer count =
-        queryForObject(
+        tx.queryForObject(
             """
             select count(*)
             from harness_thread_join
@@ -173,7 +175,7 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
     if (join.finalAnswerEntryId() == null) {
       return;
     }
-    Entry finalAnswer = requireExistingEntry(join.finalAnswerEntryId());
+    Entry finalAnswer = tx.requireExistingEntry(join.finalAnswerEntryId());
     if (!finalAnswer.sessionId().equals(child.sessionId())) {
       throw new IllegalArgumentException("join final answer must be in the child thread's session");
     }
@@ -201,7 +203,7 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   /** TurnEnd 引用的 TurnStart 必须由指定 Thread 拥有。 */
   private void requireTurnEndOwnedBy(TurnEndPayload end, UUID ownerThreadId) {
-    Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+    Entry turnStart = tx.requireExistingEntry(end.turnStartEntryId());
     if (!(turnStart.payload() instanceof TurnStartPayload start)
         || !ownerThreadId.equals(start.ownerThreadId())) {
       throw new IllegalArgumentException(
@@ -221,9 +223,9 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
 
   @Override
   public void update(ThreadJoin join) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(join, "join");
-    requireLocked(LockKey.thread(join.childThreadId()));
+    tx.requireLocked(LockKey.thread(join.childThreadId()));
     ThreadJoin old =
         tx.joins()
             .find(join.invocationId())
@@ -232,7 +234,7 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
     ThreadJoin.validateTransition(old, join);
     requireValidJoinReceipt(join);
     int updated =
-        updateJdbc(
+        tx.updateJdbc(
             """
         update harness_thread_join
         set terminal_entry_id = ?, final_answer_entry_id = ?,
@@ -252,19 +254,19 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
             old.terminalEntryId(),
             old.deliveryCommandSequence(),
             old.supersededByInvocationId());
-    requireSingleUpdate(updated, "join", join.invocationId());
+    tx.requireSingleUpdate(updated, "join", join.invocationId());
   }
 
   @Override
   public int deleteByChild(UUID childThreadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(childThreadId, "childThreadId");
-    requireLocked(LockKey.thread(childThreadId));
-    if (!isInLockedTree(childThreadId)) {
+    tx.requireLocked(LockKey.thread(childThreadId));
+    if (!tx.isInLockedTree(childThreadId)) {
       throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
     }
     List<ThreadJoin> joins =
-        queryList(
+        tx.queryList(
             "select * from harness_thread_join where child_thread_id = ?",
             PostgresqlHarnessRows.JOIN,
             childThreadId);
@@ -281,25 +283,26 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
             "cannot delete join pending delivery " + join.invocationId());
       }
     }
-    return updateJdbc("delete from harness_thread_join where child_thread_id = ?", childThreadId);
+    return tx.updateJdbc(
+        "delete from harness_thread_join where child_thread_id = ?", childThreadId);
   }
 
   @Override
   public int deleteForThreads(List<UUID> threadIds) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");
     List<UUID> copied = List.copyOf(threadIds);
     Set<UUID> deleting = Set.copyOf(copied);
     for (UUID threadId : copied) {
-      requireLocked(LockKey.thread(threadId));
-      if (!isInLockedTree(threadId)) {
+      tx.requireLocked(LockKey.thread(threadId));
+      if (!tx.isInLockedTree(threadId)) {
         throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
       }
     }
     List<ThreadJoin> joins =
-        queryList(
+        tx.queryList(
             "select * from harness_thread_join where child_thread_id in ("
-                + placeholders(copied.size())
+                + PostgresqlHarnessTransaction.placeholders(copied.size())
                 + ")",
             PostgresqlHarnessRows.JOIN,
             copied.toArray());
@@ -320,9 +323,9 @@ final class PostgresqlJoinStore extends PostgresqlHarnessView implements JoinSto
     if (pendingDelete.isEmpty()) {
       return 0;
     }
-    return updateJdbc(
+    return tx.updateJdbc(
         "delete from harness_thread_join where invocation_id in ("
-            + placeholders(pendingDelete.size())
+            + PostgresqlHarnessTransaction.placeholders(pendingDelete.size())
             + ")",
         pendingDelete.toArray());
   }
