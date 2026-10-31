@@ -358,19 +358,23 @@ public class IdeRemoteDataPlaneForwarder {
     return -1;
   }
 
-  private static HttpResponseHeader parseHeaderString(String block, byte[] overflow) {
+  private static HttpResponseHeader parseHeaderString(String block, byte[] overflow)
+      throws IOException {
     Map<String, List<String>> headers = new LinkedHashMap<>();
     String[] lines = block.split("\r\n");
-    int status = -1;
-    if (lines.length > 0) {
-      String statusLine = lines[0];
-      String[] parts = statusLine.split(" ", 3);
-      if (parts.length >= 2) {
-        try {
-          status = Integer.parseInt(parts[1]);
-        } catch (NumberFormatException ignored) {
-        }
-      }
+    if (lines.length == 0) {
+      throw new IOException("malformed status line");
+    }
+    String statusLine = lines[0];
+    String[] parts = statusLine.split(" ", 3);
+    if (parts.length < 2) {
+      throw new IOException("malformed status line");
+    }
+    int status;
+    try {
+      status = Integer.parseInt(parts[1]);
+    } catch (NumberFormatException error) {
+      throw new IOException("malformed status line", error);
     }
     for (int i = 1; i < lines.length; i++) {
       String line = lines[i];

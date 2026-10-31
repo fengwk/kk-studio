@@ -230,6 +230,51 @@ class IdeRemoteDataPlaneForwarderTest {
   }
 
   @Test
+  void forwardWebSocketMalformedStatusLineReturns502() throws Exception {
+    try (AsynchronousServerSocketChannel server = AsynchronousServerSocketChannel.open()) {
+      server.bind(new InetSocketAddress("127.0.0.1", 0));
+      int port = ((InetSocketAddress) server.getLocalAddress()).getPort();
+
+      HttpClient httpClient = mock(HttpClient.class);
+      IdeClusterClient clusterClient = mock(IdeClusterClient.class);
+      when(clusterClient.signHeaders(any(), any(), any())).thenReturn(Map.of());
+
+      ClusterOwnerRoute owner =
+          ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:" + port));
+
+      IdeRemoteDataPlaneForwarder forwarder =
+          new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+
+      Executors.newSingleThreadExecutor()
+          .submit(
+              () -> {
+                try {
+                  AsynchronousSocketChannel accepted = server.accept().get();
+                  ByteBuffer readBuf = ByteBuffer.allocate(1024);
+                  accepted.read(readBuf).get();
+                  String response = "HTTP/1.1 NOT_NUMERIC Status\r\n\r\n";
+                  accepted
+                      .write(ByteBuffer.wrap(response.getBytes(StandardCharsets.ISO_8859_1)))
+                      .get();
+                } catch (Exception ignored) {
+                }
+              });
+
+      HttpServletRequest req = mock(HttpServletRequest.class);
+      when(req.getContextPath()).thenReturn("");
+      when(req.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
+      when(req.getHeader("Sec-WebSocket-Version")).thenReturn("13");
+      when(req.getHeader("Cookie")).thenReturn("kk_ide_session=token");
+
+      HttpServletResponse res = mock(HttpServletResponse.class);
+
+      forwarder.forwardWebSocket(req, res, owner, ENV, VIEW, "/ws");
+
+      verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+    }
+  }
+
+  @Test
   void forwardHttpErrorHandling() throws Exception {
     HttpClient httpClient = mock(HttpClient.class);
     IdeClusterClient clusterClient = mock(IdeClusterClient.class);

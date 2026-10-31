@@ -18,7 +18,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
+import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.harness.environment.tunnel.testing.FakeEnvironmentTunnel;
 import fun.fengwk.kkstudio.harness.environment.tunnel.testing.FakeEnvironmentTunnels;
 import fun.fengwk.kkstudio.harness.environment.tunnel.testing.FakeTunnelExchange;
@@ -37,6 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -560,5 +564,136 @@ class IdeGatewayDataPlaneTest {
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws-fail", wsReq, wsRes);
     verify(wsRes).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
+
+  @Test
+  void localTunnelOpenHttpIllegalStateExceptionReturns503() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    EnvironmentTunnel tunnel = mock(EnvironmentTunnel.class);
+    when(tunnel.identity()).thenReturn(IDENTITY);
+    when(tunnel.openHttp(any())).thenThrow(new IllegalStateException("tunnel draining"));
+
+    EnvironmentTunnels tunnels = mock(EnvironmentTunnels.class);
+    when(tunnels.local(ENV)).thenReturn(Optional.of(tunnel));
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getContextPath()).thenReturn("");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  void localTunnelOpenWebSocketIllegalStateExceptionReturns503() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    EnvironmentTunnel tunnel = mock(EnvironmentTunnel.class);
+    when(tunnel.identity()).thenReturn(IDENTITY);
+    when(tunnel.openWebSocket(any())).thenThrow(new IllegalStateException("tunnel closed"));
+
+    EnvironmentTunnels tunnels = mock(EnvironmentTunnels.class);
+    when(tunnels.local(ENV)).thenReturn(Optional.of(tunnel));
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getHeader("Connection")).thenReturn("Upgrade");
+    when(req.getHeader("Upgrade")).thenReturn("websocket");
+    when(req.getHeader("Sec-WebSocket-Version")).thenReturn("13");
+    when(req.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeader("Origin")).thenReturn("http://localhost");
+    when(req.getScheme()).thenReturn("http");
+    when(req.getServerName()).thenReturn("localhost");
+    when(req.getServerPort()).thenReturn(80);
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  void localWebSocketHandoverFailureClosesExchangeAndReturns502() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    TunnelExchange exchange = mock(TunnelExchange.class);
+    when(exchange.responseHeaders())
+        .thenReturn(CompletableFuture.completedFuture(new TunnelExchange.Response(200, Map.of())));
+    when(exchange.stream()).thenReturn(mock(TunnelStream.class));
+
+    EnvironmentTunnel tunnel = mock(EnvironmentTunnel.class);
+    when(tunnel.identity()).thenReturn(IDENTITY);
+    when(tunnel.openWebSocket(any())).thenReturn(exchange);
+
+    EnvironmentTunnels tunnels = mock(EnvironmentTunnels.class);
+    when(tunnels.local(ENV)).thenReturn(Optional.of(tunnel));
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getHeader("Connection")).thenReturn("Upgrade");
+    when(req.getHeader("Upgrade")).thenReturn("websocket");
+    when(req.getHeader("Sec-WebSocket-Version")).thenReturn("13");
+    when(req.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeader("Origin")).thenReturn("http://localhost");
+    when(req.getScheme()).thenReturn("http");
+    when(req.getServerName()).thenReturn("localhost");
+    when(req.getServerPort()).thenReturn(80);
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+    verify(exchange).close();
   }
 }

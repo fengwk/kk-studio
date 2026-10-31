@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -28,6 +29,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>owner 节点直接通过 {@link EnvironmentTunnel} 交付流量给 Daemon；非 owner 节点透传至 owner。
  */
+@Slf4j
 @Component
 public class IdeGatewayDataPlane {
 
@@ -191,7 +193,18 @@ public class IdeGatewayDataPlane {
       throws IOException {
     TunnelHttpRequest tunnelRequest =
         new TunnelHttpRequest(request.getMethod(), daemonPath, forwardHeaders);
-    TunnelExchange exchange = tunnel.openHttp(tunnelRequest);
+    TunnelExchange exchange;
+    try {
+      exchange = tunnel.openHttp(tunnelRequest);
+    } catch (IllegalStateException error) {
+      log.info(
+          "local tunnel open failed; phase=LOCAL_TUNNEL_OPEN_HTTP; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    }
     try {
       boolean hasBody =
           request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null;
@@ -214,7 +227,12 @@ public class IdeGatewayDataPlane {
                   }
                   exchange.stream().endOutput().toCompletableFuture().join();
                 } catch (Exception error) {
-                  exchange.close();
+                  log.debug("ide local http pump failed", error);
+                  try {
+                    exchange.close();
+                  } catch (Exception closeErr) {
+                    log.debug("failed to close exchange after pump failure", closeErr);
+                  }
                 }
               });
 
@@ -226,6 +244,11 @@ public class IdeGatewayDataPlane {
                 .toCompletableFuture()
                 .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
       } catch (Exception error) {
+        log.info(
+            "local tunnel response headers failed; phase=LOCAL_TUNNEL_RESPONSE_HEADERS; environmentId={}; viewId={}; exception={}",
+            environmentId,
+            viewId,
+            error.getClass().getSimpleName());
         if (!response.isCommitted()) {
           IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
         }
@@ -267,11 +290,20 @@ public class IdeGatewayDataPlane {
         out.flush();
       }
     } catch (Exception error) {
+      log.info(
+          "local tunnel http transfer failed; phase=LOCAL_TUNNEL_TRANSFER; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
       }
     } finally {
-      exchange.close();
+      try {
+        exchange.close();
+      } catch (Exception closeErr) {
+        log.debug("failed to close local tunnel exchange", closeErr);
+      }
     }
   }
 
@@ -285,7 +317,18 @@ public class IdeGatewayDataPlane {
       UUID viewId)
       throws IOException {
     TunnelHttpRequest tunnelRequest = new TunnelHttpRequest("GET", daemonPath, forwardHeaders);
-    TunnelExchange exchange = tunnel.openWebSocket(tunnelRequest);
+    TunnelExchange exchange;
+    try {
+      exchange = tunnel.openWebSocket(tunnelRequest);
+    } catch (IllegalStateException error) {
+      log.info(
+          "local tunnel open ws failed; phase=LOCAL_TUNNEL_OPEN_WS; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    }
     TunnelExchange.Response tunnelResponse;
     try {
       tunnelResponse =
@@ -294,7 +337,16 @@ public class IdeGatewayDataPlane {
               .toCompletableFuture()
               .get(IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
     } catch (Exception error) {
-      exchange.close();
+      try {
+        exchange.close();
+      } catch (Exception closeErr) {
+        log.debug("failed to close ws exchange after header error", closeErr);
+      }
+      log.info(
+          "local tunnel ws headers failed; phase=LOCAL_TUNNEL_WS_HEADERS; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
       }
@@ -302,9 +354,29 @@ public class IdeGatewayDataPlane {
     }
 
     if (tunnelResponse.status() == 200) {
-      JettyConnectionHandover.handover(request, 101, tunnelResponse.headers(), exchange.stream());
+      try {
+        JettyConnectionHandover.handover(request, 101, tunnelResponse.headers(), exchange.stream());
+      } catch (Exception error) {
+        log.info(
+            "local tunnel ws handover failed; phase=LOCAL_TUNNEL_WS_HANDOVER; environmentId={}; viewId={}; exception={}",
+            environmentId,
+            viewId,
+            error.getClass().getSimpleName());
+        try {
+          exchange.close();
+        } catch (Exception closeErr) {
+          log.debug("failed to close ws exchange after handover failure", closeErr);
+        }
+        if (!response.isCommitted()) {
+          IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+        }
+      }
     } else {
-      exchange.close();
+      try {
+        exchange.close();
+      } catch (Exception closeErr) {
+        log.debug("failed to close ws exchange on non-200 response", closeErr);
+      }
       IdeDataHeaderPolicy.sendError(response, tunnelResponse.status());
     }
   }
