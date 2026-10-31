@@ -22,7 +22,9 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -184,21 +186,10 @@ class HarnessOwnerQueryServiceTest {
     UUID sessionId = id(32);
     when(issueAgentOwnership.findBoundThread(new OwnerRef.IssueAgent(issueId, agentName)))
         .thenReturn(Optional.of(threadId));
-    ThreadState thread = thread(threadId, sessionId, id(33), T0, T1);
+    Entry root = root(sessionId, id(34), T0, ROOT_SETTINGS);
+    ThreadState thread = thread(threadId, sessionId, root.id(), T0, T1);
     when(runtime.getThreadSnapshot(threadId))
-        .thenReturn(
-            new ThreadSnapshot(
-                thread,
-                new EntryPath(List.of(root(sessionId, id(34), T0, ROOT_SETTINGS))),
-                List.of(),
-                null,
-                List.of(),
-                ThreadLiveState.IDLE_OR_HISTORICAL,
-                List.of(),
-                0,
-                false,
-                List.of(),
-                false));
+        .thenReturn(snapshot(thread, new EntryPath(List.of(root))));
     when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
@@ -257,18 +248,7 @@ class HarnessOwnerQueryServiceTest {
     Entry afterReminder = userText(sessionId, id(505), reminder.id(), T4, "after reminder");
     ThreadState thread = thread(threadId, sessionId, afterReminder.id(), T0, T5);
     ThreadSnapshot snapshot =
-        new ThreadSnapshot(
-            thread,
-            new EntryPath(List.of(root, turnStart, user, reminder, afterReminder)),
-            List.of(),
-            null,
-            List.of(),
-            ThreadLiveState.IDLE_OR_HISTORICAL,
-            List.of(),
-            0,
-            false,
-            List.of(),
-            false);
+        snapshot(thread, new EntryPath(List.of(root, turnStart, user, reminder, afterReminder)));
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
 
@@ -286,18 +266,7 @@ class HarnessOwnerQueryServiceTest {
     ThreadState reminderHead = thread(threadId, sessionId, reminder.id(), T0, T5);
     when(runtime.getThreadSnapshot(threadId))
         .thenReturn(
-            new ThreadSnapshot(
-                reminderHead,
-                new EntryPath(List.of(root, turnStart, user, reminder)),
-                List.of(),
-                null,
-                List.of(),
-                ThreadLiveState.IDLE_OR_HISTORICAL,
-                List.of(),
-                0,
-                false,
-                List.of(),
-                false));
+            snapshot(reminderHead, new EntryPath(List.of(root, turnStart, user, reminder))));
     String reminderHeadPreview =
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
     assertEquals("latest user", reminderHeadPreview);
@@ -333,19 +302,7 @@ class HarnessOwnerQueryServiceTest {
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(root, child));
     for (ThreadState state : List.of(root, child)) {
       when(runtime.getThreadSnapshot(state.id()))
-          .thenReturn(
-              new ThreadSnapshot(
-                  state,
-                  new EntryPath(List.of(entry)),
-                  List.of(),
-                  null,
-                  List.of(),
-                  ThreadLiveState.IDLE_OR_HISTORICAL,
-                  List.of(),
-                  0,
-                  false,
-                  List.of(),
-                  false));
+          .thenReturn(snapshot(state, new EntryPath(List.of(entry))));
     }
 
     List<HarnessThreadSummaryDTO> summaries = service.listThreadSummaries(sessionId);
@@ -373,19 +330,7 @@ class HarnessOwnerQueryServiceTest {
     ThreadState thread = thread(threadId, sessionId, root.id(), T0, T1);
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
     when(runtime.getThreadSnapshot(threadId))
-        .thenReturn(
-            new ThreadSnapshot(
-                thread,
-                new EntryPath(List.of(root)),
-                List.of(),
-                null,
-                List.of(),
-                ThreadLiveState.IDLE_OR_HISTORICAL,
-                List.of(),
-                0,
-                false,
-                List.of(),
-                false));
+        .thenReturn(snapshot(thread, new EntryPath(List.of(root))));
 
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
     assertEquals("IDLE", idle.getStatus());
@@ -478,5 +423,21 @@ class HarnessOwnerQueryServiceTest {
 
   private static UUID id(long value) {
     return new UUID(0L, value);
+  }
+
+  private static ThreadSnapshot snapshot(ThreadState thread, EntryPath path) {
+    return new ThreadSnapshot(
+        thread,
+        EntryCurrentState.from(path),
+        new EntrySlice(null, path.entries()),
+        List.of(),
+        null,
+        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
+        List.of(),
+        0,
+        false,
+        List.of(),
+        false);
   }
 }

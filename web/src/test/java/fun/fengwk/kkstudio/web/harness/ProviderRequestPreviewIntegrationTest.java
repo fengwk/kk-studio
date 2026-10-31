@@ -305,7 +305,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         new Fixture(
             fixture.sessionId(),
             fixture.threadId(),
-            snapshot.entryPath().head().id(),
+            snapshot.entryState().head().id(),
             snapshot.thread().nextCommandSequence(),
             fixture.resourceBlobId(),
             fixture.providerBaseUrl());
@@ -599,7 +599,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     EntryPath path =
         TurnPlanPreview.inputCandidatePath(
             fixture.threadId(),
-            queued.entryPath(),
+            queued.requireFullPath(),
             queued.thread().nextCommandSequence() - acceptedCommandCount,
             durableCommands,
             Instant.now(clock));
@@ -651,7 +651,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     return new Fixture(
         sessionId,
         threadId,
-        snapshot.entryPath().head().id(),
+        snapshot.entryState().head().id(),
         snapshot.thread().nextCommandSequence(),
         resourceBlobId,
         providerBaseUrl());
@@ -806,7 +806,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         "thread_row",
         jdbc.queryForMap("select * from harness_thread where id = ?", fixture.threadId()));
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(fixture.threadId());
-    state.put("head_entry_id", snapshot.entryPath().head().id());
+    state.put("head_entry_id", snapshot.entryState().head().id());
     state.put("next_command_sequence", snapshot.thread().nextCommandSequence());
     if (uploadId != null) {
       Map<String, Object> upload =
