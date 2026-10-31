@@ -1,10 +1,25 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { create } from '@bufbuild/protobuf'
 
-import { describe, expect, it } from 'vitest'
-
-import { decodeUploadCommit, decodeUploadRequest, encodeUploadTicket } from '../src/protocol.js'
-import { createHttpPutObject, createResourceTransferClient, type ResourceTransferClient } from '../src/transport/resources.js'
+import {
+  MessageType,
+  PresignedPutSchema,
+  ResourceUploadTicketSchema,
+  TicketState,
+  type Envelope,
+  type PresignedPut,
+  type ResourceUploadCommit,
+  type ResourceUploadRequest,
+  type ResourceUploadTicket,
+} from '../src/generated/control_pb.js'
+import {
+  createHttpPutObject,
+  createResourceTransferClient,
+  type ResourceTransferClient,
+} from '../src/transport/resources.js'
+import { installOutboundNetwork, type InstalledOutboundNetwork } from '../src/network.js'
 import { tick, waitFor } from './helpers.js'
 
 const INVOCATION_ID = 'inv-1'
@@ -12,31 +27,47 @@ const UPLOAD_ID = '99999999-8888-4777-8666-555555555555'
 
 type TicketSpec = { state: 'PENDING' } | { state: 'READY' } | { state: 'FAILED'; message?: string }
 
-function ticketFor(transferId: string, spec: TicketSpec): string {
+function ticketFor(transferId: string, spec: TicketSpec): ResourceUploadTicket {
   switch (spec.state) {
     case 'PENDING':
-      return encodeUploadTicket({
+      return create(ResourceUploadTicketSchema, {
         transferId,
-        state: 'PENDING',
+        state: TicketState.TICKET_PENDING,
         uploadId: UPLOAD_ID,
-        presignedPut: {
+        presignedPut: create(PresignedPutSchema, {
           method: 'PUT',
           url: 'https://s3.example.com/bucket/key',
-          headers: { 'x-amz-acl': 'private' },
           expiresAt: '2030-01-01T00:00:00.000Z',
-        },
-        message: null,
+        }),
       })
     case 'READY':
-      return encodeUploadTicket({ transferId, state: 'READY', uploadId: UPLOAD_ID, presignedPut: null, message: null })
+      return create(ResourceUploadTicketSchema, {
+        transferId,
+        state: TicketState.TICKET_READY,
+        uploadId: UPLOAD_ID,
+      })
     case 'FAILED':
-      return encodeUploadTicket({ transferId, state: 'FAILED', uploadId: null, presignedPut: null, message: spec.message ?? 'nope' })
+      return create(ResourceUploadTicketSchema, {
+        transferId,
+        state: TicketState.TICKET_FAILED,
+        message: spec.message ?? 'nope',
+      })
   }
+}
+
+function getTransferId(envelope: Envelope): string {
+  if (envelope.messageType === MessageType.RESOURCE_UPLOAD_REQUEST) {
+    return (envelope.payload.value as ResourceUploadRequest).transferId ?? ''
+  }
+  if (envelope.messageType === MessageType.RESOURCE_UPLOAD_COMMIT) {
+    return (envelope.payload.value as ResourceUploadCommit).transferId ?? ''
+  }
+  return ''
 }
 
 interface Script {
   client: ResourceTransferClient
-  requests: { type: string; invocationId: string; payload: Record<string, unknown> }[]
+  requests: { type: MessageType; invocationId: string; envelope: Envelope }[]
   putCalls: number
   putBytes: number
   setScript(specs: TicketSpec[]): void
@@ -48,17 +79,16 @@ function makeClient(options: { putRejects?: boolean; ticketWaitMillis?: number }
   let client: ResourceTransferClient
   const state = { putCalls: 0, putBytes: 0 }
   client = createResourceTransferClient({
-    sendControl: (type, invocationId, payloadJson) => {
-      const payload = JSON.parse(payloadJson) as Record<string, unknown>
-      requests.push({ type, invocationId, payload })
+    sendControl: (envelope: Envelope) => {
+      requests.push({ type: envelope.messageType, invocationId: envelope.invocationId ?? '', envelope })
+      const transferId = getTransferId(envelope)
       const spec = script.shift()
       if (spec !== undefined) {
-        // 用请求中的 transferId 关联响应；在 pending 注册后异步投递票据。
-        queueMicrotask(() => client.onTicket(invocationId, ticketFor(payload.transferId as string, spec)))
+        queueMicrotask(() => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, spec)))
       }
       return true
     },
-    putObject: async (_presigned, bytes) => {
+    putObject: async (_presigned: PresignedPut, bytes: Uint8Array) => {
       state.putCalls++
       state.putBytes += bytes.byteLength
       if (options.putRejects === true) {
@@ -96,10 +126,13 @@ describe('resource transfer client', () => {
     expect(result.sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(script.putCalls).toBe(1)
     expect(script.putBytes).toBe(4)
-    expect(script.requests.map((request) => request.type)).toEqual(['RESOURCE_UPLOAD_REQUEST', 'RESOURCE_UPLOAD_COMMIT'])
-    const request = decodeUploadRequest(JSON.stringify(script.requests[0]?.payload))
-    expect(request.size).toBe(4)
-    const commit = decodeUploadCommit(JSON.stringify(script.requests[1]?.payload))
+    expect(script.requests.map((request) => request.type)).toEqual([
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+      MessageType.RESOURCE_UPLOAD_COMMIT,
+    ])
+    const request = script.requests[0]?.envelope.payload.value as ResourceUploadRequest
+    expect(request.size).toBe(4n)
+    const commit = script.requests[1]?.envelope.payload.value as ResourceUploadCommit
     expect(commit.uploadId).toBe(UPLOAD_ID)
     expect(commit.transferId).toBe(request.transferId)
   })
@@ -111,9 +144,12 @@ describe('resource transfer client', () => {
     const result = await script.client.upload(INVOCATION_ID, binary, new AbortController().signal)
     expect(result.uploadId).toBe(UPLOAD_ID)
     expect(script.putCalls).toBe(0)
-    expect(script.requests.map((request) => request.type)).toEqual(['RESOURCE_UPLOAD_REQUEST', 'RESOURCE_UPLOAD_REQUEST'])
-    const first = decodeUploadRequest(JSON.stringify(script.requests[0]?.payload))
-    const second = decodeUploadRequest(JSON.stringify(script.requests[1]?.payload))
+    expect(script.requests.map((request) => request.type)).toEqual([
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+    ])
+    const first = script.requests[0]?.envelope.payload.value as ResourceUploadRequest
+    const second = script.requests[1]?.envelope.payload.value as ResourceUploadRequest
     expect(first.transferId).toBe(second.transferId)
   })
 
@@ -125,10 +161,10 @@ describe('resource transfer client', () => {
     expect(result.uploadId).toBe(UPLOAD_ID)
     expect(script.putCalls).toBe(2)
     expect(script.requests.map((request) => request.type)).toEqual([
-      'RESOURCE_UPLOAD_REQUEST',
-      'RESOURCE_UPLOAD_COMMIT',
-      'RESOURCE_UPLOAD_REQUEST',
-      'RESOURCE_UPLOAD_COMMIT',
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+      MessageType.RESOURCE_UPLOAD_COMMIT,
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+      MessageType.RESOURCE_UPLOAD_COMMIT,
     ])
   })
 
@@ -141,14 +177,14 @@ describe('resource transfer client', () => {
   })
 
   it('waits for reconnect and resumes the same transfer', async () => {
-    const requests: { type: string; payload: Record<string, unknown> }[] = []
+    const requests: { type: MessageType; envelope: Envelope }[] = []
     let deliver: (() => void) | null = null
     let client: ResourceTransferClient
     client = createResourceTransferClient({
-      sendControl: (type, invocationId, payloadJson) => {
-        const payload = JSON.parse(payloadJson) as Record<string, unknown>
-        requests.push({ type, payload })
-        deliver = () => client.onTicket(invocationId, ticketFor(payload.transferId as string, { state: 'READY' }))
+      sendControl: (envelope: Envelope) => {
+        requests.push({ type: envelope.messageType, envelope })
+        const transferId = getTransferId(envelope)
+        deliver = () => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, { state: 'READY' }))
         return true
       },
       putObject: async () => {},
@@ -158,7 +194,6 @@ describe('resource transfer client', () => {
     })
     const promise = client.upload(INVOCATION_ID, binary, new AbortController().signal)
     await tick()
-    // 连接不可用时不会发出控制帧。
     expect(requests.length).toBe(0)
     client.onConnectionReady()
     await waitFor(() => deliver !== null)
@@ -167,12 +202,10 @@ describe('resource transfer client', () => {
     expect(result.uploadId).toBe(UPLOAD_ID)
   })
 
-  it('ignores malformed and unmatched tickets', async () => {
+  it('ignores unmatched tickets', async () => {
     const script = makeClient()
     script.client.onConnectionReady()
     script.setScript([{ state: 'READY' }])
-    // 非法票据与错误 invocationId 的票据都不应破坏后续上传。
-    script.client.onTicket(INVOCATION_ID, '{not json')
     script.client.onTicket('other-invocation', ticketFor('00000000-0000-4000-8000-000000000000', { state: 'READY' }))
     const result = await script.client.upload(INVOCATION_ID, binary, new AbortController().signal)
     expect(result.uploadId).toBe(UPLOAD_ID)
@@ -203,17 +236,17 @@ describe('resource transfer resilience branches', () => {
 
   it('fails fast when the control frame cannot be sent, then succeeds on retry', async () => {
     let attempts = 0
-    const requests: string[] = []
+    const requests: MessageType[] = []
     let client: ResourceTransferClient
     client = createResourceTransferClient({
-      sendControl: (type, invocationId, payloadJson) => {
+      sendControl: (envelope: Envelope) => {
         attempts++
         if (attempts === 1) {
           return false
         }
-        requests.push(type)
-        const transferId = (JSON.parse(payloadJson) as { transferId: string }).transferId
-        queueMicrotask(() => client.onTicket(invocationId, ticketFor(transferId, { state: 'READY' })))
+        requests.push(envelope.messageType)
+        const transferId = getTransferId(envelope)
+        queueMicrotask(() => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, { state: 'READY' })))
         return true
       },
       putObject: async () => {},
@@ -221,10 +254,9 @@ describe('resource transfer resilience branches', () => {
       connectionPollMillis: 5,
     })
     client.onConnectionReady()
-    // 第一次 sendControl 返回 false 会走退避重试；第二次放行后同一 transfer 重放成功。
     const result = await client.upload(INVOCATION_ID, binary, new AbortController().signal)
     expect(result.uploadId).toBe(UPLOAD_ID)
-    expect(requests).toEqual(['RESOURCE_UPLOAD_REQUEST'])
+    expect(requests).toEqual([MessageType.RESOURCE_UPLOAD_REQUEST])
     expect(attempts).toBe(2)
   })
 
@@ -249,8 +281,8 @@ describe('resource transfer resilience branches', () => {
     const transferIds: string[] = []
     let client: ResourceTransferClient
     client = createResourceTransferClient({
-      sendControl: (_type, _invocationId, payloadJson) => {
-        transferIds.push((JSON.parse(payloadJson) as { transferId: string }).transferId)
+      sendControl: (envelope: Envelope) => {
+        transferIds.push(getTransferId(envelope))
         return true
       },
       putObject: async () => {},
@@ -272,10 +304,10 @@ describe('resource transfer resilience branches', () => {
     let deliver: (() => void) | null = null
     let client: ResourceTransferClient
     client = createResourceTransferClient({
-      sendControl: (_type, invocationId, payloadJson) => {
+      sendControl: (envelope: Envelope) => {
         sends++
-        const transferId = (JSON.parse(payloadJson) as { transferId: string }).transferId
-        deliver = () => client.onTicket(invocationId, ticketFor(transferId, { state: 'READY' }))
+        const transferId = getTransferId(envelope)
+        deliver = () => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, { state: 'READY' }))
         return true
       },
       putObject: async () => {},
@@ -288,7 +320,6 @@ describe('resource transfer resilience branches', () => {
     client.onConnectionLost()
     await tick()
     client.onConnectionReady()
-    // 重连后重放同一 transfer 的新控制帧到达。
     await waitFor(() => sends === 2)
     deliver?.()
     const result = await promise
@@ -296,16 +327,16 @@ describe('resource transfer resilience branches', () => {
   })
 
   it('re-submits a replayed PENDING ticket without re-uploading', async () => {
-    const types: string[] = []
+    const types: MessageType[] = []
     let client: ResourceTransferClient
     let step = 0
     client = createResourceTransferClient({
-      sendControl: (type, invocationId, payloadJson) => {
-        types.push(type)
-        const transferId = (JSON.parse(payloadJson) as { transferId: string }).transferId
+      sendControl: (envelope: Envelope) => {
+        types.push(envelope.messageType)
+        const transferId = getTransferId(envelope)
         const state = step === 0 ? 'PENDING' : step === 1 ? 'PENDING' : 'READY'
         step++
-        queueMicrotask(() => client.onTicket(invocationId, ticketFor(transferId, { state } as never)))
+        queueMicrotask(() => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, { state } as never)))
         return true
       },
       putObject: async () => {},
@@ -315,18 +346,22 @@ describe('resource transfer resilience branches', () => {
     client.onConnectionReady()
     const result = await client.upload(INVOCATION_ID, binary, new AbortController().signal)
     expect(result.uploadId).toBe(UPLOAD_ID)
-    expect(types).toEqual(['RESOURCE_UPLOAD_REQUEST', 'RESOURCE_UPLOAD_COMMIT', 'RESOURCE_UPLOAD_COMMIT'])
+    expect(types).toEqual([
+      MessageType.RESOURCE_UPLOAD_REQUEST,
+      MessageType.RESOURCE_UPLOAD_COMMIT,
+      MessageType.RESOURCE_UPLOAD_COMMIT,
+    ])
   })
 
   it('falls back to re-uploading when storage rejects the PUT', async () => {
     let client: ResourceTransferClient
     let step = 0
     client = createResourceTransferClient({
-      sendControl: (_type, invocationId, payloadJson) => {
-        const transferId = (JSON.parse(payloadJson) as { transferId: string }).transferId
+      sendControl: (envelope: Envelope) => {
+        const transferId = getTransferId(envelope)
         const state = step === 0 ? 'PENDING' : 'READY'
         step++
-        queueMicrotask(() => client.onTicket(invocationId, ticketFor(transferId, { state } as never)))
+        queueMicrotask(() => client.onTicket(envelope.invocationId ?? '', ticketFor(transferId, { state } as never)))
         return true
       },
       putObject: async () => {
@@ -336,13 +371,23 @@ describe('resource transfer resilience branches', () => {
       connectionPollMillis: 5,
     })
     client.onConnectionReady()
-    // PUT 失败后走 COMMIT 权威判定；READY 时直接成功。
     const result = await client.upload(INVOCATION_ID, binary, new AbortController().signal)
     expect(result.uploadId).toBe(UPLOAD_ID)
   })
 })
 
 describe('presigned PUT http client', () => {
+  let network: InstalledOutboundNetwork
+  beforeEach(async () => {
+    network = await installOutboundNetwork({}, {
+      resolve: async () => null,
+      close: async () => {},
+    })
+  })
+  afterEach(async () => {
+    await network.close()
+  })
+
   function startServer(status: number): Promise<{ url: string; close: () => Promise<void>; seen: { method?: string; body: string } }> {
     const seen: { method?: string; body: string } = { body: '' }
     const server = createServer((request, response) => {
@@ -372,7 +417,11 @@ describe('presigned PUT http client', () => {
     try {
       const put = createHttpPutObject()
       await put(
-        { method: 'PUT', url: server.url, headers: { 'content-type': 'application/octet-stream' }, expiresAt: '2030-01-01T00:00:00.000Z' },
+        create(PresignedPutSchema, {
+          method: 'PUT',
+          url: server.url,
+          expiresAt: '2030-01-01T00:00:00.000Z',
+        }),
         new Uint8Array([1, 2, 3]),
         new AbortController().signal,
       )
@@ -389,7 +438,11 @@ describe('presigned PUT http client', () => {
       const put = createHttpPutObject()
       await expect(
         put(
-          { method: 'PUT', url: server.url, headers: {}, expiresAt: '2030-01-01T00:00:00.000Z' },
+          create(PresignedPutSchema, {
+            method: 'PUT',
+            url: server.url,
+            expiresAt: '2030-01-01T00:00:00.000Z',
+          }),
           new Uint8Array([1]),
           new AbortController().signal,
         ),
