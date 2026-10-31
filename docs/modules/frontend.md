@@ -63,7 +63,7 @@ Java long 游标保持字符串，版本比较使用长度与字典序，保留�
 
 ## Snapshot、realtime 与恢复
 
-Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v2`。
+Thread/Canvas 先读取 Snapshot，再订阅 `/api/events`。
 浏览器只有一个应用事件 WebSocket，连接与订阅由应用级 manager 按资源引用计数管理：
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
 连接建立后服务端先发 `connected` 帧，manager 用它给出本次物理连接的 `eventNodeId` 与 `connectionId`；

@@ -223,7 +223,7 @@ invocation 归属与 attempt，再让本地 active owner 立即提交 checkpoint
 该 channel 与 `harness_realtime` 共用独立 realtime LISTEN 连接。接收节点只对本地 active owner 执行
 attempt fence，不回广播、不回查 head；连接重连不重放追帧提示。数据库查询/发布失败直接向上传播为 5xx。
 
-`/api/events/v2` 是唯一的浏览器事件通道，采用严格 version 2 帧。
+`/api/events` 是唯一的浏览器事件通道，采用无版本帧（严格拒绝携带 `version` 或未知字段）。
 连接建立后的第一帧是 `connected`，携带本次物理连接的 `eventNodeId` 与 `connectionId`；每次重连都是新身份，
 浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
 资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
@@ -284,12 +284,8 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 [`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
 HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
 通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
-同源 IDE 的测试按边界选择：[`IdeDataPlaneIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeDataPlaneIntegrationTest.java)
-用真实 Tomcat HTTP/WS 与 mux peer 覆盖本地与非 owner 单跳；
-[`MuxCrossLanguageIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/MuxCrossLanguageIntegrationTest.java)
-让 Java mux 引擎与 Node 24 Daemon 传输跨进程互通；
-[`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)
-在显式提供 code-server 发行目录时启动真实 Spring/Tomcat、临时 PostgreSQL 和生产 Daemon，覆盖浏览器协议入口、目录规范化、恢复换代与崩溃失效；
+同源 IDE 的测试按边界选择：[`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)
+在显式提供 code-server 发行目录时启动真实 Spring/Jetty、临时 PostgreSQL 和生产 Daemon，覆盖浏览器协议入口、目录规范化、恢复换代与崩溃失效；
 另提供 Playwright 包目录时运行真实 Chromium 工作台、worker 注册、终端、dirty 拒绝与单视图 shell 退出验证。
 Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
