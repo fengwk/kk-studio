@@ -253,6 +253,19 @@ class EnvironmentDaemonAdmissionControllerTest {
   }
 
   @Test
+  void malformedInstanceIdInHandshakeReturns400() throws Exception {
+    MockHttpServletRequest request = newRequest();
+    request.removeHeader("KK-Daemon-Instance");
+    request.addHeader("KK-Daemon-Instance", "not-a-canonical-uuid");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(400, response.getStatus());
+    assertNoSecretLeak(response);
+  }
+
+  @Test
   void admissionInternalErrorReturns500() throws Exception {
     testSessions.admitException = new IllegalStateException("database unavailable");
     MockHttpServletRequest request = newRequest();

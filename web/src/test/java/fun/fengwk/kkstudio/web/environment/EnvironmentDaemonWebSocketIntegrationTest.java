@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 class EnvironmentDaemonWebSocketIntegrationTest {
 
   private static final String TEST_TOKEN = "test-secret-token-123";
-  private static final String TEST_INSTANCE = "inst-ws-test";
+  private static final String TEST_INSTANCE = "3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e60";
   private static final DaemonAdmission.Admitted ADMITTED =
       new DaemonAdmission.Admitted(
           EnvironmentId.parse("3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f"), TEST_INSTANCE);
