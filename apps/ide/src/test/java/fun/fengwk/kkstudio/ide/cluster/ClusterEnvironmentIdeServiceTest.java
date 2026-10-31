@@ -11,6 +11,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
@@ -19,9 +22,6 @@ import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
-import fun.fengwk.kkstudio.ide.protocol.IdeAction;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
@@ -86,7 +86,7 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeViewDTO dto = service.openView(ENV, openViewRequest());
 
     assertEquals(VIEW, dto.getViewId());
-    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).action());
+    assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).getAction());
     assertTrue(client.calls.isEmpty());
   }
 
@@ -253,21 +253,27 @@ class ClusterEnvironmentIdeServiceTest {
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
-      CompletableFuture<IdeReply> reply = new CompletableFuture<>();
-      reply.complete(
-          new IdeReply(
-              true,
-              UUID.fromString(command.viewId()),
-              command.documentId() == null ? null : UUID.fromString(command.documentId()),
-              command.eventNodeId() == null ? null : UUID.fromString(command.eventNodeId()),
-              command.connectionId() == null ? null : UUID.fromString(command.connectionId()),
-              command.claimId() == null ? null : UUID.fromString(command.claimId()),
-              1L,
-              "/home/dev/project",
-              "/daemon/workspaces/" + command.viewId(),
-              null,
-              null,
-              null));
+      CompletableFuture<IdeResult> reply = new CompletableFuture<>();
+      IdeResult.Builder builder =
+          IdeResult.newBuilder()
+              .setOk(true)
+              .setViewId(command.getViewId())
+              .setBindingEpoch(1L)
+              .setDirectory("/home/dev/project")
+              .setWorkspacePath("/daemon/workspaces/" + command.getViewId());
+      if (command.hasDocumentId()) {
+        builder.setDocumentId(command.getDocumentId());
+      }
+      if (command.hasEventNodeId()) {
+        builder.setEventNodeId(command.getEventNodeId());
+      }
+      if (command.hasConnectionId()) {
+        builder.setConnectionId(command.getConnectionId());
+      }
+      if (command.hasClaimId()) {
+        builder.setClaimId(command.getClaimId());
+      }
+      reply.complete(builder.build());
       return new IdeRequest(
           new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
     }
