@@ -75,7 +75,7 @@ export function createHttpPutObject(): PresignedPutSender {
   return async (presigned, bytes, signal) => {
     // 预签名 PUT 绝不跟随重定向：跨目标复用已签名 headers/body 会泄漏签名与对象内容。
     await getOutboundNetwork().withResponse(
-      presigned.url,
+      presigned.url ?? '',
       {
         method: presigned.method || 'PUT',
         headers: presigned.headers,

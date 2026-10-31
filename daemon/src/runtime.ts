@@ -9,50 +9,53 @@ import type {
   DaemonConfig,
   IdeCommand,
   IdeLeaseHandler,
-  IdeReply,
   IdeService,
   ProcessSupervisor,
+  ResultContent,
 } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
 import {
-  PROTOCOL_VERSION,
-} from './protocol/control/codec.js'
-import {
-  CancelledSchema,
+  CancelSchema,
   CapabilityResultSchema,
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
+  ErrorSchema,
   ExecutionExitedSchema,
   FailedSchema,
   HeartbeatSchema,
-  IdeAction,
-  IdeOpenMode,
   IdeResultSchema,
-  IdeViewState,
-  IdeViewSummarySchema,
   JsonContentSchema,
   MessageType,
   ProgressSchema,
   ReadySchema,
-  RecoverNotFoundSchema,
   ResourceContentSchema,
+  RuntimeBodySchema,
+  RuntimeSnapshotSchema,
   RuntimeStatusSchema,
+  SettingsSchema,
   StartedSchema,
   TextContentSchema,
-  UpdatePhase,
+  UpdateProgressSchema,
   UpdateResultSchema,
-  UpdateSchema,
+  IdeAction as ProtoIdeAction,
+  IdeOpenMode as ProtoIdeOpenMode,
+  type Cancel,
+  type Completed,
   type Content,
   type Envelope,
-  type EnvironmentInfo,
+  type Failed,
+  type Heartbeat,
   type IdeCommand as ProtoIdeCommand,
-  type IdeLease,
+  type IdeLease as ProtoIdeLease,
   type IdeResult,
   type Invoke,
+  type Progress,
+  type Ready,
+  type Recover,
   type ResourceUploadTicket,
-  type RuntimeSnapshot,
   type Settings,
+  type Started,
   type TemporaryResourcePolicy,
   type Update,
   type UpdateResult,
@@ -75,8 +78,8 @@ import {
   type ActiveIdeLeaseRound,
 } from './runtime-ide.js'
 import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from './runtime-ports.js'
-import { createResourceRuntime } from './runtime-resources.js'
-import { recordShutdownFailure, releaseStep } from './runtime-shutdown.js'
+import { createResourceRuntime, type UploadedResource } from './runtime-resources.js'
+import { collectDiagnosticFailure, recordShutdownFailure, releaseStep } from './runtime-shutdown.js'
 import {
   decideUpdate,
   executeUpdateAttempt,
@@ -88,6 +91,19 @@ import {
   type UpdateReceipt,
 } from './runtime-update.js'
 import type { ControlConnection, ControlTransport, ControlTransportListener } from './transport/index.js'
+
+/**
+ * Environment Daemon 的连接、协议与本地 Capability 执行基座。
+ *
+ * <p>Invocation journal 是进程内执行事实源；控制流只是消息管道。连接断开后 Daemon 保留 journal 事实并重新握手
+ * 与重连；若 Platform 再次发送相同 invocationId，RUNNING 与终态条目分别重放 STARTED 与 terminal 报文，绝不重复执行副作用。
+ * 断开连接绝不取消在途 Agent 执行。
+ *
+ * <p>本进程的 daemonInstanceId 在构造期随机生成一次并在 WebSocket 握手头中声明；同一进程的多次重连复用同一身份。每次连接尝试由
+ * 独立的 connectionGeneration 标识，隔离跨连接事件干扰。
+ *
+ * <p>有界性：并发 invocation 数、update 回执缓存、IDE 在途请求集合与 journal 终态条目都有明确上界；没有无界队列。
+ */
 
 export type RuntimeState = 'STOPPED' | 'DISCONNECTED' | 'CONNECTING' | 'READY' | 'FAILED'
 
@@ -112,12 +128,26 @@ const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 
+const ACTION_MAP: Record<number, IdeCommand['action']> = {
+  [ProtoIdeAction.OPEN_VIEW]: 'OPEN_VIEW',
+  [ProtoIdeAction.CHANGE_DIRECTORY]: 'CHANGE_DIRECTORY',
+  [ProtoIdeAction.FOCUS_TERMINAL]: 'FOCUS_TERMINAL',
+  [ProtoIdeAction.CLOSE_VIEW]: 'CLOSE_VIEW',
+  [ProtoIdeAction.DETACH_VIEW]: 'DETACH_VIEW',
+  [ProtoIdeAction.LIST_VIEWS]: 'LIST_VIEWS',
+}
+
+const MODE_MAP: Record<number, IdeCommand['mode']> = {
+  [ProtoIdeOpenMode.CREATE]: 'create',
+  [ProtoIdeOpenMode.RESUME]: 'resume',
+}
+
 export class Runtime {
   private readonly config: DaemonConfig
   private readonly transport: ControlTransport
   private readonly capabilities: Record<string, CapabilityExecutor>
   private readonly processes: ProcessSupervisor
-  private readonly environment: EnvironmentInfo
+  private readonly environment: Parameters<typeof detectEnvironmentInfo>[0] extends never ? never : ReturnType<typeof detectEnvironmentInfo>
   private readonly daemonVersion: string
   private readonly journal: InvocationJournal
   private readonly resources: ReturnType<typeof createResourceRuntime>
@@ -136,8 +166,11 @@ export class Runtime {
   private readonly running = new Map<string, RunningInvocation>()
   private readonly ideInFlight = new Map<string, AbortController>()
   private readonly updateResults = new Map<string, UpdateReceipt>()
+  /** 停机独立释放步骤与未收敛在途执行的失败：绝不阻断其余清理，由装配层显式聚合报告。 */
   private readonly shutdownFailures: unknown[] = []
+  /** 所有已登记的在途执行（capability/IDE/update）；停机后必须全部收敛才发布完成信号。 */
   private readonly inFlight = new Set<Promise<void>>()
+  /** 普通/恢复执行及其拥有的上传收尾；更新准入必须等它们全部结束。 */
   private readonly protectedExecutions = new Set<Promise<void>>()
   private activeUpdate: ActiveUpdate | null = null
   private activeIdeLeaseRound: ActiveIdeLeaseRound | null = null
@@ -209,13 +242,14 @@ export class Runtime {
     this.resources = createResourceRuntime({
       ...(options.resources === undefined ? {} : { resources: options.resources }),
       ...(options.putObject === undefined ? {} : { putObject: options.putObject }),
-      sendControl: (envelope) => this.sendEnvelope(this.activeConnection, envelope),
+      sendControl: (envelope: Envelope) => this.sendTransferControl(envelope),
     })
     this.termination = new Promise<RuntimeState>((resolveTermination) => {
       this.terminationResolve = resolveTermination
     })
   }
 
+  /** 启动连接生命周期并立即尝试建立连接；重复调用无副作用。 */
   start(): void {
     if (this.closed || this.started) {
       return
@@ -226,10 +260,12 @@ export class Runtime {
     this.scheduleReconnect(0)
   }
 
+  /** 阻塞等待终止（由 close 或终态冲突触发）；返回终态。 */
   awaitTermination(): Promise<RuntimeState> {
     return this.termination
   }
 
+  /** 停机后所有在途执行真正收敛的完成信号；与 awaitTermination 同时发布。 */
   async awaitCompletion(): Promise<void> {
     await this.termination
   }
@@ -250,22 +286,25 @@ export class Runtime {
     return this.journal
   }
 
-  getRuntimeStatus(): RuntimeSnapshot {
+  /** 当前完整运行状态快照；与 READY/HEARTBEAT/RUNTIME_STATUS 的 wire 结构一致。 */
+  getRuntimeStatus(): ReturnType<RuntimeStatusTracker['snapshot']> {
     return this.currentRuntimeStatus()
   }
 
-  getShutdownFailures(): readonly unknown[] {
-    return this.shutdownFailures
-  }
-
+  /** 当前更新字节进度；无更新时 null。供更新器/运维适配器读取同一份事实，不产生历史。 */
   getUpdateProgress(): RuntimeStatusUpdate | null {
     this.refreshUpdateProgress()
     return this.runtimeStatus.getUpdate()
   }
 
+  /** 主动停机；幂等。 */
   close(): void {
     this.shutdown('STOPPED', null)
   }
+
+  // -------------------------------------------------------------------------
+  // 连接生命周期
+  // -------------------------------------------------------------------------
 
   private scheduleReconnect(delayMillis: number): boolean {
     if (!this.started || this.reconnectScheduled) {
@@ -288,9 +327,10 @@ export class Runtime {
     const generation = ++this.connectionGeneration
     const listener: ControlTransportListener = {
       onEnvelope: (envelope) => this.onEnvelope(generation, envelope),
-      onDisconnected: () => this.handleDisconnected(generation),
+      onUpgradeFailed: (statusCode, upgradeRequired) =>
+        this.handleUpgradeFailed(generation, statusCode, upgradeRequired),
       onGoaway: () => this.handleGoaway(generation),
-      onUpgradeFailed: (statusCode, upgrade) => this.handleUpgradeFailed(generation, statusCode, upgrade),
+      onDisconnected: () => this.handleDisconnected(generation),
     }
     this.transport.connect(listener).then(
       (connection) => {
@@ -302,6 +342,7 @@ export class Runtime {
         const active = new ActiveConnection(generation, connection)
         this.activeConnection = active
         this.nextReconnectDelay = this.initialReconnectDelayMillis
+        // 握手头已在 transport 建立时发送；等待服务端 POST /control 推送 SETTINGS 帧
       },
       () => {
         this.connecting = false
@@ -323,12 +364,14 @@ export class Runtime {
     if (!this.started || generation !== this.connectionGeneration) {
       return
     }
+    // 连接失效不影响 Invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与资源预算。
     this.resources.onConnectionLost()
     this.maxResourceBytes = 0
     this.boundEnvironmentId = null
     this.state = 'DISCONNECTED'
     this.activeIdeLeaseRound = null
     connection?.abort.abort('CONTROL_DISCONNECTED')
+    // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
     for (const controller of this.ideInFlight.values()) {
       controller.abort('CONTROL_DISCONNECTED')
     }
@@ -360,41 +403,50 @@ export class Runtime {
     }
     if (statusCode === 426) {
       if (upgradeRequired?.artifactUrl && upgradeRequired?.artifactSha256) {
-        const updateCommand = create(UpdateSchema, {
-          operationId: randomUUID(),
-          targetVersion: String(upgradeRequired.targetProtocolVersion),
-          artifactUrl: upgradeRequired.artifactUrl,
-          artifactSha256: upgradeRequired.artifactSha256,
+        const updateCommand = create(EnvelopeSchema, {
+          messageType: MessageType.UPDATE,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          payload: {
+            case: 'update',
+            value: {
+              $typeName: 'kkstudio.environment.control.Update',
+              operationId: randomUUID(),
+              targetVersion: String(upgradeRequired.targetProtocolVersion),
+              artifactUrl: upgradeRequired.artifactUrl,
+              artifactSha256: upgradeRequired.artifactSha256,
+            },
+          },
         })
         const active: ActiveUpdate = {
-          operationId: updateCommand.operationId ?? '',
-          commandKey: JSON.stringify([
-            updateCommand.targetVersion ?? '',
-            updateCommand.artifactUrl ?? '',
-            updateCommand.artifactSha256 ?? '',
-          ]),
-          targetVersion: updateCommand.targetVersion ?? '',
+          operationId: randomUUID(),
+          commandKey: JSON.stringify([String(upgradeRequired.targetProtocolVersion), upgradeRequired.artifactUrl, upgradeRequired.artifactSha256]),
+          targetVersion: String(upgradeRequired.targetProtocolVersion),
           controller: new AbortController(),
           receipt: {
             commandKey: '',
             result: create(UpdateResultSchema, {
-              operationId: updateCommand.operationId ?? '',
-              phase: UpdatePhase.UPDATE_ACCEPTED,
+              operationId: randomUUID(),
+              phase: 1, // UPDATE_ACCEPTED
             }),
           },
           prepared: false,
         }
         this.activeUpdate = active
-        this.runtimeStatus.beginUpdate(updateCommand.targetVersion ?? '')
-        void this.track(this.executeUpdate(active, updateCommand))
-        return
+        void this.track(this.executeUpdate(active, updateCommand.payload.value as Update))
       }
-      process.stderr.write('daemon update required: manual reinstallation needed\n')
-      this.nextReconnectDelay = this.maxReconnectDelayMillis
-      this.handleDisconnected(generation)
+      this.failTerminal('daemon requires protocol upgrade')
       return
     }
     this.handleDisconnected(generation)
+  }
+
+  private closeFailedHandshake(connection: ActiveConnection): void {
+    try {
+      connection.connection.close()
+    } catch {
+      // 关闭失败仍要走代际断开，避免停在 CONNECTING。
+    }
+    this.handleDisconnected(connection.generation)
   }
 
   private sendReady(connection: ActiveConnection): boolean {
@@ -410,7 +462,7 @@ export class Runtime {
         }),
       },
     })
-    return this.sendEnvelope(connection, readyEnvelope)
+    return this.sendOn(connection, readyEnvelope)
   }
 
   private sendHeartbeat(): void {
@@ -434,15 +486,20 @@ export class Runtime {
         }),
       },
     })
-    const sent = this.sendEnvelope(this.activeConnection, heartbeatEnvelope)
+    const sent = this.send(heartbeatEnvelope)
     this.activeIdeLeaseRound =
       sent && ideLeaseRound !== undefined
         ? { round: ideLeaseRound, sentAt: this.monotonicNow(), consumed: false }
         : null
   }
 
-  private sendEnvelope(connection: ActiveConnection | null, envelope: Envelope): boolean {
-    if (connection === null || this.activeConnection !== connection || !connection.connection.isOpen()) {
+  private send(envelope: Envelope): boolean {
+    const connection = this.activeConnection
+    return connection !== null && this.sendOn(connection, envelope)
+  }
+
+  private sendOn(connection: ActiveConnection, envelope: Envelope): boolean {
+    if (this.activeConnection !== connection || !connection.connection.isOpen()) {
       return false
     }
     try {
@@ -465,9 +522,6 @@ export class Runtime {
     try {
       this.verifyScope(envelope)
       switch (envelope.messageType) {
-        case MessageType.SETTINGS:
-          this.handleSettings(connection, envelope)
-          return
         case MessageType.INVOKE:
           this.handleInvoke(connection, envelope)
           return
@@ -476,6 +530,9 @@ export class Runtime {
           return
         case MessageType.RECOVER:
           this.handleRecover(envelope)
+          return
+        case MessageType.SETTINGS:
+          this.handleSettings(connection, envelope)
           return
         case MessageType.TEMPORARY_RESOURCE_POLICY:
           this.handleTemporaryResourcePolicy(envelope)
@@ -498,7 +555,18 @@ export class Runtime {
         default:
           throw new Error(`daemon must not receive ${envelope.messageType} from server`)
       }
-    } catch {
+    } catch (error) {
+      this.sendOn(
+        connection,
+        create(EnvelopeSchema, {
+          messageType: MessageType.ERROR,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          payload: {
+            case: 'error',
+            value: create(ErrorSchema, { message: safeMessage(error) }),
+          },
+        }),
+      )
       this.handleDisconnected(connection.generation)
     }
   }
@@ -506,7 +574,7 @@ export class Runtime {
   private verifyScope(envelope: Envelope): void {
     if (envelope.messageType === MessageType.SETTINGS) {
       if (!envelope.environmentId) {
-        throw new Error('SETTINGS must declare non-empty environmentId')
+        throw new Error('SETTINGS must declare non-null environmentId')
       }
       return
     }
@@ -517,23 +585,22 @@ export class Runtime {
   }
 
   private handleSettings(connection: ActiveConnection, envelope: Envelope): void {
-    if (connection.settingsReceived) {
+    if (!connection.markSettingsReceived()) {
       throw new Error('SETTINGS may only be received once per connection')
     }
-    connection.settingsReceived = true
     if (!envelope.environmentId) {
-      throw new Error('SETTINGS must declare non-empty environmentId')
+      throw new Error('SETTINGS must declare non-null environmentId')
     }
     this.boundEnvironmentId = envelope.environmentId
     const settings = envelope.payload.value as Settings
-    const budgets = settings.resourceBudgets
-    this.maxResourceBytes = Number(budgets?.maxResourceBytes ?? 0n)
-    const ttl = Number(budgets?.temporaryResourceTtlSeconds ?? 0n)
-    const cleanup = Number(budgets?.temporaryResourceCleanupIntervalSeconds ?? 0n)
+    const budgets = settings?.resourceBudgets
+    this.maxResourceBytes = Number(budgets?.maxResourceBytes ?? 1048576n)
+    const ttl = Number(budgets?.temporaryResourceTtlSeconds ?? 60n)
+    const cleanup = Number(budgets?.temporaryResourceCleanupIntervalSeconds ?? 30n)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
     if (!this.sendReady(connection)) {
       if (this.activeConnection === connection) {
-        this.handleDisconnected(connection.generation)
+        this.closeFailedHandshake(connection)
       }
       return
     }
@@ -550,8 +617,8 @@ export class Runtime {
       throw new Error('TEMPORARY_RESOURCE_POLICY requires a READY bound connection')
     }
     const policy = envelope.payload.value as TemporaryResourcePolicy
-    const ttl = Number(policy.temporaryResourceTtlSeconds)
-    const cleanup = Number(policy.temporaryResourceCleanupIntervalSeconds)
+    const ttl = Number(policy?.temporaryResourceTtlSeconds ?? 60n)
+    const cleanup = Number(policy?.temporaryResourceCleanupIntervalSeconds ?? 30n)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
   }
 
@@ -561,120 +628,164 @@ export class Runtime {
     if (this.temporaryResources === null) {
       return
     }
-    if (this.scheduledCleanupIntervalSeconds === cleanupIntervalSeconds && this.sweepTimer !== null) {
+    if (this.sweepTimer !== null && this.scheduledCleanupIntervalSeconds === cleanupIntervalSeconds) {
       return
     }
+    this.scheduledCleanupIntervalSeconds = cleanupIntervalSeconds
     if (this.sweepTimer !== null) {
       clearInterval(this.sweepTimer)
       this.sweepTimer = null
     }
-    this.scheduledCleanupIntervalSeconds = cleanupIntervalSeconds
-    if (cleanupIntervalSeconds <= 0) {
-      return
-    }
     this.sweepTimer = setInterval(() => {
-      this.temporaryResources?.sweep(this.temporaryResourceTtlSeconds).catch((error) => {
-        this.shutdownFailures.push(error)
+      const ttl = this.temporaryResourceTtlSeconds
+      if (ttl <= 0 || this.temporaryResources === null) {
+        return
+      }
+      void this.temporaryResources.sweep(ttl).catch(() => {
+        // 清扫失败不影响连接状态。
       })
     }, cleanupIntervalSeconds * 1000)
   }
 
   private handleError(connection: ActiveConnection, _envelope: Envelope): void {
+    // 服务端发送的 ERROR 帧触发控制连接断开重连
     this.handleDisconnected(connection.generation)
   }
 
+  private handleTicket(envelope: Envelope): void {
+    const invocationId = requireInvocationId(envelope)
+    const ticket = envelope.payload.value as ResourceUploadTicket
+    this.resources.onTicket(invocationId, ticket)
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent invocation
+  // -------------------------------------------------------------------------
+
   private handleInvoke(connection: ActiveConnection, envelope: Envelope): void {
-    if (this.state !== 'READY') {
+    if (!this.started) {
       return
     }
     const invocationId = requireInvocationId(envelope)
     const invoke = envelope.payload.value as Invoke
-    let callArguments: Record<string, unknown> = {}
-    try {
-      callArguments = JSON.parse(invoke.argumentsJson ?? '{}') as Record<string, unknown>
-    } catch {}
-
-    const expectedFile =
-      invoke.expectedFile?.path !== undefined && invoke.expectedFile?.sha256 !== undefined
-        ? { path: invoke.expectedFile.path, sha256: invoke.expectedFile.sha256 }
-        : undefined
-
-    const call: CapabilityCall = {
-      invocationId,
-      capabilityId: invoke.capabilityId ?? '',
-      arguments: callArguments,
-      timeoutMillis: Number(invoke.timeoutMillis),
-      expectedFile,
-    }
-
-    const start = this.journal.start(call.invocationId)
+    const start = this.journal.start(invocationId)
     if (!start.created) {
       this.replay(start.entry)
       return
     }
+    try {
+      if (this.updateAdmissionHeld()) {
+        throw new Error('environment update admission is held')
+      }
+      const capabilityId = invoke?.capabilityId ?? ''
+      const executor = this.capabilities[capabilityId]
+      if (executor === undefined) {
+        throw new Error(`unknown Environment capability: ${capabilityId}`)
+      }
+      if (this.running.size >= this.maxConcurrentInvocations) {
+        throw new Error('too many concurrent capability invocations')
+      }
+      const controller = new AbortController()
+      const invocation = new RunningInvocation(invocationId, controller, this.maxResourceBytes)
+      this.running.set(invocationId, invocation)
+      this.sendStarted(connection, invocationId)
+      const timeoutMillis = Number(invoke?.timeoutMillis ?? 0n)
+      this.scheduleTimeout(invocation, timeoutMillis)
 
-    if (this.activeUpdate !== null) {
-      this.terminal(
-        call.invocationId,
-        MessageType.FAILED,
-        this.buildFailedEnvelope(call.invocationId, 'environment update is in progress'),
-        null,
-      )
-      return
-    }
-    if (this.running.size >= this.maxConcurrentInvocations) {
-      this.terminal(
-        call.invocationId,
-        MessageType.FAILED,
-        this.buildFailedEnvelope(call.invocationId, 'too many concurrent capability invocations'),
-        null,
-      )
-      return
-    }
-    const executor = this.capabilities[call.capabilityId]
-    if (executor === undefined) {
-      this.terminal(
-        call.invocationId,
-        MessageType.FAILED,
-        this.buildFailedEnvelope(call.invocationId, `unknown capability: ${call.capabilityId}`),
-        null,
-      )
-      return
-    }
+      let callArguments: Record<string, unknown> = {}
+      try {
+        callArguments = JSON.parse(invoke?.argumentsJson || '{}') as Record<string, unknown>
+      } catch {}
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort('TIMED_OUT'), call.timeoutMillis)
-    const running = new RunningInvocation(call.invocationId, controller, timer)
-    this.running.set(call.invocationId, running)
-    const execution = this.executeCapability(connection, running, call, executor)
-    void this.track(execution)
-    void this.trackProtected(execution)
+      const expectedFile =
+        invoke?.expectedFile?.path !== undefined && invoke?.expectedFile?.sha256 !== undefined
+          ? { path: invoke.expectedFile.path, sha256: invoke.expectedFile.sha256 }
+          : undefined
+
+      const call: CapabilityCall = {
+        invocationId,
+        capabilityId,
+        arguments: callArguments,
+        timeoutMillis,
+        expectedFile,
+      }
+      void this.trackProtected(this.execute(invocation, executor, call))
+    } catch (error) {
+      this.confirmRejectedBeforeExecution(invocationId)
+      this.terminal(
+        invocationId,
+        MessageType.FAILED,
+        this.buildFailedEnvelope(invocationId, safeMessage(error)),
+        null,
+      )
+    }
   }
 
-  private async executeCapability(
-    _connection: ActiveConnection,
+  private sendStarted(connection: ActiveConnection, invocationId: string): void {
+    this.sendOn(
+      connection,
+      create(EnvelopeSchema, {
+        messageType: MessageType.STARTED,
+        environmentId: this.boundEnvironmentId ?? undefined,
+        invocationId,
+        payload: { case: 'started', value: create(StartedSchema, {}) },
+      }),
+    )
+  }
+
+  /** 执行器确定未启动时记录并发送退出确认；重复确认由 journal 吸收。 */
+  private confirmRejectedBeforeExecution(invocationId: string): void {
+    if (this.journal.confirmExit(invocationId)) {
+      this.sendExecutionExited(invocationId)
+    }
+  }
+
+  private sendExecutionExited(invocationId: string): void {
+    this.send(
+      create(EnvelopeSchema, {
+        messageType: MessageType.EXECUTION_EXITED,
+        environmentId: this.boundEnvironmentId ?? undefined,
+        invocationId,
+        payload: { case: 'executionExited', value: create(ExecutionExitedSchema, {}) },
+      }),
+    )
+  }
+
+  private async execute(
     invocation: RunningInvocation,
-    call: CapabilityCall,
     executor: CapabilityExecutor,
+    call: CapabilityCall,
   ): Promise<void> {
     try {
-      const context = this.capabilityContext(invocation)
-      const result = await executor(call, context)
-      invocation.executorReturned = true
-      clearTimeout(invocation.timer)
+      const result = await executor(call, this.capabilityContext(invocation))
+      invocation.markExecutorReturned()
+      // 上传和终态仍是本次拥有的收尾，完成前不能发送退出确认。
       if (invocation.terminalClaimed) {
+        invocation.finishOwnedCleanup()
         return
       }
+      if (result.callId !== invocation.invocationId) {
+        this.terminal(
+          invocation.invocationId,
+          MessageType.FAILED,
+          this.buildFailedEnvelope(invocation.invocationId, 'capability result callId does not match invocationId'),
+          null,
+        )
+        invocation.finishOwnedCleanup()
+        return
+      }
+      const completed = await encodeCompletedProto(result, invocation.maxResourceBytes, (content) => {
+        const resources = this.resources.uploader
+        if (resources === null) {
+          throw new Error('resource upload is not configured')
+        }
+        return resources.upload(invocation.invocationId, content, invocation.controller.signal)
+      })
       const envelope = create(EnvelopeSchema, {
         messageType: MessageType.COMPLETED,
         environmentId: this.boundEnvironmentId ?? undefined,
         invocationId: invocation.invocationId,
-        payload: {
-          case: 'completed',
-          value: create(CompletedSchema, {
-            result: toProtoCapabilityResult(result),
-          }),
-        },
+        payload: { case: 'completed', value: completed },
       })
       this.terminal(invocation.invocationId, MessageType.COMPLETED, envelope, null)
       invocation.finishOwnedCleanup()
@@ -688,15 +799,11 @@ export class Runtime {
       }
       const reason = invocation.controller.signal.reason
       if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
-        const payloadReason = reason === 'SHUTDOWN' ? 'daemon shutdown' : 'cancelled'
         const envelope = create(EnvelopeSchema, {
-            messageType: MessageType.CANCELLED,
+          messageType: MessageType.CANCELLED,
           environmentId: this.boundEnvironmentId ?? undefined,
           invocationId: invocation.invocationId,
-          payload: {
-            case: 'cancelled',
-            value: create(CancelledSchema, { reason: payloadReason }),
-          },
+          payload: { case: 'cancelled', value: { $typeName: 'kkstudio.environment.control.Cancelled' } },
         })
         this.terminal(invocation.invocationId, MessageType.CANCELLED, envelope, reason)
         if (executorFailed) {
@@ -705,18 +812,24 @@ export class Runtime {
         return
       }
       if (reason === 'TIMED_OUT') {
-        const envelope = this.buildFailedEnvelope(
+        this.terminal(
           invocation.invocationId,
-          `capability execution timed out after ${call.timeoutMillis}ms`,
+          MessageType.FAILED,
+          this.buildFailedEnvelope(invocation.invocationId, `capability execution timed out after ${call.timeoutMillis}ms`),
+          'TIMED_OUT',
         )
-        this.terminal(invocation.invocationId, MessageType.FAILED, envelope, 'TIMED_OUT')
         if (executorFailed) {
           invocation.finishOwnedCleanup()
         }
         return
       }
-      const envelope = this.buildFailedEnvelope(invocation.invocationId, safeMessage(error))
-      this.terminal(invocation.invocationId, MessageType.FAILED, envelope, null)
+      this.terminal(
+        invocation.invocationId,
+        MessageType.FAILED,
+        this.buildFailedEnvelope(invocation.invocationId, safeMessage(error)),
+        null,
+      )
+      // executor 抛错仍可能已有正向范围证据；后续上传/收尾抛错则不能确认清理完成。
       if (executorFailed) {
         invocation.finishOwnedCleanup()
       }
@@ -737,53 +850,66 @@ export class Runtime {
           return resources.upload(invocationId, content, signal)
         },
       },
-      progress: async (result) => {
-        if (invocation.terminalClaimed) {
-          return
-        }
-        const envelope = create(EnvelopeSchema, {
-            messageType: MessageType.PROGRESS,
-          environmentId: this.boundEnvironmentId ?? undefined,
-          invocationId: invocation.invocationId,
-          payload: {
-            case: 'progress',
-            value: create(ProgressSchema, {
-              result: toProtoCapabilityResult(result),
-            }),
-          },
-        })
-        this.sendEnvelope(this.activeConnection, envelope)
+      progress: async (result: CapabilityResult) => {
+        this.progress(invocation, result)
       },
       confirmExecutionExit: () => {
+        // 只记录证据。发送必须等 executor 与本次拥有的收尾都结束，不能在 body 内提前 ACK。
         invocation.noteExitEvidence((current) => this.publishExecutionExit(current))
       },
     }
   }
 
+  /**
+   * executor 与本次拥有的收尾都结束后，才把已记录的正向证据写入 journal 并发送一次。
+   *
+   * <p>终态会把 invocation 移出 running，因此这里持有对象本身，不回查 map。
+   * 尚未开始执行器的确定拒绝由调用方直接确认；已经开始但没有正向证据时这里不补发。
+   * 结果终态、超时和取消本身都不是退出证据。
+   */
   private publishExecutionExit(invocation: RunningInvocation): void {
-    if (!invocation.executorReturned || !invocation.exitConfirmed || invocation.exitPublished) {
+    if (!invocation.executorFinished || !invocation.exitConfirmed || invocation.exitPublished) {
       return
     }
     invocation.exitPublished = true
     if (!this.journal.confirmExit(invocation.invocationId)) {
       return
     }
-    const exited = create(EnvelopeSchema, {
-      messageType: MessageType.EXECUTION_EXITED,
-      environmentId: this.boundEnvironmentId ?? undefined,
-      invocationId: invocation.invocationId,
-      payload: {
-        case: 'executionExited',
-        value: create(ExecutionExitedSchema, {}),
-      },
-    })
-    this.sendEnvelope(this.activeConnection, exited)
+    this.sendExecutionExited(invocation.invocationId)
+  }
+
+  private progress(invocation: RunningInvocation, result: CapabilityResult): void {
+    if (invocation.terminalClaimed || !this.isRunning(invocation.invocationId)) {
+      return
+    }
+    try {
+      const progress = encodeProgressProto(result)
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.PROGRESS,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          invocationId: invocation.invocationId,
+          payload: { case: 'progress', value: progress },
+        }),
+      )
+    } catch (error) {
+      // 对外保留 FAILED 诊断，但封存失败的同时必须把停止意图交给仍持有执行体的调用。
+      this.terminal(
+        invocation.invocationId,
+        MessageType.FAILED,
+        this.buildFailedEnvelope(invocation.invocationId, `cannot encode partial capability result: ${safeMessage(error)}`),
+        'CANCELLED',
+      )
+    }
   }
 
   private handleCancel(envelope: Envelope): void {
     const invocationId = requireInvocationId(envelope)
     const entry = this.journal.find(invocationId)
-    if (entry !== undefined && isTerminalState(entry.state)) {
+    if (entry === undefined) {
+      return
+    }
+    if (isTerminalState(entry.state)) {
       this.replay(entry)
       return
     }
@@ -793,163 +919,104 @@ export class Runtime {
     }
   }
 
+  /**
+   * 同实例重连后的取回：只重放 journal 已有的事实，绝不终止执行。运行中的调用回放 STARTED 并继续执行，结果经当前连接交付；
+   * 已终结的调用重放终态与独立退出确认；从未收到的调用保持静默。
+   */
   private handleRecover(envelope: Envelope): void {
-    const invocationId = requireInvocationId(envelope)
-    const entry = this.journal.find(invocationId)
+    const entry = this.journal.find(requireInvocationId(envelope))
     if (entry !== undefined) {
       this.replay(entry)
-    } else {
-      const notFound = create(EnvelopeSchema, {
-        messageType: MessageType.RECOVER_NOT_FOUND,
-        environmentId: this.boundEnvironmentId ?? undefined,
-        invocationId,
-        payload: {
-          case: 'recoverNotFound',
-          value: create(RecoverNotFoundSchema, {}),
-        },
-      })
-      this.sendEnvelope(this.activeConnection, notFound)
     }
   }
 
   private replay(entry: JournalEntry): void {
     if (entry.state === 'RUNNING') {
-      const started = create(EnvelopeSchema, {
-        messageType: MessageType.STARTED,
-        environmentId: this.boundEnvironmentId ?? undefined,
-        invocationId: entry.invocationId,
-        payload: {
-          case: 'started',
-          value: create(StartedSchema, { replayed: true }),
-        },
-      })
-      this.sendEnvelope(this.activeConnection, started)
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.STARTED,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          invocationId: entry.invocationId,
+          payload: { case: 'started', value: create(StartedSchema, {}) },
+        }),
+      )
     } else {
       const terminal = entry.terminalMessage
       if (terminal !== null) {
-        this.sendEnvelope(this.activeConnection, terminal.envelope)
+        this.send(terminal.envelope)
       }
     }
     if (entry.exitConfirmed) {
-      const exited = create(EnvelopeSchema, {
-        messageType: MessageType.EXECUTION_EXITED,
-        environmentId: this.boundEnvironmentId ?? undefined,
-        invocationId: entry.invocationId,
-        payload: {
-          case: 'executionExited',
-          value: create(ExecutionExitedSchema, {}),
-        },
-      })
-      this.sendEnvelope(this.activeConnection, exited)
+      this.sendExecutionExited(entry.invocationId)
     }
   }
 
+  /**
+   * 原子终态仲裁与结果派发：journal 的 RUNNING→终态跃迁是唯一提交点，只有跃迁成功者发送终态报文。
+   */
   private terminal(
     invocationId: string,
     messageType: TerminalMessage['messageType'],
     envelope: Envelope,
-    _cause: InvocationTerminationCause | null,
+    cause: InvocationTerminationCause | null,
   ): void {
     const invocation = this.running.get(invocationId)
     if (invocation !== undefined) {
-      invocation.terminalClaimed = true
-      clearTimeout(invocation.timer)
+      if (!invocation.claimTerminal()) {
+        return
+      }
+      invocation.clearDeadline()
+      if (cause !== null) {
+        invocation.controller.abort(cause)
+      }
+    }
+    const terminal: TerminalMessage = { messageType, envelope }
+    if (!this.journal.complete(invocationId, terminal)) {
+      return
+    }
+    if (invocation !== undefined) {
       this.running.delete(invocationId)
     }
-    const transition = this.journal.complete(invocationId, { messageType, envelope })
-    if (transition) {
-      this.sendEnvelope(this.activeConnection, envelope)
-    }
+    this.send(envelope)
   }
 
-  private handleTicket(envelope: Envelope): void {
-    const invocationId = requireInvocationId(envelope)
-    const ticket = envelope.payload.value as ResourceUploadTicket
-    this.resources.onTicket(invocationId, ticket)
-  }
-
-  private handleIdeCommand(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
-      throw new Error('IDE_COMMAND requires a READY bound connection')
-    }
-    const invocationId = requireInvocationId(envelope)
-    const protoCommand = envelope.payload.value as ProtoIdeCommand
-    const command = toContractsCommand(protoCommand)
-
-    const admission = admitIdeCommand({
-      invocationId,
-      command,
-      inFlight: this.ideInFlight,
-      updateHeld: this.activeUpdate !== null,
-      ide: this.ide,
-    })
-
-    if (admission.kind === 'ignore') {
+  private scheduleTimeout(invocation: RunningInvocation, timeoutMillis: number): void {
+    if (!this.isRunning(invocation.invocationId) || invocation.terminalClaimed) {
       return
     }
-    if (admission.kind === 'reply') {
-      this.sendIdeResult(invocationId, admission.reply)
+    // timeout 为 0 表示「没有 deadline」：绝不调度一个立即触发的定时终态。
+    if (timeoutMillis === 0) {
       return
     }
-
-    const controller = admission.controller
-    this.ideInFlight.set(invocationId, controller)
-    const timer = setTimeout(() => controller.abort('TIMED_OUT'), this.ideCommandTimeoutMillis)
-    const execution = this.executeIdeCommand(invocationId, command, controller, timer)
-    void this.track(execution)
+    invocation.deadlineTimer = setTimeout(() => {
+      if (!this.isRunning(invocation.invocationId) || invocation.terminalClaimed) {
+        return
+      }
+      invocation.controller.abort('TIMED_OUT')
+    }, timeoutMillis)
   }
 
-  private async executeIdeCommand(
-    invocationId: string,
-    command: IdeCommand,
-    controller: AbortController,
-    timer: NodeJS.Timeout,
-  ): Promise<void> {
-    try {
-      const ide = this.ide!
-      const reply = await ide.handle(command, controller.signal)
-      clearTimeout(timer)
-      this.sendIdeResult(invocationId, toProtoIdeResult(reply))
-    } catch (error) {
-      clearTimeout(timer)
-      this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
-    } finally {
-      this.ideInFlight.delete(invocationId)
-    }
+  private isRunning(invocationId: string): boolean {
+    const entry = this.journal.find(invocationId)
+    return entry !== undefined && entry.state === 'RUNNING'
   }
 
-  private sendIdeResult(invocationId: string, result: IdeResult): void {
-    const envelope = create(EnvelopeSchema, {
-      messageType: MessageType.IDE_RESULT,
-      environmentId: this.boundEnvironmentId ?? undefined,
-      invocationId,
-      payload: {
-        case: 'ideResult',
-        value: result,
-      },
-    })
-    this.sendEnvelope(this.activeConnection, envelope)
-  }
+  // -------------------------------------------------------------------------
+  // 资源上传控制面
+  // -------------------------------------------------------------------------
 
-  private handleIdeLease(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
-      throw new Error('IDE_LEASE requires a READY bound connection')
+  private sendTransferControl(envelope: Envelope): boolean {
+    if (this.state !== 'READY' || this.boundEnvironmentId === null) {
+      return false
     }
-    if (this.ideLease === null) {
-      throw new Error('IDE lease handler is not configured')
+    const invocationId = envelope.invocationId ?? ''
+    const invocation = this.running.get(invocationId)
+    if (invocation === undefined) {
+      return false
     }
-    const lease = envelope.payload.value as IdeLease
-    if (lease.round === undefined) {
-      throw new Error('IDE_LEASE round is required')
-    }
-    const activeRound = requireFreshIdeLease(this.activeIdeLeaseRound, lease.round, this.monotonicNow())
-    activeRound.consumed = true
-    this.activeIdeLeaseRound = activeRound
-    const roundStartedAt = activeRound.sentAt
-    const execution = Promise.resolve(this.ideLease.apply(lease, roundStartedAt)).catch((error) => {
-      this.shutdownFailures.push(error)
-    })
-    void this.track(execution)
+    return invocation.trySendControl(
+      () => this.isRunning(invocationId) && this.send(envelope),
+    )
   }
 
   // -------------------------------------------------------------------------
@@ -961,11 +1028,10 @@ export class Runtime {
       throw new Error('UPDATE requires a READY bound connection')
     }
     const command = envelope.payload.value as Update
-    const operationId = command.operationId ?? ''
     const decision = decideUpdate({
       command,
       active: this.activeUpdate,
-      cached: this.updateResults.get(operationId),
+      cached: this.updateResults.get(command.operationId ?? ''),
       currentVersion: this.daemonVersion,
       busyReason: this.updateBusyReason(),
       configured: this.update !== null,
@@ -988,7 +1054,7 @@ export class Runtime {
       return
     }
     if (decision.kind === 'reject') {
-      rememberUpdateResult(this.updateResults, operationId, decision.receipt)
+      this.rememberUpdateResult(command.operationId ?? '', decision.receipt)
       this.deliverUpdateResult(decision.receipt)
       return
     }
@@ -1001,7 +1067,6 @@ export class Runtime {
 
   private async executeUpdate(active: ActiveUpdate, command: Update): Promise<void> {
     const update = this.update
-    const operationId = command.operationId ?? active.operationId
     const attempt =
       update === null
         ? { failure: new Error('managed update is not configured'), prepared: null }
@@ -1021,7 +1086,7 @@ export class Runtime {
       this.runtimeStatus.clearUpdate()
       this.publishRuntimeStatus()
       const receipt = executionFailureReceipt(active, command, attempt.failure)
-      rememberUpdateResult(this.updateResults, operationId, receipt)
+      this.rememberUpdateResult(command.operationId ?? '', receipt)
       this.deliverUpdateResult(receipt)
       return
     }
@@ -1031,7 +1096,7 @@ export class Runtime {
     active.prepared = true
     this.runtimeStatus.beginUpdate(command.targetVersion ?? '')
     this.publishRuntimeStatus()
-    rememberUpdateResult(this.updateResults, operationId, receipt)
+    this.rememberUpdateResult(command.operationId ?? '', receipt)
     this.deliverUpdateResult(receipt)
   }
 
@@ -1039,40 +1104,66 @@ export class Runtime {
     if (this.activeUpdate !== active) {
       return
     }
-    if (this.runtimeStatus.reportProgress(progress)) {
-      this.publishRuntimeStatus()
-    }
+    this.runtimeStatus.reportProgress(progress)
   }
 
   private refreshUpdateProgress(): void {
-    if (this.activeUpdate === null || this.update?.getProgress === undefined) {
+    const active = this.activeUpdate
+    const getProgress = this.update?.getProgress
+    if (active === null || getProgress === undefined) {
       return
     }
-    const current = this.update.getProgress()
-    if (current !== null) {
-      this.reportUpdateProgress(this.activeUpdate, current)
+    try {
+      const progress = getProgress.call(this.update)
+      if (progress !== null) {
+        this.reportUpdateProgress(active, progress)
+      }
+    } catch (error) {
+      this.collectDiagnosticFailure('update progress', error)
     }
   }
 
-  private deliverUpdateResult(receipt: UpdateReceipt): void {
-    this.sendUpdateResult(receipt.result)
-    if (receipt.releasePermit !== undefined) {
-      receipt.releasePermit().catch((error) => {
-        this.shutdownFailures.push(error)
-      })
+  private currentRuntimeStatus(): ReturnType<RuntimeStatusTracker['snapshot']> {
+    this.refreshUpdateProgress()
+    return this.runtimeStatus.snapshot()
+  }
+
+  private publishRuntimeStatus(): void {
+    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RUNTIME_STATUS,
+          environmentId: this.boundEnvironmentId,
+          payload: {
+            case: 'runtimeStatus',
+            value: create(RuntimeStatusSchema, {
+              runtimeStatus: this.currentRuntimeStatus(),
+            }),
+          },
+        }),
+      )
     }
   }
 
-  private sendUpdateResult(result: UpdateResult): void {
-    const envelope = create(EnvelopeSchema, {
-      messageType: MessageType.UPDATE_RESULT,
-      environmentId: this.boundEnvironmentId ?? undefined,
-      payload: {
-        case: 'updateResult',
-        value: result,
-      },
-    })
-    this.sendEnvelope(this.activeConnection, envelope)
+  private updateAdmissionHeld(): boolean {
+    return this.activeUpdate !== null
+  }
+
+  private updateBusyReason(): string | null {
+    if (this.running.size > 0 || this.protectedExecutions.size > 0) {
+      return 'protected execution is still running'
+    }
+    if (this.ideInFlight.size > 0) {
+      return 'IDE command is in progress'
+    }
+    if (this.ide !== null && !this.ide.canStartUpdate()) {
+      return 'IDE views, cleanup or data streams are active'
+    }
+    return null
+  }
+
+  private rememberUpdateResult(operationId: string, receipt: UpdateReceipt): void {
+    rememberUpdateResult(this.updateResults, operationId, receipt)
   }
 
   private resendUpdateResults(): void {
@@ -1082,36 +1173,263 @@ export class Runtime {
     }
   }
 
-  private updateBusyReason(): string | null {
-    if (this.running.size > 0 || this.protectedExecutions.size > 0) {
-      return 'capability executions are active'
-    }
-    if (this.ide !== null && !this.ide.canStartUpdate()) {
-      return 'IDE service is busy'
-    }
-    return null
-  }
-
-  private publishRuntimeStatus(): void {
-    if (this.state !== 'READY') {
+  private deliverUpdateResult(receipt: UpdateReceipt): void {
+    this.sendUpdateResult(receipt.result)
+    const releasePermit = receipt.releasePermit
+    if (releasePermit === undefined) {
       return
     }
-    const envelope = create(EnvelopeSchema, {
-      messageType: MessageType.RUNTIME_STATUS,
-      environmentId: this.boundEnvironmentId ?? undefined,
-      payload: {
-        case: 'runtimeStatus',
-        value: create(RuntimeStatusSchema, {
-          runtimeStatus: this.currentRuntimeStatus(),
-        }),
-      },
-    })
-    this.sendEnvelope(this.activeConnection, envelope)
+    void this.track(
+      releasePermit().catch((error: unknown) => {
+        this.collectDiagnosticFailure('update permit release', error)
+      }),
+    )
   }
 
-  private currentRuntimeStatus(): RuntimeSnapshot {
-    this.refreshUpdateProgress()
-    return this.runtimeStatus.snapshot()
+  private sendUpdateResult(result: UpdateResult): void {
+    if (this.state === 'READY') {
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.UPDATE_RESULT,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          payload: { case: 'updateResult', value: result },
+        }),
+      )
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // IDE 使用证明扩展点
+  // -------------------------------------------------------------------------
+
+  private handleIdeLease(envelope: Envelope): void {
+    if (this.state !== 'READY' || !envelope.environmentId) {
+      throw new Error('IDE_LEASE requires a READY bound connection')
+    }
+    if (this.updateAdmissionHeld()) {
+      throw new Error('IDE_LEASE is not allowed while environment update admission is held')
+    }
+    const lease = envelope.payload.value as ProtoIdeLease
+    if (this.ideLease === null) {
+      throw new Error('IDE_LEASE handler is not configured')
+    }
+    const active = requireFreshIdeLease(this.activeIdeLeaseRound, lease.round ?? 0n, this.monotonicNow())
+    active.consumed = true
+    this.runExtensionHandler('IDE_LEASE', () =>
+      this.ideLease?.apply(
+        lease,
+        active.sentAt,
+      ),
+    )
+  }
+
+  private runExtensionHandler(phase: string, action: () => Promise<void> | void): void {
+    const result = action()
+    if (result === undefined) {
+      return
+    }
+    void this.track(
+      Promise.resolve(result).catch((error: unknown) => {
+        this.sendExtensionError(phase, error)
+      }),
+    )
+  }
+
+  private sendExtensionError(phase: string, error: unknown): void {
+    if (this.state === 'READY') {
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ERROR,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          payload: {
+            case: 'error',
+            value: create(ErrorSchema, { message: `${phase} handler failed: ${safeMessage(error)}` }),
+          },
+        }),
+      )
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // IDE 请求（管理动作有独立 deadline；不进入 Agent journal，
+  // 断线/停机中止而不跨代际重放副作用）
+  // -------------------------------------------------------------------------
+
+  private handleIdeCommand(envelope: Envelope): void {
+    if (this.state !== 'READY' || !envelope.environmentId) {
+      throw new Error('IDE_COMMAND requires a READY bound connection')
+    }
+    const invocationId = requireInvocationId(envelope)
+    const protoCmd = envelope.payload.value as ProtoIdeCommand
+    const command: IdeCommand = {
+      action: ACTION_MAP[protoCmd.action] ?? 'LIST_VIEWS',
+      viewId: protoCmd.viewId ?? undefined,
+      documentId: protoCmd.documentId ?? undefined,
+      eventNodeId: protoCmd.eventNodeId ?? undefined,
+      connectionId: protoCmd.connectionId ?? undefined,
+      claimId: protoCmd.claimId ?? undefined,
+      mode: protoCmd.mode ? MODE_MAP[protoCmd.mode] : undefined,
+    }
+    const admission = admitIdeCommand({
+      invocationId,
+      command,
+      inFlight: this.ideInFlight,
+      updateHeld: this.updateAdmissionHeld(),
+      ide: this.ide,
+    })
+    if (admission.kind === 'ignore') {
+      return
+    }
+    if (admission.kind === 'reply') {
+      this.sendIdeResult(invocationId, admission.reply)
+      return
+    }
+    const controller = admission.controller
+    this.ideInFlight.set(invocationId, controller)
+    const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
+    void this.track(this.runIdeCommand(invocationId, command, controller, timer))
+  }
+
+  private async runIdeCommand(
+    invocationId: string,
+    command: IdeCommand,
+    controller: AbortController,
+    timer: NodeJS.Timeout | null,
+  ): Promise<void> {
+    try {
+      const reply = await (this.ide as IdeService).handle(command, controller.signal)
+      this.sendIdeResult(invocationId, toProtoIdeResult(reply))
+    } catch (error) {
+      this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer)
+      }
+      this.ideInFlight.delete(invocationId)
+    }
+  }
+
+  private sendIdeResult(invocationId: string, reply: IdeResult): void {
+    this.send(
+      create(EnvelopeSchema, {
+        messageType: MessageType.IDE_RESULT,
+        environmentId: this.boundEnvironmentId ?? undefined,
+        invocationId,
+        payload: { case: 'ideResult', value: reply },
+      }),
+    )
+  }
+
+  // -------------------------------------------------------------------------
+  // 停机
+  // -------------------------------------------------------------------------
+
+  private failTerminal(reason: string): void {
+    this.shutdown('FAILED', reason)
+  }
+
+  private shutdown(terminalState: RuntimeState, reason: string | null): void {
+    if (this.closed) {
+      return
+    }
+    this.closed = true
+    this.started = false
+    this.state = terminalState
+    this.failureReason = reason
+    const connection = this.activeConnection
+    this.activeConnection = null
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.sweepTimer !== null) {
+      clearInterval(this.sweepTimer)
+      this.sweepTimer = null
+    }
+    this.release('resource transfer client close', () => this.resources.close())
+    if (connection !== null) {
+      connection.abort.abort('SHUTDOWN')
+      this.release('connection close', () => connection.connection.close())
+    }
+    this.activeIdeLeaseRound = null
+    for (const invocation of this.running.values()) {
+      invocation.claimTerminal()
+      invocation.controller.abort('SHUTDOWN')
+      invocation.clearDeadline()
+      this.release('invocation journal complete', () => {
+        this.journal.complete(invocation.invocationId, {
+          messageType: MessageType.CANCELLED,
+          envelope: create(EnvelopeSchema, {
+            messageType: MessageType.CANCELLED,
+            environmentId: this.boundEnvironmentId ?? undefined,
+            invocationId: invocation.invocationId,
+            payload: { case: 'cancelled', value: { $typeName: 'kkstudio.environment.control.Cancelled' } },
+          }),
+        })
+      })
+    }
+    this.running.clear()
+    for (const controller of this.ideInFlight.values()) {
+      controller.abort('SHUTDOWN')
+    }
+    this.ideInFlight.clear()
+    this.activeUpdate?.controller?.abort('SHUTDOWN')
+    if (this.activeUpdate !== null) {
+      this.activeUpdate.controller = null
+    }
+    this.release('transport close', async () => {
+      await this.transport.close()
+    })
+    void this.finalize(terminalState)
+  }
+
+  private release(phase: string, action: () => void | Promise<void>): void {
+    releaseStep(this.shutdownFailures, phase, action)
+  }
+
+  private recordShutdownFailure(phase: string, error: unknown): void {
+    recordShutdownFailure(this.shutdownFailures, phase, error)
+  }
+
+  private collectDiagnosticFailure(phase: string, error: unknown): void {
+    collectDiagnosticFailure(this.shutdownFailures, phase, error)
+  }
+
+  private track(promise: Promise<void>): Promise<void> {
+    return this.trackIn(null, promise)
+  }
+
+  private trackProtected(promise: Promise<void>): Promise<void> {
+    return this.trackIn(this.protectedExecutions, promise)
+  }
+
+  private trackIn(group: Set<Promise<void>> | null, promise: Promise<void>): Promise<void> {
+    this.inFlight.add(promise)
+    group?.add(promise)
+    const remove = (): void => {
+      this.inFlight.delete(promise)
+      group?.delete(promise)
+    }
+    promise.then(remove, remove)
+    return promise
+  }
+
+  private async finalize(terminalState: RuntimeState): Promise<void> {
+    const settled = await Promise.allSettled([...this.inFlight])
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') {
+        this.recordShutdownFailure('in-flight execution did not converge', outcome.reason)
+      }
+    }
+    this.terminationResolve(terminalState)
+  }
+
+  getShutdownFailures(): readonly unknown[] {
+    return this.shutdownFailures
   }
 
   private buildFailedEnvelope(invocationId: string, message: string): Envelope {
@@ -1125,109 +1443,50 @@ export class Runtime {
       },
     })
   }
-
-  // -------------------------------------------------------------------------
-  // 停机与生命周期收敛
-  // -------------------------------------------------------------------------
-
-  private failTerminal(reason: string): void {
-    this.shutdown('FAILED', reason)
-  }
-
-  private shutdown(targetState: RuntimeState, reason: string | null): void {
-    if (this.closed) {
-      return
-    }
-    this.closed = true
-    this.state = targetState
-    this.failureReason = reason
-    if (this.heartbeatTimer !== null) {
-      clearInterval(this.heartbeatTimer)
-      this.heartbeatTimer = null
-    }
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    if (this.sweepTimer !== null) {
-      clearInterval(this.sweepTimer)
-      this.sweepTimer = null
-    }
-
-    const connection = this.activeConnection
-    this.activeConnection = null
-    connection?.abort.abort('SHUTDOWN')
-    connection?.connection.close()
-    for (const controller of this.ideInFlight.values()) {
-      controller.abort('SHUTDOWN')
-    }
-    this.ideInFlight.clear()
-    this.resources.close()
-
-    void (async () => {
-      try {
-        await this.transport.close()
-      } catch (error) {
-        recordShutdownFailure(this.shutdownFailures, 'transport close', error)
-      }
-      await Promise.allSettled([...this.inFlight])
-      this.terminationResolve(this.state)
-    })()
-  }
-
-  private async track(promise: Promise<void>): Promise<void> {
-    this.inFlight.add(promise)
-    try {
-      await promise
-    } catch (error) {
-      recordShutdownFailure(this.shutdownFailures, 'execution', error)
-    } finally {
-      this.inFlight.delete(promise)
-    }
-  }
-
-  private async trackProtected(promise: Promise<void>): Promise<void> {
-    this.protectedExecutions.add(promise)
-    try {
-      await promise
-    } finally {
-      this.protectedExecutions.delete(promise)
-    }
-  }
 }
 
 class ActiveConnection {
-  readonly abort = new AbortController()
-  settingsReceived = false
   ready = false
+  readonly abort = new AbortController()
+  private settingsReceived = false
 
   constructor(
     readonly generation: number,
     readonly connection: ControlConnection,
   ) {}
+
+  markSettingsReceived(): boolean {
+    if (this.settingsReceived) {
+      return false
+    }
+    this.settingsReceived = true
+    return true
+  }
 }
 
 class RunningInvocation {
   terminalClaimed = false
+  executorReturned = false
+  executorFinished = false
   exitConfirmed = false
   exitPublished = false
-  executorReturned = false
   private exitPublisher: ((invocation: RunningInvocation) => void) | null = null
-  private cleanupResolve: () => void = () => {}
-  readonly ownedCleanup: Promise<void>
+  deadlineTimer: NodeJS.Timeout | null = null
 
   constructor(
     readonly invocationId: string,
     readonly controller: AbortController,
-    readonly timer: NodeJS.Timeout,
-  ) {
-    this.ownedCleanup = new Promise<void>((resolve) => {
-      this.cleanupResolve = resolve
-    })
+    readonly maxResourceBytes: number,
+  ) {}
+
+  markExecutorReturned(): void {
+    this.executorReturned = true
+    this.exitPublisher?.(this)
   }
 
   finishOwnedCleanup(): void {
-    this.cleanupResolve()
+    this.executorReturned = true
+    this.executorFinished = true
     this.exitPublisher?.(this)
   }
 
@@ -1238,14 +1497,46 @@ class RunningInvocation {
       publisher(this)
     }
   }
+
+  claimTerminal(): boolean {
+    if (this.terminalClaimed) {
+      return false
+    }
+    this.terminalClaimed = true
+    return true
+  }
+
+  clearDeadline(): void {
+    if (this.deadlineTimer !== null) {
+      clearTimeout(this.deadlineTimer)
+      this.deadlineTimer = null
+    }
+  }
+
+  trySendControl(sender: () => boolean): boolean {
+    if (this.terminalClaimed) {
+      return false
+    }
+    return sender()
+  }
 }
 
 function requireInvocationId(envelope: Envelope): string {
-  const id = envelope.invocationId
-  if (!id || id.trim() === '') {
-    throw new Error('envelope invocationId is required')
+  const invocationId = envelope.invocationId
+  if (invocationId === undefined || invocationId === null || invocationId.trim() === '') {
+    throw new Error(`${envelope.messageType} requires non-null invocationId`)
   }
-  return id
+  return invocationId
+}
+
+function safeMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message
+    if (typeof message === 'string' && message.trim() !== '') {
+      return message
+    }
+  }
+  return FALLBACK_FAILURE_MESSAGE
 }
 
 function requirePositive(value: number, name: string): number {
@@ -1262,93 +1553,128 @@ function requireNonNegative(value: number, name: string): number {
   return value
 }
 
-function safeMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    return error.message
+async function encodeCompletedProto(
+  result: CapabilityResult,
+  maximumResourceBytes: number,
+  uploader: ((content: Extract<ResultContent, { type: 'binary' }>) => Promise<UploadedResource>) | null,
+): Promise<Completed> {
+  if (!Number.isSafeInteger(maximumResourceBytes) || maximumResourceBytes <= 0) {
+    throw new Error('maximumResourceBytes must be positive')
   }
-  return FALLBACK_FAILURE_MESSAGE
-}
-
-function toProtoCapabilityResult(result: CapabilityResult) {
-  const contents: Content[] = result.contents.map((content) => {
-    if (content.type === 'text') {
-      return create(ContentSchema, {
-        body: { case: 'text', value: create(TextContentSchema, { text: content.text }) },
-      })
-    }
-    if (content.type === 'json') {
-      return create(ContentSchema, {
-        body: { case: 'json', value: create(JsonContentSchema, { json: JSON.stringify(content.json) }) },
-      })
-    }
+  let aggregate = 0
+  for (const content of result.contents) {
+    let size = 0
     if (content.type === 'resource') {
-      return create(ContentSchema, {
-        body: {
-          case: 'resource',
-          value: create(ResourceContentSchema, {
-            uploadId: content.uploadId,
-            mediaType: content.mediaType,
-            name: content.name ?? undefined,
-            size: BigInt(content.size),
-            sha256: content.sha256,
-            preview: content.preview ?? undefined,
-          }),
-        },
-      })
+      size = content.size
+    } else if (content.type === 'binary') {
+      size = content.bytes.byteLength
     }
-    throw new Error(`unsupported content type: ${(content as unknown as { type: string }).type}`)
-  })
+    if (size > maximumResourceBytes - aggregate) {
+      throw new Error(`aggregate resource bytes exceed maximumResourceBytes: maximum=${maximumResourceBytes}`)
+    }
+    aggregate += size
+  }
 
-  return create(CapabilityResultSchema, {
-    callId: result.callId,
-    error: result.error,
-    detailsJson: JSON.stringify(result.details ?? {}),
-    contents,
+  const protoContents: Content[] = []
+  for (const content of result.contents) {
+    if (content.type === 'text') {
+      protoContents.push(
+        create(ContentSchema, {
+          body: {
+            case: 'text',
+            value: create(TextContentSchema, { text: content.text }),
+          },
+        }),
+      )
+    } else if (content.type === 'json') {
+      protoContents.push(
+        create(ContentSchema, {
+          body: {
+            case: 'json',
+            value: create(JsonContentSchema, { json: JSON.stringify(content.json) }),
+          },
+        }),
+      )
+    } else if (content.type === 'resource') {
+      protoContents.push(
+        create(ContentSchema, {
+          body: {
+            case: 'resource',
+            value: create(ResourceContentSchema, {
+              uploadId: content.uploadId,
+              mediaType: content.mediaType,
+              name: content.name ?? undefined,
+              size: BigInt(content.size),
+              sha256: content.sha256,
+            }),
+          },
+        }),
+      )
+    } else if (content.type === 'binary') {
+      if (uploader === null) {
+        throw new Error('resource upload is not configured')
+      }
+      const uploaded = await uploader(content)
+      protoContents.push(
+        create(ContentSchema, {
+          body: {
+            case: 'resource',
+            value: create(ResourceContentSchema, {
+              uploadId: uploaded.uploadId,
+              mediaType: uploaded.mediaType,
+              name: uploaded.name ?? undefined,
+              size: BigInt(uploaded.size),
+              sha256: uploaded.sha256,
+            }),
+          },
+        }),
+      )
+    }
+  }
+
+  return create(CompletedSchema, {
+    result: create(CapabilityResultSchema, {
+      callId: result.callId,
+      error: result.error,
+      detailsJson: JSON.stringify(result.details ?? {}),
+      contents: protoContents,
+    }),
   })
 }
 
-function toContractsCommand(proto: ProtoIdeCommand): IdeCommand {
-  let action: IdeCommand['action']
-  switch (proto.action) {
-    case IdeAction.OPEN_VIEW:
-      action = 'OPEN_VIEW'
-      break
-    case IdeAction.CHANGE_DIRECTORY:
-      action = 'CHANGE_DIRECTORY'
-      break
-    case IdeAction.FOCUS_TERMINAL:
-      action = 'FOCUS_TERMINAL'
-      break
-    case IdeAction.CLOSE_VIEW:
-      action = 'CLOSE_VIEW'
-      break
-    case IdeAction.DETACH_VIEW:
-      action = 'DETACH_VIEW'
-      break
-    case IdeAction.LIST_VIEWS:
-      action = 'LIST_VIEWS'
-      break
-    default:
-      throw new Error(`unknown IdeAction: ${proto.action}`)
-  }
-
-  let mode: IdeCommand['mode']
-  if (proto.mode === IdeOpenMode.CREATE) {
-    mode = 'create'
-  } else if (proto.mode === IdeOpenMode.RESUME) {
-    mode = 'resume'
-  }
-
-  return {
-    action,
-    viewId: proto.viewId,
-    documentId: proto.documentId,
-    eventNodeId: proto.eventNodeId,
-    connectionId: proto.connectionId,
-    claimId: proto.claimId,
-    bindingEpoch: proto.bindingEpoch !== undefined ? proto.bindingEpoch.toString() : undefined,
-    mode,
-    directory: proto.directory,
-    discard: proto.discard,
-  }
+function encodeProgressProto(result: CapabilityResult): Progress {
+  return create(ProgressSchema, {
+    result: create(CapabilityResultSchema, {
+      callId: result.callId,
+      error: result.error,
+      detailsJson: JSON.stringify(result.details ?? {}),
+      contents: result.contents.map((content) => {
+        if (content.type === 'text') {
+          return create(ContentSchema, {
+            body: { case: 'text', value: create(TextContentSchema, { text: content.text }) },
+          })
+        }
+        if (content.type === 'json') {
+          return create(ContentSchema, {
+            body: { case: 'json', value: create(JsonContentSchema, { json: JSON.stringify(content.json) }) },
+          })
+        }
+        if (content.type === 'resource') {
+          return create(ContentSchema, {
+            body: {
+              case: 'resource',
+              value: create(ResourceContentSchema, {
+                uploadId: content.uploadId,
+                mediaType: content.mediaType,
+                name: content.name ?? undefined,
+                size: BigInt(content.size),
+                sha256: content.sha256,
+              }),
+            },
+          })
+        }
+        throw new Error('progress does not allow binary content')
+      }),
+    }),
+  })
 }
