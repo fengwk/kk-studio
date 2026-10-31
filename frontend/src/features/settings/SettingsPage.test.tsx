@@ -45,7 +45,7 @@ vi.mock('@/shared/api/config-sync-service', () => ({
   }),
 }))
 
-const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
+const STORAGE_KEY = 'kkstudio.browser-preferences'
 
 interface NotificationState {
   permission: NotificationPermission

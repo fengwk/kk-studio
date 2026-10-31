@@ -43,7 +43,7 @@ function bindThread(threadId: string): PaneTarget {
 }
 
 function snapshotOf(state: ChatPaneState) {
-  return { version: 1, presentation: state }
+  return { presentation: state }
 }
 
 function readSnapshot(store: Storage, chatId: string) {
@@ -93,7 +93,7 @@ describe('Chat tab presentation storage', () => {
   it('falls through an invalid session snapshot to last state, and to defaults when both fail', () => {
     const local = storage()
     const session = storage()
-    session.setItem(chatTabSessionStorageKey('chat-1'), '{"version":999,"presentation":{}}')
+    session.setItem(chatTabSessionStorageKey('chat-1'), '{"invalidKey":true,"presentation":{}}')
     local.setItem(
       chatTabLastStorageKey('chat-1'),
       JSON.stringify(snapshotOf(applyChatLayout(createDefaultChatPaneState(), 'split-3'))),
@@ -101,13 +101,12 @@ describe('Chat tab presentation storage', () => {
     expect(loadChatPaneState('chat-1', tabStorage(local, session)).state.layout).toBe('split-3')
 
     session.setItem(chatTabSessionStorageKey('chat-2'), 'not-json')
-    local.setItem(chatTabLastStorageKey('chat-2'), '{"version":1,"presentation":{"layout":"grid-4"}}')
+    local.setItem(chatTabLastStorageKey('chat-2'), '{"presentation":{"layout":"grid-4"}}')
     const fallback = loadChatPaneState('chat-2', tabStorage(local, session))
     expect(fallback.state.layout).toBe('single')
     expect(fallback.saved).toBe(true)
     // 损坏来源被本 tab 的默认快照替换，但仍不触碰 localStorage。
     expect(JSON.parse(session.getItem(chatTabSessionStorageKey('chat-2'))!)).toMatchObject({
-      version: 1,
       presentation: { layout: 'single' },
     })
   })
@@ -138,52 +137,32 @@ describe('Chat tab presentation storage', () => {
     expect(store.getItem(pendingKey)).toBe('{"opaque":"sidecar"}')
   })
 
-  it('ignores legacy presentation keys', () => {
-    const local = storage()
-    local.setItem('kk-studio.chat-pane.chat-1', JSON.stringify({ layout: 'grid-4', focusedPaneId: 'pane-1', panes: [] }))
-    local.setItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-1', JSON.stringify(bindThread('thread-1')))
-    const loaded = loadChatPaneState('chat-1', { localStorage: local, sessionStorage: storage() })
-    expect(loaded.state.layout).toBe('single')
-    expect(chatPaneTarget(loaded.state, 'pane-1')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
-  })
-
-  it('rejects malformed, version-mismatched, unknown-field, and out-of-range snapshots', () => {
-    const base = snapshotOf(createDefaultChatPaneState())
+  it('rejects malformed, unknown-field, and out-of-range snapshots', () => {
+    const base = createDefaultChatPaneState()
     const malformed: unknown[] = [
-      { version: 2, presentation: base.presentation },
       { ...base, extra: true },
-      { version: 1, presentation: { ...base.presentation, extra: true } },
-      { version: 1, presentation: { ...base.presentation, layout: 'tiles-16' } },
-      { version: 1, presentation: { ...base.presentation, focusedPaneId: 'pane-9' } },
-      { version: 1, presentation: { ...base.presentation, panes: base.presentation.panes.slice(0, 8) } },
+      { ...base, layout: 'tiles-16' },
+      { ...base, focusedPaneId: 'pane-9' },
+      { ...base, panes: base.panes.slice(0, 8) },
       {
-        version: 1,
-        presentation: {
-          ...base.presentation,
-          panes: [{ ...base.presentation.panes[0], id: 'pane-x' }, ...base.presentation.panes.slice(1)],
-        },
+        ...base,
+        panes: [{ ...base.panes[0], id: 'pane-x' }, ...base.panes.slice(1)],
       },
       {
-        version: 1,
-        presentation: {
-          ...base.presentation,
-          panes: [{ ...base.presentation.panes[0], target: { kind: 'BOUND_THREAD', threadId: 't1', extra: true } },
-            ...base.presentation.panes.slice(1)],
-        },
+        ...base,
+        panes: [{ ...base.panes[0], target: { kind: 'BOUND_THREAD', threadId: 't1', extra: true } },
+          ...base.panes.slice(1)],
       },
       {
-        version: 1,
-        presentation: {
-          ...base.presentation,
-          panes: [{ ...base.presentation.panes[0], target: { kind: 'BOUND_THREAD', threadId: '' } },
-            ...base.presentation.panes.slice(1)],
-        },
+        ...base,
+        panes: [{ ...base.panes[0], target: { kind: 'BOUND_THREAD', threadId: '' } },
+          ...base.panes.slice(1)],
       },
     ]
     for (const value of malformed) {
       expect(parseChatPaneState(value)).toBeNull()
     }
-    expect(parseChatPaneState(base.presentation)).toEqual(base.presentation)
+    expect(parseChatPaneState(base)).toEqual(base)
   })
 
   it('rejects oversized snapshots before writing either storage', () => {

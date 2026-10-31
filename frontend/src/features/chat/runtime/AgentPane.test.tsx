@@ -1301,7 +1301,7 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     localStorage.setItem(
-      `kkstudio.ai.pending-stop.v1:${THREAD_ID}`,
+      `kkstudio.ai.pending-stop:${THREAD_ID}`,
       JSON.stringify({
         stopRequestId: 'stop-1',
         expectedVersion: '0',
