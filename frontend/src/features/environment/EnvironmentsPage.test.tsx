@@ -126,7 +126,7 @@ describe('EnvironmentsPage', () => {
         ready: true,
         statusExpiresAt: 1784509383,
         lastSeen: 1784509323,
-        capabilities: [{ id: 'process.exec', version: '2' }],
+        capabilities: [{ id: 'process.exec' }],
         daemonVersion: '1.2.3',
         version: '1',
         createTime: 1784505600,
@@ -636,11 +636,11 @@ describe('EnvironmentsPage', () => {
       environment({
         name: 'fat-box',
         capabilities: [
-          { id: 'a', version: '1' },
-          { id: 'b', version: '1' },
-          { id: 'c', version: '1' },
-          { id: 'd', version: '1' },
-          { id: 'e', version: '1' },
+          { id: 'a' },
+          { id: 'b' },
+          { id: 'c' },
+          { id: 'd' },
+          { id: 'e' },
         ],
       }),
     ])
