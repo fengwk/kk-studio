@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.io.IOException;
@@ -75,7 +77,7 @@ public final class IdeInternalDataPlaneController {
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = parseEnvironmentId(environmentId);
+    EnvironmentId environment = RequestParameters.environmentId(environmentId);
     requireLocalOwner(environment);
     UUID viewId = requireViewId(request);
     String rawPathAndQuery = requirePathParameter(request);
@@ -112,11 +114,7 @@ public final class IdeInternalDataPlaneController {
       throw new AiValidationException("environment", "internal IDE viewId is missing");
     }
     try {
-      UUID parsed = UUID.fromString(value);
-      if (!parsed.toString().equals(value)) {
-        throw new IllegalArgumentException("viewId is not canonical");
-      }
-      return parsed;
+      return Uuids.parseCanonical(value, "viewId");
     } catch (IllegalArgumentException error) {
       throw new AiValidationException("environment", "internal IDE viewId is invalid");
     }
@@ -128,14 +126,6 @@ public final class IdeInternalDataPlaneController {
     if (!local) {
       throw new AiValidationException(
           "environment", "internal IDE request does not match this node's READY owner route");
-    }
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
   }
 

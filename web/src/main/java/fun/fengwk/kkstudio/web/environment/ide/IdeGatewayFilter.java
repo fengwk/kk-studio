@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 
@@ -77,10 +78,7 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
     String viewSegment = slash < 0 ? tail : tail.substring(0, slash);
     UUID viewId;
     try {
-      viewId = UUID.fromString(viewSegment);
-      if (!viewId.toString().equals(viewSegment)) {
-        throw new IllegalArgumentException("viewId is not canonical");
-      }
+      viewId = Uuids.parseCanonical(viewSegment, "viewId");
     } catch (IllegalArgumentException error) {
       response.sendError(HttpServletResponse.SC_NOT_FOUND);
       return;

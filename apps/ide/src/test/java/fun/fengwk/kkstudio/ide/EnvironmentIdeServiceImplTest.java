@@ -248,6 +248,17 @@ class EnvironmentIdeServiceImplTest {
 
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
     assertEquals(0, tickets.pendingCount());
+
+    EnvironmentIdeCloseViewDTO canonical = new EnvironmentIdeCloseViewDTO();
+    canonical.setDocumentId(DOCUMENT.toString());
+    canonical.setBindingEpoch("7");
+    canonical.setDiscard(true);
+    int beforeInvalidView = transport.commands.size();
+    // 测试意图：请求体本身合法时，大写 viewId 仍必须在发命令前按校验错误拒绝。
+    assertThrows(
+        AiValidationException.class,
+        () -> service.closeView(ENV, "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE", canonical));
+    assertEquals(beforeInvalidView, transport.commands.size());
   }
 
   @Test

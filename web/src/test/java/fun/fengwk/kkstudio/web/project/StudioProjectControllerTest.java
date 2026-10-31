@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -315,6 +316,18 @@ class StudioProjectControllerTest {
         .andExpect(jsonPath("$.data.referencedStateCodes").isArray())
         .andExpect(jsonPath("$.data.referencedStateCodes[0]").value("INIT"))
         .andExpect(jsonPath("$.data.referencedStateCodes[1]").value("WORK"));
+  }
+
+  @Test
+  void rejectsUppercaseProjectIdAndPaddedVersionBeforeService() throws Exception {
+    // 测试意图：HTTP UUID 与 version 都是严格 canonical，大写和前后空白不再归一后进入服务。
+    mockMvc
+        .perform(get("/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(delete("/api/projects/" + projectId).param("expectedVersion", " 1"))
+        .andExpect(status().isBadRequest());
+    verifyNoInteractions(projectService);
   }
 
   @Test

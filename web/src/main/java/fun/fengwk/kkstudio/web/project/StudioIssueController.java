@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
@@ -97,7 +99,7 @@ public class StudioIssueController {
   public ResponseEntity<ApiResponse<IssueDTO>> createIssue(
       @PathVariable("projectId") String projectIdStr, @RequestBody CreateIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     Issue created =
         issueEditingService.createIssue(projectId, request.getTitle(), request.getDescription());
     return ResponseEntity.status(HttpStatus.CREATED)
@@ -110,7 +112,7 @@ public class StudioIssueController {
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
       @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
     return ApiResponse.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
@@ -122,7 +124,7 @@ public class StudioIssueController {
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
       @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
     issueEditingService.getIssue(issueId);
@@ -135,9 +137,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> updateIssue(
       @PathVariable("issueId") String issueIdStr, @RequestBody UpdateIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
         issueEditingService.updateIssue(
             issueId, expectedVersion, request.getTitle(), request.getDescription());
@@ -148,9 +150,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> transition(
       @PathVariable("issueId") String issueIdStr, @RequestBody TransitionIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
         issueLifecycleService.transition(
             issueId, expectedVersion, request.getRequestKey(), request.getToState());
@@ -161,9 +163,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> block(
       @PathVariable("issueId") String issueIdStr, @RequestBody BlockIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue blocked =
         issueLifecycleService.blockIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getReason());
@@ -174,9 +176,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> recover(
       @PathVariable("issueId") String issueIdStr, @RequestBody RecoverIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue recovered =
         issueLifecycleService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
     return ApiResponse.ok(mapper.toDto(recovered));
@@ -186,9 +188,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> pause(
       @PathVariable("issueId") String issueIdStr, @RequestBody PauseIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     PauseReason reason = parseEnum(request.getReason(), PauseReason.class, "reason");
     Issue paused =
         issueLifecycleService.pauseIssue(
@@ -200,9 +202,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> resume(
       @PathVariable("issueId") String issueIdStr, @RequestBody ResumeIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue resumed =
         issueLifecycleService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
     return ApiResponse.ok(mapper.toDto(resumed));
@@ -212,9 +214,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> stop(
       @PathVariable("issueId") String issueIdStr, @RequestBody StopIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue stopped =
         issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
@@ -226,9 +228,9 @@ public class StudioIssueController {
       @PathVariable("issueId") String issueIdStr,
       @RequestBody ResolveUnknownIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue resolved =
         issueLifecycleService.resolveUnknown(
             issueId, expectedVersion, request.getRequestKey(), request.getVerification());
@@ -239,9 +241,8 @@ public class StudioIssueController {
   public ResponseEntity<Void> deleteIssue(
       @PathVariable("issueId") String issueIdStr,
       @RequestParam("expectedVersion") String expectedVersionStr) {
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
+    long expectedVersion = DecimalLongs.parseNonNegative(expectedVersionStr, "expectedVersion");
     issueLifecycleService.deleteIssue(issueId, expectedVersion);
     return ResponseEntity.noContent().build();
   }
@@ -250,9 +251,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> reopen(
       @PathVariable("issueId") String issueIdStr, @RequestBody ReopenIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue reopened =
         issueLifecycleService.reopen(issueId, expectedVersion, request.getRequestKey());
     return ApiResponse.ok(mapper.toDto(reopened));
@@ -265,9 +266,9 @@ public class StudioIssueController {
     if (request.getMaxRuns() == null) {
       throw new IllegalArgumentException("maxRuns must not be null");
     }
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     StageBudgetView view =
         issueStageBudgetService.resetStageBudget(
             issueId,
@@ -282,9 +283,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> archive(
       @PathVariable("issueId") String issueIdStr, @RequestBody ArchiveIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue archived = issueLifecycleService.archiveIssue(issueId, expectedVersion);
     return ApiResponse.ok(mapper.toDto(archived));
   }
@@ -293,9 +294,9 @@ public class StudioIssueController {
   public ApiResponse<IssueDTO> unarchive(
       @PathVariable("issueId") String issueIdStr, @RequestBody UnarchiveIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Issue unarchived = issueLifecycleService.unarchiveIssue(issueId, expectedVersion);
     return ApiResponse.ok(mapper.toDto(unarchived));
   }
@@ -305,9 +306,9 @@ public class StudioIssueController {
       @PathVariable("issueId") String issueIdStr,
       @RequestBody AppendIssueActivityRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     if (request.getBody() == null || request.getBody().isBlank()) {
       throw new IllegalArgumentException("body must not be blank");
     }
@@ -350,7 +351,7 @@ public class StudioIssueController {
   @GetMapping("/api/issues/{issueId}/evidence")
   public ApiResponse<List<IssueEvidenceDTO>> listEvidence(
       @PathVariable("issueId") String issueIdStr) {
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     issueEditingService.getIssue(issueId);
     return ApiResponse.ok(
         issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
@@ -360,8 +361,8 @@ public class StudioIssueController {
   public ResponseEntity<ApiResponse<IssueEvidenceDTO>> addEvidence(
       @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    UUID uploadId = ProjectDtoMapper.parseUuid(request.getUploadId(), "uploadId");
+    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
+    UUID uploadId = Uuids.parseCanonical(request.getUploadId(), "uploadId");
 
     IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
 
@@ -373,7 +374,7 @@ public class StudioIssueController {
     if (value == null || value.isBlank()) {
       return 0;
     }
-    return ProjectDtoMapper.parseNonNegativeLong(value, "afterSequence");
+    return DecimalLongs.parseNonNegative(value, "afterSequence");
   }
 
   private static int parseActivityLimit(int limit) {

@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -84,7 +86,7 @@ public class StudioProjectController {
 
   @GetMapping("/{projectId}")
   public ApiResponse<ProjectDTO> getProject(@PathVariable("projectId") String projectIdStr) {
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     Project project = projectService.getProject(projectId);
     if (project == null) {
       throw new ProjectNotFoundException("project");
@@ -97,9 +99,9 @@ public class StudioProjectController {
       @PathVariable("projectId") String projectIdStr,
       @RequestBody UpdateProjectRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Project updated =
         projectService.updateConfiguration(
             projectId, expectedVersion, request.getTitle(), request.getDescription());
@@ -114,9 +116,9 @@ public class StudioProjectController {
     if (request.getWorkflow() == null) {
       throw new IllegalArgumentException("workflow must not be null");
     }
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     ProjectWorkflow workflow = mapper.toWorkflow(request.getWorkflow());
     String workflowJson = workflowCodec.encode(workflow);
     Project updated = projectService.updateWorkflow(projectId, expectedVersion, workflowJson);
@@ -131,9 +133,9 @@ public class StudioProjectController {
     if (request.getYoloEnabled() == null) {
       throw new IllegalArgumentException("yoloEnabled must not be null");
     }
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Project updated =
         projectService.updateYolo(projectId, expectedVersion, request.getYoloEnabled());
     return ApiResponse.ok(mapper.toDto(updated));
@@ -143,9 +145,8 @@ public class StudioProjectController {
   public ResponseEntity<Void> deleteProject(
       @PathVariable("projectId") String projectIdStr,
       @RequestParam("expectedVersion") String expectedVersionStr) {
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
-    long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
+    long expectedVersion = DecimalLongs.parseNonNegative(expectedVersionStr, "expectedVersion");
     projectService.deleteProject(projectId, expectedVersion);
     return ResponseEntity.noContent().build();
   }
@@ -155,9 +156,9 @@ public class StudioProjectController {
       @PathVariable("projectId") String projectIdStr,
       @RequestBody ProjectVersionRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Project archived = projectService.archiveProject(projectId, expectedVersion);
     return ApiResponse.ok(mapper.toDto(archived));
   }
@@ -167,9 +168,9 @@ public class StudioProjectController {
       @PathVariable("projectId") String projectIdStr,
       @RequestBody ProjectVersionRequestDTO request) {
     Objects.requireNonNull(request, "request");
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
     Project unarchived = projectService.unarchiveProject(projectId, expectedVersion);
     return ApiResponse.ok(mapper.toDto(unarchived));
   }
@@ -177,7 +178,7 @@ public class StudioProjectController {
   @GetMapping("/{projectId}/snapshot")
   public ApiResponse<ProjectSnapshotDTO> getSnapshot(
       @PathVariable("projectId") String projectIdStr) {
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    UUID projectId = Uuids.parseCanonical(projectIdStr, "projectId");
     ProjectSnapshotDTO snapshot = projectSnapshotAssembler.assemble(projectId);
     return ApiResponse.ok(snapshot);
   }

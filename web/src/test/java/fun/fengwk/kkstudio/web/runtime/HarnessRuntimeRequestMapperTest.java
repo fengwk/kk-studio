@@ -209,40 +209,21 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void strictScalarParsersRejectNonCanonicalAndOverflowValues() {
-    // UUID 与 decimal cursor 不能接受大小写、前导零、负数或 bigint 溢出。
-    assertEquals(id(1), HarnessRuntimeRequestMapper.parseUuid(idText(1), "id"));
-    assertThrows(
-        IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.parseUuid(null, "id"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseUuid("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "id"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseUuid("not-a-uuid", "id"));
-
-    assertEquals(1L, HarnessRuntimeRequestMapper.parsePositiveDecimal("1", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("0", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("01", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("9223372036854775808", "sequence"));
-
-    assertEquals(0L, HarnessRuntimeRequestMapper.parseNonNegativeDecimal("0", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseNonNegativeDecimal("-1", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseNonNegativeDecimal("01", "version"));
+  void mapperRejectsNonCanonicalIdentityAndVersion() {
+    // 测试意图：真实 DTO 映射必须把大写 UUID 与越界版本交给共同解析器，而不是只重复测试解析器本身。
+    HarnessThreadCompactDTO uppercase = new HarnessThreadCompactDTO();
+    uppercase.setExpectedVersion("1");
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.parseNonNegativeDecimal("9223372036854775808", "version"));
+            HarnessRuntimeRequestMapper.toCompactThreadCommand(
+                "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", uppercase));
+
+    HarnessThreadCompactDTO overflow = new HarnessThreadCompactDTO();
+    overflow.setExpectedVersion("9223372036854775808");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(idText(1), overflow));
   }
 
   @Test

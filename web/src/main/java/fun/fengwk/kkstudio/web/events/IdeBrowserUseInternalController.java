@@ -15,6 +15,7 @@ import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseIntentQuery;
@@ -102,8 +103,7 @@ public class IdeBrowserUseInternalController {
               requireSingleParameter(parameters, "eventNodeId"),
               requireSingleParameter(parameters, "connectionId"));
       documentId =
-          ConnectionIdentity.parseCanonicalUuid(
-              requireSingleParameter(parameters, "documentId"), "documentId");
+          Uuids.parseCanonical(requireSingleParameter(parameters, "documentId"), "documentId");
     } catch (RuntimeException error) {
       throw new AiValidationException("browserUse", "browser-use query is invalid");
     }

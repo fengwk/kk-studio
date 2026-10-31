@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
@@ -31,6 +30,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 
 import java.nio.charset.StandardCharsets;
@@ -66,7 +66,7 @@ public class StudioEnvironmentController {
 
   @GetMapping("/{environmentId}")
   public ApiResponse<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
-    return ApiResponse.ok(environmentService.get(parseEnvironmentId(environmentId)));
+    return ApiResponse.ok(environmentService.get(RequestParameters.environmentId(environmentId)));
   }
 
   @PostMapping
@@ -79,7 +79,8 @@ public class StudioEnvironmentController {
   @GetMapping("/{environmentId}/events")
   public ApiResponse<List<EnvironmentEventDTO>> listEnvironmentEvents(
       @PathVariable String environmentId) {
-    return ApiResponse.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
+    return ApiResponse.ok(
+        environmentService.listEvents(RequestParameters.environmentId(environmentId)));
   }
 
   /**
@@ -90,7 +91,7 @@ public class StudioEnvironmentController {
   @GetMapping("/{environmentId}/runtime")
   public ApiResponse<EnvironmentRuntimeStatusDTO> getEnvironmentRuntime(
       @PathVariable String environmentId) {
-    EnvironmentId id = parseEnvironmentId(environmentId);
+    EnvironmentId id = RequestParameters.environmentId(environmentId);
     return ApiResponse.ok(runtimeStatus(id));
   }
 
@@ -102,7 +103,7 @@ public class StudioEnvironmentController {
   @PostMapping("/{environmentId}/update")
   public ApiResponse<EnvironmentUpdateStartDTO> startEnvironmentUpdate(
       @PathVariable String environmentId) {
-    EnvironmentId id = parseEnvironmentId(environmentId);
+    EnvironmentId id = RequestParameters.environmentId(environmentId);
     return ApiResponse.ok(startUpdate(id));
   }
 
@@ -114,14 +115,16 @@ public class StudioEnvironmentController {
     return noStore(
         ApiResponse.ok(
             environmentService.issueInstallCode(
-                parseEnvironmentId(environmentId), expectedVersion)));
+                RequestParameters.environmentId(environmentId), expectedVersion)));
   }
 
   /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。响应不经 ApiResponse 包装。 */
   @GetMapping(value = "/{environmentId}/install", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> installationScript(
       @PathVariable String environmentId, @RequestParam String code) {
-    return script(environmentService.installationScript(parseEnvironmentId(environmentId), code));
+    return script(
+        environmentService.installationScript(
+            RequestParameters.environmentId(environmentId), code));
   }
 
   /** 按操作系统返回卸载脚本；不读取 token，也不改变 Environment。 */
@@ -136,13 +139,14 @@ public class StudioEnvironmentController {
     String expectedVersion = request != null ? request.getExpectedVersion() : null;
     return noStore(
         ApiResponse.ok(
-            environmentService.rotateToken(parseEnvironmentId(environmentId), expectedVersion)));
+            environmentService.rotateToken(
+                RequestParameters.environmentId(environmentId), expectedVersion)));
   }
 
   @DeleteMapping("/{environmentId}")
   public ApiResponse<Void> deleteEnvironment(
       @PathVariable String environmentId, @RequestParam String expectedVersion) {
-    environmentService.delete(parseEnvironmentId(environmentId), expectedVersion);
+    environmentService.delete(RequestParameters.environmentId(environmentId), expectedVersion);
     return ApiResponse.noContent();
   }
 
@@ -151,16 +155,8 @@ public class StudioEnvironmentController {
       @PathVariable String environmentId, @RequestBody Map<String, Object> request) {
     return ApiResponse.ok(
         environmentService.updateInstallConfig(
-            parseEnvironmentId(environmentId),
+            RequestParameters.environmentId(environmentId),
             EnvironmentInstallConfigs.parseUpdate(EnvironmentInstallConfigs.tree(request))));
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException e) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
-    }
   }
 
   /** owner 单跳：本节点为 READY owner 时直接读取本地缓存，否则经内部 HMAC 调 owner；无路由即明确 unavailable。 */

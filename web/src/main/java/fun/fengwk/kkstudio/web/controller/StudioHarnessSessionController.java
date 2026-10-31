@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -71,7 +72,7 @@ public class StudioHarnessSessionController {
     return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
+              UUID id = Uuids.parseCanonical(sessionId, "sessionId");
               return harnessQueryService.listThreadSummaries(id);
             }));
   }
@@ -82,7 +83,7 @@ public class StudioHarnessSessionController {
     return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
+              UUID id = Uuids.parseCanonical(sessionId, "sessionId");
               List<Entry> entries = harnessQueryService.listSessionEntries(id);
               Map<UUID, HarnessUsageCostDTO> usageCosts =
                   usageCostProjectionService.project(entries);
