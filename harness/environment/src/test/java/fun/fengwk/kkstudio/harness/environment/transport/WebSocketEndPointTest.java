@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.transport;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.eclipse.jetty.websocket.api.Callback;
@@ -21,6 +23,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -92,6 +95,24 @@ class WebSocketEndPointTest {
   }
 
   @Test
+  void fillAppendsToFlushModeBuffer() throws Exception {
+    endPoint.onOpen();
+    endPoint.onInboundData(ByteBuffer.wrap(new byte[] {1, 2, 3, 4}), Callback.NOOP);
+
+    // BufferUtil.allocate 返回处于 Flush 模式（pos=0, limit=0, cap=10）的缓冲
+    ByteBuffer flushBuffer = BufferUtil.allocate(10);
+    assertEquals(0, flushBuffer.remaining());
+
+    int filled = endPoint.fill(flushBuffer);
+    assertEquals(4, filled);
+    assertEquals(4, flushBuffer.remaining());
+    assertEquals(1, flushBuffer.get());
+    assertEquals(2, flushBuffer.get());
+    assertEquals(3, flushBuffer.get());
+    assertEquals(4, flushBuffer.get());
+  }
+
+  @Test
   void chunksLargeWriteAndDrivesWriteFlusher() throws Exception {
     int totalSize = 2 * 1024 * 1024 + 100; // 2 MiB + 100 bytes
     byte[] payload = new byte[totalSize];
@@ -138,6 +159,17 @@ class WebSocketEndPointTest {
   }
 
   @Test
+  void synchronousSendBinaryCompletesWriteWithoutHanging() throws Exception {
+    pipe.synchronousSend = true;
+    TestUtilCallback callback = new TestUtilCallback();
+    ByteBuffer buffer = ByteBuffer.wrap(new byte[] {1, 2, 3});
+
+    endPoint.write(callback, buffer);
+
+    assertDoesNotThrow(() -> callback.future().get(2, TimeUnit.SECONDS));
+  }
+
+  @Test
   void closedEndpointRejectsFurtherOperations() throws Exception {
     endPoint.close();
     assertTrue(pipe.closed);
@@ -150,13 +182,18 @@ class WebSocketEndPointTest {
     private final Queue<Callback> pendingCallbacks = new ArrayDeque<>();
     private final AtomicInteger demandCount = new AtomicInteger();
     private boolean closed;
+    private boolean synchronousSend;
 
     @Override
     public void sendBinary(ByteBuffer payload, Callback callback) {
       byte[] copy = new byte[payload.remaining()];
       payload.get(copy);
       sentMessages.add(ByteBuffer.wrap(copy));
-      pendingCallbacks.add(callback);
+      if (synchronousSend) {
+        callback.succeed();
+      } else {
+        pendingCallbacks.add(callback);
+      }
     }
 
     @Override

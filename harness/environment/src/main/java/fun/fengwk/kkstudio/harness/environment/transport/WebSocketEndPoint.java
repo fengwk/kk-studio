@@ -107,9 +107,10 @@ public class WebSocketEndPoint extends AbstractEndPoint {
       }
       if (currentEntry != null) {
         ByteBuffer source = currentEntry.buffer();
-        int remainingBefore = buffer.remaining();
-        BufferUtil.put(source, buffer);
-        filled = remainingBefore - buffer.remaining();
+        if (buffer.position() == 0 && buffer.limit() == buffer.capacity()) {
+          buffer.limit(0);
+        }
+        filled = BufferUtil.append(buffer, source);
         if (!source.hasRemaining()) {
           callbackToComplete = currentEntry.callback();
           currentEntry = null;
@@ -191,7 +192,19 @@ public class WebSocketEndPoint extends AbstractEndPoint {
   }
 
   @Override
-  protected void onIncompleteFlush() {}
+  protected void onIncompleteFlush() {
+    boolean pending;
+    Throwable failure;
+    synchronized (lock) {
+      pending = writePending;
+      failure = closedException;
+    }
+    if (failure != null) {
+      getWriteFlusher().onFail(failure);
+    } else if (!pending) {
+      getWriteFlusher().completeWrite();
+    }
+  }
 
   @Override
   protected void needsFillInterest() {
