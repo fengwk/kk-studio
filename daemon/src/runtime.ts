@@ -851,6 +851,9 @@ export class Runtime {
   }
 
   private handleIdeCommand(envelope: Envelope): void {
+    if (this.state !== 'READY' || !envelope.environmentId) {
+      throw new Error('IDE_COMMAND requires a READY bound connection')
+    }
     const invocationId = requireInvocationId(envelope)
     const protoCommand = envelope.payload.value as ProtoIdeCommand
     const command = toContractsCommand(protoCommand)
