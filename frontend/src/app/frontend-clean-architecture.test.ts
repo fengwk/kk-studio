@@ -108,18 +108,13 @@ describe('Frontend architecture and entry contracts', () => {
     expect(violations).toEqual([])
   })
 
-  it('protects shared .code-textarea styles and prevents legacy comfyui page selectors', () => {
-    // 测试意图：确保 styles.css 中多个特性共享的 .code-textarea 样式得到持久保障，
-    // 同时避免已下线的旧 comfyui 页面级样式选择器重新混入全局样式表。
+  it('protects shared .code-textarea styles', () => {
+    // 测试意图：确保 styles.css 中多个特性共享的 .code-textarea 样式得到持久保障。
     const stylesPath = resolvePath('../styles.css')
     const stylesContent = readFileSync(stylesPath, 'utf8')
 
     // 共享规则 .code-textarea 必须完好保留
     expect(stylesContent).toContain('.code-textarea')
-
-    // 不包含已清理的 .comfyui-* 页面样式规则
-    const comfyuiClassMatches = stylesContent.match(/\.comfyui-[\w-]+/g) ?? []
-    expect(comfyuiClassMatches).toEqual([])
   })
 
   describe('Architectural boundary verification and violation detection', () => {

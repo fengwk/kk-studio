@@ -29,7 +29,6 @@ export interface ChatPaneState {
 }
 
 export interface ChatTabSnapshot {
-  version: 1
   presentation: ChatPaneState
 }
 
@@ -46,10 +45,9 @@ export interface ChatTabStorage {
   localStorage?: ChatTabStorageArea | null
 }
 
-export const CHAT_TAB_STATE_VERSION = 1 as const
 export const CHAT_TAB_STATE_MAX_BYTES = 64 * 1024
-export const CHAT_TAB_SESSION_PREFIX = 'kk-studio.tab-state.v1:'
-export const CHAT_TAB_LAST_PREFIX = 'kk-studio.last-state.v1:'
+export const CHAT_TAB_SESSION_PREFIX = 'kk-studio.tab-state:'
+export const CHAT_TAB_LAST_PREFIX = 'kk-studio.last-state:'
 
 export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
@@ -123,7 +121,7 @@ function parsePane(value: unknown, index: number): ChatPane | null {
   return createPane(index, normalizePaneTarget(value.target))
 }
 
-/** 严格解析版本化 Chat 呈现快照；任何未知字段、越界集合或坏目标都使整份快照失效。 */
+/** 严格解析 Chat 呈现快照；任何未知字段、越界集合或坏目标都使整份快照失效。 */
 export function parseChatPaneState(value: unknown): ChatPaneState | null {
   if (!isRecord(value) || !hasExactKeys(value, ['layout', 'focusedPaneId', 'panes'])) {
     return null
@@ -166,7 +164,6 @@ function serializeChatTabSnapshot(state: ChatPaneState): string | null {
     return null
   }
   const snapshot: ChatTabSnapshot = {
-    version: CHAT_TAB_STATE_VERSION,
     presentation: parsed,
   }
   const serialized = JSON.stringify(snapshot)
@@ -181,8 +178,7 @@ function parseChatTabSnapshot(raw: string | null): ChatPaneState | null {
     const value: unknown = JSON.parse(raw)
     if (
       !isRecord(value)
-      || !hasExactKeys(value, ['version', 'presentation'])
-      || value.version !== CHAT_TAB_STATE_VERSION
+      || !hasExactKeys(value, ['presentation'])
     ) {
       return null
     }

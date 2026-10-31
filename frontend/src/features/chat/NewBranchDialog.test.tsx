@@ -34,7 +34,7 @@ describe('NewBranchDialog', () => {
 
   it('uses the shared dialog body/footer and form controls', () => {
     renderDialog()
-    // 标题 / 正文 / 操作区使用共享 Dialog 布局，输入与按钮不再贴边。
+    // 标题 / 正文 / 操作区使用共享 Dialog 布局，输入与按钮使用标准边距。
     const form = document.querySelector('.new-branch-dialog .modal-card-form')
     expect(form).not.toBeNull()
     expect(form!.querySelector('.modal-body')).not.toBeNull()

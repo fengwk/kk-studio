@@ -5,7 +5,7 @@ const PROJECT = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE = 'a0000000-0000-0000-0000-000000000002'
 const RUN = 'a0000000-0000-0000-0000-000000000003'
 const STAMP = '2026-10-01T00:00:00Z'
-const STORAGE_KEY = `kkstudio.projects.pending-action.v1:${ISSUE}`
+const STORAGE_KEY = `kkstudio.projects.pending-action:${ISSUE}`
 const detail: IssueDetailDTO = {
   issue: {
     id: ISSUE, projectId: PROJECT, number: '12', title: 'Offline visual issue',

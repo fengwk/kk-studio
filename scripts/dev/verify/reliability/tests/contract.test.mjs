@@ -87,12 +87,12 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
     ),
     /Thread Agent mismatch/,
   )
-  // 旧 providerName 模型字段必须被精确的 ModelSelection 校验拒绝。
-  const legacyProvider = structuredClone(accepted)
-  legacyProvider.thread.branchSettings.model.providerName = model.providerName
+  // 非规范模型字段必须被精确的 ModelSelection 校验拒绝。
+  const invalidModel = structuredClone(accepted)
+  invalidModel.thread.branchSettings.model.invalidField = 'unexpected'
   assert.throws(
     () => assertThreadSettings(
-      legacyProvider,
+      invalidModel,
       fakeCase(model),
       chat.agentName,
     ),

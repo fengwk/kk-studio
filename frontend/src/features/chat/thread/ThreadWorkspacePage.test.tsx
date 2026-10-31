@@ -391,7 +391,7 @@ describe('ThreadWorkspacePage', () => {
   })
 
   it('aggregates a descendant approval in the root pane and writes back to the original invocation', async () => {
-    // 子 Thread 不再内联审批：根面板通过 GET /interactions?rootThreadId= 汇聚待决审批，
+    // 子 Thread 不内联审批：根面板通过 GET /interactions?rootThreadId= 汇聚待决审批，
     // 决策仍写回原始来源 Thread 与 invocation。
     const user = userEvent.setup()
     const rootId = '00000000-0000-4000-8000-000000000010'
@@ -546,7 +546,7 @@ describe('ThreadWorkspacePage', () => {
   })
 
   it('does not expose the inactive relationship tree on a child thread', async () => {
-    // 手动关系树已移除：子 Thread 自身不是 root，因此不挂载活跃代理树，也不查询整棵树。
+    // 子 Thread 自身不是 root，因此不挂载活跃代理树，也不查询整棵树。
     const rootId = '00000000-0000-4000-8000-000000000010'
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
       ...snapshotWithPendingTool(CHILD_THREAD_ID),

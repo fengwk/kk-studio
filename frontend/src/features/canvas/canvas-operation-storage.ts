@@ -89,14 +89,9 @@ function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions): Reso
   }
 }
 
-function upgradeOperations(db: IDBDatabase, transaction: IDBTransaction | null): void {
+function upgradeOperations(db: IDBDatabase): void {
   if (!db.objectStoreNames.contains(STORE_NAME)) {
     const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
-    store.createIndex(SESSION_INDEX, 'sessionKey', { unique: false })
-    return
-  }
-  const store = transaction?.objectStore(STORE_NAME)
-  if (store && !store.indexNames.contains(SESSION_INDEX)) {
     store.createIndex(SESSION_INDEX, 'sessionKey', { unique: false })
   }
 }

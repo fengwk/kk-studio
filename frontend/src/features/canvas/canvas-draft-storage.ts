@@ -28,7 +28,7 @@ import { removeDraftField, type CanvasNodeDraft } from '@/features/canvas/canvas
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 
 const DB_NAME = 'kkstudio.canvas.drafts'
-const DB_VERSION = 2
+const DB_VERSION = 1
 const STORE_NAME = 'drafts'
 const SESSION_INDEX = 'sessionKey'
 
@@ -64,21 +64,11 @@ function resolveScope(canvasId: string, options?: CanvasDraftStorageOptions) {
   }
 }
 
-function upgradeDrafts(db: IDBDatabase, transaction: IDBTransaction | null): void {
-  let store: IDBObjectStore
+function upgradeDrafts(db: IDBDatabase): void {
   if (!db.objectStoreNames.contains(STORE_NAME)) {
-    store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
-  } else {
-    store = (transaction?.objectStore(STORE_NAME)) as IDBObjectStore
-  }
-
-  if (!store.indexNames.contains(SESSION_INDEX)) {
+    const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
     store.createIndex(SESSION_INDEX, 'sessionKey', { unique: false })
-  }
-  if (!store.indexNames.contains('canvasId')) {
     store.createIndex('canvasId', 'canvasId', { unique: false })
-  }
-  if (!store.indexNames.contains('userId')) {
     store.createIndex('userId', 'userId', { unique: false })
   }
 }

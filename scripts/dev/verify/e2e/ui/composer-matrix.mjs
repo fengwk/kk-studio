@@ -31,7 +31,7 @@ import {
 } from '../lib/harness.mjs'
 
 const CHAT_PANE_STORAGE_PREFIX = 'kk-studio.chat-pane.'
-const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
+const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft:'
 const TINY_IMAGE = readFileSync(
   path.join(
     REPO_ROOT,

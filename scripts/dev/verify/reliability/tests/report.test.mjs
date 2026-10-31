@@ -34,7 +34,7 @@ test('redaction removes sensitive fields, endpoints, credentials, and write proo
   assert.equal(json.includes('super-secret'), false)
   assert.equal(json.includes('provider.example'), false)
   assert.equal(json.includes(WRITE_PROOF), false)
-  assert.equal(json.includes('RELIABILITY_WRITE_PROOF_V1'), false)
+  assert.equal(json.includes('RELIABILITY_WRITE_PROOF'), false)
   assert.equal(json.includes('raw-value'), false)
   assert.doesNotThrow(() => assertSafeReportString(json))
 })
@@ -113,7 +113,7 @@ test('report artifacts never repeat the 12KiB payload', () => {
     ]) {
       const content = readFileSync(file, 'utf8')
       assert.equal(content.includes(WRITE_PROOF), false)
-      assert.equal(content.includes('RELIABILITY_WRITE_PROOF_V1'), false)
+      assert.equal(content.includes('RELIABILITY_WRITE_PROOF'), false)
       assert.match(content, new RegExp(WRITE_PROOF_META.sha256))
     }
     assert.match(readFileSync(path.join(runDir, 'report.md'), 'utf8'), /model turns started: 0/)

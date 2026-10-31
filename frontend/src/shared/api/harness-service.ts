@@ -63,7 +63,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
 
     /**
      * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
-     * 客户端只提交 CAS 游标与命令，不再伪造产品 owner。
+     * 客户端只提交 CAS 游标与命令，不包含产品 owner。
      */
     acceptThreadCommandBatch: (
       threadId: string,

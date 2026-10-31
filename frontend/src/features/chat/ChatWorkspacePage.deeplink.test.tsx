@@ -94,7 +94,6 @@ beforeEach(() => {
   sessionStorage.clear()
   setLocale('zh-CN')
   localStorage.setItem(chatTabLastStorageKey(CHAT_ID), JSON.stringify({
-    version: 1,
     presentation: applyChatLayout(createDefaultChatPaneState(), 'split-2'),
   }))
   vi.mocked(chatService.getChat).mockResolvedValue({

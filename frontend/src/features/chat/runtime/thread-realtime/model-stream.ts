@@ -349,7 +349,7 @@ export function isFailedGeneration(
   )
 }
 
-/** 公共输出状态是否为冻结终态；终态投影不再接受任何迟到 delta。 */
+/** 公共输出状态是否为冻结终态；终态投影不接受任何迟到 delta。 */
 export function isTerminalAssistantOutputStatus(status: string): boolean {
   return status === 'SUCCEEDED'
     || status === 'FAILED'
@@ -362,7 +362,7 @@ export function isTerminalAssistantOutputStatus(status: string): boolean {
  *
  * <p>contents 只承载已完成的 text/thinking 片段，按服务端顺序拼接；sequence 是
  * canonical 非负十进制字符串，只有可安全表示的整数才接受。resultEntryId 到达后由
- * durable Entry 接管，投影立即消失。前端不再解析任何 Provider 原始 JSON。
+ * durable Entry 接管，投影立即消失。前端不解析任何 Provider 原始 JSON。
  */
 export function snapshotModelStream(
   threadId: string,

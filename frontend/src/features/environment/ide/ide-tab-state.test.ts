@@ -60,14 +60,13 @@ function sessionRaw(
   recoveryByEnvironment: Record<string, IdeRecovery>,
 ): string {
   return JSON.stringify({
-    version: 1,
     presentation: presentationValue,
     recoveryByEnvironment,
   })
 }
 
 function localRaw(presentationValue: IdePresentation): string {
-  return JSON.stringify({ version: 1, presentation: presentationValue })
+  return JSON.stringify({ presentation: presentationValue })
 }
 
 describe('ide tab state', () => {
@@ -106,7 +105,6 @@ describe('ide tab state', () => {
     expect(loaded.recoveryByEnvironment).toEqual({})
     expect(loaded.sessionSaved).toBe(true)
     expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toEqual({
-      version: 1,
       presentation: presentation(),
       recoveryByEnvironment: {},
     })
@@ -117,7 +115,7 @@ describe('ide tab state', () => {
   it('falls back to local when the session snapshot is corrupt', () => {
     const session = new MemoryStorage()
     const local = new MemoryStorage()
-    session.values.set(IDE_TAB_SESSION_KEY, '{"version":1,"presentation":')
+    session.values.set(IDE_TAB_SESSION_KEY, '{"presentation":')
     local.values.set(IDE_TAB_LAST_KEY, localRaw(presentation()))
 
     const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: local })
@@ -133,7 +131,6 @@ describe('ide tab state', () => {
     local.values.set(
       IDE_TAB_LAST_KEY,
       JSON.stringify({
-        version: 1,
         presentation: presentation(),
         recoveryByEnvironment: { [ENV_A]: recovery() },
       }),
@@ -206,7 +203,7 @@ describe('ide tab state', () => {
       recoveryByEnvironment: recoveries,
     })
     const localSnapshot = local.values.get(IDE_TAB_LAST_KEY) ?? ''
-    expect(JSON.parse(localSnapshot)).toEqual({ version: 1, presentation: next })
+    expect(JSON.parse(localSnapshot)).toEqual({ presentation: next })
     expect(localSnapshot).not.toContain(VIEW_A)
     expect(localSnapshot).not.toContain(DAEMON_A)
     expect(localSnapshot).not.toContain('/workspace')

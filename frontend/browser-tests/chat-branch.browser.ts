@@ -497,8 +497,8 @@ async function seedChatTab(
       return { id, target: targets[id] ?? { kind: 'NEW_SESSION_DRAFT' } }
     }),
   }
-  const snapshot: ChatTabSnapshot = { version: 1, presentation }
-  const key = `kk-studio.tab-state.v1:chat:${CHAT_ID}`
+  const snapshot: ChatTabSnapshot = { presentation }
+  const key = `kk-studio.tab-state:chat:${CHAT_ID}`
   await page.addInitScript(({ key, snapshot }) => {
     // 仅初始化空 tab；刷新必须恢复用户操作后写入的快照。
     if (window.top === window && sessionStorage.getItem(key) == null) {
@@ -519,7 +519,7 @@ async function readPaneTarget(
     const snapshot = JSON.parse(raw) as ChatTabSnapshot
     return snapshot.presentation.panes.find((pane) => pane.id === paneId)?.target ?? null
   }, {
-    key: `kk-studio.${store === 'session' ? 'tab' : 'last'}-state.v1:chat:${CHAT_ID}`,
+    key: `kk-studio.${store === 'session' ? 'tab' : 'last'}-state:chat:${CHAT_ID}`,
     paneId,
     store,
   })
@@ -692,7 +692,7 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await page.screenshot({ path: testInfo.outputPath('hidden-pane-history-focus.png') })
 
     // 重载必须恢复刚刚路由的目标，而不是重放初始 pane fixture。
-    const lastKey = `kk-studio.last-state.v1:chat:${CHAT_ID}`
+    const lastKey = `kk-studio.last-state:chat:${CHAT_ID}`
     const lastBeforeReload = await page.evaluate((key) => localStorage.getItem(key), lastKey)
     await page.reload()
     await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()

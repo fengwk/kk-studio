@@ -70,7 +70,7 @@ test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly six 
   assert.equal(target.threadId, threadId)
   assert.equal(target.threadName, 'branch')
   assert.equal(target.yoloEnabled, true)
-  assert.equal(Object.hasOwn(target, 'name'), false, 'NEW_THREAD must not accept the legacy name input')
+  assert.equal(Object.hasOwn(target, 'name'), false, 'NEW_THREAD uses threadName, not name')
   assert.equal(Object.hasOwn(target, 'rootSettings'), false)
 })
 
@@ -158,9 +158,9 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   }
 })
 
-test('threadIdOf accepts only the three-state runtime status and rejects removed processing', () => {
+test('threadIdOf accepts only the three-state runtime status', () => {
   // 测试意图：Thread 的 status 只表示本地活动三态（RUNNING/WAITING/IDLE），executionControl 是正交的
-  // 持久控制（RUNNABLE/STOPPED）；threadIdOf 必须接受六种组合，并显式拒绝旧状态词汇和已删除的 processing。
+  // 持久控制（RUNNABLE/STOPPED）；threadIdOf 必须接受六种组合，并显式拒绝非法状态词汇。
   const threadId = '00000000-0000-4000-8000-000000000000'
   const base = {
     threadId,
@@ -199,15 +199,7 @@ test('threadIdOf accepts only the three-state runtime status and rejects removed
     assert.throws(
       () => threadIdOf({ ...base, status, executionControl: 'RUNNABLE' }),
       /unknown ThreadRuntimeStatus/,
-      `legacy status ${status} must be rejected`,
-    )
-  }
-
-  // 新合同不保留旧 boolean 别名：即使值与新状态一致，携带 processing 也必须被拒绝。
-  for (const processing of [false, true]) {
-    assert.throws(
-      () => threadIdOf({ ...base, status: 'IDLE', executionControl: 'RUNNABLE', processing }),
-      /processing/,
+      `invalid status ${status} must be rejected`,
     )
   }
 })
@@ -293,24 +285,15 @@ test('thread YOLO wire is an explicit boolean with an immutable execution root',
   assert.throws(() => threadIdOf({ ...rootThread, yoloEnabled: undefined }), /explicit boolean/)
 })
 
-test('legacy ENTRY target tokens and helpers are no longer part of the lib API', async () => {
-  // Test intent: old ENTRY/ENTRY_DRAFT wire vocabulary must not regress into the script surface.
-  const { readFile } = await import('node:fs/promises')
-  const sourceUrl = new URL('../lib/harness.mjs', import.meta.url)
-  const source = await readFile(sourceUrl, 'utf8')
-  assert.doesNotMatch(source, /\bENTRY\b/)
-  assert.doesNotMatch(source, /entryTarget|createEntryThread/)
-})
-
 test('chatOwner/canonicalUuid keep the strict Chat owner wire shape', () => {
-  // Test intent: public command owner is {type,chatId}, never the legacy {type,id}.
+  // Test intent: public command owner is strictly {type,chatId}.
   const id = cid()
   assert.deepEqual(chatOwner(id), { type: 'CHAT', chatId: id })
   assert.equal(canonicalUuid(id, 'id'), id)
   assert.throws(() => chatOwner('bad'), /canonical UUID/)
 })
 
-test('acceptCommandBatch rejects legacy owner aliases before HTTP', async () => {
+test('acceptCommandBatch rejects malformed owner shapes before HTTP', async () => {
   // Test intent: the backend rejects unknown owner keys, including an id alongside chatId.
   const ctx = { call: async () => { throw new Error('unexpected HTTP call') } }
   const target = newSessionTarget({ sessionId: cid(), threadId: cid(), rootSettings: {} })

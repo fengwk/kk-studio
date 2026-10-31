@@ -10,7 +10,7 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * TURN_END 本身不投影消息，因此「仅在 turn 关闭后出现且位于该 turn 全部消息之后」
  * 就是 TURN_END 后投影的可观察语义。
  *
- * 费用是读取投影：ASSISTANT metadata 里的旧 cost（若存在）绝不被读取，前端也不定价。
+ * 费用是读取投影：费用由服务端定价并只来自 Entry.usageCost 读取投影。
  * Entry.usageCost -> assistantMetadata 的接线由 branch owner 在 entry-projection 完成。
  */
 
@@ -122,7 +122,7 @@ describe('Turn usage after TURN_END', () => {
         cacheWrite: 0,
         reasoning: 3,
         providerTotal: 33,
-        // 旧 metadata.cost 不再被读取；费用只来自 Entry.usageCost 读取投影
+        // 费用只来自 Entry.usageCost 读取投影
         cost: null,
       },
       details: {
@@ -278,7 +278,7 @@ describe('Turn usage after TURN_END', () => {
 
   it('does not leak usage from an unclosed turn into the next TURN_END', () => {
     // 上一 turn 的 assistant 已带 usage，但该 turn 没有 TURN_END（快照截断）：
-    // 新 TURN_START 必须丢弃残留，下一个 TURN_END 不再投影旧 usage。
+    // 新 TURN_START 必须丢弃残留，下一个 TURN_END 投影当前 usage。
     const timeline = buildThreadTimeline(
       [
         turnStart('turn-1'),
@@ -341,30 +341,20 @@ describe('Turn usage after TURN_END', () => {
     expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
   })
 
-  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage，使完整用量变 unknown
-  it('ignores snake_case aliases and legacy metadata.cost and propagates unknown', () => {
+  // usage 结构非法时投影 unknown turnUsage
+  it('propagates unknown when usage metadata structure is non-canonical', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
         userMessage('a'),
         assistant('assistant-1', '回答', {
-          usage: {
-            input_tokens: '10',
-            completionTokens: 20,
-            cachedTokens: 3,
-            cache_write_tokens: '4',
-            cache_write_long_tokens: 5,
-            reasoning_tokens: '6',
-            totalTokens: 44,
-          },
-          cost: { usd: '0.002' },
+          usage: { invalidField: 123 },
         }),
         turnEnd(),
       ],
       [],
       [],
     )
-    // 携带模型 metadata 但 usage 非法：投影 unknown turnUsage，不采信别名数字或旧 cost
     const metaWithUsage = timeline.messages.find(
       (message) => message.role === 'meta' && message.turnUsage != null,
     )

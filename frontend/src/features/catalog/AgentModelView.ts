@@ -1,7 +1,7 @@
 import type { AgentModelDTO } from '@/shared/api/generated/contracts'
 
 /**
- * {@link AgentModelDTO} 的客户端投影。逻辑名已全局唯一，因此不再补充 provider 前缀；
+ * {@link AgentModelDTO} 的客户端投影。逻辑名全局唯一，不包含 provider 前缀；
  * 单 Model 与组的展示/引用都直接使用 {@link AgentModelView.name}。
  */
 export type AgentModelView = AgentModelDTO

@@ -10,7 +10,7 @@ import {
   type PropsWithChildren,
 } from 'react'
 
-const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
+const STORAGE_KEY = 'kkstudio.browser-preferences'
 const CHANGE_EVENT = 'kkstudio:browser-preferences'
 
 export interface BrowserPreferences {

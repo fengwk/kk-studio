@@ -268,7 +268,7 @@ function paneState(
 }
 
 function snapshotOf(state: ChatPaneState) {
-  return { version: 1, presentation: state }
+  return { presentation: state }
 }
 
 function seedLastState(chatId: string, state: ChatPaneState) {
@@ -303,7 +303,7 @@ describe('ChatWorkspacePage', () => {
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(5)
   })
 
-  it('restores layout and pane targets from one bounded tab snapshot without legacy keys', async () => {
+  it('restores layout and pane targets from one bounded tab snapshot', async () => {
     seedLastState(CHAT_ID, paneState('split-2', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     await waitFor(() =>
@@ -312,14 +312,10 @@ describe('ChatWorkspacePage', () => {
     const localSnapshot = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))
     const sessionSnapshot = readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
     expect(localSnapshot).toMatchObject({
-      version: 1,
       presentation: { layout: 'split-2' },
     })
     expect(sessionSnapshot).toEqual(localSnapshot)
     expect(localSnapshot?.presentation.panes[0].target).toEqual(bindThread(THREAD_ID))
-    // 旧的布局/目标呈现键不再读写。
-    expect(localStorage.getItem(`kk-studio.chat-pane.${CHAT_ID}`)).toBeNull()
-    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toBeNull()
   })
 
   it('creates a NEW_SESSION on first send and binds the pane to its response', async () => {
@@ -355,7 +351,7 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // 既有 Thread 走 per-thread 写入口，不再经过创建批次端点。
+    // 既有 Thread 走 per-thread 写入口，不经过创建批次端点。
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!

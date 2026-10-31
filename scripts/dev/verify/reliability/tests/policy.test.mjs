@@ -87,7 +87,7 @@ test('durable trace summarizes write content by byte length and SHA-256', () => 
   const contentSummary = trace.toolCalls[0].arguments.content
   assert.deepEqual(contentSummary, WRITE_PROOF_META)
   assert.equal(JSON.stringify(trace).includes(WRITE_PROOF), false)
-  assert.equal(JSON.stringify(trace).includes('RELIABILITY_WRITE_PROOF_V1'), false)
+  assert.equal(JSON.stringify(trace).includes('RELIABILITY_WRITE_PROOF'), false)
   assert.equal(trace.writeDiagnostics[0].content.sha256, WRITE_PROOF_META.sha256)
   assert.equal(trace.usage.inputTokens, 10)
   assert.equal(trace.usage.cacheReadTokens, 3)
@@ -167,7 +167,7 @@ test('durable trace uses resource previews, emits markers without previews, and 
   assert.equal(trace.toolResults[1].text, '[Resource artifact.bin bytes=12]')
   assert.match(trace.toolResults[2].text, /^\[REDACTED_WRITE_PROOF bytes=/)
   assert.equal(JSON.stringify(trace).includes(WRITE_PROOF), false)
-  assert.equal(JSON.stringify(trace).includes('RELIABILITY_WRITE_PROOF_V1'), false)
+  assert.equal(JSON.stringify(trace).includes('RELIABILITY_WRITE_PROOF'), false)
 })
 
 test('repair policy distinguishes intact write arguments from missing/damaged arguments', () => {
@@ -610,17 +610,17 @@ test('cost amount accepts finite numbers and decimal strings but rejects coerced
   )
 })
 
-test('usageCost recognizes only amount and ignores deprecated total property', () => {
-  const legacyTotal = extractDurableTrace([
+test('usageCost requires canonical amount property for cost resolution', () => {
+  const missingAmount = extractDurableTrace([
     messageEntry(
       '1',
       { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] },
       metadata(10, 5, 0),
-      { currency: 'USD', total: '0.01' },
+      { currency: 'USD', value: '0.01' },
     ),
   ])
-  assert.equal(legacyTotal.costKnown, false)
-  assert.equal(legacyTotal.usage.costTotal, null)
+  assert.equal(missingAmount.costKnown, false)
+  assert.equal(missingAmount.usage.costTotal, null)
 
   const canonical = extractDurableTrace([
     messageEntry(

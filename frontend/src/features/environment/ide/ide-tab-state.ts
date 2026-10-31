@@ -15,13 +15,11 @@ export interface IdeRecovery {
 }
 
 export interface IdeTabSnapshot {
-  version: 1
   presentation: IdePresentation
   recoveryByEnvironment: Record<string, IdeRecovery>
 }
 
 export interface IdeLastSnapshot {
-  version: 1
   presentation: IdePresentation
 }
 
@@ -47,10 +45,9 @@ export interface IdeSaveResult {
   localSaved: boolean
 }
 
-export const IDE_TAB_STATE_VERSION = 1 as const
 export const IDE_TAB_STATE_MAX_BYTES = 64 * 1024
-export const IDE_TAB_SESSION_KEY = 'kk-studio.tab-state.v1:ide'
-export const IDE_TAB_LAST_KEY = 'kk-studio.last-state.v1:ide'
+export const IDE_TAB_SESSION_KEY = 'kk-studio.tab-state:ide'
+export const IDE_TAB_LAST_KEY = 'kk-studio.last-state:ide'
 export const IDE_MAX_OPEN_ENVIRONMENTS = 64
 export const IDE_MAX_DIRECTORY_CHARS = 4096
 
@@ -173,17 +170,17 @@ function parseSnapshot(
   }
   try {
     const value: unknown = JSON.parse(raw)
-    if (!isRecord(value) || value.version !== IDE_TAB_STATE_VERSION) {
+    if (!isRecord(value)) {
       return null
     }
     if (kind === 'local') {
-      if (!hasExactKeys(value, ['version', 'presentation'])) {
+      if (!hasExactKeys(value, ['presentation'])) {
         return null
       }
       const presentation = parsePresentation(value.presentation)
       return presentation == null ? null : { presentation, recoveryByEnvironment: {} }
     }
-    if (!hasExactKeys(value, ['version', 'presentation', 'recoveryByEnvironment'])) {
+    if (!hasExactKeys(value, ['presentation', 'recoveryByEnvironment'])) {
       return null
     }
     const presentation = parsePresentation(value.presentation)
@@ -202,7 +199,6 @@ function serializeSession(
   recoveryByEnvironment: Record<string, IdeRecovery>,
 ): string | null {
   const snapshot: IdeTabSnapshot = {
-    version: IDE_TAB_STATE_VERSION,
     presentation,
     recoveryByEnvironment,
   }
@@ -218,7 +214,6 @@ function serializeSession(
 
 function serializeLocal(presentation: IdePresentation): string | null {
   const snapshot: IdeLastSnapshot = {
-    version: IDE_TAB_STATE_VERSION,
     presentation,
   }
   const serialized = JSON.stringify(snapshot)

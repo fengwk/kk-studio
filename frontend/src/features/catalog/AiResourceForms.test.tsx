@@ -435,7 +435,7 @@ describe('AiResourceForms', () => {
     expect(hintElement?.textContent).toContain('Reasoning 当前已关闭')
     expect(hintElement?.textContent).toContain('勾选开启上方 Reasoning')
 
-    // 重新开启后，不再设置 aria-describedby 到关闭提示
+    // 重新开启后，不设置 aria-describedby 到关闭提示
     await user.click(reasoningCheckbox)
     expect(zhEffort).toBeEnabled()
     expect(zhEffort).not.toHaveAttribute('aria-describedby')

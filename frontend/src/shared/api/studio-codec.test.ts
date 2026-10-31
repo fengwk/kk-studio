@@ -343,7 +343,7 @@ describe('studio codec', () => {
     expect(() => decodeCanvasPatch(payload)).toThrow('node patch.nodeId')
   })
 
-  describe('canonical acceptance and strict rejection of legacy payloads', () => {
+  describe('canonical acceptance and strict structural rejection', () => {
     it('accepts canonical function definition with full fields', () => {
       const canonical = {
         name: 'test-fn',
@@ -439,7 +439,7 @@ describe('studio codec', () => {
         .toEqual({ definitionFingerprint: '0'.repeat(64) })
       expect(isCanvasFunctionVersion({ definitionFingerprint: 'd'.repeat(64) })).toBe(true)
       expect(isCanvasFunctionVersion({ definitionFingerprint: 'd'.repeat(64), extra: 1 })).toBe(false)
-      expect(isCanvasFunctionVersion({ catalogEpoch: 7, definitionFingerprint: 'd'.repeat(64) })).toBe(false)
+      expect(isCanvasFunctionVersion({ unknownField: 7, definitionFingerprint: 'd'.repeat(64) })).toBe(false)
     })
 
     it('fails closed on every non-canonical, non-textual, or unknown-function-version token', () => {
@@ -449,9 +449,9 @@ describe('studio codec', () => {
       expect(() => decodeCanvasFunctionVersion(null)).toThrow('functionVersion must be an object')
       expect(() => decodeCanvasFunctionVersion({}))
         .toThrow('functionVersion.definitionFingerprint must be a string')
-      // 旧版本坐标不再是合法字段
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '7' }))
-        .toThrow('functionVersion has unknown field: catalogEpoch')
+      // 未知字段拒绝
+      expect(() => decodeCanvasFunctionVersion({ ...ok, unknownProperty: '7' }))
+        .toThrow('functionVersion has unknown field: unknownProperty')
       // 指纹：大写 / 长度不符 / 非 hex / 非字符串
       expect(() => decodeCanvasFunctionVersion({ ...ok, definitionFingerprint: 'D'.repeat(64) }))
         .toThrow('lowercase 64-char hex')
@@ -466,59 +466,34 @@ describe('studio codec', () => {
         .toThrow('functionVersion has unknown field: definitionName')
     })
 
-    it('strictly rejects legacy function definition without version', () => {
-      const legacyFnWithoutVersion = {
-        name: 'legacy-fn',
+    it('strictly rejects function definition missing version', () => {
+      const fnWithoutVersion = {
+        name: 'test-fn',
         argsSchema: {},
         outputs: [],
         available: true,
         unavailableReason: null,
       }
-      expect(() => decodeCanvasFunctionDefinition(legacyFnWithoutVersion))
+      expect(() => decodeCanvasFunctionDefinition(fnWithoutVersion))
         .toThrow('functionVersion must be an object')
     })
 
-    it('strictly rejects legacy document payload without revision (only version)', () => {
-      const legacyDocument = {
+    it('strictly rejects document payload missing revision', () => {
+      const invalidDocument = {
         id: CANVAS_ID,
-        title: 'Legacy',
-        version: '3',
+        title: 'Doc',
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-02T00:00:00Z',
       }
-      expect(() => decodeCanvasDocument(legacyDocument)).toThrow('document.revision must be a canonical')
+      expect(() => decodeCanvasDocument(invalidDocument)).toThrow('document.revision must be a canonical')
     })
 
-    it('strictly rejects legacy patch payload without revision (only version)', () => {
-      const legacyPatch = {
-        version: '4',
+    it('strictly rejects patch payload missing revision', () => {
+      const invalidPatch = {
         groups: [],
         nodes: [],
       }
-      expect(() => decodeCanvasPatch(legacyPatch)).toThrow('patch.revision must be a canonical')
-    })
-
-    it('strictly rejects legacy function definition using outputKind instead of outputs', () => {
-      const legacyFn = {
-        name: 'legacy-fn',
-        description: null,
-        argsSchema: {},
-        outputKind: 'IMAGE',
-        available: true,
-        unavailableReason: null,
-      }
-      expect(() => decodeCanvasFunctionDefinition(legacyFn)).toThrow('function.outputs must be an array')
-    })
-
-    it('strictly rejects legacy node function payload with modelKey/configJson', () => {
-      const legacyNodeFunction = {
-        ...snapshotPayload(),
-        nodes: [{
-          ...nodePayload(),
-          function: { modelKey: 'image', configJson: '{}' },
-        }],
-      }
-      expect(() => decodeCanvasSnapshot(legacyNodeFunction)).toThrow('node.function.name must be a string')
+      expect(() => decodeCanvasPatch(invalidPatch)).toThrow('patch.revision must be a canonical')
     })
 
     it('strictly rejects node function missing args object', () => {
