@@ -227,7 +227,7 @@ function config(dataDir: string): DaemonConfig {
     dataDir,
     tokenPath: path.join(dataDir, 'daemon.token'),
     studioUrl: 'https://studio.example.com',
-    gatewayUri: 'wss://studio.example.com/api/harness/environment-daemon/v1',
+    gatewayUri: 'wss://studio.example.com/api/harness/environment-daemon',
     bashExecutable: 'bash',
     note: null,
     lsp: {},

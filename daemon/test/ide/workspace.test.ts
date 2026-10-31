@@ -38,7 +38,7 @@ function config(dataDir: string): DaemonConfig {
     dataDir,
     tokenPath: join(dataDir, 'token'),
     studioUrl: 'https://studio.example',
-    gatewayUri: 'wss://studio.example/api/harness/environment-daemon/v1',
+    gatewayUri: 'wss://studio.example/api/harness/environment-daemon',
     bashExecutable: '/bin/bash',
     note: null,
     lsp: {},
