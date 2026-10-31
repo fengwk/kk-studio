@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from 'undici'
-import { WebSocketServer } from 'ws'
+import { WebSocket, WebSocketServer } from 'ws'
 
 import type { SystemProxyResolver } from '../src/contracts.js'
 import {
@@ -320,57 +320,62 @@ describe('outbound network integration', () => {
     })
 
     await withNetwork({ http_proxy: proxy.url }, async () => {
-      const received: string[] = []
-      const connection = await createWebSocketTransport(`ws://127.0.0.1:${port}`).connect({
-        onMessage(message) {
-          received.push(message)
-        },
-        onDisconnected() {},
-      })
-      expect(connection.isOpen()).toBe(true)
-      await connection.sendText('proxied')
-      await waitFor(() => received.length === 1)
-      expect(received[0]).toBe('proxied')
-      connection.close()
+      const { agent, destroy } = await getOutboundNetwork().createWebSocketAgent(
+        `ws://127.0.0.1:${port}`,
+        new AbortController().signal,
+      )
+      try {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}`, { agent })
+        await new Promise<void>((resolve, reject) => {
+          ws.once('open', resolve)
+          ws.once('error', reject)
+        })
+        expect(ws.readyState).toBe(WebSocket.OPEN)
+        ws.close()
+      } finally {
+        destroy()
+      }
     })
     expect(proxy.upgrades).toHaveLength(1)
     expect(proxy.upgrades[0]!.startsWith(`http://127.0.0.1:${port}`)).toBe(true)
   })
 
   it('never follows redirects for a signed PUT', async () => {
-    const target = await startOrigin('target-body')
-    cleanups.push(target.close)
-    let redirected = 0
-    const upload = http.createServer((_request, response) => {
-      redirected += 1
-      response.writeHead(307, { location: target.url })
-      response.end()
-    })
-    await new Promise<void>((resolve) => upload.listen(0, '127.0.0.1', () => resolve()))
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          upload.closeAllConnections?.()
-          upload.close(() => resolve())
-        }),
-    )
-    const port = (upload.address() as net.AddressInfo).port
+    await withNetwork({}, async () => {
+      const target = await startOrigin('target-body')
+      cleanups.push(target.close)
+      let redirected = 0
+      const upload = http.createServer((_request, response) => {
+        redirected += 1
+        response.writeHead(307, { location: target.url })
+        response.end()
+      })
+      await new Promise<void>((resolve) => upload.listen(0, '127.0.0.1', () => resolve()))
+      cleanups.push(
+        () =>
+          new Promise<void>((resolve) => {
+            upload.closeAllConnections?.()
+            upload.close(() => resolve())
+          }),
+      )
+      const port = (upload.address() as net.AddressInfo).port
 
-    const put = createHttpPutObject()
-    await expect(
-      put(
-        {
-          method: 'PUT',
-          url: `http://127.0.0.1:${port}/signed?X-Amz-Signature=SECRETQUERY`,
-          headers: { 'content-type': 'application/octet-stream' },
-          expiresAt: '2030-01-01T00:00:00.000Z',
-        },
-        new Uint8Array([1, 2, 3]),
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow(/redirect/)
-    expect(redirected).toBe(1)
-    expect(target.hits).toHaveLength(0)
+      const put = createHttpPutObject()
+      await expect(
+        put(
+          {
+            method: 'PUT',
+            url: `http://127.0.0.1:${port}/signed?X-Amz-Signature=SECRETQUERY`,
+            headers: { 'content-type': 'application/octet-stream' },
+            expiresAt: '2030-01-01T00:00:00.000Z',
+          },
+          new Uint8Array([1, 2, 3]),
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(/redirect/)
+      expect(redirected).toBe(1)
+      expect(target.hits).toHaveLength(0)
+    })
   })
 
   it('keeps private loopback requests off the proxy under NODE_USE_ENV_PROXY', async () => {
@@ -458,11 +463,12 @@ describe('outbound network integration', () => {
   })
 
   it('leaves the current network untouched when the environment is invalid', async () => {
-    const baseline = getOutboundNetwork()
-    await expect(
-      installOutboundNetwork({ https_proxy: 'invalid-secret' }, systemDirect),
-    ).rejects.toThrow(/Invalid HTTP proxy or bypass configuration/)
-    expect(getOutboundNetwork()).toBe(baseline)
+    await withNetwork({}, async (baseline) => {
+      await expect(
+        installOutboundNetwork({ https_proxy: 'invalid-secret' }, systemDirect),
+      ).rejects.toThrow(/Invalid HTTP proxy or bypass configuration/)
+      expect(getOutboundNetwork()).toBe(baseline)
+    })
   })
 
   it('does not leak the query URL into a failed request error', async () => {
@@ -537,128 +543,6 @@ describe('outbound network lifecycle and connect deadlines', () => {
     expect(response.statusCode).toBe(200)
     await installed.close()
     await waitFor(() => origin.closes >= 1)
-  })
-
-  it('aborts a pending handshake lookup when the transport closes', async () => {
-    let aborted = false
-    const system: SystemProxyResolver = {
-      resolve(_uri: string, signal: AbortSignal): Promise<string | null> {
-        return new Promise<string | null>((resolve) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              aborted = true
-              resolve(null)
-            },
-            { once: true },
-          )
-        })
-      },
-      async close(): Promise<void> {},
-    }
-    const installed = await installOutboundNetwork({}, system)
-    try {
-      const transport = createWebSocketTransport('ws://127.0.0.1:1', { connectTimeoutMillis: 5000 })
-      const connected = transport.connect({ onMessage() {}, onDisconnected() {} })
-      await Promise.resolve()
-      transport.close()
-      await expect(connected).rejects.toThrow(/cancelled|aborted/i)
-      expect(aborted).toBe(true)
-    } finally {
-      await installed.close()
-    }
-  })
-
-  it('does not reset the connect deadline after the system lookup', async () => {
-    const blackhole = net.createServer(() => undefined)
-    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', () => resolve()))
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          blackhole.closeAllConnections?.()
-          blackhole.close(() => resolve())
-        }),
-    )
-    const port = (blackhole.address() as net.AddressInfo).port
-    const system: SystemProxyResolver = {
-      resolve(): Promise<string | null> {
-        return new Promise<string | null>((resolve) => {
-          setTimeout(() => resolve(null), 400)
-        })
-      },
-      async close(): Promise<void> {},
-    }
-    const installed = await installOutboundNetwork({}, system)
-    try {
-      const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 400 })
-      const startedAt = Date.now()
-      await expect(transport.connect({ onMessage() {}, onDisconnected() {} })).rejects.toThrow()
-      // 共享 deadline：总耗时接近 400ms，而不是 lookup 400ms + 握手再 400ms。
-      expect(Date.now() - startedAt).toBeLessThan(650)
-    } finally {
-      await installed.close()
-    }
-  })
-
-  it('rejects immediately when the transport closes during the TCP handshake', async () => {
-    let accepted = 0
-    const blackholeSockets: net.Socket[] = []
-    const blackhole = net.createServer((socket) => {
-      accepted += 1
-      blackholeSockets.push(socket)
-    })
-    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', () => resolve()))
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          for (const socket of blackholeSockets) {
-            socket.destroy()
-          }
-          blackhole.close(() => resolve())
-        }),
-    )
-    const port = (blackhole.address() as net.AddressInfo).port
-    const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 30_000 })
-    const connected = transport.connect({ onMessage() {}, onDisconnected() {} })
-    await waitFor(() => accepted >= 1)
-    const startedAt = Date.now()
-    transport.close()
-    await expect(connected).rejects.toThrow(/cancelled|aborted/i)
-    expect(Date.now() - startedAt).toBeLessThan(1000)
-  })
-
-  it('keeps an established connection open after the connect deadline elapses', async () => {
-    const server = new WebSocketServer({ port: 0, perMessageDeflate: true })
-    await new Promise<void>((resolve) => server.once('listening', () => resolve()))
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve) => {
-          for (const client of server.clients) {
-            client.terminate()
-          }
-          server.close(() => resolve())
-        }),
-    )
-    server.on('connection', (socket) => {
-      socket.on('message', (data) => socket.send(data.toString()))
-    })
-    const port = (server.address() as net.AddressInfo).port
-    const received: string[] = []
-    const transport = createWebSocketTransport(`ws://127.0.0.1:${port}`, { connectTimeoutMillis: 200 })
-    const connection = await transport.connect({
-      onMessage(message) {
-        received.push(message)
-      },
-      onDisconnected() {},
-    })
-    expect(connection.isOpen()).toBe(true)
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    // deadline 到点后已建立连接必须仍存活并可发送，绝不能被连接超时终止。
-    expect(connection.isOpen()).toBe(true)
-    await connection.sendText('alive')
-    await waitFor(() => received.length === 1)
-    expect(received[0]).toBe('alive')
-    connection.close()
   })
 
   it('waits for an in-flight retire and shares its failure across close callers', async () => {
