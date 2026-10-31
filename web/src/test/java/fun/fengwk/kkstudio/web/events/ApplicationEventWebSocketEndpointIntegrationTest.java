@@ -31,7 +31,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * {@code /api/events/v2} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实 Jetty 握手、connected 首帧、
+ * {@code /api/events} 的真实端到端覆盖（RANDOM_PORT + testcontainers PG）：真实 Jetty 握手、connected 首帧、
  * 严格帧解码、非法帧关闭、资源错误保活、合法订阅 ack，以及原生 ping 与文本共享同一物理 writer 串行发送。
  */
 class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSupport {
@@ -52,7 +52,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     socket.sendText("{\"op\":\"subscribe\"}", true).get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.version must be the integer 2\"}",
+        "{\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.type must be a string\"}",
         collector.nextText());
     assertEquals(1002, collector.nextCloseCode(), "invalid protocol frame must close with 1002");
   }
@@ -70,8 +70,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     socket
         .sendText(ideUseFrame(documentId, environmentId, viewId, claimId), true)
         .get(10, TimeUnit.SECONDS);
-    assertEquals(
-        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
     assertTrue(
         browserUseRegistry
             .findExactIntent(identity, documentId, EnvironmentId.of(environmentId), viewId, claimId)
@@ -90,7 +89,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
         .sendText(ideUseFrame(documentId, environmentId, viewId, UUID.randomUUID()), true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
+        "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
         collector.nextText());
 
     // 以合成时间越过 45 秒：真实连接以 1013 关闭，事件节点立即撤销证明。
@@ -125,7 +124,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
           .append("\"}");
     }
     String frame =
-        "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+        "{\"type\":\"ide-use\",\"documentId\":\""
             + documentId
             + "\",\"revision\":\"1\",\"views\":["
             + views
@@ -134,8 +133,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
     socket.sendText(frame, true).get(10, TimeUnit.SECONDS);
 
-    assertEquals(
-        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", collector.nextText());
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
   }
 
@@ -148,14 +146,14 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String unknown = "00000000-0000-0000-0000-000000000999";
     socket
         .sendText(
-            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + unknown
                 + "\"}}",
             true)
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + unknown
             + "\"}}",
         collector.nextText());
@@ -164,13 +162,13 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String another = "00000000-0000-0000-0000-000000000998";
     socket
         .sendText(
-            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + another
                 + "\"}}",
             true)
         .get(10, TimeUnit.SECONDS);
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + another
             + "\"}}",
         collector.nextText());
@@ -190,7 +188,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
       String unknown = new UUID(0L, i).toString();
       socket
           .sendText(
-              "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+              "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                   + unknown
                   + "\"}}",
               true)
@@ -201,7 +199,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     for (int i = 1; i <= 16; i++) {
       String unknown = new UUID(0L, i).toString();
       assertEquals(
-          "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+          "{\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
               + unknown
               + "\"}}",
           collector.nextText());
@@ -273,14 +271,14 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertConnected(collector);
     socket
         .sendText(
-            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + threadId
                 + "\"}}",
             true)
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + threadId
             + "\"},\"cursor\":\""
             + version
@@ -291,7 +289,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
 
   private ConnectionIdentity assertConnected(FrameCollector collector) throws Exception {
     JsonNode connected = MAPPER.readTree(collector.nextText());
-    assertEquals(2, connected.path("version").asInt());
+    assertFalse(connected.has("version"));
     assertEquals("connected", connected.path("type").asText());
     String eventNodeId = connected.path("eventNodeId").asText();
     String connectionId = connected.path("connectionId").asText();
@@ -303,7 +301,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   private static String ideUseFrame(
       UUID documentId, UUID environmentId, UUID viewId, UUID claimId) {
     return """
-        {"version":2,"type":"ide-use","documentId":"%s","revision":"1","views":[
+        {"type":"ide-use","documentId":"%s","revision":"1","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"9"}]}
         """
         .formatted(documentId, environmentId, viewId, claimId);

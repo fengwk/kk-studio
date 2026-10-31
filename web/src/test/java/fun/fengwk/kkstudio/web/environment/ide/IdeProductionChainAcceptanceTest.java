@@ -87,7 +87,7 @@ import java.util.concurrent.TimeoutException;
  * <ul>
  *   <li><b>浏览器入口用例</b>（{@code servesRealManagedCodeServerViewsThroughTheProductionDataPlane}、{@code
  *       servesTheManagedViewThroughTheRealBrowserEntryAndDataPlane}）：走真实浏览器协议——事件通道 {@code
- *       /api/events/v2} 登记打开意图、REST {@code /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换
+ *       /api/events} 登记打开意图、REST {@code /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换
  *       view 级 cookie、view 基址取 workbench HTML 与静态/worker 资源、浏览器 WebSocket 升级。这只验证浏览器协议入口，不运行真实工作台。
  *   <li><b>数据面用例</b>（{@code streamsRealCodeServerContentOverTheReusedMuxDataConnection}、{@code
  *       servesTwoManagedViewsOverOneReusedDataConnection}）：直接经产品自己的数据连接注册表打开 mux 逻辑流，覆盖真实 DATA_BIND
@@ -211,7 +211,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     UUID viewId = UUID.randomUUID();
     UUID registeredClaim = UUID.randomUUID();
     UUID otherClaim = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       events.registerUsage(
           documentId, 1L, List.of(new IntentView(environmentId, viewId, registeredClaim, null)));
@@ -283,7 +283,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void servesRealManagedCodeServerViewsThroughTheProductionDataPlane() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID firstView = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -359,7 +359,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void servesTheManagedViewThroughTheRealBrowserEntryAndDataPlane() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
@@ -431,7 +431,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void streamsRealCodeServerContentOverTheReusedMuxDataConnection() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
@@ -485,7 +485,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void servesTwoManagedViewsOverOneReusedDataConnection() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID firstView = UUID.randomUUID();
       UUID secondView = UUID.randomUUID();
@@ -525,7 +525,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void closesTheManagedViewThroughTheRestApi() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID claimId = UUID.randomUUID();
@@ -548,7 +548,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void detachFreezesTheOldEpochAndResumeIssuesANewBinding() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -604,7 +604,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   void invalidatesTheOldBindingAfterTheManagedCodeServerCrashes() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewId = UUID.randomUUID();
       UUID firstClaim = UUID.randomUUID();
@@ -685,7 +685,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Path browserTemp = Files.createDirectory(workspace.resolve(".browser-tmp"));
     Files.setPosixFilePermissions(browserTemp, PosixFilePermissions.fromString("rwx------"));
     UUID documentId = UUID.randomUUID();
-    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
       EventIdentity identity = events.awaitConnected();
       UUID viewA = UUID.randomUUID();
       UUID viewB = UUID.randomUUID();
@@ -1498,7 +1498,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     void registerUsage(UUID documentId, long revision, List<IntentView> views)
         throws InterruptedException {
       StringBuilder builder = new StringBuilder();
-      builder.append("{\"version\":2,\"type\":\"ide-use\",\"documentId\":\"").append(documentId);
+      builder.append("{\"type\":\"ide-use\",\"documentId\":\"").append(documentId);
       builder.append("\",\"revision\":\"").append(revision).append("\",\"views\":[");
       for (int index = 0; index < views.size(); index++) {
         IntentView view = views.get(index);
