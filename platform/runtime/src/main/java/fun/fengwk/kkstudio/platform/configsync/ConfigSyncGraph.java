@@ -32,8 +32,7 @@ import java.util.Set;
  * 基于一次快照构建配置引用依赖图并计算传递闭包。
  *
  * <p>有向边完全来自现有业务事实：Model → Provider；Agent → Model / Skill Package / Subagent / MCP Service（经 MCP
- * 工具名 归属）；Plugin → 该插件普通配置声明的 Agent。Settings 不再由旧集成字段反向扩展 Agent：原先由设置携带的 H3 提示词 Agent
- * 引用改由对应插件的普通配置声明。闭包做去重并对互相引用的 Agent 终止。Environment 是独立条目，没有反向扩展。
+ * 工具名 归属）；Plugin → 该插件普通配置声明的 Agent。闭包做去重并对互相引用的 Agent 终止。Environment 是独立条目，没有反向扩展。
  *
  * <p>系统内置 Agent 不在可导出条目里，但确实存在：引用它们的依赖视为已由系统满足，因此不产生边、不进入 portable 闭包，也不让导出失败。
  */

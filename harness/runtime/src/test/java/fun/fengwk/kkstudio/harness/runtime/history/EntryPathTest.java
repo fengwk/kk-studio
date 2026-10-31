@@ -1379,7 +1379,7 @@ class EntryPathTest {
         id,
         SESSION_ID,
         parentId,
-        new CustomEntryPayload("com.example.goal", customType, 1, "{\"s\":1}"),
+        new CustomEntryPayload("com.example.goal", customType, "{\"s\":1}"),
         time(id));
   }
 

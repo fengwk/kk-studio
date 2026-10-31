@@ -46,8 +46,8 @@ class TurnPlanBuilderContributorStateTest {
       TurnStartReason reason) {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     UUID threadId = seedBaseline(store).threadId();
-    CustomEntryPayload opened = new CustomEntryPayload("project", "run", 1, "{\"active\":true}");
-    CustomEntryPayload closed = new CustomEntryPayload("project", "run", 1, "{\"active\":false}");
+    CustomEntryPayload opened = new CustomEntryPayload("project", "run", "{\"active\":true}");
+    CustomEntryPayload closed = new CustomEntryPayload("project", "run", "{\"active\":false}");
     AgentMessage message =
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("continue")));
     List<ThreadCommandPayload> payloads =
@@ -110,7 +110,7 @@ class TurnPlanBuilderContributorStateTest {
             store,
             threadId,
             new SetContributorStateCommandPayload(
-                new CustomEntryPayload("project", "run", 1, "{\"active\":false}")));
+                new CustomEntryPayload("project", "run", "{\"active\":false}")));
     // 纯状态更新不唤醒模型，也不提前应用；下一条真实输入到来后才由规划消费。
     var error =
         assertThrows(

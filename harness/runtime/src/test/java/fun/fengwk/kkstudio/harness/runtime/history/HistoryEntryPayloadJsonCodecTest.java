@@ -90,7 +90,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CustomMessagePayload.CORE_RENDERER_KEY,
             user("system"),
             CustomMessagePayload.CORE_DETAILS_JSON);
-    EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", 2, "{\"s\":1}");
+    EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", "{\"s\":1}");
     EntryPayload attemptFailure =
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
@@ -163,21 +163,18 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(payload, CODEC.decodeNode(payload.type(), CODEC.encodeNode(payload)));
   }
 
-  /**
-   * 意图：ASSISTANT metadata 的流式生成计时可选可空——带计时精确往返（canonical 字段序），旧历史缺失该字段仍可解码为 null，且重编码与旧 JSON
-   * 逐字一致（不引入版本别名）。
-   */
+  /** ASSISTANT metadata 的流式生成计时可选可空：带计时精确往返，省略时解码为 null。 */
   @Test
-  void roundTripsAssistantMetadataStreamTimingAndAcceptsLegacyShape() {
-    String legacy =
+  void roundTripsAssistantMetadataStreamTiming() {
+    String omitted =
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
             + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
             + "\"toolResultMetadata\":null}";
-    MessagePayload legacyPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, legacy);
-    assertNull(legacyPayload.assistantMetadata().decodeDurationMillis());
-    assertEquals(legacy, CODEC.encode(legacyPayload));
+    MessagePayload omittedPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, omitted);
+    assertNull(omittedPayload.assistantMetadata().decodeDurationMillis());
+    assertEquals(omitted, CODEC.encode(omittedPayload));
 
     MessagePayload timed =
         new MessagePayload(
@@ -211,9 +208,9 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(metadata, decoded.assistantMetadata());
   }
 
-  /** 测试意图：request-body 定价快照只持久指纹与布尔值，旧记录缺失字段保持未知而不是反推匹配。 */
+  /** 测试意图：request-body 定价快照只持久指纹与布尔值。 */
   @Test
-  void roundTripsRequestBodyPricingSnapshotAndAcceptsLegacyAbsence() {
+  void roundTripsRequestBodyPricingSnapshot() {
     String fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     AssistantMessageMetadata metadata =
         new AssistantMessageMetadata(
@@ -451,10 +448,9 @@ class HistoryEntryPayloadJsonCodecTest {
                 user("sys"),
                 CustomMessagePayload.CORE_DETAILS_JSON)));
     assertEquals(
-        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\","
             + "\"data\":{\"state\":\"open\"}}",
-        CODEC.encode(
-            new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}")));
+        CODEC.encode(new CustomEntryPayload("com.example.goal", "goal", "{\"state\":\"open\"}")));
     assertEquals(
         "{\"turnStartEntryId\":\""
             + UUID_7
@@ -618,9 +614,9 @@ class HistoryEntryPayloadJsonCodecTest {
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
   }
 
-  /** 测试意图：三字段 branch settings 是唯一 durable 形态——旧的两字段 shape 与缺失 environmentName 必须严格拒绝。 */
+  /** 测试意图：branch settings 缺失 environmentName 或格式非法必须严格拒绝。 */
   @Test
-  void rejectsLegacyBranchSettingsShapeWithoutEnvironmentName() {
+  void rejectsBranchSettingsWithoutEnvironmentNameOrInvalidFormat() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1057,7 +1053,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\","
                     + "\"data\":{},\"extra\":1}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -1068,43 +1064,19 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":[]}"));
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"Goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":{}}"));
+                "{\"contributorId\":\"Goal\",\"customType\":\"goal\"," + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":0,"
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":-1,"
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":\"1\","
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":null}"));
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":null}"));
   }
 
   @Test
@@ -1317,7 +1289,7 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void preservesCustomEntryDataNumberPrecision() {
     String dataJson = "{\"big\":1E+309,\"tiny\":1E-324}";
-    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", 1, dataJson);
+    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", dataJson);
 
     String encoded = CODEC.encode(payload);
 

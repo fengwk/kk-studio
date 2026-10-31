@@ -16,7 +16,7 @@ import java.util.UUID;
  * Builtin debug 专属查询：在同一 Runtime 事务内锁定 Thread，读取当前 open Turn 的 Builtin generation 冻结请求。
  *
  * <p>查询只接受归属于该 Thread、该 open Turn 且 request head 在当前路径上的 Invocation；其它 Driver 或没有任何 Builtin
- * generation 时返回 empty。公共 ThreadSnapshot 不再携带私有 request spec。
+ * generation 时返回 empty。公共 ThreadSnapshot 不携带私有 request spec。
  */
 public final class BuiltinRequestQuery {
 

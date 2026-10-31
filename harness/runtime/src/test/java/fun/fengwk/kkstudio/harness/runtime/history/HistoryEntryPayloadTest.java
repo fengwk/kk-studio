@@ -200,48 +200,40 @@ class HistoryEntryPayloadTest {
   }
 
   @Test
-  void customEntryPayloadValidatesIdentifiersSchemaVersionAndCanonicalDataJson() {
+  void customEntryPayloadValidatesIdentifiersAndCanonicalDataJson() {
     CustomEntryPayload valid =
-        new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}");
+        new CustomEntryPayload("com.example.goal", "goal", "{\"state\":\"open\"}");
     assertEquals("com.example.goal", valid.contributorId());
     assertEquals("goal", valid.customType());
-    assertEquals(1, valid.schemaVersion());
     assertEquals("{\"state\":\"open\"}", valid.dataJson());
     assertEquals(EntryType.CUSTOM, valid.type());
 
-    assertThrows(NullPointerException.class, () -> new CustomEntryPayload(null, "goal", 1, "{}"));
+    assertThrows(NullPointerException.class, () -> new CustomEntryPayload(null, "goal", "{}"));
     assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("Goal", "goal", 1, "{}"));
+        IllegalArgumentException.class, () -> new CustomEntryPayload("Goal", "goal", "{}"));
     assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "Goal", 1, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 0, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", -1, "{}"));
-    assertThrows(NullPointerException.class, () -> new CustomEntryPayload("goal", "goal", 1, null));
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "Goal", "{}"));
+    assertThrows(NullPointerException.class, () -> new CustomEntryPayload("goal", "goal", null));
     // dataJson 必须是 bounded canonical JSON object：非 JSON / 非 object / 非 canonical / 超长都拒绝。
     assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "[]"));
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "[]"));
     assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "\"x\""));
-    assertThrows(
-        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "{"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\":1} {\"b\":2}"));
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "\"x\""));
+    assertThrows(IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "{"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\":1,\"a\":2}"));
+        () -> new CustomEntryPayload("goal", "goal", "{\"a\":1} {\"b\":2}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\": 1}"));
+        () -> new CustomEntryPayload("goal", "goal", "{\"a\":1,\"a\":2}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", "{\"a\": 1}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CustomEntryPayload(
                 "goal",
                 "goal",
-                1,
                 "{\"a\":\"" + "x".repeat(CustomEntryPayload.MAX_DATA_JSON_CHARS) + "\"}"));
   }
 

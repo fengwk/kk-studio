@@ -57,7 +57,7 @@ public final class ThreadCommandPayloadJsonCodec {
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
   private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
   private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
-      orderedSet("contributorId", "customType", "schemaVersion", "data");
+      orderedSet("contributorId", "customType", "data");
   private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
@@ -204,7 +204,6 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("contributorId", state.contributorId());
     node.put("customType", state.customType());
-    node.put("schemaVersion", state.schemaVersion());
     node.set("data", parseCanonicalObject(state.dataJson(), "state.data"));
     return node;
   }
@@ -312,7 +311,6 @@ public final class ThreadCommandPayloadJsonCodec {
         new CustomEntryPayload(
             canonicalText(state, "contributorId", "SET_CONTRIBUTOR_STATE.state"),
             canonicalText(state, "customType", "SET_CONTRIBUTOR_STATE.state"),
-            requiredNonNegativeInt(state, "schemaVersion", "SET_CONTRIBUTOR_STATE.state"),
             write(requireObject(state.get("data"), "SET_CONTRIBUTOR_STATE.state.data"))));
   }
 

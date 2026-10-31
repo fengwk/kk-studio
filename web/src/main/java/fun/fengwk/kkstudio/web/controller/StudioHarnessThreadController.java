@@ -60,7 +60,7 @@ import java.util.function.Supplier;
  *
  * <p>统一返回 {@link ApiResponse}，HTTP 状态由 {@code ApiResponseStatusAdvice} 按 {@code response.status}
  * 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO {@literal ->}
- * 400。控制面不再按 Thread 的产品归属（Issue/Chat）拒绝：认证、实际资源权限与请求格式仍是硬边界，业务规则由对应业务工作流显式编排。
+ * 400。认证、实际资源权限与请求格式是硬边界，业务规则由对应业务工作流显式编排。
  */
 @RestController
 @RequestMapping("/api/threads")
@@ -205,7 +205,7 @@ public class StudioHarnessThreadController {
   /**
    * 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。
    *
-   * <p>认证、实际资源权限与请求形状是硬边界；不再按 Thread 所属产品拒绝，业务命名规则由对应业务工作流显式维护。
+   * <p>认证、实际资源权限与请求形状是硬边界，业务命名规则由对应业务工作流显式维护。
    */
   @PutMapping("/{threadId}/name")
   public ApiResponse<HarnessThreadDTO> rename(
@@ -225,7 +225,7 @@ public class StudioHarnessThreadController {
   /**
    * 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩；返回 202 Accepted。
    *
-   * <p>压缩会产生 Turn / model invocation / 后续 work；通用入口不再按 Thread 归属拒绝，认证与请求格式照常校验。
+   * <p>压缩会产生 Turn / model invocation / 后续 work；通用入口校验认证与请求格式。
    */
   @PostMapping("/{threadId}/compact")
   public ApiResponse<HarnessThreadCompactResultDTO> compact(
@@ -247,7 +247,7 @@ public class StudioHarnessThreadController {
    * Command/Entry/Work、不唤醒 processors。返回权威当前 Thread（与 stop 一致）。
    *
    * <p>请求形状先经 {@link HarnessRuntimeRequestMapper} 严格校验（非 canonical UUID -&gt; 400）；缺失 Thread 由
-   * {@link HarnessRuntime} 翻译为 404。控制面不再按产品归属拒绝，业务默认策略由对应业务工作流显式维护。
+   * {@link HarnessRuntime} 翻译为 404。业务默认策略由对应业务工作流显式维护。
    */
   @PutMapping("/{threadId}/yolo")
   public ApiResponse<HarnessThreadDTO> updateYolo(
@@ -282,7 +282,7 @@ public class StudioHarnessThreadController {
   /**
    * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。
    *
-   * <p>操作者只取自服务端认证上下文；请求形状与资源归属照常校验，不再按 Thread 产品归属拒绝。
+   * <p>操作者只取自服务端认证上下文；请求形状与资源归属照常校验。
    */
   @PutMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
   public ApiResponse<ToolInvocationDTO> decideApproval(

@@ -25,10 +25,6 @@ public final class ProjectRunContextProjector implements ContextProjector {
     if (snapshot == null) {
       return List.of();
     }
-    if (snapshot.schemaVersion() != ProjectRunScope.SCHEMA_VERSION) {
-      throw new IllegalStateException(
-          "unsupported project run scope schema version: " + snapshot.schemaVersion());
-    }
     ProjectRunScope scope;
     try {
       scope = CODEC.decode(snapshot.dataJson());

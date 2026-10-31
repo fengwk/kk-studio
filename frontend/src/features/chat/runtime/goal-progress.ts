@@ -43,7 +43,6 @@ export function parseGoalProgress(
     if (
       payload.contributorId !== 'builtin'
       || payload.customType !== 'goal.progress'
-      || payload.schemaVersion !== 1
     ) {
       continue
     }

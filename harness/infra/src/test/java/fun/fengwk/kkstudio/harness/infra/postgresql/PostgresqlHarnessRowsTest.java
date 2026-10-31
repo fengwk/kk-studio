@@ -102,7 +102,7 @@ class PostgresqlHarnessRowsTest {
             1,
             UUID.fromString("00000000-0000-0000-0000-0000000000a1"),
             new SetContributorStateCommandPayload(
-                new CustomEntryPayload("com.example.issue", "issue-scope", 1, DATA_JSON)));
+                new CustomEntryPayload("com.example.issue", "issue-scope", DATA_JSON)));
 
     String encoded = PostgresqlHarnessRows.encodeCancelledInputs(List.of(input));
 

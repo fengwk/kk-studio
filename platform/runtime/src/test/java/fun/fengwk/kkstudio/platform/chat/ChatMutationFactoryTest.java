@@ -111,9 +111,9 @@ class ChatMutationFactoryTest {
     assertNull(chat.getEnvironmentName());
   }
 
-  /** Chat 不再承载 workspace：创建与更新都不接受该字段，且 Chat 行本身不存在目录状态。 */
+  /** 创建与更新均严格拒绝未知字段。 */
   @Test
-  void rejectsLegacyWorkspacePathFieldOnCreateAndUpdate() {
+  void rejectsUnknownFieldsOnCreateAndUpdate() {
     ChatMutationFactory factory = factory();
 
     ChatCreateDTO create = new ChatCreateDTO();
@@ -127,16 +127,10 @@ class ChatMutationFactoryTest {
     factory.apply(chat, update);
     assertEquals("next", chat.getTitle());
 
-    // legacy workspace 字段在 DTO 边界就被幂等拒绝，绝不会作为未知字段被静默忽略。
     assertThrows(
-        IllegalArgumentException.class,
-        () -> create.rejectUnknownField("workspacePath", "src/main"));
+        IllegalArgumentException.class, () -> create.rejectUnknownField("unknownField", "value"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> update.rejectUnknownField("workspacePath", "/absolute"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> update.rejectUnknownField("environmentId", "11111111-1111-1111-1111-111111111111"));
+        IllegalArgumentException.class, () -> update.rejectUnknownField("unknownField", "value"));
   }
 
   private static Chat chatWith(String agentName) {

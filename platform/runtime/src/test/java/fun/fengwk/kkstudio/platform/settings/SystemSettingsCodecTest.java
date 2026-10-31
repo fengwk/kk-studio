@@ -278,24 +278,6 @@ class SystemSettingsCodecTest {
   }
 
   @Test
-  void rejectsLegacyIntegrationsInStoredJson() throws Exception {
-    // 旧 integrations 段（含 comfyui/minimaxH3 与更早的 openCliHub/seedance/gptImage2）已从设置合同删除：
-    // 存储层按未知字段硬拒绝，绝不静默忽略或兼容解码出旧值。
-    ObjectNode legacySections = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
-    legacySections.putObject("integrations");
-    assertThrows(
-        IllegalStateException.class, () -> codec.decode(mapper.writeValueAsString(legacySections)));
-    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2", "comfyui")) {
-      ObjectNode node = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
-      ((ObjectNode) node.putObject("integrations")).putObject(legacyField);
-      assertThrows(
-          IllegalStateException.class,
-          () -> codec.decode(mapper.writeValueAsString(node)),
-          legacyField);
-    }
-  }
-
-  @Test
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));

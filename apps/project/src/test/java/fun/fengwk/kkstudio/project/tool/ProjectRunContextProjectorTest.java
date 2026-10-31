@@ -52,10 +52,7 @@ class ProjectRunContextProjectorTest {
   @Test
   void projectsFrozenScopeAsSingleFragment() {
     List<ContextFragment> fragments =
-        projector.project(
-            view(
-                Optional.of(
-                    new CustomStateSnapshot(ProjectRunScope.SCHEMA_VERSION, codec.encode(SCOPE)))));
+        projector.project(view(Optional.of(new CustomStateSnapshot(codec.encode(SCOPE)))));
 
     assertEquals(1, fragments.size());
     String text = fragments.get(0).text();
@@ -65,27 +62,12 @@ class ProjectRunContextProjectorTest {
     assertTrue(text.contains("issue_transition"), text);
   }
 
-  /** 不兼容 schema 版本确定性失败关闭。 */
-  @Test
-  void failsClosedOnUnsupportedSchemaVersion() {
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            projector.project(
-                view(
-                    Optional.of(
-                        new CustomStateSnapshot(
-                            ProjectRunScope.SCHEMA_VERSION + 1, codec.encode(SCOPE))))));
-  }
-
   /** 损坏快照（合法 JSON 但缺少必需字段）确定性失败关闭，而不是投影为空。 */
   @Test
   void failsClosedOnCorruptSnapshot() {
     assertThrows(
         IllegalStateException.class,
-        () ->
-            projector.project(
-                view(Optional.of(new CustomStateSnapshot(ProjectRunScope.SCHEMA_VERSION, "{}")))));
+        () -> projector.project(view(Optional.of(new CustomStateSnapshot("{}")))));
   }
 
   /** 已关闭（active=false）的 Run scope 不再投影任何 Issue 上下文。 */
@@ -93,11 +75,7 @@ class ProjectRunContextProjectorTest {
   void projectsNothingForClosedScope() {
     ProjectRunScope closed = SCOPE.closed();
     List<ContextFragment> fragments =
-        projector.project(
-            view(
-                Optional.of(
-                    new CustomStateSnapshot(
-                        ProjectRunScope.SCHEMA_VERSION, codec.encode(closed)))));
+        projector.project(view(Optional.of(new CustomStateSnapshot(codec.encode(closed)))));
 
     assertEquals(List.of(), fragments);
   }

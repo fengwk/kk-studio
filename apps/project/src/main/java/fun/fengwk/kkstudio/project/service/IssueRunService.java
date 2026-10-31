@@ -564,7 +564,6 @@ public class IssueRunService {
                 new CustomEntryPayload(
                     ProjectRunScope.CONTRIBUTOR_ID,
                     ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
                     RUN_SCOPE_CODEC.encode(scope.closed()))),
             commandKey(run.getId(), "scope-closed"));
     IssueThreadView view = threadExecutions.readThread(threadId);
@@ -719,7 +718,7 @@ public class IssueRunService {
 
   /**
    * 冻结本次 Run 的权威上下文快照：当前 Issue、阶段职责与业务执行身份（sourceThreadId）一起写入 branch custom state， 之后的模型 turn
-   * 只读取这份快照，运行时不再反查 Thread 属于哪个 Issue。
+   * 只读取这份快照。
    */
   private ProjectRunScope runScope(
       Issue issue, ProjectWorkflowState stage, String agentName, UUID runId, UUID threadId) {
@@ -758,7 +757,6 @@ public class IssueRunService {
                 new CustomEntryPayload(
                     ProjectRunScope.CONTRIBUTOR_ID,
                     ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
                     RUN_SCOPE_CODEC.encode(scope))),
             runId,
             "contributor-state"),

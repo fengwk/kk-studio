@@ -107,8 +107,8 @@ public final class HarnessRuntimeResponseMapper {
   /**
    * 映射一个一致的 Thread 快照；DTO 列表为不可变副本。
    *
-   * <p>对外状态完全来自 {@link ThreadSnapshot#runtimeStatus()}：web 层不再自行分类，也不注入任何委派/子树状态，因此 Thread API
-   * 的结果只取决于该 Thread 自己的 durable 事实。
+   * <p>对外状态完全来自 {@link ThreadSnapshot#runtimeStatus()}：不注入委派/子树状态，Thread API 的结果只取决于该 Thread 自己的
+   * durable 事实。
    */
   public static HarnessThreadDTO toThreadDto(ThreadSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");

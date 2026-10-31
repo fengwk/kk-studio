@@ -215,13 +215,13 @@ class ToolInvocationTransitionTest {
   void successPersistsEffectsAtomicallyAndKeepsThemTerminalImmutable() {
     ToolEffectBatch effects =
         new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}")));
+            List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}")));
     ToolInvocation succeeded = running(1, allowed()).succeed(result(), effects, T1);
     assertEquals(effects, succeeded.effects());
 
     ToolEffectBatch changed =
         new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"other\"}")));
+            List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"other\"}")));
     ToolInvocation rewritten =
         new ToolInvocation(
             succeeded.id(),

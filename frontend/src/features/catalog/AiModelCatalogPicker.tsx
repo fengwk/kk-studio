@@ -121,7 +121,7 @@ export function ModelCatalogPicker({
           onChange={(event) => setQuery(event.target.value)}
         />
         <span className="inline-hint">
-          {source === 'models_dev_v1' ? 'models.dev v1' : 'models.dev v2'}
+          models.dev
         </span>
         <Button
           variant="ghost"

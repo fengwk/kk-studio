@@ -19,12 +19,10 @@ import java.util.UUID;
 /**
  * {@code goal.progress} CUSTOM snapshot 的严格、确定性 JSON 编解码器。
  *
- * <p>要求 {@code schemaVersion = 1}，{@code dataJson} 精确包含且仅包含 4 个字段（{@code goalId}、{@code status}、
- * {@code reason}、{@code reportedAt}）。未知 / 缺失 / 重复字段、尾随 token、非法状态或时间戳一律 fail-closed 拒绝。
+ * <p>{@code dataJson} 精确包含且仅包含 4 个字段（{@code goalId}、{@code status}、 {@code reason}、{@code
+ * reportedAt}）。未知 / 缺失 / 重复字段、尾随 token、非法状态或时间戳一律 fail-closed 拒绝。
  */
 final class GoalProgressCodec {
-
-  static final int SCHEMA_VERSION = 1;
 
   private static final Set<String> FIELDS = Set.of("goalId", "status", "reason", "reportedAt");
   private static final ObjectMapper MAPPER =
@@ -50,10 +48,6 @@ final class GoalProgressCodec {
 
   GoalProgress decode(CustomStateSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
-    if (snapshot.schemaVersion() != SCHEMA_VERSION) {
-      throw new IllegalArgumentException(
-          "unsupported goal progress schemaVersion: " + snapshot.schemaVersion());
-    }
     JsonNode parsed = parse(snapshot.dataJson(), "goal progress");
     if (!(parsed instanceof ObjectNode node)) {
       throw new IllegalArgumentException("goal progress must be an object");

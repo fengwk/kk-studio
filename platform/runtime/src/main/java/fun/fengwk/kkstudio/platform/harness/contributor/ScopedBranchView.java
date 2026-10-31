@@ -38,7 +38,7 @@ public final class ScopedBranchView implements BranchView {
       if (entry.payload() instanceof CustomEntryPayload custom
           && custom.contributorId().equals(contributorId)
           && custom.customType().equals(customType)) {
-        snapshots.add(new CustomStateSnapshot(custom.schemaVersion(), custom.dataJson()));
+        snapshots.add(new CustomStateSnapshot(custom.dataJson()));
       }
     }
     return List.copyOf(snapshots);

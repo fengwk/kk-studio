@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.project.ProjectTestSupport;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
 import java.util.UUID;
 
@@ -68,8 +67,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
   /** 以 Run 自己 Thread 上真实冻结的 scope 调用业务工具。 */
   private IssueTransitionService.IssueTransitionResult accept(RunFixture fixture, String toState) {
     UUID threadId = fixture.run().getThreadId();
-    return issueTransitionService.accept(
-        threadId, ProjectRunScope.SCHEMA_VERSION, frozenRunScopeJson(threadId), toState);
+    return issueTransitionService.accept(threadId, frozenRunScopeJson(threadId), toState);
   }
 
   private String nextState(UUID runId) {
@@ -143,10 +141,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
             AiValidationException.class,
             () ->
                 issueTransitionService.accept(
-                    UUID.randomUUID(),
-                    ProjectRunScope.SCHEMA_VERSION,
-                    frozenRunScopeJson(runThreadId),
-                    "REVIEW"));
+                    UUID.randomUUID(), frozenRunScopeJson(runThreadId), "REVIEW"));
 
     assertTrue(rejected.getMessage().contains("run's own thread"), rejected.getMessage());
     assertNull(nextState(fixture.run().getId()));

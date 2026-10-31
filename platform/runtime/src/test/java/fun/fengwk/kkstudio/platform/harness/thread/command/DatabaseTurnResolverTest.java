@@ -1950,7 +1950,7 @@ class DatabaseTurnResolverTest {
                 id(2),
                 SESSION_ID,
                 id(1),
-                new CustomEntryPayload(BUSINESS_CONTRIBUTOR, BUSINESS_CUSTOM_TYPE, 1, stateJson),
+                new CustomEntryPayload(BUSINESS_CONTRIBUTOR, BUSINESS_CUSTOM_TYPE, stateJson),
                 NOW)));
   }
 

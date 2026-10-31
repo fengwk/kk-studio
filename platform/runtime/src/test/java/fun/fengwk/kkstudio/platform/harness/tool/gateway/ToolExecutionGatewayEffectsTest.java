@@ -114,7 +114,7 @@ class ToolExecutionGatewayEffectsTest {
 
   @Test
   void validAppendIsValidatedThenDeliveredWithInjectedContributorOwner() {
-    AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{\"objective\":\"ship\"}");
+    AppendCustomEntry entry = new AppendCustomEntry("state", "{\"objective\":\"ship\"}");
     Fixture fixture =
         fixture(
             statefulTool(
@@ -124,7 +124,7 @@ class ToolExecutionGatewayEffectsTest {
 
     ToolGateway.Succeeded succeeded = assertInstanceOf(ToolGateway.Succeeded.class, completion);
     assertEquals(
-        List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}")),
+        List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}")),
         succeeded.success().effects().customEntries());
     assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, fixture.loadedAssistantId.get());
   }
@@ -156,7 +156,7 @@ class ToolExecutionGatewayEffectsTest {
   /** effects 指向未注册的 customType：契约违反，在资源外部化之前以确定性失败收敛。 */
   @Test
   void intentTargetingUnregisteredCustomTypeFailsBeforeExternalization() {
-    AppendCustomEntry unregistered = new AppendCustomEntry("unregistered.type", 1, "{\"k\":\"v\"}");
+    AppendCustomEntry unregistered = new AppendCustomEntry("unregistered.type", "{\"k\":\"v\"}");
     Fixture fixture =
         fixture(
             statefulTool(
@@ -177,7 +177,7 @@ class ToolExecutionGatewayEffectsTest {
   /** effects 指向只声明 READ 的状态：缺少 WRITE 声明，同样在外部化之前失败。 */
   @Test
   void intentTargetingReadOnlyDeclaredStateFailsBeforeExternalization() {
-    AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{\"k\":\"v\"}");
+    AppendCustomEntry entry = new AppendCustomEntry("state", "{\"k\":\"v\"}");
     Fixture fixture =
         fixture(
             readOnlyTool(

@@ -91,7 +91,7 @@ class ProviderResponseJsonCodecTest {
     assertNull(codec.decode(untimed).decodeDurationMillis());
     assertNull(codec.decodeNode(canonicalNode()).decodeDurationMillis());
 
-    // 缺失该字段即拒绝：canonical JSON 不再接受旧 durable 行形态。
+    // 缺失该字段即拒绝：canonical JSON 严格校验必需字段。
     assertRejected(root -> root.remove("decodeDurationMillis"));
 
     assertRejected(root -> root.put("decodeDurationMillis", -1));

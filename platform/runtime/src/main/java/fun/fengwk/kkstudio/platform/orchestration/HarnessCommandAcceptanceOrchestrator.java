@@ -50,8 +50,7 @@ import java.util.UUID;
  *
  * <p>首次创建的写入顺序与设计 §7.1 一致：调用方先持有产品锁并完成额度检查，再由 Harness NEW_SESSION 在同一事务内创建 Session/ROOT/Thread
  * 并接受初始命令；Chat 归属边由本服务的 preflight 与这些 Harness 写入一起提交，Issue+Agent 的稳定 Thread 绑定则必须由调用方在 {@code
- * accept} 返回后、同一物理事务内写入（此时 harness Thread 已存在，即时 FK 自然成立，不需要延迟 FK 或预创建空会话）。 本服务不代写 Issue+Agent
- * 绑定，也不提供任何“先绑定后接受”的历史顺序或兼容包装。
+ * accept} 返回后、同一物理事务内写入（此时 harness Thread 已存在，即时 FK 自然成立，不需要延迟 FK 或预创建空会话）。 本服务不代写 Issue+Agent 绑定。
  *
  * <p>绑定一旦存在，它就是该归属唯一的授权依据且不可重绑：后续 THREAD/NEW_THREAD 接受必须已有稳定绑定，绑定 Thread 解析出的 Session 必须与 目标
  * Session 一致；同一 Thread 不能被另一个 Agent/Issue 抢走（唯一键拒绝），同一 Agent 也不能改绑到新 Thread。首次 NEW_SESSION 允许

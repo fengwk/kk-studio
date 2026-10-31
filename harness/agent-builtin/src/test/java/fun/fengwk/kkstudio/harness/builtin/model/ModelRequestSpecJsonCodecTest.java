@@ -138,7 +138,7 @@ class ModelRequestSpecJsonCodecTest {
   // 测试意图: agent_definition.description 放开为 text 后，subagent 描述不能再被 512 字符上限拒绝，
   // 且长描述必须无损地穿过冻结 spec 的编解码边界。
   @Test
-  void roundTripsSubagentDescriptionBeyondLegacyLengthLimit() {
+  void roundTripsLongSubagentDescription() {
     ModelRequestSpec base = hostModelRequest();
     String longDescription = "d".repeat(4096);
     ModelRequestSpec requestSpec =
@@ -227,11 +227,6 @@ class ModelRequestSpecJsonCodecTest {
     extra.put("extra", true);
     assertInvalid(extra);
 
-    // 未知字段包含旧的 skillBindings 必须被拒绝
-    ObjectNode legacySkills = encodedNode();
-    legacySkills.putArray("skillBindings");
-    assertInvalid(legacySkills);
-
     ObjectNode missing = encodedNode();
     missing.remove("toolBindings");
     assertInvalid(missing);
@@ -248,11 +243,9 @@ class ModelRequestSpecJsonCodecTest {
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
 
-    // toolBindings 内部包含旧字段 environmentRequired 必须被拒绝
-    ObjectNode legacyTool = encodedNode();
-    ObjectNode firstTool = (ObjectNode) legacyTool.path("toolBindings").get(0);
-    firstTool.put("environmentRequired", true);
-    assertInvalid(legacyTool);
+    ObjectNode toolExtra = encodedNode();
+    ((ObjectNode) toolExtra.path("toolBindings").get(0)).put("extra", true);
+    assertInvalid(toolExtra);
 
     // toolBindings 内部缺失 environmentSupport 或使用未知枚举值必须被拒绝
     ObjectNode missingSupport = encodedNode();

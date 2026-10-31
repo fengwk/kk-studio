@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
  * aiRuntime.compactionKeepRecentTokens} 映射 {@link CompactionConfig}。
  *
  * <p>{@link CompactionConfigProvider} 同时被 platform 的 {@code DatabaseTurnResolver} 与 web 组合根的 {@code
- * ThreadProcessorConfig} 消费，因此放在 platform 作为唯一定义点；web 不再重复声明。aiRuntime 配置 live 生效，无需重启。
+ * ThreadProcessorConfig} 消费，作为 platform 的唯一定义点。aiRuntime 配置 live 生效，无需重启。
  */
 @Configuration(proxyBeanMethods = false)
 public class HarnessCompactionConfiguration {

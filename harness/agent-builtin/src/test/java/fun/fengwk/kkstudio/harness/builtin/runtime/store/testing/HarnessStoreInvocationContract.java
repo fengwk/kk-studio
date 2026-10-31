@@ -1954,8 +1954,8 @@ public abstract class HarnessStoreInvocationContract {
     ToolEffectBatch effects =
         new ToolEffectBatch(
             List.of(
-                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}"),
-                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"verify\"}")));
+                new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}"),
+                new CustomEntryPayload("goal", "state", "{\"objective\":\"verify\"}")));
     ToolResult result =
         new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{\"done\":true}");
     updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));

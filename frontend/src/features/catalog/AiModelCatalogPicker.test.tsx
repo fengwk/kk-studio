@@ -54,19 +54,17 @@ describe('ModelCatalogPicker request fencing', () => {
     const first = deferred<ModelCatalogPageDTO>()
     const stale = deferred<ModelCatalogPageDTO>()
     const current = deferred<ModelCatalogPageDTO>()
-    const crossSource = deferred<ModelCatalogPageDTO>()
     vi.mocked(agentService.listModelDefaults)
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(stale.promise)
       .mockReturnValueOnce(current.promise)
-      .mockReturnValueOnce(crossSource.promise)
 
     render(<ModelCatalogPicker onApply={vi.fn()} />)
     await act(async () => {
       vi.advanceTimersByTime(250)
     })
     await act(async () => {
-      first.resolve(page('models_dev_v1', 'gen-1', [candidate('initial')]))
+      first.resolve(page('models_dev_v2', 'gen-1', [candidate('initial')]))
       await first.promise
     })
     expect(screen.getByText('catalog-provider / initial')).toBeInTheDocument()
@@ -90,23 +88,10 @@ describe('ModelCatalogPicker request fencing', () => {
 
     // 旧 query 的响应在新请求之后才返回：epoch 已过期，不得覆盖较新的结果。
     await act(async () => {
-      stale.resolve(page('models_dev_v1', 'gen-1', [candidate('stale')]))
+      stale.resolve(page('models_dev_v2', 'gen-1', [candidate('stale')]))
       await stale.promise
     })
     expect(screen.queryByText('catalog-provider / stale')).not.toBeInTheDocument()
-    expect(screen.getByText('catalog-provider / refreshed')).toBeInTheDocument()
-
-    // 同一 generation 号来自不同 source 时仍视为混源响应，不能把两个目录拼在一起。
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'fourth' } })
-    await act(async () => {
-      vi.advanceTimersByTime(250)
-    })
-    expect(agentService.listModelDefaults).toHaveBeenCalledTimes(4)
-    await act(async () => {
-      crossSource.resolve(page('models_dev_v1', 'gen-2', [candidate('mixed')]))
-      await crossSource.promise
-    })
-    expect(screen.queryByText('catalog-provider / mixed')).not.toBeInTheDocument()
     expect(screen.getByText('catalog-provider / refreshed')).toBeInTheDocument()
   })
 

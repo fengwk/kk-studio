@@ -21,22 +21,22 @@ class ToolEffectBatchJsonCodecTest {
     ToolEffectBatch batch =
         new ToolEffectBatch(
             List.of(
-                new CustomEntryPayload("goal", "state", 1, "{\"n\":1}"),
-                new CustomEntryPayload("memory", "state", 2, "{\"n\":2}")));
+                new CustomEntryPayload("goal", "state", "{\"n\":1}"),
+                new CustomEntryPayload("memory", "state", "{\"n\":2}")));
 
     String json =
-        "{\"version\":1,\"customEntries\":["
-            + "{\"contributorId\":\"goal\",\"customType\":\"state\",\"schemaVersion\":1,\"data\":{\"n\":1}},"
-            + "{\"contributorId\":\"memory\",\"customType\":\"state\",\"schemaVersion\":2,\"data\":{\"n\":2}}]}";
+        "{\"customEntries\":["
+            + "{\"contributorId\":\"goal\",\"customType\":\"state\",\"data\":{\"n\":1}},"
+            + "{\"contributorId\":\"memory\",\"customType\":\"state\",\"data\":{\"n\":2}}]}";
     assertEquals(json, codec.encode(batch));
     assertEquals(batch, codec.decode(json));
     assertEquals(batch, codec.decodeNode(codec.encodeNode(batch)));
-    assertEquals("{\"version\":1,\"customEntries\":[]}", codec.encode(ToolEffectBatch.EMPTY));
+    assertEquals("{\"customEntries\":[]}", codec.encode(ToolEffectBatch.EMPTY));
   }
 
   @Test
-  void rejectsMalformedDuplicateTrailingUnknownMissingAndUnsupportedVersion() {
-    String valid = "{\"version\":1,\"customEntries\":[]}";
+  void rejectsMalformedDuplicateTrailingUnknownAndMissingFields() {
+    String valid = "{\"customEntries\":[]}";
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null));
     assertThrows(NullPointerException.class, () -> codec.decodeNode(null));
@@ -45,15 +45,12 @@ class ToolEffectBatchJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(valid + " {}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"version\":1,\"version\":1,\"customEntries\":[]}"));
+        () -> codec.decode("{\"customEntries\":[],\"customEntries\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"version\":1,\"customEntries\":[],\"extra\":true}"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("{\"customEntries\":[]}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode("{\"version\":2,\"customEntries\":[]}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode("{\"version\":1,\"customEntries\":{}}"));
+        () -> codec.decode("{\"customEntries\":[],\"extra\":true}"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("{}"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("{\"customEntries\":{}}"));
   }
 
   @Test
@@ -62,13 +59,12 @@ class ToolEffectBatchJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"version\":1,\"customEntries\":["
-                    + "{\"contributorId\":\"goal\",\"customType\":\"state\","
-                    + "\"schemaVersion\":1,\"data\":null}]}"));
+                "{\"customEntries\":["
+                    + "{\"contributorId\":\"goal\",\"customType\":\"state\",\"data\":null}]}"));
 
     List<CustomEntryPayload> entries = new ArrayList<>();
     for (int i = 0; i <= ToolEffectBatch.MAX_CUSTOM_ENTRIES; i++) {
-      entries.add(new CustomEntryPayload("goal", "state-" + i, 1, "{}"));
+      entries.add(new CustomEntryPayload("goal", "state-" + i, "{}"));
     }
     assertThrows(IllegalArgumentException.class, () -> new ToolEffectBatch(entries));
   }

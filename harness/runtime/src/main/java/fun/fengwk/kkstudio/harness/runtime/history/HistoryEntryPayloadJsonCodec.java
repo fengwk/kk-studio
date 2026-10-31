@@ -80,7 +80,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
-      orderedSet("contributorId", "customType", "schemaVersion", "data");
+      orderedSet("contributorId", "customType", "data");
   private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
       orderedSet("attempt", "model", "requestedAt", "error", "retryAt");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS =
@@ -277,7 +277,6 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("contributorId", value.contributorId());
     node.put("customType", value.customType());
-    node.put("schemaVersion", value.schemaVersion());
     node.set("data", JsonObjects.parseObject(value.dataJson(), "data"));
     return node;
   }
@@ -548,7 +547,6 @@ public final class HistoryEntryPayloadJsonCodec {
             HistoryValueCodecs.text(node, "contributorId"), "contributorId"),
         HistoryValueCodecs.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "customType"), "customType"),
-        HistoryValueCodecs.requiredNonNegativeInt(node, "schemaVersion", "CUSTOM"),
         JsonObjects.write(HistoryValueCodecs.requireObject(node.get("data"), "CUSTOM.data")));
   }
 

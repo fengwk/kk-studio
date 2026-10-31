@@ -200,35 +200,6 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     }
   }
 
-  /** Chat 不再有 workspace 默认目录：legacy workspacePath 字段在 DTO 边界被严格拒绝，且不残留任何目录状态。 */
-  @Test
-  void legacyWorkspacePathIsRejectedAndChatCarriesNoDirectoryState() {
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle("env-default");
-    create.setAgentName("default-assistant");
-    assertThrows(
-        IllegalArgumentException.class, () -> create.rejectUnknownField("workspacePath", "."));
-
-    ChatDTO created = chatService.createChat(create);
-    String chatId = created.getId();
-    try {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> {
-            ChatUpdateDTO clear = new ChatUpdateDTO();
-            clear.setExpectedVersion(created.getVersion());
-            clear.rejectUnknownField("workspacePath", null);
-          });
-
-      ChatDTO roundTripped = chatService.getChat(chatId);
-      assertEquals("env-default", roundTripped.getTitle());
-      assertEquals("default-assistant", roundTripped.getAgentName());
-    } finally {
-      chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
-      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
-    }
-  }
-
   /** Chat 默认环境按名称保存：null 合法，非 null 必须存在且 canonical；更新区分省略与显式清空，CAS 失败不写入。 */
   @Test
   void persistsDefaultEnvironmentAndRejectsUnknownOrMalformedNames() throws Exception {

@@ -177,16 +177,14 @@ class IssueTransitionServiceTest {
   private AiValidationException acceptFrom(
       UUID callingThreadId, String runScopeJson, String toState) {
     return assertThrows(
-        AiValidationException.class,
-        () ->
-            service.accept(callingThreadId, ProjectRunScope.SCHEMA_VERSION, runScopeJson, toState));
+        AiValidationException.class, () -> service.accept(callingThreadId, runScopeJson, toState));
   }
 
   /** 测试意图：合法交接只登记 Run 的 next_state —— Issue 阶段与 Issue 行都不在本调用中被改写。 */
   @Test
   void acceptsLegalHandoffWithoutChangingTheIssueStage() {
     IssueTransitionService.IssueTransitionResult result =
-        service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
+        service.accept(THREAD_ID, scopeJson(), "REVIEW");
 
     assertEquals("DESIGN", result.fromState());
     assertEquals("REVIEW", result.toState());
@@ -201,10 +199,10 @@ class IssueTransitionServiceTest {
   /** 测试意图：同一目标的重复调用是丢响应后的幂等重放，不重复写行、不推进版本。 */
   @Test
   void replaysSameTargetWithoutWriting() {
-    service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
+    service.accept(THREAD_ID, scopeJson(), "REVIEW");
 
     IssueTransitionService.IssueTransitionResult replay =
-        service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
+        service.accept(THREAD_ID, scopeJson(), "REVIEW");
 
     assertTrue(replay.replayed());
     assertEquals("REVIEW", replay.toState());
@@ -214,7 +212,7 @@ class IssueTransitionServiceTest {
   /** 测试意图：已接受目标后不接受第二个不同目标，避免收尾时出现两个互相矛盾的交接意图。 */
   @Test
   void rejectsDifferentTargetAfterAcceptance() {
-    service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVISE");
+    service.accept(THREAD_ID, scopeJson(), "REVISE");
 
     // REVISE 与 REVIEW 都是 DESIGN 的合法目标，但已接受一个后必须拒绝另一个，避免出现两个互相矛盾的交接意图。
     assertTrue(reject("REVIEW").getMessage().contains("already accepted"));
@@ -258,12 +256,7 @@ class IssueTransitionServiceTest {
     IllegalStateException mismatch =
         assertThrows(
             IllegalStateException.class,
-            () ->
-                service.accept(
-                    THREAD_ID,
-                    ProjectRunScope.SCHEMA_VERSION,
-                    scopeJsonWithProject(OTHER_PROJECT_ID),
-                    "REVIEW"));
+            () -> service.accept(THREAD_ID, scopeJsonWithProject(OTHER_PROJECT_ID), "REVIEW"));
     assertEquals("Project thread ownership is inconsistent", mismatch.getMessage());
     verify(runs, never()).updateById(any(), anyLong());
   }
@@ -276,18 +269,14 @@ class IssueTransitionServiceTest {
     when(runs.getById(RUN_ID)).thenReturn(foreign);
     IllegalStateException mismatch =
         assertThrows(
-            IllegalStateException.class,
-            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
+            IllegalStateException.class, () -> service.accept(THREAD_ID, scopeJson(), "REVIEW"));
     assertEquals("Project thread ownership is inconsistent", mismatch.getMessage());
     verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：不兼容的 scope schema 版本与损坏快照都确定性拒绝，绝不静默当成"没有上下文"。 */
+  /** 测试意图：损坏快照确定性拒绝，绝不静默当成"没有上下文"。 */
   @Test
-  void rejectsUnsupportedVersionAndInvalidScope() {
-    assertThrows(
-        AiValidationException.class,
-        () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION + 1, scopeJson(), "REVIEW"));
+  void rejectsInvalidScope() {
     assertTrue(
         acceptFrom(THREAD_ID, "{oops}", "REVIEW").getMessage().contains("invalid run context"));
   }
@@ -350,7 +339,7 @@ class IssueTransitionServiceTest {
     AiVersionConflictException conflict =
         assertThrows(
             AiVersionConflictException.class,
-            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
+            () -> service.accept(THREAD_ID, scopeJson(), "REVIEW"));
     assertEquals("issue_run", conflict.resource());
   }
 
@@ -360,8 +349,7 @@ class IssueTransitionServiceTest {
     when(issues.getById(ISSUE_ID)).thenReturn(null);
     IllegalStateException missing =
         assertThrows(
-            IllegalStateException.class,
-            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
+            IllegalStateException.class, () -> service.accept(THREAD_ID, scopeJson(), "REVIEW"));
     assertEquals("Project thread ownership is inconsistent", missing.getMessage());
   }
 }

@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
 import java.io.IOException;
@@ -46,29 +44,5 @@ final class ModelCatalogFixtures {
     if (actual == null || new BigDecimal(expected).compareTo(actual) != 0) {
       throw new AssertionError("expected decimal " + expected + " but was " + actual);
     }
-  }
-
-  static SystemSettings settings(ModelCatalogSource source) {
-    SystemSettings.AiRuntime defaults = SystemSettings.AiRuntime.DEFAULT;
-    SystemSettings.AiRuntime aiRuntime =
-        new SystemSettings.AiRuntime(
-            defaults.retryMaxRetries(),
-            defaults.retryBackoffStrategy(),
-            defaults.retryBaseDelayMillis(),
-            defaults.retryMaxDelayMillis(),
-            defaults.compactionKeepRecentTokens(),
-            defaults.subagentMaxDepth(),
-            defaults.subagentMaxConcurrency(),
-            defaults.subagentMaxTotalConcurrency(),
-            defaults.subagentMaxTurns(),
-            defaults.modelHttpRetryStatusCodes(),
-            source);
-    return new SystemSettings(
-        SystemSettings.DEFAULT.tool(),
-        aiRuntime,
-        SystemSettings.DEFAULT.environment(),
-        SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.storageMedia(),
-        SystemSettings.DEFAULT.advanced());
   }
 }

@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
@@ -223,9 +222,7 @@ public class SystemSettingsCodec {
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
         requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"),
         requiredStatusCodes(
-            dto.getModelHttpRetryStatusCodes(), "aiRuntime.modelHttpRetryStatusCodes"),
-        ModelCatalogSource.fromValue(
-            requiredText(dto.getModelCatalogSource(), "aiRuntime.modelCatalogSource")));
+            dto.getModelHttpRetryStatusCodes(), "aiRuntime.modelHttpRetryStatusCodes"));
   }
 
   private static SystemSettings.Environment toEnvironment(SystemSettingsEnvironmentDTO dto) {
@@ -375,7 +372,6 @@ public class SystemSettingsCodec {
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
     dto.setSubagentMaxTurns(aiRuntime.subagentMaxTurns());
     dto.setModelHttpRetryStatusCodes(aiRuntime.modelHttpRetryStatusCodes());
-    dto.setModelCatalogSource(aiRuntime.modelCatalogSource().value());
     return dto;
   }
 

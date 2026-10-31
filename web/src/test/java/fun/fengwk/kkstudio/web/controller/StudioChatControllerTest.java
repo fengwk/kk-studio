@@ -149,23 +149,22 @@ class StudioChatControllerTest {
     assertEquals("default-assistant", captor.getValue().getAgentName());
   }
 
-  /** 测试意图：验证旧 workspacePath 创建字段在严格 DTO 边界被拒绝。 */
+  /** 测试意图：验证创建 Chat 请求严格拒绝未知字段。 */
   @Test
-  void createChatRejectsLegacyWorkspacePath() throws Exception {
+  void createChatRejectsUnknownField() throws Exception {
     mockMvc
         .perform(
             post("/api/chats")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"title\":\"t\",\"agentName\":\"default-assistant\","
-                        + "\"workspacePath\":\"src\"}"))
+                    "{\"title\":\"t\",\"agentName\":\"default-assistant\"," + "\"extra\":true}"))
         .andExpect(status().isBadRequest());
     verifyNoInteractions(chatService);
   }
 
-  /** 测试意图：验证 Chat 更新继续传递 CAS version，响应中不存在 Workspace 状态。 */
+  /** 测试意图：验证 Chat 更新继续传递 CAS version。 */
   @Test
-  void updateChatCarriesNoWorkspaceState() throws Exception {
+  void updateChatCarriesExpectedVersion() throws Exception {
     ChatDTO updated = new ChatDTO();
     updated.setId("7");
     updated.setTitle("t");
@@ -179,21 +178,20 @@ class StudioChatControllerTest {
             put("/api/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"2\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.workspacePath").doesNotExist());
+        .andExpect(status().isOk());
     ArgumentCaptor<ChatUpdateDTO> captor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
     verify(chatService).updateChat(eq("7"), captor.capture());
     assertEquals("2", captor.getValue().getExpectedVersion());
   }
 
-  /** 测试意图：验证旧 workspacePath 更新字段在严格 DTO 边界被拒绝。 */
+  /** 测试意图：验证更新 Chat 请求严格拒绝未知字段。 */
   @Test
-  void updateChatRejectsLegacyWorkspacePath() throws Exception {
+  void updateChatRejectsUnknownField() throws Exception {
     mockMvc
         .perform(
             put("/api/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
+                .content("{\"extra\":true,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isBadRequest());
     verifyNoInteractions(chatService);
   }

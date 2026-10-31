@@ -22,7 +22,6 @@ import java.util.UUID;
 /** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
-  private static final String LEGACY_WORKSPACE_PATH = "123e4567-e89b-12d3-a456-426614174000";
   private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
@@ -63,7 +62,7 @@ class ThreadCommandPayloadJsonCodecTest {
 
   /** 测试意图：SET_ENVIRONMENT 只接受 text 或 null；缺失字段、未知字段与错误类型都必须严格拒绝。 */
   @Test
-  void setEnvironmentAcceptsOnlyTextOrNullAndRejectsLegacyShapes() {
+  void setEnvironmentAcceptsOnlyTextOrNullAndRejectsMalformedPayloads() {
     assertEquals(
         new SetEnvironmentCommandPayload("local"),
         codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"local\"}"));
@@ -81,7 +80,6 @@ class ThreadCommandPayloadJsonCodecTest {
             "{\"environmentName\":\"a/b\"}",
             "{\"environmentName\":\"" + "e".repeat(65) + "\"}",
             "{\"environmentName\":null,\"extra\":1}",
-            "{\"workspacePath\":\"../outside\"}",
             "{\"environmentName\":null}{\"environmentName\":null}")) {
       assertThrows(
           IllegalArgumentException.class,
@@ -244,22 +242,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
-  /** workspacePath 形状已整体删除，对任何 command type 都必须保持拒绝。 */
-  @Test
-  void rejectsLegacyWorkspacePathPayloadAcrossAllTypes() {
-    for (ThreadCommandType type : ThreadCommandType.values()) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(type, "{\"workspacePath\":\"" + LEGACY_WORKSPACE_PATH + "\"}"),
-          "workspacePath 形状必须对 " + type + " 保持拒绝");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(type, "{\"workspacePath\":null}"),
-          "workspacePath 形状必须对 " + type + " 保持拒绝");
-    }
-    assertEquals(8, ThreadCommandType.values().length);
-  }
-
   /** 测试意图：NOTIFICATION command 四字段严格往返，canonical 字段序与历史 payload 同形，仅允许 USER 角色。 */
   @Test
   void roundTripsNotificationCommandWithStrictFieldOrder() {
@@ -355,12 +337,11 @@ class ThreadCommandPayloadJsonCodecTest {
             new CustomEntryPayload(
                 "com.example.issue",
                 "issue-scope",
-                2,
                 "{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],\"nested\":{\"k\":1}}"));
     String json = codec.encode(payload);
     assertEquals(
         "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
-            + "\"schemaVersion\":2,\"data\":{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],"
+            + "\"data\":{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],"
             + "\"nested\":{\"k\":1}}}}",
         json);
     assertEquals(ThreadCommandType.SET_CONTRIBUTOR_STATE, payload.type());
@@ -374,7 +355,7 @@ class ThreadCommandPayloadJsonCodecTest {
 
   /**
    * 测试意图：SET_CONTRIBUTOR_STATE 只接受 {@code
-   * {state:{contributorId,customType,schemaVersion,data}}}；缺失、未知、 类型错误、非法标识符与非正 schemaVersion 一律拒绝。
+   * {state:{contributorId,customType,data}}}；缺失、未知、类型错误与非法标识符一律拒绝。
    */
   @Test
   void rejectsSetContributorStateMissingUnknownOrWrongTypedFields() {
@@ -383,17 +364,14 @@ class ThreadCommandPayloadJsonCodecTest {
             "{}",
             "{\"state\":5}",
             "{\"state\":[]}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,",
-            "{\"state\":{\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"schemaVersion\":1,\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":0,\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":-1,\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"C\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":[]}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{},\"extra\":1}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}},\"extra\":1}")) {
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",",
+            "{\"state\":{\"customType\":\"t\",\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\"}}",
+            "{\"state\":{\"contributorId\":\"C\",\"customType\":\"t\",\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":[]}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{},\"extra\":1}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{}},\"extra\":1}")) {
       assertThrows(
           IllegalArgumentException.class,
           () -> codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json),
@@ -410,20 +388,6 @@ class ThreadCommandPayloadJsonCodecTest {
         + "}";
   }
 
-  /** schemaVersion 必须是整数 token，不能把小数截断为另一个 schema 版本。 */
-  @Test
-  void rejectsNonIntegralContributorSchemaVersions() {
-    for (String version : List.of("1.5", "1.0", "1e0", "\"1\"", "null", "2147483648")) {
-      String json =
-          "{\"state\":{\"contributorId\":\"project\",\"customType\":\"run\",\"schemaVersion\":"
-              + version
-              + ",\"data\":{}}}";
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json));
-    }
-  }
-
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }
@@ -438,7 +402,7 @@ class ThreadCommandPayloadJsonCodecTest {
     String dataJson = "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}";
     SetContributorStateCommandPayload payload =
         new SetContributorStateCommandPayload(
-            new CustomEntryPayload("com.example.issue", "issue-scope", 1, dataJson));
+            new CustomEntryPayload("com.example.issue", "issue-scope", dataJson));
 
     String json = codec.encode(payload);
 
@@ -447,7 +411,7 @@ class ThreadCommandPayloadJsonCodecTest {
     assertFalse(json.contains("Infinity"), json);
     assertEquals(
         "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
-            + "\"schemaVersion\":1,\"data\":"
+            + "\"data\":"
             + dataJson
             + "}}",
         json);

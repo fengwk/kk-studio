@@ -111,8 +111,7 @@ public final class IssueTransitionTool implements Tool {
                       new IllegalArgumentException(
                           NAME + " requires the current run's frozen context"));
       IssueTransitionService.IssueTransitionResult result =
-          transitionService.accept(
-              request.context().threadId(), scope.schemaVersion(), scope.dataJson(), toState);
+          transitionService.accept(request.context().threadId(), scope.dataJson(), toState);
       return success(request, result);
     } catch (RuntimeException error) {
       return error(request, error);

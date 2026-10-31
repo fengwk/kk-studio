@@ -189,31 +189,6 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(bareThreadTarget))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.detail").value("unknown target type: THREAD"));
-
-    // 历史 THREAD target 的 cursor 字段不再是 union 成员，多携带即未知字段。
-    String legacyThreadTarget =
-        batch(
-            """
-            {
-              "type":"THREAD",
-              "threadId":"%s",
-              "expectedHeadEntryId":"%s",
-              "expectedNextCommandSequence":"4"
-            }
-            """
-                .formatted(THREAD_ID, ENTRY_ID));
-    mockMvc
-        .perform(
-            post("/api/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(legacyThreadTarget))
-        .andExpect(status().isBadRequest())
-        .andExpect(
-            jsonPath("$.errors.detail").value("unknown command target field: expectedHeadEntryId"));
-
-    verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
-    verifyNoInteractions(runtime);
   }
 
   @Test

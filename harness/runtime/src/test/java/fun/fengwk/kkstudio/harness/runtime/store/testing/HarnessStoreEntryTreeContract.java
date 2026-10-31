@@ -1029,19 +1029,19 @@ public abstract class HarnessStoreEntryTreeContract {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
+            new CustomEntryPayload("test.contributor", "type.a", "{\"step\":1}"));
     UUID intermediateCustom =
         insertChildEntry(
             store,
             baseline.sessionId(),
             custom1,
-            new CustomEntryPayload("other.contributor", "type.x", 1, "{\"skip\":true}"));
+            new CustomEntryPayload("other.contributor", "type.x", "{\"skip\":true}"));
     UUID custom2 =
         insertChildEntry(
             store,
             baseline.sessionId(),
             intermediateCustom,
-            new CustomEntryPayload("test.contributor", "type.b", 1, "{\"step\":2}"));
+            new CustomEntryPayload("test.contributor", "type.b", "{\"step\":2}"));
 
     store.transaction(
         tx -> {
@@ -1062,25 +1062,25 @@ public abstract class HarnessStoreEntryTreeContract {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"common\":true}"));
+            new CustomEntryPayload("contributor.alpha", "state", "{\"common\":true}"));
     UUID sharedBeta =
         insertChildEntry(
             store,
             baseline.sessionId(),
             sharedAlpha,
-            new CustomEntryPayload("contributor.beta", "state", 1, "{\"other\":true}"));
+            new CustomEntryPayload("contributor.beta", "state", "{\"other\":true}"));
     UUID branch1Alpha =
         insertChildEntry(
             store,
             baseline.sessionId(),
             sharedBeta,
-            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":1}"));
+            new CustomEntryPayload("contributor.alpha", "state", "{\"branch\":1}"));
     UUID branch2Alpha =
         insertChildEntry(
             store,
             baseline.sessionId(),
             sharedBeta,
-            new CustomEntryPayload("contributor.alpha", "state", 1, "{\"branch\":2}"));
+            new CustomEntryPayload("contributor.alpha", "state", "{\"branch\":2}"));
 
     store.transaction(
         tx -> {
@@ -1121,7 +1121,7 @@ public abstract class HarnessStoreEntryTreeContract {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("other.contributor", "state", 1, "{\"ok\":true}"));
+            new CustomEntryPayload("other.contributor", "state", "{\"ok\":true}"));
 
     store.transaction(
         tx -> {
@@ -1165,13 +1165,13 @@ public abstract class HarnessStoreEntryTreeContract {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("target.contributor", "type", 1, "{\"ok\":true}"));
+            new CustomEntryPayload("target.contributor", "type", "{\"ok\":true}"));
     UUID otherHeadCustom =
         insertChildEntry(
             store,
             baseline.sessionId(),
             targetCustom,
-            new CustomEntryPayload("other.contributor", "type", 1, "{\"other\":true}"));
+            new CustomEntryPayload("other.contributor", "type", "{\"other\":true}"));
 
     store.transaction(
         tx -> {

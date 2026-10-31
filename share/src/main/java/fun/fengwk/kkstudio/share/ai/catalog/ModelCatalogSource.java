@@ -3,9 +3,8 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-/** 系统设置中选择的模型目录来源；两者使用独立适配器，绝不自动回退或混合。 */
+/** 模型目录来源。 */
 public enum ModelCatalogSource {
-  MODELS_DEV_V1("models_dev_v1"),
   MODELS_DEV_V2("models_dev_v2");
 
   private final String value;

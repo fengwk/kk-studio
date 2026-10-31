@@ -19,11 +19,9 @@ class ModelsDevCatalogTransportTest {
   @Test
   void pinsHttpsEndpointsTimeoutAndResponseLimit() {
     assertEquals(
-        URI.create("https://models.dev/api.json"),
-        ModelsDevCatalogTransport.endpoints().get(ModelCatalogSource.MODELS_DEV_V1));
-    assertEquals(
         URI.create("https://models.dev/experimental/v2.0/api.json"),
         ModelsDevCatalogTransport.endpoints().get(ModelCatalogSource.MODELS_DEV_V2));
+    assertEquals(1, ModelsDevCatalogTransport.endpoints().size());
     assertEquals(Duration.ofSeconds(20), ModelsDevCatalogTransport.TIMEOUT);
     assertEquals(32 * 1024 * 1024, ModelsDevCatalogTransport.MAX_BYTES);
   }

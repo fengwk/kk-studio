@@ -24,8 +24,8 @@ class BranchViewTest {
   /** 验证 BranchView 纯接口可以通过实现类正确提供 customEntries 和 latestCustomEntry 查询。 */
   @Test
   void branchViewMockProvidesStateSnapshots() {
-    CustomStateSnapshot snapshot1 = new CustomStateSnapshot(1, "{\"item\":1}");
-    CustomStateSnapshot snapshot2 = new CustomStateSnapshot(2, "{\"item\":2}");
+    CustomStateSnapshot snapshot1 = new CustomStateSnapshot("{\"item\":1}");
+    CustomStateSnapshot snapshot2 = new CustomStateSnapshot("{\"item\":2}");
 
     BranchView view =
         new BranchView() {
@@ -59,49 +59,37 @@ class BranchViewTest {
     assertEquals(Optional.of(new GoalSnapshot(new UUID(0L, 9L), "ship it")), view.goal());
   }
 
-  /** 验证 CustomStateSnapshot 字段非空与版本号正数约束。 */
+  /** 验证 CustomStateSnapshot 字段非空与 JSON 校验约束。 */
   @Test
   void customStateSnapshotValidatesFields() {
-    CustomStateSnapshot snapshot = new CustomStateSnapshot(1, "{\"k\":\"v\"}");
-    assertEquals(1, snapshot.schemaVersion());
+    CustomStateSnapshot snapshot = new CustomStateSnapshot("{\"k\":\"v\"}");
     assertEquals("{\"k\":\"v\"}", snapshot.dataJson());
 
-    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(0, "{}"));
-    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(-1, "{}"));
-    assertThrows(NullPointerException.class, () -> new CustomStateSnapshot(1, null));
+    assertThrows(NullPointerException.class, () -> new CustomStateSnapshot(null));
 
-    CustomStateSnapshot same = new CustomStateSnapshot(1, "{\"k\":\"v\"}");
+    CustomStateSnapshot same = new CustomStateSnapshot("{\"k\":\"v\"}");
     assertEquals(snapshot, same);
     assertEquals(snapshot.hashCode(), same.hashCode());
   }
 
-  /** 验证 AppendCustomEntry 完整字段校验：canonical customType、正数版本号与非空 JSON。 */
+  /** 验证 AppendCustomEntry 完整字段校验：canonical customType 与非空 JSON。 */
   @Test
   void appendCustomEntryValidatesFields() {
-    AppendCustomEntry entry = new AppendCustomEntry("goal.state", 1, "{\"progress\":50}");
+    AppendCustomEntry entry = new AppendCustomEntry("goal.state", "{\"progress\":50}");
     assertEquals("goal.state", entry.customType());
-    assertEquals(1, entry.schemaVersion());
     assertEquals("{\"progress\":50}", entry.dataJson());
 
     // customType canonical 校验
-    assertThrows(NullPointerException.class, () -> new AppendCustomEntry(null, 1, "{}"));
-    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("", 1, "{}"));
-    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("Goal", 1, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new AppendCustomEntry("goal_state", 1, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new AppendCustomEntry("goal..state", 1, "{}"));
-
-    // schemaVersion 校验
-    assertThrows(
-        IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", 0, "{}"));
-    assertThrows(
-        IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", -1, "{}"));
+    assertThrows(NullPointerException.class, () -> new AppendCustomEntry(null, "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("", "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("Goal", "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("goal_state", "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("goal..state", "{}"));
 
     // dataJson 校验
-    assertThrows(NullPointerException.class, () -> new AppendCustomEntry("goal.state", 1, null));
+    assertThrows(NullPointerException.class, () -> new AppendCustomEntry("goal.state", null));
 
-    AppendCustomEntry same = new AppendCustomEntry("goal.state", 1, "{\"progress\":50}");
+    AppendCustomEntry same = new AppendCustomEntry("goal.state", "{\"progress\":50}");
     assertEquals(entry, same);
     assertEquals(entry.hashCode(), same.hashCode());
   }
@@ -112,28 +100,28 @@ class BranchViewTest {
   @Test
   void customDataJsonRequiresStrictSingleJsonValueAndPreservesRawText() {
     // null / scalar 均为合法单值。
-    assertEquals("null", new CustomStateSnapshot(1, "null").dataJson());
-    assertEquals("42", new AppendCustomEntry("goal.state", 1, "42").dataJson());
+    assertEquals("null", new CustomStateSnapshot("null").dataJson());
+    assertEquals("42", new AppendCustomEntry("goal.state", "42").dataJson());
 
     // 空白、畸形、重复字段、尾随内容全部 fail closed。
-    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "   "));
-    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{oops}"));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot("   "));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot("{oops}"));
     assertThrows(
-        IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{\"a\":1,\"a\":2}"));
-    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{} {}"));
-    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", 1, " "));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new AppendCustomEntry("goal.state", 1, "{\"a\":1,\"a\":2}"));
+        IllegalArgumentException.class, () -> new CustomStateSnapshot("{\"a\":1,\"a\":2}"));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot("{} {}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", " "));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AppendCustomEntry("goal.state", 1, "{\"a\":1} trailing"));
+        () -> new AppendCustomEntry("goal.state", "{\"a\":1,\"a\":2}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AppendCustomEntry("goal.state", "{\"a\":1} trailing"));
 
     // 保留原文：空白与超长小数都不被规范化。
     String spaced = " { \"a\" : 1e999 } ";
-    assertEquals(spaced, new CustomStateSnapshot(1, spaced).dataJson());
+    assertEquals(spaced, new CustomStateSnapshot(spaced).dataJson());
     String precise = "{\"n\":0.123456789012345678901234567890}";
-    assertEquals(precise, new AppendCustomEntry("goal.state", 1, precise).dataJson());
+    assertEquals(precise, new AppendCustomEntry("goal.state", precise).dataJson());
   }
 
   /** 验证 ContextFragment 文本非空校验与值对象语义。 */
@@ -162,12 +150,12 @@ class BranchViewTest {
         new BranchView() {
           @Override
           public List<CustomStateSnapshot> customEntries(String customType) {
-            return List.of(new CustomStateSnapshot(1, "{\"state\":\"data\"}"));
+            return List.of(new CustomStateSnapshot("{\"state\":\"data\"}"));
           }
 
           @Override
           public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-            return Optional.of(new CustomStateSnapshot(1, "{\"state\":\"data\"}"));
+            return Optional.of(new CustomStateSnapshot("{\"state\":\"data\"}"));
           }
 
           @Override

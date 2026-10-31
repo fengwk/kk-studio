@@ -72,9 +72,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -84,7 +81,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Stream;
 
 /**
  * ModelRequestDebugService 契约：以草稿 model / environment 在单次不可变 snapshot 上投影共享规划结果、把确定性拒绝降级为稳定 code
@@ -480,31 +476,6 @@ class ModelRequestDebugServiceTest {
     when(agentDefinitionRepository.getByName("coder")).thenReturn(coder);
   }
 
-  /**
-   * 测试意图：旧的展示文本预览服务及其装配/测试必须彻底删除，Debug 只保留结构化投影这一条路径。这里扫描源码而不是 {@code Class.forName}，以免 target/
-   * 下的陈旧 class 文件掩盖真实状态。
-   */
-  @Test
-  void obsoleteTextPreviewServiceAndWiringAreGone() throws IOException {
-    // 标记按片段拼接，避免本测试文件自身命中扫描。
-    String obsoleteMarker = "SystemPrompt" + "Preview" + "Service";
-    Path reactorRoot = reactorRoot();
-    List<String> offenders = new ArrayList<>();
-    try (Stream<Path> paths =
-        Stream.concat(
-            Stream.concat(
-                Files.walk(reactorRoot.resolve("platform/runtime/src")),
-                Files.walk(reactorRoot.resolve("platform/plugin-api/src"))),
-            Files.walk(reactorRoot.resolve("web/src")))) {
-      for (Path path : paths.filter(file -> file.toString().endsWith(".java")).toList()) {
-        if (Files.readString(path, StandardCharsets.UTF_8).contains(obsoleteMarker)) {
-          offenders.add(reactorRoot.relativize(path).toString());
-        }
-      }
-    }
-    assertTrue(offenders.isEmpty(), () -> "obsolete preview sources remain: " + offenders);
-  }
-
   private static ThreadSnapshot idleSnapshot() {
     EntryPath path = basePath();
     return new ThreadSnapshot(
@@ -677,18 +648,5 @@ class ModelRequestDebugServiceTest {
         List.of(),
         List.of(new SubagentBinding("coder", "Codes solutions.")),
         new ProviderCacheControl(PromptCacheRetention.SHORT, SESSION_ID.toString()));
-  }
-
-  /** 从当前工作目录向上定位 reactor 根（同时含 platform 与 web 模块源码）。 */
-  private static Path reactorRoot() {
-    Path current = Path.of("").toAbsolutePath().normalize();
-    while (current != null) {
-      if (Files.isDirectory(current.resolve("platform/runtime/src/main/java"))
-          && Files.isDirectory(current.resolve("web/src/main/java"))) {
-        return current;
-      }
-      current = current.getParent();
-    }
-    throw new IllegalStateException("cannot locate reactor root for source scan");
   }
 }

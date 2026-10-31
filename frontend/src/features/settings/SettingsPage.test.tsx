@@ -102,7 +102,7 @@ async function tabByName(name: string) {
 
 describe('SettingsPage general tab + notifications', () => {
   // 真实页面使用服务端 schema，完整 PUT 成功后清理脏状态。
-  it('saves the selected model catalog source through the schema UI', async () => {
+  it('saves an updated retry backoff strategy through the schema UI', async () => {
     const user = userEvent.setup()
     const dto = makeSettingsDto()
     mocks.update.mockImplementation(async (update) => {
@@ -112,15 +112,15 @@ describe('SettingsPage general tab + notifications', () => {
     })
     renderSettings()
     await user.click(await tabByName('AI 运行时'))
-    const select = await screen.findByLabelText('模型目录来源')
-    expect(select).toHaveTextContent('models.dev v2')
+    const select = await screen.findByLabelText('退避策略')
+    expect(select).toHaveTextContent('指数')
     await user.click(select)
-    await user.click(screen.getByRole('option', { name: 'models.dev v1（旧版）' }))
+    await user.click(screen.getByRole('option', { name: '固定' }))
     expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(mocks.update).toHaveBeenCalledWith({
       tool: dto.tool,
-      aiRuntime: { ...dto.aiRuntime, modelCatalogSource: 'models_dev_v1' },
+      aiRuntime: { ...dto.aiRuntime, retryBackoffStrategy: 'FIXED' },
       environment: dto.environment, network: dto.network,
       storageMedia: dto.storageMedia, advanced: dto.advanced, expectedVersion: dto.version,
     })
