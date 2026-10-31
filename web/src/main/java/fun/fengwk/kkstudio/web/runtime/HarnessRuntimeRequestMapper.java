@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -49,69 +51,21 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /** Harness Runtime HTTP 请求的严格解析与 DTO-to-domain 映射。 */
 public final class HarnessRuntimeRequestMapper {
 
-  private static final Pattern POSITIVE_DECIMAL = Pattern.compile("[1-9][0-9]*");
-  private static final Pattern NON_NEGATIVE_DECIMAL = Pattern.compile("0|[1-9][0-9]*");
-
   private HarnessRuntimeRequestMapper() {}
-
-  /** 解析 canonical UUID 实体 id（{@code UUID.fromString} 往返一致）。 */
-  public static UUID parseUuid(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
-    }
-    UUID parsed;
-    try {
-      parsed = UUID.fromString(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
-    }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
-    }
-    return parsed;
-  }
-
-  static long parsePositiveDecimal(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null || !POSITIVE_DECIMAL.matcher(value).matches()) {
-      throw new IllegalArgumentException(field + " must be an unsigned positive decimal: " + value);
-    }
-    try {
-      return Long.parseLong(value);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(field + " exceeds bigint range: " + value, error);
-    }
-  }
-
-  static long parseNonNegativeDecimal(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null || !NON_NEGATIVE_DECIMAL.matcher(value).matches()) {
-      throw new IllegalArgumentException(
-          field + " must be a non-negative decimal bigint: " + value);
-    }
-    try {
-      return Long.parseLong(value);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(field + " exceeds bigint range: " + value, error);
-    }
-  }
 
   /** 映射 owner，只允许 CHAT 与 ISSUE_AGENT：Canvas 不持有 Harness Session，公共 batch 端点不接受 Issue+Agent。 */
   public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
     String type = requireText(dto.getType(), "owner.type");
     return switch (type) {
-      case "CHAT" -> new OwnerRef.Chat(parseUuid(dto.getChatId(), "owner.chatId"));
+      case "CHAT" -> new OwnerRef.Chat(Uuids.parseCanonical(dto.getChatId(), "owner.chatId"));
       case "ISSUE_AGENT" -> new OwnerRef.IssueAgent(
-          parseUuid(dto.getIssueId(), "owner.issueId"),
+          Uuids.parseCanonical(dto.getIssueId(), "owner.issueId"),
           requireText(dto.getAgentName(), "owner.agentName"));
       default -> throw new IllegalArgumentException(
           "owner.type must be CHAT or ISSUE_AGENT: " + type);
@@ -138,16 +92,16 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessThreadCompactDTO dto) {
     requireNonNull(dto, "compactDTO");
     return new CompactThreadCommand(
-        parseUuid(threadId, "threadId"),
-        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
+        Uuids.parseCanonical(threadId, "threadId"),
+        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   public static StopCommand toStopCommand(String threadId, HarnessThreadStopDTO dto) {
     requireNonNull(dto, "stopDTO");
     return new StopCommand(
-        parseUuid(threadId, "threadId"),
-        parseUuid(dto.getStopRequestId(), "stopRequestId"),
-        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
+        Uuids.parseCanonical(threadId, "threadId"),
+        Uuids.parseCanonical(dto.getStopRequestId(), "stopRequestId"),
+        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 解析放弃退出确认目标；执行 id 与 Thread id 都是 canonical UUID，expectedVersion 是 non-negative bigint。 */
@@ -155,9 +109,9 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, String executionId, HarnessExecutionAbandonDTO dto) {
     requireNonNull(dto, "abandonDTO");
     return new AbandonExecutionTarget(
-        parseUuid(threadId, "threadId"),
-        parseUuid(executionId, "executionId"),
-        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
+        Uuids.parseCanonical(threadId, "threadId"),
+        Uuids.parseCanonical(executionId, "executionId"),
+        DecimalLongs.parseNonNegative(dto.getExpectedVersion(), "expectedVersion"));
   }
 
   /** 已校验的放弃退出确认目标。 */
@@ -167,7 +121,8 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessThreadYoloUpdateDTO dto) {
     requireNonNull(dto, "yoloUpdateDTO");
     return new SetThreadYoloCommand(
-        parseUuid(threadId, "threadId"), requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
+        Uuids.parseCanonical(threadId, "threadId"),
+        requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 
   /**
@@ -184,7 +139,9 @@ public final class HarnessRuntimeRequestMapper {
       throw new IllegalArgumentException("attempt must be positive: " + attempt);
     }
     return new StreamCatchupRequest(
-        parseUuid(threadId, "threadId"), parseUuid(dto.getInvocationId(), "invocationId"), attempt);
+        Uuids.parseCanonical(threadId, "threadId"),
+        Uuids.parseCanonical(dto.getInvocationId(), "invocationId"),
+        attempt);
   }
 
   /** 已通过 HTTP 形状校验的流式追帧目标。 */
@@ -195,7 +152,7 @@ public final class HarnessRuntimeRequestMapper {
       String sessionId, HarnessNameUpdateDTO dto) {
     requireNonNull(dto, "nameUpdateDTO");
     return new RenameSessionCommand(
-        parseUuid(sessionId, "sessionId"), requireText(dto.getName(), "name"));
+        Uuids.parseCanonical(sessionId, "sessionId"), requireText(dto.getName(), "name"));
   }
 
   /** 把 PUT name 请求映射为 Thread 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
@@ -203,7 +160,7 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessNameUpdateDTO dto) {
     requireNonNull(dto, "nameUpdateDTO");
     return new RenameThreadCommand(
-        parseUuid(threadId, "threadId"), requireText(dto.getName(), "name"));
+        Uuids.parseCanonical(threadId, "threadId"), requireText(dto.getName(), "name"));
   }
 
   /** 把审批请求映射为命令。操作者身份由调用方从认证上下文解析后显式传入，绝不读取请求体中的身份字段。 */
@@ -219,10 +176,10 @@ public final class HarnessRuntimeRequestMapper {
               "decision must be ALLOW or DENY: " + decision);
         };
     return new ToolApprovalCommand(
-        parseUuid(threadId, "threadId"),
-        parseUuid(toolInvocationId, "toolInvocationId"),
+        Uuids.parseCanonical(threadId, "threadId"),
+        Uuids.parseCanonical(toolInvocationId, "toolInvocationId"),
         parsed,
-        parseUuid(dto.getDecisionId(), "decisionId"),
+        Uuids.parseCanonical(dto.getDecisionId(), "decisionId"),
         requireText(actor, "actor"),
         dto.getReason());
   }
@@ -234,7 +191,7 @@ public final class HarnessRuntimeRequestMapper {
   public static ToolInputSubmissionCommand toToolInputSubmissionCommand(
       String toolInvocationId, HarnessToolInputDTO dto, String actor) {
     requireNonNull(dto, "toolInputDTO");
-    UUID submissionId = parseUuid(dto.getSubmissionId(), "submissionId");
+    UUID submissionId = Uuids.parseCanonical(dto.getSubmissionId(), "submissionId");
     boolean declined = requireBoolean(dto.getDeclined(), "declined");
     List<List<String>> answers = dto.getAnswers();
     if (declined) {
@@ -246,8 +203,8 @@ public final class HarnessRuntimeRequestMapper {
       throw new IllegalArgumentException("answers must not be null");
     }
     return new ToolInputSubmissionCommand(
-        parseUuid(dto.getThreadId(), "threadId"),
-        parseUuid(toolInvocationId, "toolInvocationId"),
+        Uuids.parseCanonical(dto.getThreadId(), "threadId"),
+        Uuids.parseCanonical(toolInvocationId, "toolInvocationId"),
         submissionId,
         requireText(actor, "actor"),
         declined,
@@ -264,8 +221,8 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(
             dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewRootSession(
-            parseUuid(dto.getSessionId(), "target.sessionId"),
-            parseUuid(dto.getThreadId(), "target.threadId"),
+            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
+            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
             toBranchSettings(requireNonNull(dto.getRootSettings(), "target.rootSettings")),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
@@ -274,9 +231,9 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(
             dto.hasSourceThreadIdField(), "target.sourceThreadId", "target type " + type);
         yield new AcceptCommandsTarget.NewThread(
-            parseUuid(dto.getSessionId(), "target.sessionId"),
-            parseUuid(dto.getStartEntryId(), "target.startEntryId"),
-            parseUuid(dto.getThreadId(), "target.threadId"),
+            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
+            Uuids.parseCanonical(dto.getStartEntryId(), "target.startEntryId"),
+            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
             requireText(dto.getThreadName(), "target.threadName"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
@@ -284,10 +241,10 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
         requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
         yield new AcceptCommandsTarget.NewForkedSession(
-            parseUuid(dto.getSourceThreadId(), "target.sourceThreadId"),
-            parseUuid(dto.getStartEntryId(), "target.startEntryId"),
-            parseUuid(dto.getSessionId(), "target.sessionId"),
-            parseUuid(dto.getThreadId(), "target.threadId"),
+            Uuids.parseCanonical(dto.getSourceThreadId(), "target.sourceThreadId"),
+            Uuids.parseCanonical(dto.getStartEntryId(), "target.startEntryId"),
+            Uuids.parseCanonical(dto.getSessionId(), "target.sessionId"),
+            Uuids.parseCanonical(dto.getThreadId(), "target.threadId"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
       default -> throw new IllegalArgumentException("unknown target type: " + type);
@@ -337,11 +294,11 @@ public final class HarnessRuntimeRequestMapper {
     }
     AcceptCommandsTarget target =
         new AcceptCommandsTarget.Thread(
-            parseUuid(threadId, "threadId"),
-            headEntryId == null ? null : parseUuid(headEntryId, "expectedHeadEntryId"),
+            Uuids.parseCanonical(threadId, "threadId"),
+            headEntryId == null ? null : Uuids.parseCanonical(headEntryId, "expectedHeadEntryId"),
             nextCommandSequence == null
                 ? null
-                : parsePositiveDecimal(nextCommandSequence, "expectedNextCommandSequence"));
+                : DecimalLongs.parsePositive(nextCommandSequence, "expectedNextCommandSequence"));
     return new AcceptCommandsCommand(target, commands);
   }
 
@@ -406,7 +363,7 @@ public final class HarnessRuntimeRequestMapper {
     ThreadCommandPayload payload = toPayload(dto);
     return new NewThreadCommand(
         payload,
-        parseUuid(dto.getIdempotencyKey(), "command.idempotencyKey"),
+        Uuids.parseCanonical(dto.getIdempotencyKey(), "command.idempotencyKey"),
         ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
@@ -546,13 +503,14 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasNameField(), context + ".name", "content type " + type);
         requireForbidden(dto.hasPreviewField(), context + ".preview", "content type " + type);
         yield new AttachmentMessageContent(
-            parseUuid(dto.getUploadId(), context + ".uploadId"), toImageTier(dto, context));
+            Uuids.parseCanonical(dto.getUploadId(), context + ".uploadId"),
+            toImageTier(dto, context));
       }
       case "RESOURCE" -> {
         requireForbidden(dto.hasTextField(), context + ".text", "content type " + type);
         requireForbidden(dto.hasUploadIdField(), context + ".uploadId", "content type " + type);
         yield ResourceMessageContent.media(
-            parseUuid(dto.getBlobId(), context + ".blobId"),
+            Uuids.parseCanonical(dto.getBlobId(), context + ".blobId"),
             requireText(dto.getName(), context + ".name"),
             dto.getPreview(),
             toImageTier(dto, context));

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.browser;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -18,24 +20,7 @@ public record ConnectionIdentity(UUID eventNodeId, UUID connectionId) {
   /** 解析两个 canonical UUID 文本；大小写变体或非 canonical 形状一律拒绝。 */
   public static ConnectionIdentity parse(String eventNodeId, String connectionId) {
     return new ConnectionIdentity(
-        parseCanonicalUuid(eventNodeId, "eventNodeId"),
-        parseCanonicalUuid(connectionId, "connectionId"));
-  }
-
-  public static UUID parseCanonicalUuid(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
-    }
-    UUID parsed;
-    try {
-      parsed = UUID.fromString(value);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
-    }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
-    }
-    return parsed;
+        Uuids.parseCanonical(eventNodeId, "eventNodeId"),
+        Uuids.parseCanonical(connectionId, "connectionId"));
   }
 }

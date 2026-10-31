@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.ide.browser;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.Objects;
@@ -23,7 +24,7 @@ public record IdeBrowserUseIntentQuery(
   }
 
   public UUID document() {
-    return ConnectionIdentity.parseCanonicalUuid(documentId, "documentId");
+    return Uuids.parseCanonical(documentId, "documentId");
   }
 
   public EnvironmentId environment() {
@@ -31,11 +32,11 @@ public record IdeBrowserUseIntentQuery(
   }
 
   public UUID view() {
-    return ConnectionIdentity.parseCanonicalUuid(viewId, "viewId");
+    return Uuids.parseCanonical(viewId, "viewId");
   }
 
   public UUID claim() {
-    return ConnectionIdentity.parseCanonicalUuid(claimId, "claimId");
+    return Uuids.parseCanonical(claimId, "claimId");
   }
 
   public static IdeBrowserUseIntentQuery of(

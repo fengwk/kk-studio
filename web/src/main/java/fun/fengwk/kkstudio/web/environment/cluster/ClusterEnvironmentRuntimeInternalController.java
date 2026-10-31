@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 import java.util.Map;
 
@@ -70,7 +71,7 @@ public class ClusterEnvironmentRuntimeInternalController {
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = parseEnvironmentId(environmentId);
+    EnvironmentId environment = RequestParameters.environmentId(environmentId);
     boolean local =
         clusterNodeRegistry.route(environment).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
@@ -78,14 +79,6 @@ public class ClusterEnvironmentRuntimeInternalController {
           "internal runtime request does not match this node's READY owner route");
     }
     return environment;
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
-    }
   }
 
   @ExceptionHandler(ClusterInternalAuthenticationException.class)

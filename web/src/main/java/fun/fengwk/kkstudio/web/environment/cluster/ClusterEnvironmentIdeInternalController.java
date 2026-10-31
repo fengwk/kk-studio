@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -136,7 +137,7 @@ public class ClusterEnvironmentIdeInternalController {
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = parseEnvironmentId(environmentId);
+    EnvironmentId environment = RequestParameters.environmentId(environmentId);
     requireLocalOwner(environment);
     return environment;
   }
@@ -169,14 +170,6 @@ public class ClusterEnvironmentIdeInternalController {
     if (!local) {
       throw new AiEnvironmentIdeUnavailableException(
           "internal IDE request does not match this node's READY owner route");
-    }
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
   }
 

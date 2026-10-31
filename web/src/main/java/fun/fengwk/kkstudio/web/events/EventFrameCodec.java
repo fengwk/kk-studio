@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
@@ -274,22 +275,15 @@ final class EventFrameCodec {
     return node;
   }
 
-  /** 解析 canonical UUID（{@code UUID.fromString} 往返一致）。 */
+  /** 解析 canonical UUID，并去掉共同解析器回显的原始值。 */
   static UUID parseUuid(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null) {
-      throw new IllegalArgumentException(field + " must not be null");
-    }
-    UUID parsed;
     try {
-      parsed = UUID.fromString(value);
+      return Uuids.parseCanonical(value, field);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
+      String message =
+          value == null ? field + " must not be null" : field + " must be a canonical UUID";
+      throw new IllegalArgumentException(message);
     }
-    if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException(field + " must be a canonical UUID");
-    }
-    return parsed;
   }
 
   private static void requireVersionTwo(ObjectNode node, String context) {

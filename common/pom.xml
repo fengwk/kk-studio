@@ -52,6 +52,7 @@
                                         <include>fun.fengwk.kkstudio.common.json.BoundedJsonWriter</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedOutputStream</include>
                                         <include>fun.fengwk.kkstudio.common.id.Uuids</include>
+                                        <include>fun.fengwk.kkstudio.common.number.DecimalLongs</include>
                                         <include>fun.fengwk.kkstudio.common.work.WorkState</include>
                                     </includes>
                                     <limits>

@@ -9,15 +9,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 /**
  * Environment IDE 视图控制 API：把 Studio pane 的 view 生命周期翻译为对 Daemon 的 IDE 命令。
@@ -36,7 +35,7 @@ public class StudioEnvironmentIdeController {
   public ApiResponse<EnvironmentIdeViewDTO> openView(
       @PathVariable String environmentId, @RequestBody EnvironmentIdeOpenViewDTO request) {
     return ApiResponse.ok(
-        environmentIdeService.openView(parseEnvironmentId(environmentId), request));
+        environmentIdeService.openView(RequestParameters.environmentId(environmentId), request));
   }
 
   @PutMapping("/{viewId}/directory")
@@ -45,7 +44,8 @@ public class StudioEnvironmentIdeController {
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeChangeDirectoryDTO request) {
     return ApiResponse.ok(
-        environmentIdeService.changeDirectory(parseEnvironmentId(environmentId), viewId, request));
+        environmentIdeService.changeDirectory(
+            RequestParameters.environmentId(environmentId), viewId, request));
   }
 
   @PostMapping("/{viewId}/terminal")
@@ -53,7 +53,8 @@ public class StudioEnvironmentIdeController {
       @PathVariable String environmentId,
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeViewBindingDTO request) {
-    environmentIdeService.focusTerminal(parseEnvironmentId(environmentId), viewId, request);
+    environmentIdeService.focusTerminal(
+        RequestParameters.environmentId(environmentId), viewId, request);
     return ApiResponse.noContent();
   }
 
@@ -62,15 +63,8 @@ public class StudioEnvironmentIdeController {
       @PathVariable String environmentId,
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeCloseViewDTO request) {
-    environmentIdeService.closeView(parseEnvironmentId(environmentId), viewId, request);
+    environmentIdeService.closeView(
+        RequestParameters.environmentId(environmentId), viewId, request);
     return ApiResponse.noContent();
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
-    }
   }
 }

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.browser;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.Objects;
@@ -27,35 +29,13 @@ public record IdeBrowserUseView(
       String environmentId, String viewId, String claimId, String bindingEpoch) {
     return new IdeBrowserUseView(
         EnvironmentId.parse(environmentId),
-        ConnectionIdentity.parseCanonicalUuid(viewId, "viewId"),
-        ConnectionIdentity.parseCanonicalUuid(claimId, "claimId"),
-        bindingEpoch == null ? null : parsePositiveLong(bindingEpoch, "bindingEpoch"));
+        Uuids.parseCanonical(viewId, "viewId"),
+        Uuids.parseCanonical(claimId, "claimId"),
+        bindingEpoch == null ? null : DecimalLongs.parsePositive(bindingEpoch, "bindingEpoch"));
   }
 
   /** 该持有项是否已带 claim 成功后的 binding epoch。 */
   public boolean bound() {
     return bindingEpoch != null;
-  }
-
-  /** 解析 canonical 正十进制字符串，上限为 {@link Long#MAX_VALUE}。 */
-  public static long parsePositiveLong(String value, String field) {
-    Objects.requireNonNull(field, "field");
-    if (value == null || value.isEmpty()) {
-      throw new IllegalArgumentException(field + " must be a canonical positive decimal");
-    }
-    if (value.charAt(0) < '1' || value.charAt(0) > '9') {
-      throw new IllegalArgumentException(field + " must be a canonical positive decimal");
-    }
-    for (int i = 1; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c < '0' || c > '9') {
-        throw new IllegalArgumentException(field + " must be a canonical positive decimal");
-      }
-    }
-    try {
-      return Long.parseLong(value);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(field + " must fit in a signed 64-bit decimal");
-    }
   }
 }
