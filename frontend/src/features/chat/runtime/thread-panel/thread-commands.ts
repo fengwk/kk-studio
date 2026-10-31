@@ -132,14 +132,16 @@ function manualCompactionDisabledReason(reason: string | null): string {
   if (key) {
     return translate(key)
   }
-  if (/^[A-Z0-9_]+$/.test(reason)) {
-    return translate('ai.runtime.action.compactUnavailable')
-  }
-  return reason
+  return translate('ai.runtime.action.compactUnavailable')
 }
 
+export type CommandCompactionState =
+  | { status: 'checking' }
+  | { status: 'failed' }
+  | { status: 'ready'; availability: ManualCompactionAvailability }
+
 export interface ThreadCommandOptions {
-  manualCompaction?: ManualCompactionAvailability | null
+  compaction?: CommandCompactionState | null
   allowNewSession?: boolean
   readOnly?: boolean
   canBranchFromRoot?: boolean
@@ -151,18 +153,28 @@ export function threadCommandsForTarget(
   target: PaneTarget,
   options: ThreadCommandOptions = {},
 ): ThreadCommand[] {
-  const manualCompaction = options.manualCompaction
+  const compaction = options.compaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
   // 命令可用性只由目标 kind 与显式能力决定；owner 不参与既有 Thread 的能力裁剪。
   const commandList = THREAD_COMMANDS
 
   return commandList.map((item) => {
     const targetEnabled = enabled.has(item.id)
-    const compactDisabled =
-      item.id === 'compact'
-      && target.kind === 'BOUND_THREAD'
-      && manualCompaction != null
-      && !manualCompaction.available
+    let compactDisabled = false
+    let compactDisabledReason: string | undefined
+
+    if (item.id === 'compact' && target.kind === 'BOUND_THREAD' && compaction != null) {
+      if (compaction.status === 'checking') {
+        compactDisabled = true
+        compactDisabledReason = translate('ai.runtime.command.disabled.compaction.checking')
+      } else if (compaction.status === 'failed') {
+        compactDisabled = true
+        compactDisabledReason = translate('ai.runtime.command.disabled.compaction.checkFailed')
+      } else if (compaction.status === 'ready' && !compaction.availability.available) {
+        compactDisabled = true
+        compactDisabledReason = manualCompactionDisabledReason(compaction.availability.disabledReason)
+      }
+    }
 
     const readOnlyDisabled =
       Boolean(options.readOnly)
@@ -189,7 +201,7 @@ export function threadCommandsForTarget(
     if (readOnlyDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.readOnly')
     } else if (compactDisabled) {
-      disabledReason = manualCompactionDisabledReason(manualCompaction?.disabledReason ?? null)
+      disabledReason = compactDisabledReason
     } else if (newDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.singleSession')
     } else if (agentDisabled) {

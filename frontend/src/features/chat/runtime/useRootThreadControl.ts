@@ -6,7 +6,6 @@ import { useBoundThreadPanelViews } from '@/features/chat/runtime/useBoundThread
 import type { ThreadPanelComposerInput } from '@/features/chat/runtime/thread-panel/ThreadPanel'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { HarnessManualCompactionDTO } from '@/shared/api/generated/contracts'
 import {
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
@@ -38,7 +37,10 @@ import {
   type PaneTarget,
   type PendingAcceptance,
 } from '@/features/chat/runtime/agent-pane'
-import { threadCommandsForTarget } from '@/features/chat/runtime/thread-panel/thread-commands'
+import {
+  threadCommandsForTarget,
+  type CommandCompactionState,
+} from '@/features/chat/runtime/thread-panel/thread-commands'
 import { useI18n } from '@/shared/i18n'
 import { paneTargetViewKey } from '@/features/chat/runtime/thread-presentation'
 import { cloneDraft } from '@/features/chat/runtime/root-thread/branch-draft-replay'
@@ -513,27 +515,21 @@ export function useRootThreadControl({
     enabled: advisoryEnabled,
   })
 
-  let manualCompaction: HarnessManualCompactionDTO | null = null
+  let compaction: CommandCompactionState | null = null
   if (isBoundTarget(target)) {
     if (compactionAdvisoryQuery.isError) {
-      manualCompaction = {
-        available: false,
-        disabledReason: t('ai.runtime.command.disabled.compaction.checkFailed'),
-      }
+      compaction = { status: 'failed' }
     } else if (compactionAdvisoryQuery.data) {
-      manualCompaction = compactionAdvisoryQuery.data
+      compaction = { status: 'ready', availability: compactionAdvisoryQuery.data }
     } else {
-      manualCompaction = {
-        available: false,
-        disabledReason: t('ai.runtime.command.disabled.compaction.checking'),
-      }
+      compaction = { status: 'checking' }
     }
   }
 
   const commands = threadCommandsForTarget(
     target,
     {
-      manualCompaction,
+      compaction,
       allowNewSession: capabilities?.allowNewSession,
       readOnly: capabilities?.readOnly,
       canBranchFromRoot,

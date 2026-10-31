@@ -1,6 +1,8 @@
 # D1fe: Frontend Incremental Snapshot Loading & Advisory Query Implementation
 
-## Summary
+## Commits
+- `293fe3959cb80847b99f551d8661aef5a3dffe7e`: Initial D1fe implementation (incremental snapshot loading, cache merging, independent advisory query).
+- (Follow-up commit): Refactored compaction advisory state to client-owned discriminated union (`status: 'checking' | 'failed' | 'ready'`), restored canonical `manualCompactionDisabledReason` without regex/pass-through, and decoupled client UI loading/failure states from server DTOs.
 - Implemented frontend incremental snapshot loading with `afterEntryId` cursor and snapshot cache merging (`thread-snapshot-cache.ts`).
 - Removed `manualCompaction` from snapshot contracts and core models; introduced independent compaction advisory query via `GET /api/threads/{id}/compaction-availability` with on-demand lifecycle when command palette opens.
 - Replaced client-side CAS pre-checks with authoritative server CAS delegation via `expectedVersion`.
