@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.driver;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -28,10 +29,12 @@ public interface AgentDriver {
       CompactionPreparation preparation);
 
   /** 只读取当前 open Turn 的 Driver 状态，不取得 Driver 私有行锁。调用方须已锁定 Thread； 返回值仅用于读取投影，不授予执行或变更权限。 */
-  LockedDriverState readState(HarnessStore.Transaction tx, ThreadState thread, EntryPath path);
+  LockedDriverState readState(
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state);
 
   /** 锁定当前 open Turn 的 Driver 状态，供执行和变更使用。没有状态时返回 {@link DriverActivity#NONE} 的实现。 */
-  LockedDriverState lockState(HarnessStore.Transaction tx, ThreadState thread, EntryPath path);
+  LockedDriverState lockState(
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state);
 
   /** 把已终止的 generation 结果物化为公共 Entry/ToolInvocation，并清理 Driver 私有 terminal 状态。 */
   DriverApplied applyResponse(

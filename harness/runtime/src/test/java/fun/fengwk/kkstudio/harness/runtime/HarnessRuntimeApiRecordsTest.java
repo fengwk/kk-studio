@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -510,7 +512,8 @@ class HarnessRuntimeApiRecordsTest {
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
             thread,
-            path,
+            EntryCurrentState.from(path),
+            new EntrySlice(null, path.entries()),
             queued,
             null,
             List.of(),
@@ -528,7 +531,8 @@ class HarnessRuntimeApiRecordsTest {
         () ->
             new ThreadSnapshot(
                 thread,
-                path,
+                EntryCurrentState.from(path),
+                new EntrySlice(null, path.entries()),
                 queued,
                 null,
                 List.of(),
@@ -543,7 +547,8 @@ class HarnessRuntimeApiRecordsTest {
         () ->
             new ThreadSnapshot(
                 null,
-                path,
+                EntryCurrentState.from(path),
+                new EntrySlice(null, path.entries()),
                 queued,
                 null,
                 List.of(),
@@ -559,6 +564,7 @@ class HarnessRuntimeApiRecordsTest {
             new ThreadSnapshot(
                 thread,
                 null,
+                new EntrySlice(null, path.entries()),
                 queued,
                 null,
                 List.of(),
@@ -573,7 +579,8 @@ class HarnessRuntimeApiRecordsTest {
         () ->
             new ThreadSnapshot(
                 thread,
-                path,
+                EntryCurrentState.from(path),
+                new EntrySlice(null, path.entries()),
                 null,
                 null,
                 List.of(),
@@ -588,7 +595,8 @@ class HarnessRuntimeApiRecordsTest {
         () ->
             new ThreadSnapshot(
                 thread,
-                path,
+                EntryCurrentState.from(path),
+                new EntrySlice(null, path.entries()),
                 queued,
                 null,
                 null,

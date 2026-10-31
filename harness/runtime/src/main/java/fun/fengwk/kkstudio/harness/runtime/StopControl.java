@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -256,9 +257,11 @@ final class StopControl {
     // Stage 4: Commands 锁（loadQueuedCommands）
     Map<UUID, List<ThreadCommand>> queuedByThread = new HashMap<>();
     Map<UUID, EntryPath> pathsByThread = new HashMap<>();
+    Map<UUID, EntryCurrentState> statesByThread = new HashMap<>();
     for (ThreadStopCandidate candidate : toStop) {
       EntryPath path = tx.entries().loadPath(candidate.thread().headEntryId());
       pathsByThread.put(candidate.thread().id(), path);
+      statesByThread.put(candidate.thread().id(), EntryCurrentState.from(path));
       List<ThreadCommand> queued = tx.commands().loadQueued(candidate.thread().id());
       queuedByThread.put(candidate.thread().id(), queued);
     }
@@ -266,9 +269,9 @@ final class StopControl {
     // Stage 5: Driver 状态锁
     Map<UUID, LockedDriverState> driverStatesByThread = new HashMap<>();
     for (ThreadStopCandidate candidate : toStop) {
-      EntryPath path = pathsByThread.get(candidate.thread().id());
+      EntryCurrentState state = statesByThread.get(candidate.thread().id());
       driverStatesByThread.put(
-          candidate.thread().id(), driver.lockState(tx, candidate.thread(), path));
+          candidate.thread().id(), driver.lockState(tx, candidate.thread(), state));
     }
 
     // Stage 6: Tools 锁与 ThreadContext 分类（只读：不在遍历中 mutation；terminal 结果物化与收敛统一留到
@@ -276,11 +279,12 @@ final class StopControl {
     List<ThreadStopContext> contexts = new ArrayList<>();
     for (ThreadStopCandidate candidate : toStop) {
       EntryPath path = pathsByThread.get(candidate.thread().id());
+      EntryCurrentState state = statesByThread.get(candidate.thread().id());
       List<ThreadCommand> queued = queuedByThread.get(candidate.thread().id());
       LockedDriverState driverState = driverStatesByThread.get(candidate.thread().id());
       List<ToolInvocation> siblings =
           loadAssistantSiblings(tx, candidate.thread(), path, driverState);
-      ThreadContext context = CLASSIFIER.classify(candidate.thread(), path, driverState, siblings);
+      ThreadContext context = CLASSIFIER.classify(candidate.thread(), state, driverState, siblings);
       contexts.add(
           new ThreadStopContext(
               candidate.thread(),
@@ -328,10 +332,11 @@ final class StopControl {
       ThreadState thread = tx.threads().find(original.thread().id()).orElseThrow();
       UUID stopRequestId = original.stopRequestId();
       EntryPath path = tx.entries().loadPath(thread.headEntryId());
+      EntryCurrentState currentState = EntryCurrentState.from(path);
       List<ThreadCommand> queued = original.queued();
       LockedDriverState driverState = original.driverState();
       List<ToolInvocation> siblings = original.toolSiblings();
-      ThreadContext context = CLASSIFIER.classify(thread, path, driverState, siblings);
+      ThreadContext context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       if (context instanceof ThreadContext.ModelTerminalPending pending) {
         // 提交先于 Stop：用 Driver 的公共物化把已提交的 terminal 结果写入历史（绝不 409），再正常 Stop。
         Materialized materialized =
@@ -341,15 +346,17 @@ final class StopControl {
         }
         thread = materialized.thread();
         path = tx.entries().loadPath(thread.headEntryId());
-        driverState = driver.lockState(tx, thread, path);
+        currentState = EntryCurrentState.from(path);
+        driverState = driver.lockState(tx, thread, currentState);
         siblings = loadAssistantSiblings(tx, thread, path, driverState);
-        context = CLASSIFIER.classify(thread, path, driverState, siblings);
+        context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       } else if (context instanceof ThreadContext.ToolTerminalPending pending) {
         thread = materializeTerminalToolBatch(tx, thread, path, driverState, pending.siblings());
         path = tx.entries().loadPath(thread.headEntryId());
-        driverState = driver.lockState(tx, thread, path);
+        currentState = EntryCurrentState.from(path);
+        driverState = driver.lockState(tx, thread, currentState);
         siblings = List.of();
-        context = CLASSIFIER.classify(thread, path, driverState, siblings);
+        context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       }
       if (context instanceof ThreadContext.ModelTerminalPending
           || context instanceof ThreadContext.ToolTerminalPending) {

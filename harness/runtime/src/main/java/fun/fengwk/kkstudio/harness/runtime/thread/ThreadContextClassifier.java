@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -27,19 +27,19 @@ public final class ThreadContextClassifier {
 
   public ThreadContext classify(
       ThreadState thread,
-      EntryPath path,
+      EntryCurrentState state,
       LockedDriverState driverState,
       List<ToolInvocation> toolSiblings) {
     Objects.requireNonNull(thread, "thread");
-    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(state, "state");
     Objects.requireNonNull(driverState, "driverState");
     Objects.requireNonNull(toolSiblings, "toolSiblings");
-    Optional<Entry> openTurn = path.openTurnStart();
+    Optional<Entry> openTurn = state.openTurnStart();
     if (openTurn.isEmpty()) {
       requireNoDriverOrSiblings(driverState, toolSiblings, "without an open turn");
-      Entry head = path.headIgnoringTrailingControlEntries();
+      Entry head = state.headIgnoringTrailingControlEntries();
       if (head.payload() instanceof TurnEndPayload end && end.continueModel()) {
-        TurnStartPayload start = referencedTurnStart(path, end);
+        TurnStartPayload start = referencedTurnStart(state, end);
         if (thread.id().equals(start.ownerThreadId())) {
           return new ThreadContext.ContinuationDue(head);
         }
@@ -48,7 +48,7 @@ public final class ThreadContextClassifier {
       return new ThreadContext.IdleOrHistorical();
     }
     Entry turn = openTurn.get();
-    Entry head = path.head();
+    Entry head = state.head();
     if (driverState.activity() == DriverActivity.ACTIVE
         || driverState.activity() == DriverActivity.RESPONSE_PENDING) {
       if (!driverState.atBasis(head.id())) {
@@ -133,12 +133,12 @@ public final class ThreadContextClassifier {
     requireEmptySiblings(toolSiblings, context);
   }
 
-  private static TurnStartPayload referencedTurnStart(EntryPath path, TurnEndPayload end) {
-    for (Entry entry : path.entries()) {
-      if (entry.id().equals(end.turnStartEntryId())
-          && entry.payload() instanceof TurnStartPayload start) {
-        return start;
-      }
+  private static TurnStartPayload referencedTurnStart(EntryCurrentState state, TurnEndPayload end) {
+    Entry referenced = state.referencedTurnStartEntry();
+    if (referenced != null
+        && referenced.id().equals(end.turnStartEntryId())
+        && referenced.payload() instanceof TurnStartPayload start) {
+      return start;
     }
     throw new IllegalStateException(
         "TURN_END with turnStartEntryId "

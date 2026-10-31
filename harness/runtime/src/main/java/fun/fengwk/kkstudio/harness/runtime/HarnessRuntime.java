@@ -12,7 +12,10 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
@@ -36,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -197,12 +201,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 读取目标 Thread 所属执行树的一致快照：按不可变 {@code rootThreadId} 取同根全部 Thread。
+   * 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。
    *
-   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成快照；不按 Session 成员替代永久父子关系。目标不存在抛 {@link
+   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成节点；不按 Session 成员替代永久父子关系，也不装载历史 Entry。目标不存在抛 {@link
    * HarnessRuntimeNotFoundException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
    */
-  public List<ThreadSnapshot> getThreadTree(UUID threadId) {
+  public List<ThreadTreeNode> getThreadTree(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
@@ -222,30 +226,41 @@ public final class HarnessRuntime {
             locked.add(tx.threads().lock(id).orElseThrow());
           }
           ThreadContextProbe probe = new ThreadContextProbe(driver);
-          List<ThreadSnapshot> snapshots = new ArrayList<>(locked.size());
+          List<ThreadTreeNode> nodes = new ArrayList<>(locked.size());
           for (ThreadState thread : locked) {
             List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-            EntryPath path = tx.entries().loadPath(thread.headEntryId());
+            EntryCurrentState state = tx.entries().loadCurrent(thread.headEntryId());
+            EntryPathMetrics metrics = tx.entries().loadPathMetrics(thread.headEntryId());
             int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
             boolean unconsumedAppliedNotifications =
                 ThreadInputDemand.hasUnconsumedNotification(tx, thread);
-            // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
-            snapshots.add(
-                snapshot(
-                    thread,
-                    path,
+            // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯，也不装载历史。
+            ThreadContext context = probe.probe(tx, thread, state);
+            List<ExecutionExitFact> unconfirmed = tx.exits().loadUnconfirmed(thread.id());
+            boolean incompleteOwnerChild = tx.joins().hasIncompleteOwnerChild(thread.id());
+            ThreadRuntimeStatus status =
+                ThreadSnapshot.evaluateRuntimeStatus(
+                    thread.executionControl(),
+                    ThreadSnapshot.liveStateOf(context),
+                    state,
+                    thread.id(),
                     queued,
-                    probe.probe(tx, thread, path),
-                    tx.stops().loadByThread(thread.id()),
-                    incompleteChildJoins,
                     unconsumedAppliedNotifications,
-                    tx.exits().loadUnconfirmed(thread.id()),
-                    tx.joins().hasIncompleteOwnerChild(thread.id())));
+                    incompleteChildJoins,
+                    incompleteOwnerChild,
+                    !unconfirmed.isEmpty());
+            nodes.add(
+                new ThreadTreeNode(
+                    thread,
+                    state.baseSettings(),
+                    status,
+                    ThreadSnapshot.evaluateOutcome(status, state),
+                    metrics));
           }
-          snapshots.sort(
-              Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
-                  .thenComparing(snapshot -> snapshot.thread().id(), UuidOrder.COMPARATOR));
-          return List.copyOf(snapshots);
+          nodes.sort(
+              Comparator.comparing((ThreadTreeNode node) -> node.thread().createdAt())
+                  .thenComparing(node -> node.thread().id(), UuidOrder.COMPARATOR));
+          return List.copyOf(nodes);
         });
   }
 
@@ -651,17 +666,24 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在单个短 transaction 内读取一次一致的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Model
+   * 在单个短 transaction 内读取一次完整的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Model
    * -&gt; Tool siblings），跨 transaction 永不混合状态。
    *
    * <p>只锁目标 Thread 与该 Thread 当前适用的 Commands/Model/Tool 行，不取执行树锁；Thread 行锁串行化该 Thread 的全部写入，Entry
-   * 不可变，因此同事务行锁已足以保证快照一致性，无需阻塞祖先或兄弟。返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队
-   * Commands，以及仅与分类器匹配的 ModelInvocation / Tool siblings / 尚未物化的失败 attempts：IDLE_OR_HISTORICAL 与
-   * CONTINUATION_DUE 不暴露 Invocation，Model context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部
-   * siblings。ModelInvocation checkpoint 可能在 Thread version 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把
-   * version 当作完整快照 ETag。不持久化也不返回任何派生状态。
+   * 不可变，因此同事务行锁已足以保证快照一致性，无需阻塞祖先或兄弟。当前状态与完整历史在同一事务读取。ModelInvocation checkpoint 可能在 Thread version
+   * 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把 version 当作完整快照 ETag。
    */
   public ThreadSnapshot getThreadSnapshot(UUID threadId) {
+    return getThreadSnapshot(threadId, null);
+  }
+
+  /**
+   * 读取当前完整状态，并按 {@code afterEntryId} 返回历史切片。
+   *
+   * <p>游标为 null 时是完整历史。游标是祖先时只返回其后的 Entry，游标即 head 时列表为空且当前 checkpoint 仍是最新值。未知或不在链上的游标由 {@code
+   * loadSlice} 返回完整历史且 base 为 null。锁序与 {@link #getThreadSnapshot(UUID)} 相同。
+   */
+  public ThreadSnapshot getThreadSnapshot(UUID threadId, UUID afterEntryId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
@@ -672,24 +694,52 @@ public final class HarnessRuntime {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "thread " + threadId + " does not exist"));
-          return snapshotLockedThread(tx, thread);
+          return snapshotLockedThread(tx, thread, afterEntryId);
         });
   }
 
-  /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 行锁（整树查询另持有树锁）。 */
+  /** 已锁定 Thread 的完整当前快照；调用方必须已持有该 Thread 行锁。 */
   private ThreadSnapshot snapshotLockedThread(HarnessStore.Transaction tx, ThreadState thread) {
+    return snapshotLockedThread(tx, thread, null);
+  }
+
+  /** 已锁定 Thread 的当前状态与指定切片；调用方必须已持有该 Thread 行锁。 */
+  private ThreadSnapshot snapshotLockedThread(
+      HarnessStore.Transaction tx, ThreadState thread, UUID afterEntryId) {
+    EntrySlice slice = tx.entries().loadSlice(thread.headEntryId(), afterEntryId);
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread, driver);
+    GenerationProjection generation = generationOf(locked.context());
+    if (generation != null) {
+      if (!tx.entries().isAncestor(thread.headEntryId(), generation.requestHeadEntryId())) {
+        throw new IllegalStateException(
+            "driver generation request head "
+                + generation.requestHeadEntryId()
+                + " is not on the thread path");
+      }
+      if (generation.resultEntryId() != null
+          && !tx.entries().isAncestor(thread.headEntryId(), generation.resultEntryId())) {
+        throw new IllegalStateException(
+            "driver generation result entry "
+                + generation.resultEntryId()
+                + " is not on the thread path");
+      }
+    }
+    List<ToolInvocation> toolSiblings = toolSiblingsOf(locked.context());
+    ThreadLiveState liveState = ThreadSnapshot.liveStateOf(locked.context());
     int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
     boolean unconsumedAppliedNotifications =
         ThreadInputDemand.hasUnconsumedNotification(tx, thread);
     List<ExecutionExitFact> unconfirmedExecutions = tx.exits().loadUnconfirmed(thread.id());
     boolean hasIncompleteOwnerChildJoin = tx.joins().hasIncompleteOwnerChild(thread.id());
-    return snapshot(
+    return new ThreadSnapshot(
         thread,
-        locked.path(),
+        locked.entryState(),
+        slice,
         queued,
-        locked.context(),
+        generation,
+        toolSiblings,
+        liveState,
         tx.stops().loadByThread(thread.id()),
         incompleteChildJoins,
         unconsumedAppliedNotifications,
@@ -697,116 +747,20 @@ public final class HarnessRuntime {
         hasIncompleteOwnerChildJoin);
   }
 
-  private static ThreadSnapshot snapshot(
-      ThreadState thread,
-      EntryPath path,
-      List<ThreadCommand> queued,
-      ThreadContext context,
-      List<StoppedThreadReceipt> stopReceipts,
-      int incompleteChildJoins,
-      boolean unconsumedAppliedNotifications,
-      List<ExecutionExitFact> unconfirmedExecutions,
-      boolean hasIncompleteOwnerChildJoin) {
+  private static GenerationProjection generationOf(ThreadContext context) {
     return switch (context) {
-      case ThreadContext.IdleOrHistorical ignored -> snapshot(
-          thread,
-          path,
-          queued,
-          null,
-          List.of(),
-          ThreadLiveState.IDLE_OR_HISTORICAL,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
-      case ThreadContext.ContinuationDue ignored -> snapshot(
-          thread,
-          path,
-          queued,
-          null,
-          List.of(),
-          ThreadLiveState.CONTINUATION_DUE,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
-      case ThreadContext.ModelActive active -> snapshot(
-          thread,
-          path,
-          queued,
-          active.driverState().projection(),
-          List.of(),
-          ThreadLiveState.DRIVER_ACTIVE,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
-      case ThreadContext.ModelTerminalPending pending -> snapshot(
-          thread,
-          path,
-          queued,
-          pending.driverState().projection(),
-          List.of(),
-          ThreadLiveState.DRIVER_RESPONSE_PENDING,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
-      case ThreadContext.ToolActive active -> snapshot(
-          thread,
-          path,
-          queued,
-          null,
-          active.siblings(),
-          ThreadLiveState.TOOL_ACTIVE,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
-      case ThreadContext.ToolTerminalPending pending -> snapshot(
-          thread,
-          path,
-          queued,
-          null,
-          pending.siblings(),
-          ThreadLiveState.TOOL_TERMINAL_PENDING,
-          stopReceipts,
-          incompleteChildJoins,
-          unconsumedAppliedNotifications,
-          unconfirmedExecutions,
-          hasIncompleteOwnerChildJoin);
+      case ThreadContext.ModelActive active -> active.driverState().projection();
+      case ThreadContext.ModelTerminalPending pending -> pending.driverState().projection();
+      default -> null;
     };
   }
 
-  private static ThreadSnapshot snapshot(
-      ThreadState thread,
-      EntryPath path,
-      List<ThreadCommand> queued,
-      GenerationProjection generation,
-      List<ToolInvocation> toolSiblings,
-      ThreadLiveState liveState,
-      List<StoppedThreadReceipt> stopReceipts,
-      int incompleteChildJoins,
-      boolean unconsumedAppliedNotifications,
-      List<ExecutionExitFact> unconfirmedExecutions,
-      boolean hasIncompleteOwnerChildJoin) {
-    return new ThreadSnapshot(
-        thread,
-        path,
-        queued,
-        generation,
-        toolSiblings,
-        liveState,
-        stopReceipts,
-        incompleteChildJoins,
-        unconsumedAppliedNotifications,
-        unconfirmedExecutions,
-        hasIncompleteOwnerChildJoin);
+  private static List<ToolInvocation> toolSiblingsOf(ThreadContext context) {
+    return switch (context) {
+      case ThreadContext.ToolActive active -> active.siblings();
+      case ThreadContext.ToolTerminalPending pending -> pending.siblings();
+      default -> List.of();
+    };
   }
 
   /** 按永久 {@code parentThreadId} 深度优先收集整棵树；重复出现即环路，fail closed。 */
