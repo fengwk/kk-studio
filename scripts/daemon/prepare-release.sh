@@ -35,7 +35,7 @@
 # 暂存资产（输出目录每次整体重建，因此每次恰好只包含下列五个文件）：
 #   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz          可运行发行归档
 #   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz.sha256   上者的 `sha256sum -c` 校验文件
-#   kk-studio-daemon-<tag>-<os>-<arch>.json            schemaVersion 1 的确定性元数据
+#   kk-studio-daemon-<tag>-<os>-<arch>.json            确定性元数据
 #   LICENSE                                            Apache License 2.0
 #   THIRD_PARTY_NOTICES                                Daemon 的第三方组件来源与许可
 #
@@ -66,7 +66,6 @@ LICENSE_FILE="$REPO_ROOT/LICENSE"
 THIRD_PARTY_NOTICES_FILE="$DAEMON_DIR/THIRD_PARTY_NOTICES"
 RELEASE_ROOT="$DAEMON_DIR/release"
 
-METADATA_SCHEMA_VERSION=1
 ENTRYPOINT=main.js
 # 与 .github/workflows/daemon-release.yml 的 tag 校验必须保持一致。
 RELEASE_TAG_PATTERN='^v[0-9A-Za-z._-]+$'
@@ -95,7 +94,7 @@ every asset is written into a freshly rebuilt output directory.
 Staged assets:
   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz          runnable distribution archive
   kk-studio-daemon-<tag>-<os>-<arch>.tar.gz.sha256   sha256sum -c checksum
-  kk-studio-daemon-<tag>-<os>-<arch>.json            deterministic metadata (schemaVersion 1)
+  kk-studio-daemon-<tag>-<os>-<arch>.json            deterministic metadata
   LICENSE                                            Apache License 2.0
   THIRD_PARTY_NOTICES                                third-party component notices
 
@@ -420,7 +419,6 @@ EOF
     const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const key = process.argv[2];
     const out = {
-      schemaVersion: manifest.schemaVersion,
       daemonVersion: process.argv[3],
       codeServerVersion: manifest.codeServerVersion,
       codeServer: { [key]: manifest.codeServer[key] },
@@ -437,7 +435,6 @@ EOF
 
   cat >"$WORK_DIR/$metadata" <<EOF
 {
-  "schemaVersion": $METADATA_SCHEMA_VERSION,
   "tag": "$release_tag",
   "commit": "$commit",
   "sourceDateEpoch": $source_date_epoch,

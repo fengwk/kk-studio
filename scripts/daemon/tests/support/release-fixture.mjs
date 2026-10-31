@@ -284,7 +284,7 @@ export class ReleaseFixture {
     }
     writeText(
       path.join(daemon, 'runtime-manifest.json'),
-      JSON.stringify({ schemaVersion: 1, codeServerVersion: CODE_SERVER_VERSION, codeServer }, null, 2) + '\n',
+      JSON.stringify({ codeServerVersion: CODE_SERVER_VERSION, codeServer }, null, 2) + '\n',
       0o644,
     )
     this.gitInit()
@@ -397,7 +397,7 @@ exit 0
       writeText(path.join(work, 'main.js'), MAIN_JS, 0o644)
       writeText(
         path.join(work, 'runtime-manifest.json'),
-        `{"schemaVersion":1,"daemonVersion":"${DAEMON_VERSION}","codeServer":{"${key}":{"url":"https://example.invalid"}}}\n`,
+        `{"daemonVersion":"${DAEMON_VERSION}","codeServer":{"${key}":{"url":"https://example.invalid"}}}\n`,
         0o644,
       )
       const entries = treeEntries(work, '.').slice(1).map((entry) => ({ ...entry, name: entry.name.replace(/^\.\//, '') }))

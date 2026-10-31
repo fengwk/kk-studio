@@ -709,7 +709,6 @@ export async function createIdeService(
       const documents: BridgeDocument[] = result.documents ?? []
       const complete = result.complete !== false && (result.omitted ?? 0) === 0
       const backup: RecoveryBackup = {
-        version: 1,
         viewId: view.viewId,
         bindingEpoch: view.bindingEpoch,
         directory: view.directory,

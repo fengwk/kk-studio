@@ -220,7 +220,7 @@ export function buildArchive(
     rmSync(path.dirname(rgDir), { recursive: true })
   }
   writeFileSync(path.join(build, 'package.json'), `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}","type":"module"}\n`)
-  writeFileSync(path.join(build, 'runtime-manifest.json'), '{"schemaVersion":1}\n')
+  writeFileSync(path.join(build, 'runtime-manifest.json'), '{}\n')
   writeFileSync(path.join(build, 'LICENSE'), 'Apache License 2.0\n')
   writeFileSync(path.join(build, 'THIRD_PARTY_NOTICES'), 'notices\n')
 

@@ -8,7 +8,7 @@ import type {
   CapabilityResult,
 } from '../contracts.js'
 import { textResult } from '../contracts.js'
-import { MAX_DETAILS_JSON_UTF8_BYTES } from '../protocol.js'
+import { MAX_DETAILS_JSON_UTF8_BYTES } from '../protocol/control/codec.js'
 import {
   CancelledError,
   ToolInputRejectedError,

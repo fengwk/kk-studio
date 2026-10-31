@@ -120,7 +120,6 @@ async function startEntry(): Promise<EntryHarness> {
       await writeFile(
         path.join(destination, RUNTIME_MANIFEST),
         JSON.stringify({
-          schemaVersion: 1,
           daemonVersion: TARGET_VERSION,
           codeServerVersion: '4.143.1-kk.1',
           codeServer: {

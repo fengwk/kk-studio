@@ -81,7 +81,6 @@ export interface RecoveryDocument {
 }
 
 export interface RecoveryBackup {
-  version: 1
   viewId: string
   bindingEpoch: string
   directory: string
@@ -199,7 +198,6 @@ export async function readRecoveryBackup(
   }
   const backup = parsed as RecoveryBackup
   if (
-    backup.version !== 1 ||
     backup.viewId !== validateViewId(viewId) ||
     typeof backup.bindingEpoch !== 'string' ||
     typeof backup.directory !== 'string' ||

@@ -206,7 +206,7 @@ export interface IdeStreamUpstream {
 
 export interface IdeService extends IdeLeaseHandler {
   handle(command: IdeCommand, signal: AbortSignal): Promise<IdeReply>
-  /** 只有不存在 OPEN/CLOSING/创建预留与活动 mux 流时才允许进入更新。 */
+  /** 只有不存在 OPEN/CLOSING/创建预留与活动流时才允许进入更新。 */
   canStartUpdate(): boolean
   /** 更新准入后停止闲置 code-server，并确认受管进程范围已收敛。 */
   stopForUpdate(signal: AbortSignal): Promise<void>

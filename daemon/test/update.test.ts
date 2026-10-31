@@ -92,7 +92,6 @@ function harness(
         await writeFile(path.join(destination, MANAGED_ENTRY), '// staged entry')
       }
       const manifest: Record<string, unknown> = {
-        schemaVersion: 1,
         daemonVersion: options.manifestVersion ?? VERSION,
         codeServerVersion: '9.9.9-kk.2',
       }
@@ -578,7 +577,7 @@ describe('update handler', () => {
         await deps.extractArchive(archive, destination, signal)
         await writeFile(
           path.join(destination, RUNTIME_MANIFEST),
-          JSON.stringify({ schemaVersion: 1, version: VERSION, codeServer: { 'linux-amd64': {} } }),
+          JSON.stringify({ version: VERSION, codeServer: { 'linux-amd64': {} } }),
         )
       },
     })

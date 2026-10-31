@@ -240,6 +240,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
     }, this.controlStreamTimeoutMillis)
 
     session.on('stream', (stream, streamHeaders) => {
+      stream.on('error', () => {})
       const method = (streamHeaders[HTTP2_HEADER_METHOD] as string) || ''
       const path = (streamHeaders[HTTP2_HEADER_PATH] as string) || ''
       const protocol = (streamHeaders[HTTP2_HEADER_PROTOCOL] as string) || ''

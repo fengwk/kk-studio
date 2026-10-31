@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 import type { DaemonConfig, LspServerConfig } from './contracts.js'
 import { isWindows } from './native/host.js'
-import { MAX_NOTE_CHARS, ProtocolError, parseStrictJson } from './protocol.js'
+import { ProtocolError, parseStrictJson } from './protocol.js'
+import { MAX_NOTE_CHARS } from './protocol/control/codec.js'
 
 /**
  * Daemon 连接与本地执行配置。
