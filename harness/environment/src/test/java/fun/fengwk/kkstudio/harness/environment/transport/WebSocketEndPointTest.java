@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.environment.transport;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class WebSocketEndPointTest {
 
@@ -45,27 +45,40 @@ class WebSocketEndPointTest {
   }
 
   @Test
-  void readsInboundDataInOrderAndFreesCallback() throws Exception {
-    AtomicBoolean callback1Done = new AtomicBoolean(false);
-    AtomicBoolean callback2Done = new AtomicBoolean(false);
+  void demandDrivenInboundBackpressure() throws Exception {
+    // 1. 打开时调用一次 demand
+    endPoint.onOpen();
+    assertEquals(1, pipe.demandCount.get());
 
+    // 2. 收到一条消息，未消费时不 demand 下一条
+    AtomicBoolean msg1Done = new AtomicBoolean(false);
     endPoint.onInboundData(
         ByteBuffer.wrap(new byte[] {1, 2, 3}),
-        Callback.from(() -> callback1Done.set(true), ignored -> {}));
+        Callback.from(() -> msg1Done.set(true), ignored -> {}));
+    assertEquals(1, pipe.demandCount.get());
+
+    // 3. 部分消费（2 字节），未完全消费，不 demand
+    ByteBuffer partial = ByteBuffer.allocate(2);
+    assertEquals(2, endPoint.fill(partial));
+    assertFalse(msg1Done.get());
+    assertEquals(1, pipe.demandCount.get());
+
+    // 4. 完全消费剩余 1 字节，触发 callback 并 demand 下一条消息
+    ByteBuffer remaining = ByteBuffer.allocate(2);
+    assertEquals(1, endPoint.fill(remaining));
+    assertTrue(msg1Done.get());
+    assertEquals(2, pipe.demandCount.get());
+
+    // 5. 收到第二条消息，完全消费后 demand 第三次
+    AtomicBoolean msg2Done = new AtomicBoolean(false);
     endPoint.onInboundData(
-        ByteBuffer.wrap(new byte[] {4, 5}),
-        Callback.from(() -> callback2Done.set(true), ignored -> {}));
+        ByteBuffer.wrap(new byte[] {4, 5}), Callback.from(() -> msg2Done.set(true), ignored -> {}));
+    assertEquals(2, pipe.demandCount.get());
 
-    ByteBuffer target = ByteBuffer.allocate(10);
-    int readCount = endPoint.fill(target);
-    assertEquals(5, readCount);
-    target.flip();
-    byte[] readBytes = new byte[target.remaining()];
-    target.get(readBytes);
-    assertArrayEquals(new byte[] {1, 2, 3, 4, 5}, readBytes);
-
-    assertTrue(callback1Done.get());
-    assertTrue(callback2Done.get());
+    ByteBuffer second = ByteBuffer.allocate(5);
+    assertEquals(2, endPoint.fill(second));
+    assertTrue(msg2Done.get());
+    assertEquals(3, pipe.demandCount.get());
   }
 
   @Test
@@ -138,6 +151,7 @@ class WebSocketEndPointTest {
   private static final class TestPipe implements WebSocketPipe {
     private final List<ByteBuffer> sentMessages = new ArrayList<>();
     private final Queue<Callback> pendingCallbacks = new ArrayDeque<>();
+    private final AtomicInteger demandCount = new AtomicInteger();
     private boolean closed;
 
     @Override
@@ -149,7 +163,9 @@ class WebSocketEndPointTest {
     }
 
     @Override
-    public void demand() {}
+    public void demand() {
+      demandCount.incrementAndGet();
+    }
 
     @Override
     public void close(int statusCode, String reason) {

@@ -9,15 +9,15 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
-import java.util.ArrayDeque;
 import java.util.Objects;
-import java.util.Queue;
 
 /**
  * 由底层 WebSocket 二进制管道支撑的 Jetty {@link org.eclipse.jetty.io.EndPoint}。
  *
- * <p>入站数据由管道接收并由 {@link #fill(ByteBuffer)} 驱动读取；出站数据由 {@link #flush(ByteBuffer...)} 切片为至多 1 MiB
- * 的二进制消息异步发出，由底层发送回调驱动 {@link org.eclipse.jetty.io.WriteFlusher} 推进后续写入。
+ * <p>入站背压由本端点主动控制：打开连接时调用一次 {@link WebSocketPipe#demand()}，入站队列中最多保留一条消息；每条消息被 {@link
+ * #fill(ByteBuffer)} 完全消费后再 demand 下一条消息。 消息消费回调和 {@code fillable()} 通知均在锁外执行。 出站数据由 {@link
+ * #flush(ByteBuffer...)} 切片为至多 1 MiB 的二进制消息异步发出，由底层发送回调驱动 {@link org.eclipse.jetty.io.WriteFlusher}
+ * 推进后续写入。
  */
 public class WebSocketEndPoint extends AbstractEndPoint {
 
@@ -26,8 +26,8 @@ public class WebSocketEndPoint extends AbstractEndPoint {
 
   private final WebSocketPipe pipe;
   private final Object lock = new Object();
-  private final Queue<InboundEntry> inbound = new ArrayDeque<>();
 
+  private InboundEntry currentEntry;
   private boolean eof;
   private Throwable closedException;
   private boolean writePending;
@@ -35,6 +35,12 @@ public class WebSocketEndPoint extends AbstractEndPoint {
   public WebSocketEndPoint(Scheduler scheduler, WebSocketPipe pipe) {
     super(scheduler);
     this.pipe = Objects.requireNonNull(pipe, "pipe must not be null");
+  }
+
+  @Override
+  public void onOpen() {
+    super.onOpen();
+    pipe.demand();
   }
 
   /**
@@ -48,17 +54,25 @@ public class WebSocketEndPoint extends AbstractEndPoint {
       if (callback != null) {
         callback.succeeded();
       }
+      pipe.demand();
       return;
     }
+
+    boolean accepted = false;
     synchronized (lock) {
-      if (eof || isInputShutdown()) {
-        if (callback != null) {
-          callback.succeeded();
-        }
-        return;
+      if (!eof && !isInputShutdown() && closedException == null && currentEntry == null) {
+        currentEntry = new InboundEntry(data.slice(), callback);
+        accepted = true;
       }
-      inbound.add(new InboundEntry(data.slice(), callback));
     }
+
+    if (!accepted) {
+      if (callback != null) {
+        callback.succeeded();
+      }
+      return;
+    }
+
     getFillInterest().fillable();
   }
 
@@ -75,13 +89,15 @@ public class WebSocketEndPoint extends AbstractEndPoint {
     synchronized (lock) {
       closedException = cause;
     }
-    getFillInterest().onClose();
-    getWriteFlusher().onFail(cause);
     close(cause);
   }
 
   @Override
   public int fill(ByteBuffer buffer) throws IOException {
+    Callback callbackToComplete = null;
+    boolean needDemand = false;
+    int filled = 0;
+
     synchronized (lock) {
       if (closedException != null) {
         throw new IOException("endpoint closed exceptionally", closedException);
@@ -89,29 +105,34 @@ public class WebSocketEndPoint extends AbstractEndPoint {
       if (isInputShutdown()) {
         return -1;
       }
-      int filled = 0;
-      while (buffer.hasRemaining() && !inbound.isEmpty()) {
-        InboundEntry entry = inbound.peek();
-        ByteBuffer source = entry.buffer();
+      if (currentEntry != null) {
+        ByteBuffer source = currentEntry.buffer();
         int remainingBefore = buffer.remaining();
         BufferUtil.put(source, buffer);
-        filled += (remainingBefore - buffer.remaining());
+        filled = remainingBefore - buffer.remaining();
         if (!source.hasRemaining()) {
-          inbound.poll();
-          if (entry.callback() != null) {
-            entry.callback().succeeded();
-          }
+          callbackToComplete = currentEntry.callback();
+          currentEntry = null;
+          needDemand = !eof && !isInputShutdown();
         }
       }
       if (filled > 0) {
-        return filled;
-      }
-      if (eof) {
+        // 延后在锁外完成 callback 和 demand
+      } else if (eof) {
         shutdownInput();
         return -1;
+      } else {
+        return 0;
       }
-      return 0;
     }
+
+    if (callbackToComplete != null) {
+      callbackToComplete.succeeded();
+    }
+    if (needDemand) {
+      pipe.demand();
+    }
+    return filled;
   }
 
   @Override
@@ -176,7 +197,7 @@ public class WebSocketEndPoint extends AbstractEndPoint {
   protected void needsFillInterest() {
     boolean ready;
     synchronized (lock) {
-      ready = eof || !inbound.isEmpty() || closedException != null;
+      ready = eof || currentEntry != null || closedException != null;
     }
     if (ready) {
       getFillInterest().fillable();
