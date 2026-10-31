@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
@@ -77,11 +76,10 @@ public final class ControlProtocolCodec {
   public static final int MAX_PREVIEW_UTF8_BYTES = ResourceRef.MAX_PREVIEW_UTF8_BYTES;
 
   /** 单条控制元数据消息的字符上限。 */
-  public static final int MAX_CONTROL_PAYLOAD_CHARS = DaemonResourceTransferCodec.MAX_PAYLOAD_CHARS;
+  public static final int MAX_CONTROL_PAYLOAD_CHARS = 16 * 1024;
 
   /** 上传票据失败说明的字符上限。 */
-  public static final int MAX_FAILURE_MESSAGE_CHARS =
-      DaemonResourceTransferCodec.MAX_FAILURE_MESSAGE_CHARS;
+  public static final int MAX_FAILURE_MESSAGE_CHARS = 512;
 
   /** 展示名的字符上限。 */
   public static final int MAX_DISPLAY_NAME_CHARS = 256;

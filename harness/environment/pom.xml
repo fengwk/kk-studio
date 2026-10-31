@@ -91,8 +91,13 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionSession</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonInvocationTracker</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonTransferCoordinator</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonIdeCoordinator</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonUpdateCoordinator</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.tunnel.*</include>
                                     </includes>
                                     <limits>
