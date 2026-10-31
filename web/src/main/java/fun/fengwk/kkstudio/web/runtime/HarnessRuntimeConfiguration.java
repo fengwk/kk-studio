@@ -91,7 +91,7 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * 唯一的 Agent Driver：A 只存在 Builtin 实现，组合根直接装配，不做 kind 分发、不注入 no-op 或备用 Driver。
+   * Builtin Driver 的装配入口。
    *
    * <p>Driver 只在 Runtime 已开启的事务内工作，不执行外部 I/O。
    */
