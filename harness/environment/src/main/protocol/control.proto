@@ -1,18 +1,15 @@
 syntax = "proto3";
 
-package kkstudio.environment.control.v8;
+package kkstudio.environment.control;
 
 option java_package = "fun.fengwk.kkstudio.harness.environment.protocol";
 option java_multiple_files = true;
 option java_outer_classname = "ControlProto";
 
-// Daemon <-> Studio 控制协议 v8 的单一事实源。
+// Daemon <-> Studio 控制协议的单一事实源。
 //
 // <p>wire 使用 protobuf binary，每条外层控制消息带 4 字节 big-endian 长度前缀（长度不含前缀，1..16 MiB）。
 // 任意 JSON 载荷始终以原始 JSON string 承载，不映射为 Struct；解码只校验文本，不重新序列化。
-//
-// <p>HELLO/WELCOME/DATA_BIND 已删除：认证与版本在 HTTP 升级完成，WELCOME 的资源预算并入首条 SETTINGS。
-// AGENT_COMMAND / AGENT_RESULT 只预留字段号，本切片不定义 Claude 载荷。
 enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0;
 
@@ -70,12 +67,6 @@ enum UpdatePhase {
   UPDATE_FAILED = 3;
 }
 
-enum ErrorCode {
-  ERROR_CODE_UNSPECIFIED = 0;
-  RETRY_LATER = 1;
-  REGISTRATION_REJECTED = 2;
-}
-
 enum IdeAction {
   IDE_ACTION_UNSPECIFIED = 0;
   OPEN_VIEW = 1;
@@ -99,43 +90,39 @@ enum IdeViewState {
 }
 
 message Envelope {
-  optional int32 protocol_version = 1;
-  MessageType message_type = 2;
-  optional string environment_id = 3;
-  optional string invocation_id = 4;
-
-  // AGENT_COMMAND / AGENT_RESULT 预留，本切片不定义 payload。
-  reserved 100, 101;
+  MessageType message_type = 1;
+  optional string environment_id = 2;
+  optional string invocation_id = 3;
 
   oneof payload {
-    Settings settings = 10;
-    Ready ready = 11;
-    Heartbeat heartbeat = 12;
-    RuntimeStatus runtime_status = 13;
-    Invoke invoke = 14;
-    Started started = 15;
-    Progress progress = 16;
-    Completed completed = 17;
-    Failed failed = 18;
-    Cancel cancel = 19;
-    Cancelled cancelled = 20;
-    Recover recover = 21;
-    RecoverNotFound recover_not_found = 22;
-    ExecutionExited execution_exited = 23;
-    ResourceUploadRequest resource_upload_request = 24;
-    ResourceUploadTicket resource_upload_ticket = 25;
-    ResourceUploadCommit resource_upload_commit = 26;
-    TemporaryResourcePolicy temporary_resource_policy = 27;
-    Update update = 28;
-    UpdateResult update_result = 29;
-    IdeCommand ide_command = 30;
-    IdeResult ide_result = 31;
-    IdeLease ide_lease = 32;
-    Error error = 33;
+    Settings settings = 4;
+    Ready ready = 5;
+    Heartbeat heartbeat = 6;
+    RuntimeStatus runtime_status = 7;
+    Invoke invoke = 8;
+    Started started = 9;
+    Progress progress = 10;
+    Completed completed = 11;
+    Failed failed = 12;
+    Cancel cancel = 13;
+    Cancelled cancelled = 14;
+    Recover recover = 15;
+    RecoverNotFound recover_not_found = 16;
+    ExecutionExited execution_exited = 17;
+    ResourceUploadRequest resource_upload_request = 18;
+    ResourceUploadTicket resource_upload_ticket = 19;
+    ResourceUploadCommit resource_upload_commit = 20;
+    TemporaryResourcePolicy temporary_resource_policy = 21;
+    Update update = 22;
+    UpdateResult update_result = 23;
+    IdeCommand ide_command = 24;
+    IdeResult ide_result = 25;
+    IdeLease ide_lease = 26;
+    Error error = 27;
   }
 }
 
-// HTTP 426 升级拒绝的 protobuf 载荷。content-type 与端点适配由后续切片完成。
+// HTTP 426 升级拒绝的 protobuf 载荷。
 message UpgradeRequired {
   optional int32 target_protocol_version = 1;
   optional string artifact_url = 2;
@@ -154,10 +141,9 @@ message ResourceBudgets {
 }
 
 message Ready {
-  optional int32 capabilities_version = 1;
-  optional string daemon_version = 2;
-  EnvironmentInfo environment = 3;
-  RuntimeSnapshot runtime_status = 4;
+  optional string daemon_version = 1;
+  EnvironmentInfo environment = 2;
+  RuntimeSnapshot runtime_status = 3;
 }
 
 message EnvironmentInfo {
@@ -367,5 +353,4 @@ message IdeLeaseBinding {
 
 message Error {
   optional string message = 1;
-  ErrorCode code = 2;
 }

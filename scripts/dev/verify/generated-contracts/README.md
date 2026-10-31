@@ -24,10 +24,10 @@ Daemon 的 [protocol-contract.ts](../../../../daemon/src/generated/protocol-cont
 测试源码的 `DaemonContractGenerator` 从当前 v7 Java 协议常量生成：协议与 catalog 版本、payload 上限、错误码，以及消息类型、
 操作系统、架构、上传票据状态与更新阶段的 wire 值。它服务尚未切换的 v7 运行解码器。
 
-v8 控制协议的单一事实源是
+控制协议的单一事实源是
 [control.proto](../../../../harness/environment/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
 TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
-[control_pb.ts](../../../../daemon/src/generated/control/v8/control_pb.ts)。`check.sh` / `write.sh` 会检查或重写这份生成物。
+[control_pb.ts](../../../../daemon/src/generated/control_pb.ts)。`check.sh` / `write.sh` 会检查或重写这份生成物。
 
 Capability JSON Schema 以 Java classpath 资源为唯一来源，
 [capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon/resources/capabilities`。`check.sh` 发现内容或多余副本即失败，

@@ -378,7 +378,7 @@ Daemon 在同一准入门闩下检查并进入更新：没有未收敛普通执�
 | [Environment registry](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java) | 保留租约与三种投影，不存 IDE/更新任务 |
 | [Environment server](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) | 控制状态契约、更新准入、代际绑定；IDE 载荷仍由应用定义 |
 | [IDE application](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/) | mux codec/流状态、视图管理命令、租约协调与跨节点服务 |
-| [IDE Web gateway](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/) | HTTP/WS 适配、视图入口、绑定校验与单跳代理 |
+| [IDE Web gateway](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/cluster/ClusterEnvironmentIdeInternalController.java) | 跨节点 IDE 控制入口与鉴权 |
 | [Browser event channel](../../web/src/main/java/fun/fengwk/kkstudio/web/events/) | connectionId、ide-use、原生 Ping/Pong 和连接释放 |
 | [Daemon runtime](../../daemon/src/runtime.ts) / [update](../../daemon/src/update.ts) | 本机准入、完整状态、下载进度与更新器交接 |
 | [Daemon IDE](../../daemon/src/ide/) / [transport](../../daemon/src/transport/) | 视图权威、期限和资源句柄、数据复用 |

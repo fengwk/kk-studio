@@ -18,7 +18,7 @@ import {
   type CapabilityResult,
   type Invoke,
   type ResourceContent,
-} from '../../src/generated/control/v8/control_pb.js'
+} from '../../src/generated/control_pb.js'
 import {
   decodeBinary,
   decodeFrame,
@@ -74,11 +74,9 @@ function lengthDelimited(field: number, bytes: Uint8Array): number[] {
 function baseEnvelope(messageType: MessageType, payload: number[]): Uint8Array {
   return new Uint8Array([
     ...varint(1 << 3),
-    ...varint(8),
-    ...varint(2 << 3),
     ...varint(messageType),
-    ...lengthDelimited(3, new TextEncoder().encode(ENVIRONMENT_ID)),
-    ...lengthDelimited(4, new TextEncoder().encode(INVOCATION_ID)),
+    ...lengthDelimited(2, new TextEncoder().encode(ENVIRONMENT_ID)),
+    ...lengthDelimited(3, new TextEncoder().encode(INVOCATION_ID)),
     ...payload,
   ])
 }
@@ -92,7 +90,7 @@ function validInvoke() {
   })
 }
 
-describe('v8 control binary codec', () => {
+describe('control binary codec', () => {
   it('encodes the shared fixtures to golden byte-for-byte', () => {
     assertBytesEqual(encodeBinary(invokeEnvelope()), readGolden('invoke.bin'))
     assertBytesEqual(encodeBinary(completedEnvelope()), readGolden('completed.bin'))
@@ -136,7 +134,6 @@ describe('v8 control binary codec', () => {
       body: { case: 'text', value: create(TextContentSchema, { text: '' }) },
     })
     const envelope = create(EnvelopeSchema, {
-      protocolVersion: 8,
       messageType: MessageType.COMPLETED,
       environmentId: ENVIRONMENT_ID,
       invocationId: INVOCATION_ID,
@@ -161,7 +158,7 @@ describe('v8 control binary codec', () => {
     expect(() => decodeBinary(envelopeUnknown)).toThrow(/unknown protobuf fields/)
 
     const invokeBytes = new Uint8Array([...toBinary(InvokeSchema, validInvoke()), ...unknown])
-    const invokeUnknown = baseEnvelope(MessageType.INVOKE, lengthDelimited(14, invokeBytes))
+    const invokeUnknown = baseEnvelope(MessageType.INVOKE, lengthDelimited(8, invokeBytes))
     expect(() => decodeBinary(invokeUnknown)).toThrow(/unknown protobuf fields/)
 
     const content = create(ContentSchema, {
@@ -180,7 +177,7 @@ describe('v8 control binary codec', () => {
         ]),
       ),
     ])
-    const completedUnknown = baseEnvelope(MessageType.COMPLETED, lengthDelimited(17, completedPayload))
+    const completedUnknown = baseEnvelope(MessageType.COMPLETED, lengthDelimited(11, completedPayload))
     expect(() => decodeBinary(completedUnknown)).toThrow(/unknown protobuf fields/)
   })
 
@@ -247,7 +244,6 @@ describe('v8 control binary codec', () => {
     expect(() =>
       encodeBinary(
         create(EnvelopeSchema, {
-          protocolVersion: 8,
           messageType: MessageType.COMPLETED,
           environmentId: ENVIRONMENT_ID,
           invocationId: INVOCATION_ID,
@@ -259,19 +255,6 @@ describe('v8 control binary codec', () => {
     expect(() =>
       encodeBinary(
         create(EnvelopeSchema, {
-          protocolVersion: 7,
-          messageType: MessageType.EXECUTION_EXITED,
-          environmentId: ENVIRONMENT_ID,
-          invocationId: INVOCATION_ID,
-          payload: { case: 'executionExited', value: create(ExecutionExitedSchema, {}) },
-        }),
-      ),
-    ).toThrow(/protocolVersion/)
-
-    expect(() =>
-      encodeBinary(
-        create(EnvelopeSchema, {
-          protocolVersion: 8,
           messageType: MessageType.EXECUTION_EXITED,
           environmentId: 'not-a-uuid',
           invocationId: INVOCATION_ID,
@@ -300,10 +283,8 @@ describe('v8 control binary codec', () => {
   })
 })
 
-describe('v8 upgrade payload', () => {
-  it('accepts only a positive int32 target protocol version', () => {
-    // UpgradeRequired.target_protocol_version is proto int32, so the direct validator must reject
-    // values that are safe integers but not representable as signed 32-bit integers.
+describe('upgrade payload', () => {
+  it('accepts only a positive int32 target protocol version and enforces url/sha co-presence', () => {
     const upgrade = upgradeRequired()
     expect(validateUpgrade({ ...upgrade, targetProtocolVersion: 2147483647 }).targetProtocolVersion).toBe(
       2147483647,
@@ -314,10 +295,18 @@ describe('v8 upgrade payload', () => {
         /targetProtocolVersion must be in 1\.\.2147483647/,
       )
     }
+
+    expect(validateUpgrade({ targetProtocolVersion: 1 })).toBeDefined()
+    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactUrl: upgrade.artifactUrl })).toThrow(
+      /must both be present or both absent/,
+    )
+    expect(() => validateUpgrade({ targetProtocolVersion: 1, artifactSha256: upgrade.artifactSha256 })).toThrow(
+      /must both be present or both absent/,
+    )
   })
 })
 
-describe('v8 control framing', () => {
+describe('control framing', () => {
   it('accepts exactly 16 MiB and rejects the adjacent boundaries', () => {
     const message = new Uint8Array(MAX_MESSAGE_BYTES)
     message[0] = 1
@@ -342,7 +331,6 @@ describe('v8 control framing', () => {
 
 function envelope(messageType: MessageType, invoke: Invoke) {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType,
     environmentId: ENVIRONMENT_ID,
     invocationId: INVOCATION_ID,
@@ -367,7 +355,6 @@ function completedWithResource(resource: ResourceContent) {
 
 function completedWithResult(result: CapabilityResult) {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.COMPLETED,
     environmentId: ENVIRONMENT_ID,
     invocationId: INVOCATION_ID,

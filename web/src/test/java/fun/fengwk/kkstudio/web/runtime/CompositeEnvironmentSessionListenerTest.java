@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -30,7 +29,7 @@ import java.util.function.Consumer;
 
 /**
  * 意图：验证 compositeEnvironmentSessionListener 在 READY 事件上既唤醒 HarnessWorkDispatcher，又触发 Skill
- * 全量同步；Daemon 实例接管时转发给 IDE 数据面清理；任一宿主抛出运行时异常时都不得向调用方泄露异常。
+ * 全量同步；任一宿主抛出运行时异常时都不得向调用方泄露异常。
  */
 class CompositeEnvironmentSessionListenerTest {
 
@@ -38,8 +37,6 @@ class CompositeEnvironmentSessionListenerTest {
   private ObjectProvider<HarnessWorkDispatcher> dispatcherProvider;
   private EnvironmentSkillSyncOrchestrator orchestrator;
   private ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider;
-  private IdeGenerationCloseListener generationCloseListener;
-  private ObjectProvider<IdeGenerationCloseListener> generationCloseProvider;
   private IdeLeaseCoordinator leaseCoordinator;
   private ObjectProvider<IdeLeaseCoordinator> leaseCoordinatorProvider;
   private EnvironmentSessionListener listener;
@@ -70,17 +67,6 @@ class CompositeEnvironmentSessionListenerTest {
         .when(orchestratorProvider)
         .ifAvailable(any());
 
-    generationCloseListener = mock(IdeGenerationCloseListener.class);
-    generationCloseProvider = mock(ObjectProvider.class);
-    doAnswer(
-            invocation -> {
-              Consumer<IdeGenerationCloseListener> consumer = invocation.getArgument(0);
-              consumer.accept(generationCloseListener);
-              return null;
-            })
-        .when(generationCloseProvider)
-        .ifAvailable(any());
-
     leaseCoordinator = mock(IdeLeaseCoordinator.class);
     leaseCoordinatorProvider = mock(ObjectProvider.class);
     doAnswer(
@@ -94,10 +80,7 @@ class CompositeEnvironmentSessionListenerTest {
 
     listener =
         config.compositeEnvironmentSessionListener(
-            dispatcherProvider,
-            orchestratorProvider,
-            generationCloseProvider,
-            leaseCoordinatorProvider);
+            dispatcherProvider, orchestratorProvider, leaseCoordinatorProvider);
   }
 
   /** 队列按每个并发槽 8 个排队任务计算，容量用尽时 AbortPolicy 拒绝。 */
@@ -117,27 +100,6 @@ class CompositeEnvironmentSessionListenerTest {
     } finally {
       executor.shutdownNow();
     }
-  }
-
-  @Test
-  void forwardsInstanceReplacementToIdeDataPlaneCleanup() {
-    DaemonConnectionIdentity previous =
-        new DaemonConnectionIdentity(EnvironmentId.of(UUID.randomUUID()), "daemon-1");
-
-    listener.onDaemonInstanceReplaced(previous);
-
-    verify(generationCloseListener).onGenerationClosed(previous);
-  }
-
-  @Test
-  void ideCleanupExceptionDoesNotPropagate() {
-    DaemonConnectionIdentity previous =
-        new DaemonConnectionIdentity(EnvironmentId.of(UUID.randomUUID()), "daemon-1");
-    doThrow(new IllegalStateException("ide cleanup failed"))
-        .when(generationCloseListener)
-        .onGenerationClosed(any());
-
-    assertDoesNotThrow(() -> listener.onDaemonInstanceReplaced(previous));
   }
 
   @Test

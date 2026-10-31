@@ -3,7 +3,6 @@ import { fromBinary, toBinary } from '@bufbuild/protobuf'
 import {
   Architecture,
   EnvelopeSchema,
-  ErrorCode,
   IdeAction,
   IdeOpenMode,
   IdeViewState,
@@ -36,7 +35,7 @@ import {
   type UpdateProgress,
   type UpdateResult,
   type UpgradeRequired,
-} from '../../generated/control/v8/control_pb.js'
+} from '../../generated/control_pb.js'
 import { frame, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -50,8 +49,7 @@ import {
   requireUuid,
 } from './runtime.js'
 
-export const PROTOCOL_VERSION = 8
-export const CAPABILITIES_VERSION = 6
+export const PROTOCOL_VERSION = 1
 export const MAX_INVOCATION_ID_CHARS = 256
 export const MAX_CAPABILITY_VERSION_CHARS = 128
 export const MAX_CALL_ID_CHARS = 256
@@ -175,22 +173,26 @@ export function validateUpgrade(upgrade: UpgradeRequired): UpgradeRequired {
     upgrade.targetProtocolVersion,
     'upgradeRequired.targetProtocolVersion',
   )
-  const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
-  if (!ARTIFACT_URL_PATTERN.test(url)) {
-    throw new Error('upgradeRequired.artifactUrl must be the official platform release archive')
+  const hasUrl = upgrade.artifactUrl !== undefined
+  const hasSha = upgrade.artifactSha256 !== undefined
+  if (hasUrl !== hasSha) {
+    throw new Error('upgradeRequired artifactUrl and artifactSha256 must both be present or both absent')
   }
-  const sha = requireText(upgrade.artifactSha256, 'upgradeRequired.artifactSha256', { nonBlank: true })
-  if (!SHA256_ANY_PATTERN.test(sha)) {
-    throw new Error('upgradeRequired.artifactSha256 has invalid syntax')
+  if (hasUrl) {
+    const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
+    if (!ARTIFACT_URL_PATTERN.test(url)) {
+      throw new Error('upgradeRequired.artifactUrl must be the official platform release archive')
+    }
+    const sha = requireText(upgrade.artifactSha256, 'upgradeRequired.artifactSha256', { nonBlank: true })
+    if (!SHA256_ANY_PATTERN.test(sha)) {
+      throw new Error('upgradeRequired.artifactSha256 has invalid syntax')
+    }
   }
   return upgrade
 }
 
 export function validate(envelope: Envelope): Envelope {
   assertNoUnknown(envelope, 'envelope')
-  if (envelope.protocolVersion !== PROTOCOL_VERSION) {
-    throw new Error(`protocolVersion must be ${PROTOCOL_VERSION}`)
-  }
   const messageType = envelope.messageType
   if (!messageType) {
     throw new Error('messageType must be a known non-unspecified value')
@@ -329,9 +331,6 @@ function validateSettings(settings: Settings): void {
 
 function validateReady(ready: Ready): void {
   assertNoUnknown(ready, 'ready')
-  if (ready.capabilitiesVersion !== CAPABILITIES_VERSION) {
-    throw new Error(`ready.capabilitiesVersion must be ${CAPABILITIES_VERSION}`)
-  }
   const daemonVersion = requireDaemonVersion(ready.daemonVersion, 'ready.daemonVersion')
   if (ready.environment === undefined) {
     throw new Error('ready.environment is required')
@@ -811,9 +810,6 @@ function validateIdeLease(lease: IdeLease): void {
 function validateError(error: ProtocolErrorMessage): void {
   assertNoUnknown(error, 'error')
   requireMessage(error.message, 'error.message')
-  if (error.code !== undefined && error.code > ErrorCode.REGISTRATION_REJECTED) {
-    throw new Error('error.code is unknown')
-  }
 }
 
 function requireCase(envelope: Envelope, expected: string, messageType: string): void {

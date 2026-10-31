@@ -9,12 +9,12 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-/** v8 三条首批控制消息的 binary golden 与应用层边界测试。 */
+/** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
 
-  /** 其余消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
+  /** 各类消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
   @Test
-  void validatesRemainingMessages() {
+  void validatesMessageBoundaries() {
     Envelope settings =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("settings.bin"));
     assertThrows(
@@ -38,13 +38,6 @@ class ControlProtocolCodecTest {
 
     Envelope ready =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("ready.bin"));
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                ready.toBuilder()
-                    .setReady(ready.getReady().toBuilder().setCapabilitiesVersion(5))
-                    .build()));
     assertThrows(
         ControlProtocolException.class,
         () ->
@@ -195,7 +188,7 @@ class ControlProtocolCodecTest {
 
     UpgradeRequired upgrade =
         UpgradeRequired.newBuilder()
-            .setTargetProtocolVersion(8)
+            .setTargetProtocolVersion(ControlProtocolCodec.PROTOCOL_VERSION)
             .setArtifactUrl(
                 "https://github.com/fengwk/kk-studio/releases/download/v1.2.3/"
                     + "kk-studio-daemon-v1.2.3-linux-amd64.tar.gz")
@@ -204,6 +197,16 @@ class ControlProtocolCodecTest {
     ControlProtocolCodec.validateUpgrade(upgrade);
     ControlProtocolCodec.validateUpgrade(
         upgrade.toBuilder().setTargetProtocolVersion(Integer.MAX_VALUE).build());
+    ControlProtocolCodec.validateUpgrade(
+        UpgradeRequired.newBuilder().setTargetProtocolVersion(1).build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(
+                upgrade.toBuilder().clearArtifactSha256().build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.validateUpgrade(upgrade.toBuilder().clearArtifactUrl().build()));
     assertThrows(
         ControlProtocolException.class,
         () ->
@@ -394,8 +397,7 @@ class ControlProtocolCodecTest {
 
     Envelope error =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("error.bin"));
-    ControlProtocolCodec.encodeBinary(
-        error.toBuilder().setError(error.getError().toBuilder().clearCode()).build());
+    assertEquals("retry", error.getError().getMessage());
 
     assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.validate(null));
     assertThrows(
@@ -597,11 +599,6 @@ class ControlProtocolCodecTest {
             .build();
     assertThrows(
         ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(unspecified));
-
-    Envelope wrongVersion =
-        ControlProtocolFixtures.invokeEnvelope().toBuilder().setProtocolVersion(7).build();
-    assertThrows(
-        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(wrongVersion));
 
     Envelope missingInvocation =
         ControlProtocolFixtures.invokeEnvelope().toBuilder().clearInvocationId().build();
