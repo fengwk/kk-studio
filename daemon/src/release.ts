@@ -78,3 +78,31 @@ export function parseReleaseArtifactUrl(url: string): ReleaseArtifact | null {
   }
   return { targetVersion: version, os: os as ReleaseOs, arch: arch as ReleaseArch }
 }
+
+/** 取得当前宿主平台的官方发布矩阵键（linux-amd64/linux-arm64/macos-amd64/macos-arm64/windows-amd64）。 */
+export function currentPlatformKey(platformName: NodeJS.Platform = process.platform, archName: string = process.arch): string {
+  let os: ReleaseOs
+  if (platformName === 'linux') {
+    os = 'linux'
+  } else if (platformName === 'darwin') {
+    os = 'macos'
+  } else if (platformName === 'win32') {
+    os = 'windows'
+  } else {
+    throw new Error(`unsupported daemon operating system: ${platformName}`)
+  }
+  let arch: ReleaseArch
+  if (archName === 'x64') {
+    arch = 'amd64'
+  } else if (archName === 'arm64') {
+    arch = 'arm64'
+  } else {
+    throw new Error(`unsupported daemon architecture: ${archName}`)
+  }
+  const key = `${os}-${arch}`
+  if (!PUBLISHED_PLATFORMS.has(key)) {
+    throw new Error(`platform is not covered by the official release matrix: ${key}`)
+  }
+  return key
+}
+

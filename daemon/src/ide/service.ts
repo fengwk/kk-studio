@@ -10,7 +10,7 @@ import type {
   IdeViewSummary,
   ProcessSupervisor,
 } from '../contracts.js'
-import type { IdeLease } from '../protocol.js'
+import type { IdeLease } from '../generated/control/v8/control_pb.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { createIdeBridge, type BridgeDocument, type BridgeResult, type IdeBridge } from './bridge.js'
 import {
@@ -1170,13 +1170,16 @@ export async function createIdeService(
       return
     }
     for (const binding of lease.bindings) {
+      if (!binding.viewId || binding.bindingEpoch === undefined) {
+        continue
+      }
       const view = views.get(binding.viewId)
       if (
         view === undefined ||
         view.state !== 'OPEN' ||
         view.detachedAt !== null ||
         view.documentId !== binding.documentId ||
-        view.bindingEpoch !== binding.bindingEpoch
+        view.bindingEpoch !== binding.bindingEpoch.toString()
       ) {
         continue
       }
