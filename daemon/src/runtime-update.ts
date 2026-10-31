@@ -46,14 +46,20 @@ export type UpdateDecision =
 
 /** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
 export function updateCommandKey(command: Update): string {
-  return JSON.stringify([command.targetVersion ?? '', command.artifactUrl ?? '', command.artifactSha256 ?? ''])
+  return JSON.stringify([command.targetVersion, command.artifactUrl, command.artifactSha256])
+}
+
+export function normalizeUpdateResult(raw: UpdateOutcomeLike, operationId: string): UpdateResult {
+  const phase = raw.phase === 'FAILED' ? UpdatePhase.UPDATE_FAILED : UpdatePhase.UPDATE_PREPARED
+  const message = typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : undefined
+  return create(UpdateResultSchema, { operationId, phase, message })
 }
 
 export function acceptedReceipt(command: Update): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
     result: create(UpdateResultSchema, {
-      operationId: command.operationId ?? '',
+      operationId: command.operationId,
       phase: UpdatePhase.UPDATE_ACCEPTED,
     }),
   }
@@ -63,7 +69,7 @@ export function failedReceipt(command: Update, message: string): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
     result: create(UpdateResultSchema, {
-      operationId: command.operationId ?? '',
+      operationId: command.operationId,
       phase: UpdatePhase.UPDATE_FAILED,
       message,
     }),
@@ -74,7 +80,7 @@ export function preparedReceipt(active: ActiveUpdate, command: Update, prepared:
   return {
     commandKey: active.commandKey,
     result: create(UpdateResultSchema, {
-      operationId: command.operationId ?? active.operationId,
+      operationId: command.operationId || active.operationId,
       phase: UpdatePhase.UPDATE_PREPARED,
       message: prepared.message ?? undefined,
     }),
@@ -87,8 +93,21 @@ export function executionFailureReceipt(
   command: Update,
   failure: Error | null,
 ): UpdateReceipt {
-  const message = failure?.message ?? 'managed update execution failed'
-  return failedReceipt(command, message)
+  return {
+    commandKey: active.commandKey,
+    result: create(UpdateResultSchema, {
+      operationId: command.operationId,
+      phase: UpdatePhase.UPDATE_FAILED,
+      message: messageOf(failure ?? new Error('update failed')),
+    }),
+  }
+}
+
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') {
+    return error.message
+  }
+  return 'capability execution failed'
 }
 
 /**

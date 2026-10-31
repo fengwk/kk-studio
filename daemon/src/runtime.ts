@@ -133,18 +133,37 @@ const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 const CAPABILITY_CATALOG_VERSION = '3'
 
-const ACTION_MAP: Record<number, IdeCommand['action']> = {
-  [ProtoIdeAction.OPEN_VIEW]: 'OPEN_VIEW',
-  [ProtoIdeAction.CHANGE_DIRECTORY]: 'CHANGE_DIRECTORY',
-  [ProtoIdeAction.FOCUS_TERMINAL]: 'FOCUS_TERMINAL',
-  [ProtoIdeAction.CLOSE_VIEW]: 'CLOSE_VIEW',
-  [ProtoIdeAction.DETACH_VIEW]: 'DETACH_VIEW',
-  [ProtoIdeAction.LIST_VIEWS]: 'LIST_VIEWS',
+function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
+  switch (action) {
+    case ProtoIdeAction.OPEN_VIEW:
+      return 'OPEN_VIEW'
+    case ProtoIdeAction.CHANGE_DIRECTORY:
+      return 'CHANGE_DIRECTORY'
+    case ProtoIdeAction.FOCUS_TERMINAL:
+      return 'FOCUS_TERMINAL'
+    case ProtoIdeAction.CLOSE_VIEW:
+      return 'CLOSE_VIEW'
+    case ProtoIdeAction.DETACH_VIEW:
+      return 'DETACH_VIEW'
+    case ProtoIdeAction.LIST_VIEWS:
+      return 'LIST_VIEWS'
+    default:
+      throw new Error(`unsupported IDE action: ${action}`)
+  }
 }
 
-const MODE_MAP: Record<number, IdeCommand['mode']> = {
-  [ProtoIdeOpenMode.CREATE]: 'create',
-  [ProtoIdeOpenMode.RESUME]: 'resume',
+function toIdeMode(mode: ProtoIdeOpenMode | undefined): IdeCommand['mode'] | undefined {
+  if (mode === undefined || mode === ProtoIdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED) {
+    return undefined
+  }
+  switch (mode) {
+    case ProtoIdeOpenMode.CREATE:
+      return 'create'
+    case ProtoIdeOpenMode.RESUME:
+      return 'resume'
+    default:
+      throw new Error(`unsupported IDE open mode: ${mode}`)
+  }
 }
 
 export class Runtime {
@@ -573,17 +592,20 @@ export class Runtime {
           throw new Error(`daemon must not receive ${envelope.messageType} from server`)
       }
     } catch (error) {
-      this.sendOn(
-        connection,
-        create(EnvelopeSchema, {
-          messageType: MessageType.ERROR,
-          environmentId: this.boundEnvironmentId ?? undefined,
-          payload: {
-            case: 'error',
-            value: create(ErrorSchema, { message: safeMessage(error) }),
-          },
-        }),
-      )
+      const errorEnvironmentId = this.boundEnvironmentId ?? envelope.environmentId ?? undefined
+      if (errorEnvironmentId !== undefined) {
+        this.sendOn(
+          connection,
+          create(EnvelopeSchema, {
+            messageType: MessageType.ERROR,
+            environmentId: errorEnvironmentId,
+            payload: {
+              case: 'error',
+              value: create(ErrorSchema, { message: safeMessage(error) }),
+            },
+          }),
+        )
+      }
     }
   }
 
@@ -609,10 +631,10 @@ export class Runtime {
     }
     this.boundEnvironmentId = envelope.environmentId
     const settings = envelope.payload.value as Settings
-    const budgets = settings?.resourceBudgets
-    this.maxResourceBytes = Number(budgets?.maxResourceBytes ?? 1048576n)
-    const ttl = Number(budgets?.temporaryResourceTtlSeconds ?? 60n)
-    const cleanup = Number(budgets?.temporaryResourceCleanupIntervalSeconds ?? 30n)
+    const budgets = settings.resourceBudgets!
+    this.maxResourceBytes = Number(budgets.maxResourceBytes)
+    const ttl = Number(budgets.temporaryResourceTtlSeconds)
+    const cleanup = Number(budgets.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
     if (!this.sendReady(connection)) {
       if (this.activeConnection === connection) {
@@ -633,8 +655,8 @@ export class Runtime {
       throw new Error('TEMPORARY_RESOURCE_POLICY requires a READY bound connection')
     }
     const policy = envelope.payload.value as TemporaryResourcePolicy
-    const ttl = Number(policy?.temporaryResourceTtlSeconds ?? 60n)
-    const cleanup = Number(policy?.temporaryResourceCleanupIntervalSeconds ?? 30n)
+    const ttl = Number(policy.temporaryResourceTtlSeconds)
+    const cleanup = Number(policy.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
   }
 
@@ -693,12 +715,15 @@ export class Runtime {
       if (this.updateAdmissionHeld()) {
         throw new Error('environment update admission is held')
       }
-      const capabilityId = invoke?.capabilityId ?? ''
+      const capabilityId = invoke.capabilityId!
+      if (invoke.expectedFile !== undefined && capabilityId !== 'fs.edit') {
+        throw new Error('expectedFile is only valid for fs.edit')
+      }
       const executor = this.capabilities[capabilityId]
       if (executor === undefined) {
         throw new Error(`unknown Environment capability: ${capabilityId}`)
       }
-      if (invoke.capabilityVersion && invoke.capabilityVersion !== this.capabilityCatalogVersion) {
+      if (invoke.capabilityVersion !== this.capabilityCatalogVersion) {
         throw new Error(
           `capabilityVersion does not match environment descriptor: ${invoke.capabilityVersion}`,
         )
@@ -706,21 +731,22 @@ export class Runtime {
       if (this.running.size >= this.maxConcurrentInvocations) {
         throw new Error('too many concurrent capability invocations')
       }
+      const parsedArgs = JSON.parse(invoke.argumentsJson!)
+      if (typeof parsedArgs !== 'object' || parsedArgs === null || Array.isArray(parsedArgs)) {
+        throw new Error('arguments must be a JSON object')
+      }
+      const callArguments = parsedArgs as Record<string, unknown>
+
       const controller = new AbortController()
       const invocation = new RunningInvocation(invocationId, controller, this.maxResourceBytes)
       this.running.set(invocationId, invocation)
       this.sendStarted(connection, invocationId)
-      const timeoutMillis = Number(invoke?.timeoutMillis ?? 0n)
+      const timeoutMillis = Number(invoke.timeoutMillis)
       this.scheduleTimeout(invocation, timeoutMillis)
 
-      let callArguments: Record<string, unknown> = {}
-      try {
-        callArguments = JSON.parse(invoke?.argumentsJson || '{}') as Record<string, unknown>
-      } catch {}
-
       const expectedFile =
-        invoke?.expectedFile?.path !== undefined && invoke?.expectedFile?.sha256 !== undefined
-          ? { path: invoke.expectedFile.path, sha256: invoke.expectedFile.sha256 }
+        invoke.expectedFile !== undefined
+          ? { path: invoke.expectedFile.path!, sha256: invoke.expectedFile.sha256! }
           : undefined
 
       const call: CapabilityCall = {
@@ -1049,8 +1075,12 @@ export class Runtime {
     if (invocation === undefined) {
       return false
     }
+    const outbound = create(EnvelopeSchema, {
+      ...envelope,
+      environmentId: this.boundEnvironmentId,
+    })
     return invocation.trySendControl(
-      () => this.isRunning(invocationId) && this.send(envelope),
+      () => this.isRunning(invocationId) && this.send(outbound),
     )
   }
 
@@ -1305,13 +1335,13 @@ export class Runtime {
     const invocationId = requireInvocationId(envelope)
     const protoCmd = envelope.payload.value as ProtoIdeCommand
     const command: IdeCommand = {
-      action: ACTION_MAP[protoCmd.action] ?? 'LIST_VIEWS',
+      action: toIdeAction(protoCmd.action),
       viewId: protoCmd.viewId ?? undefined,
       documentId: protoCmd.documentId ?? undefined,
       eventNodeId: protoCmd.eventNodeId ?? undefined,
       connectionId: protoCmd.connectionId ?? undefined,
       claimId: protoCmd.claimId ?? undefined,
-      mode: protoCmd.mode ? MODE_MAP[protoCmd.mode] : undefined,
+      mode: toIdeMode(protoCmd.mode),
     }
     const admission = admitIdeCommand({
       invocationId,
@@ -1596,7 +1626,7 @@ function requirePositive(value: number, name: string): number {
 
 function requireNonNegative(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${name} must be a non-negative integer`)
+    throw new Error(`${name} must not be negative`)
   }
   return value
 }

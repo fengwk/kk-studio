@@ -96,7 +96,7 @@ export function defaultNote(operatingSystem: OperatingSystem): string {
       return 'Linux environment.'
     case OperatingSystem.MACOS:
       return 'macOS environment.'
-    default:
-      return 'Local environment.'
+    case OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED:
+      throw new Error('operatingSystem must not be unspecified')
   }
 }

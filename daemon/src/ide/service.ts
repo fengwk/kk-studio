@@ -1169,16 +1169,13 @@ export async function createIdeService(
       return
     }
     for (const binding of lease.bindings) {
-      if (!binding.viewId || binding.bindingEpoch === undefined) {
-        continue
-      }
-      const view = views.get(binding.viewId)
+      const view = views.get(binding.viewId!)
       if (
         view === undefined ||
         view.state !== 'OPEN' ||
         view.detachedAt !== null ||
         view.documentId !== binding.documentId ||
-        view.bindingEpoch !== binding.bindingEpoch.toString()
+        view.bindingEpoch !== binding.bindingEpoch!.toString()
       ) {
         continue
       }

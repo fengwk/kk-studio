@@ -98,6 +98,7 @@ function invokeEnvelope(invocationId = 'inv-1', args: Record<string, unknown> = 
       case: 'invoke',
       value: create(InvokeSchema, {
         capabilityId: 'fs.read',
+        capabilityVersion: '3',
         argumentsJson: JSON.stringify(args),
         timeoutMillis: 60_000n,
       }),
@@ -128,7 +129,7 @@ describe('runtime constructor validation', () => {
       /must not exceed maxReconnectDelayMillis/,
     )
     expect(() => new Runtime(baseOptions({ heartbeatIntervalMillis: 0 }))).toThrow(/heartbeatIntervalMillis must be a positive/)
-    expect(() => new Runtime(baseOptions({ initialReconnectDelayMillis: -1 }))).toThrow(/non-negative/)
+    expect(() => new Runtime(baseOptions({ initialReconnectDelayMillis: -1 }))).toThrow(/must not be negative/)
     expect(() => new Runtime(baseOptions({ maxReconnectDelayMillis: 0 }))).toThrow(/maxReconnectDelayMillis must be a positive/)
     expect(() => new Runtime(baseOptions({ maxConcurrentInvocations: 0 }))).toThrow(/maxConcurrentInvocations must be a positive/)
     expect(() => new Runtime(baseOptions({ ideCommandTimeoutMillis: 0 }))).toThrow(/ideCommandTimeoutMillis must be a positive/)
