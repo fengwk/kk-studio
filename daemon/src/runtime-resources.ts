@@ -1,5 +1,5 @@
 import type { ResultContent, ResourceUploader } from './contracts.js'
-import type { ResourceUploadTicket, Envelope } from './generated/control/v8/control_pb.js'
+import type { ResourceUploadTicket, Envelope } from './generated/control_pb.js'
 import {
   createHttpPutObject,
   createResourceTransferClient,

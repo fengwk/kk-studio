@@ -13,7 +13,7 @@ import {
   type Envelope,
   type PresignedPut,
   type ResourceUploadTicket,
-} from '../generated/control/v8/control_pb.js'
+} from '../generated/control_pb.js'
 
 /**
  * Daemon 侧 invocation 作用域资源上传客户端：把内存字节经控制面直传全局对象存储。
@@ -171,7 +171,6 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
                 invocationId,
                 key,
                 create(EnvelopeSchema, {
-                  protocolVersion: 8,
                   messageType: MessageType.RESOURCE_UPLOAD_COMMIT,
                   invocationId,
                   payload: {
@@ -188,7 +187,6 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
                 invocationId,
                 key,
                 create(EnvelopeSchema, {
-                  protocolVersion: 8,
                   messageType: MessageType.RESOURCE_UPLOAD_REQUEST,
                   invocationId,
                   payload: {

@@ -6,7 +6,7 @@ import {
   IdeViewState,
   IdeViewSummarySchema,
   type IdeResult,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 import type { IdeReply } from './contracts.js'
 
 /** 在途 IDE 请求条数上界，防止无界 map 与资源耗尽。 */

@@ -15,7 +15,7 @@ import {
 } from '../../src/protocol/control/codec.js'
 import {
   type Envelope,
-} from '../../src/generated/control/v8/control_pb.js'
+} from '../../src/generated/control_pb.js'
 
 const {
   HTTP2_HEADER_METHOD,

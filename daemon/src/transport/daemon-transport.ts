@@ -15,12 +15,13 @@ import {
   decodeFrame,
   encodeFrame,
   PROTOCOL_VERSION,
+  validateUpgrade,
 } from '../protocol/control/codec.js'
 import {
   UpgradeRequiredSchema,
   type Envelope,
   type UpgradeRequired,
-} from '../generated/control/v8/control_pb.js'
+} from '../generated/control_pb.js'
 import { handleIdeConnectRequest, handleIdeHttpRequest } from './ide-tunnel.js'
 
 const {
@@ -191,7 +192,7 @@ export class DaemonWebSocketTransport implements ControlTransport {
           try {
             const body = Buffer.concat(chunks)
             if (body.length > 0) {
-              upgradeRequired = fromBinary(UpgradeRequiredSchema, body)
+              upgradeRequired = validateUpgrade(fromBinary(UpgradeRequiredSchema, body))
             }
           } catch {}
           if (!connectResolved) {

@@ -35,7 +35,7 @@ import {
   SettingsSchema,
   UpgradeRequiredSchema,
   type Envelope,
-} from '../src/generated/control/v8/control_pb.js'
+} from '../src/generated/control_pb.js'
 import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
 import { FakeStudioPeer } from './support/fake-studio.js'
 import { IdeError } from '../src/ide/errors.js'
@@ -260,7 +260,6 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
 
     // Studio 发送 SETTINGS
     const settingsEnvelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.SETTINGS,
       environmentId: '11111111-1111-4111-8111-111111111111',
       payload: {
@@ -283,7 +282,6 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
 
     // Daemon 回复 RECOVER_NOT_FOUND
     const recoverNotFound = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.RECOVER_NOT_FOUND,
       environmentId: '11111111-1111-4111-8111-111111111111',
       invocationId: 'invoke-123',
@@ -639,8 +637,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       // Studio 发送 SETTINGS
       peer.sendEnvelope(
         create(EnvelopeSchema, {
-          protocolVersion: PROTOCOL_VERSION,
-          messageType: MessageType.SETTINGS,
+              messageType: MessageType.SETTINGS,
           environmentId: '11111111-1111-4111-8111-111111111111',
           payload: {
             case: 'settings',
@@ -663,8 +660,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       // Studio 发送 INVOKE
       peer.sendEnvelope(
         create(EnvelopeSchema, {
-          protocolVersion: PROTOCOL_VERSION,
-          messageType: MessageType.INVOKE,
+              messageType: MessageType.INVOKE,
           environmentId: '11111111-1111-4111-8111-111111111111',
           invocationId: 'invoke-100',
           payload: {
@@ -687,8 +683,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       // 测试 RECOVER 未知调用 -> 回复 RECOVER_NOT_FOUND
       peer.sendEnvelope(
         create(EnvelopeSchema, {
-          protocolVersion: PROTOCOL_VERSION,
-          messageType: MessageType.RECOVER,
+              messageType: MessageType.RECOVER,
           environmentId: '11111111-1111-4111-8111-111111111111',
           invocationId: 'unknown-invoke-999',
           payload: {

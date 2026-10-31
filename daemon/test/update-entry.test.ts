@@ -17,7 +17,7 @@ import {
   UpdatePhase,
   UpdateSchema,
   type UpdateResult,
-} from '../src/generated/control/v8/control_pb.js'
+} from '../src/generated/control_pb.js'
 import { create } from '@bufbuild/protobuf'
 import {
   HANDOFF_FILE,
@@ -209,7 +209,6 @@ async function startEntry(): Promise<EntryHarness> {
   await tick()
   transport.receive(
     create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.SETTINGS,
       environmentId: ENVIRONMENT_ID,
       payload: {
@@ -234,8 +233,7 @@ describe('managed update real entry', () => {
     const harness = await startEntry()
     harness.transport.receive(
       create(EnvelopeSchema, {
-        protocolVersion: PROTOCOL_VERSION,
-        messageType: MessageType.UPDATE,
+          messageType: MessageType.UPDATE,
         environmentId: ENVIRONMENT_ID,
         payload: {
           case: 'update',

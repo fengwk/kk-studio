@@ -15,7 +15,6 @@ import type {
 } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
 import {
-  CAPABILITIES_VERSION,
   PROTOCOL_VERSION,
 } from './protocol/control/codec.js'
 import {
@@ -58,7 +57,7 @@ import {
   type Update,
   type UpdateResult,
   type UpgradeRequired,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 import {
   InMemoryInvocationJournal,
   isTerminalState,
@@ -400,13 +399,11 @@ export class Runtime {
 
   private sendReady(connection: ActiveConnection): boolean {
     const readyEnvelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.READY,
       environmentId: this.boundEnvironmentId ?? undefined,
       payload: {
         case: 'ready',
         value: create(ReadySchema, {
-          capabilitiesVersion: CAPABILITIES_VERSION,
           daemonVersion: this.daemonVersion,
           environment: this.environment,
           runtimeStatus: this.currentRuntimeStatus(),
@@ -427,7 +424,6 @@ export class Runtime {
       ideLeaseRound = this.ideLeaseRound
     }
     const heartbeatEnvelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.HEARTBEAT,
       environmentId: this.boundEnvironmentId ?? undefined,
       payload: {
@@ -670,7 +666,6 @@ export class Runtime {
         return
       }
       const envelope = create(EnvelopeSchema, {
-        protocolVersion: PROTOCOL_VERSION,
         messageType: MessageType.COMPLETED,
         environmentId: this.boundEnvironmentId ?? undefined,
         invocationId: invocation.invocationId,
@@ -695,8 +690,7 @@ export class Runtime {
       if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
         const payloadReason = reason === 'SHUTDOWN' ? 'daemon shutdown' : 'cancelled'
         const envelope = create(EnvelopeSchema, {
-          protocolVersion: PROTOCOL_VERSION,
-          messageType: MessageType.CANCELLED,
+            messageType: MessageType.CANCELLED,
           environmentId: this.boundEnvironmentId ?? undefined,
           invocationId: invocation.invocationId,
           payload: {
@@ -748,8 +742,7 @@ export class Runtime {
           return
         }
         const envelope = create(EnvelopeSchema, {
-          protocolVersion: PROTOCOL_VERSION,
-          messageType: MessageType.PROGRESS,
+            messageType: MessageType.PROGRESS,
           environmentId: this.boundEnvironmentId ?? undefined,
           invocationId: invocation.invocationId,
           payload: {
@@ -789,7 +782,6 @@ export class Runtime {
       this.replay(entry)
     } else {
       const notFound = create(EnvelopeSchema, {
-        protocolVersion: PROTOCOL_VERSION,
         messageType: MessageType.RECOVER_NOT_FOUND,
         environmentId: this.boundEnvironmentId ?? undefined,
         invocationId,
@@ -805,7 +797,6 @@ export class Runtime {
   private replay(entry: JournalEntry): void {
     if (entry.state === 'RUNNING') {
       const started = create(EnvelopeSchema, {
-        protocolVersion: PROTOCOL_VERSION,
         messageType: MessageType.STARTED,
         environmentId: this.boundEnvironmentId ?? undefined,
         invocationId: entry.invocationId,
@@ -823,7 +814,6 @@ export class Runtime {
     }
     if (entry.exitConfirmed) {
       const exited = create(EnvelopeSchema, {
-        protocolVersion: PROTOCOL_VERSION,
         messageType: MessageType.EXECUTION_EXITED,
         environmentId: this.boundEnvironmentId ?? undefined,
         invocationId: entry.invocationId,
@@ -909,7 +899,6 @@ export class Runtime {
 
   private sendIdeResult(invocationId: string, result: IdeResult): void {
     const envelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.IDE_RESULT,
       environmentId: this.boundEnvironmentId ?? undefined,
       invocationId,
@@ -1055,7 +1044,6 @@ export class Runtime {
 
   private sendUpdateResult(result: UpdateResult): void {
     const envelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.UPDATE_RESULT,
       environmentId: this.boundEnvironmentId ?? undefined,
       payload: {
@@ -1088,7 +1076,6 @@ export class Runtime {
       return
     }
     const envelope = create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.RUNTIME_STATUS,
       environmentId: this.boundEnvironmentId ?? undefined,
       payload: {
@@ -1108,7 +1095,6 @@ export class Runtime {
 
   private buildFailedEnvelope(invocationId: string, message: string): Envelope {
     return create(EnvelopeSchema, {
-      protocolVersion: PROTOCOL_VERSION,
       messageType: MessageType.FAILED,
       environmentId: this.boundEnvironmentId ?? undefined,
       invocationId,

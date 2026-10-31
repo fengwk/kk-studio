@@ -7,7 +7,7 @@ import type {
   ResourceUploader,
 } from './contracts.js'
 import type { InvocationJournal } from './journal.js'
-import type { EnvironmentInfo } from './generated/control/v8/control_pb.js'
+import type { EnvironmentInfo } from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
 import type { ControlTransport } from './transport/index.js'
 import type { PresignedPutSender } from './transport/resources.js'

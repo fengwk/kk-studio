@@ -1,6 +1,6 @@
 import type { Readable, Writable } from 'node:stream'
 
-import type { IdeLease } from './generated/control/v8/control_pb.js'
+import type { IdeLease } from './generated/control_pb.js'
 
 /** Runtime boundaries shared by capability, native process and transport implementations. */
 export interface DaemonConfig {

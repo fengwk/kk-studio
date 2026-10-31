@@ -5,7 +5,7 @@ import {
   UpdateResultSchema,
   type Update,
   type UpdateResult,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
 import type { UpdateOutcomeLike, UpdatePort, UpdateProgressReporter } from './runtime-ports.js'
 

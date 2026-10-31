@@ -5,7 +5,7 @@ import { InMemoryInvocationJournal, isTerminalState } from '../src/journal.js'
 import {
   EnvelopeSchema,
   MessageType,
-} from '../src/generated/control/v8/control_pb.js'
+} from '../src/generated/control_pb.js'
 
 const terminal = (messageType: MessageType.COMPLETED | MessageType.FAILED | MessageType.CANCELLED) => ({
   messageType,

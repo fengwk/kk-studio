@@ -9,7 +9,7 @@ import {
   EnvironmentInfoSchema,
   OperatingSystem,
   type EnvironmentInfo,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 
 /** 采集真实进程宿主事实：OS family、时区、进程用户、canonical HOME、稳定说明与受控临时目录。 */
 export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: string): EnvironmentInfo {

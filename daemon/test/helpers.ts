@@ -14,7 +14,7 @@ import {
   EnvelopeSchema,
   MessageType,
   type Envelope,
-} from '../src/generated/control/v8/control_pb.js'
+} from '../src/generated/control_pb.js'
 
 /** 创建一个 owner-only 的临时 daemon 根，含 daemon.json 与 daemon.token。 */
 export function createDaemonRoot(token = 'test-registration-token'): { root: string; configPath: string } {

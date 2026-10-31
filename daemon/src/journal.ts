@@ -1,7 +1,7 @@
 import {
   MessageType,
   type Envelope,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 
 /**
  * Invocation 去重与终态重放的最小 journal 端口及其内存实现。

@@ -10,7 +10,7 @@ import type {
   IdeViewSummary,
   ProcessSupervisor,
 } from '../contracts.js'
-import type { IdeLease } from '../generated/control/v8/control_pb.js'
+import type { IdeLease } from '../generated/control_pb.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { createIdeBridge, type BridgeDocument, type BridgeResult, type IdeBridge } from './bridge.js'
 import {

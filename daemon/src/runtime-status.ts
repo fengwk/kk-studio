@@ -5,7 +5,7 @@ import {
   RuntimeSnapshotSchema,
   UpdateProgressSchema,
   type RuntimeSnapshot,
-} from './generated/control/v8/control_pb.js'
+} from './generated/control_pb.js'
 
 /** 更新器可上报的发行归档下载字节进度；总长未知时 totalBytes 为 null。 */
 export interface UpdateByteProgress {
