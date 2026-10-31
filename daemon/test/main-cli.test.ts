@@ -7,6 +7,7 @@ import { once } from 'node:events'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { DAEMON_VERSION } from '../src/config.js'
+import { MessageType } from '../src/generated/control_pb.js'
 import * as native from '../src/native/index.js'
 import { waitFor } from './helpers.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
@@ -177,7 +178,7 @@ describe('daemon compiled CLI runtime', () => {
       child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk.toString('utf8')))
       cleans.push(() => reap(child))
 
-      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
 
       // 真实长进程写回自己的真实 OS PID。
       const pidFile = join(fixture.root, 'cli.pid')
