@@ -92,14 +92,13 @@ function sessionSnapshot(
   recoveryByEnvironment: Record<string, IdeRecovery>,
 ): string {
   return JSON.stringify({
-    version: 1,
     presentation,
     recoveryByEnvironment,
   })
 }
 
 function lastSnapshot(presentation: IdePresentation): string {
-  return JSON.stringify({ version: 1, presentation })
+  return JSON.stringify({ presentation })
 }
 
 function sessionRecovery(environmentId: string): IdeRecovery | undefined {
