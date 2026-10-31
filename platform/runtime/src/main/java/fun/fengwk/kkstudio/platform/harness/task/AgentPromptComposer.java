@@ -61,7 +61,7 @@ public final class AgentPromptComposer {
   /**
    * Agent 正文只替换已知 {@code date}；其它 {@code ${...}} 与未闭合占位符保持原文，避免把 shell/文档示例打成规划失败。
    *
-   * <p>不再注入或替换 {@code workspace}/{@code cwd}：目录只由每次工具调用显式提供，Agent 之间也不做目录继承。
+   * <p>目录由每次工具调用显式提供，Agent 之间不做目录继承。
    */
   private static String renderAgentBody(String systemPrompt, CurrentEnvironmentContext context) {
     return substituteKnown(systemPrompt, Map.of("date", DATE_FORMAT.format(context.currentDate())));

@@ -26,7 +26,7 @@ import java.util.UUID;
  * <p>请求形状由 {@link HarnessRuntimeRequestMapper} 严格校验（非 canonical UUID / 非法 batch -&gt; 400）；缺失
  * Thread 由 Runtime 的 typed 异常翻译为 404；当前事实不允许精确预览（游标漂移、非空闲、queued、 下一步压缩、附件未就绪、adapter 不支持预览）统一为
  * 409。附件引用仍必须由目标 Session 持有，预览不写任何 durable 状态、不消费 upload、不触发 transport，因此响应不包含 HTTP 状态 202
- * 之类的「已接受」语义。预览不再要求客户端伪造产品 owner。
+ * 之类的「已接受」语义。
  */
 @RestController
 @RequestMapping("/api/threads")

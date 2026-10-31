@@ -165,7 +165,7 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /**
-   * 从最新 Agent 配置派生本 turn 的模型可见工具名；Issue Run 的业务工具由 Agent 配置显式声明，运行时不再按 Thread owner 注入或裁剪。
+   * 从最新 Agent 配置派生本 turn 的模型可见工具名；Issue Run 的业务工具由 Agent 配置显式声明。
    *
    * <p>Agent 只能声明 SELECTABLE 工具；Catalog 缺该工具时按通用规则拒绝规划，绝不静默少一个受控工具。
    */
@@ -387,8 +387,8 @@ public final class DatabaseAgentTurnContextResolver {
    * 本轮请求唯一的系统指令：Agent 正文 / Environment / Skills / Subagents 组合段，加上注册顺序稳定的 Contributor context
    * projector 片段，用空行确定性拼接为一个字符串——不写入任何会话消息。
    *
-   * <p>Issue 上下文不再是本入口的特殊分支：它由 {@code project/run} contributor 自己的 context projector 从本 branch 冻结的
-   * custom state 投影，按贡献者注册顺序与其他片段拼接。运行时因此不需要知道"哪个 Thread 属于哪个 Issue"。
+   * <p>Issue 上下文由 {@code project/run} contributor 自己的 context projector 从本 branch 冻结的 custom state
+   * 投影，按贡献者注册顺序与其他片段拼接。
    */
   private String systemInstruction(
       String systemPrompt,

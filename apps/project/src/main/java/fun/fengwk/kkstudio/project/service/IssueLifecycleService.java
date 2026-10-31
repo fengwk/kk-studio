@@ -436,7 +436,7 @@ public class IssueLifecycleService {
 
   /**
    * 停止必须在「执行尚未收敛」时收敛为 UNKNOWN 而不是直接取消：本地仍有工作（命令 / Model / 工具 / owned continuation） 或已有结果未定的 UNKNOWN
-   * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影，本类不再自行推导「在途」。
+   * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影。
    */
   private static boolean isUndeterminedInFlight(IssueThreadView view) {
     if (view == null) {

@@ -21,9 +21,8 @@ import java.util.Objects;
  * canonical constructor 中执行：字段范围与跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
  * heartbeat&lt;lease）。permission 规则数组保序；不依赖 JSON 对象键顺序。
  *
- * <p>插件（含 ComfyUI 与 MiniMax-H3）的运行参数不再属于设置合同：它们只有插件 Schema 与配置同步 plugins 一个来源。本聚合只承载可持久化的
- * 非敏感配置。DB/server 连接、filesystem root/workdir/temp/二进制路径、daemon token/identity、access/API key、bearer
- * token、OpenCLI instanceId 等秘密与 bootstrap 输入绝不进入本模型。
+ * <p>本聚合只承载可持久化的 非敏感配置。DB/server 连接、filesystem root/workdir/temp/二进制路径、daemon
+ * token/identity、access/API key、bearer token、OpenCLI instanceId 等秘密与 bootstrap 输入绝不进入本模型。
  */
 public record SystemSettings(
     Tool tool,

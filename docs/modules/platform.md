@@ -12,7 +12,7 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
 
 Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 SQL、行映射与 CAS，
-业务服务使用具体类，不再经过单实现接口和 JdbcStore/DO 转发层。
+业务服务使用具体类。
 
 [`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
 由上述组件扫描装配，提供默认 UTC 时钟和节点身份；它不是独立的 Boot 自动配置入口。
@@ -22,7 +22,7 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 `JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
 
-链路追踪采用 Spring Boot 4 官方 Micrometer Tracing（OpenTelemetry 桥接与 W3C 上下文传播），不再依赖第三方 AspectJ starter 或旧框架切面。
+链路追踪采用 Spring Boot 4 官方 Micrometer Tracing（OpenTelemetry 桥接与 W3C 上下文传播）。
 
 ## 按用例定位源码
 

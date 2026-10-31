@@ -578,7 +578,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
   }
 
-  /** 测试意图：即使在途模型仍 RUNNING，预算耗尽也必须先 Stop 再失败收尾，绝不能像旧实现那样 pause 后无限期停在 DEFERRED。 */
+  /** 测试意图：即使在途模型仍 RUNNING，预算耗尽也必须先 Stop 再失败收尾，不能停在 DEFERRED。 */
   @Test
   void inFlightRunBudgetExhaustedStopsAndFailsInsteadOfWaitingForIdle() {
     String agent = createAgent();
@@ -677,7 +677,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     matchRunJoin(run.getId(), terminal);
     issueTransitionService.accept(
         run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
-    // Join 冻结之后本 Thread 又有人类对话与在途模型：旧实现会因 busy 无限期延后，永不提交已匹配的收尾。
+    // Join 冻结之后本 Thread 又有人类对话与在途模型：已匹配的收尾仍正常提交。
     appendHistoryEntry(run.getThreadId());
     ModelInvocation activeModel = mock(ModelInvocation.class);
     when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
@@ -1829,9 +1829,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
   }
 
-  /**
-   * 缺陷 7 测试意图：reconcileIdle 不再使用 catch(RuntimeException) 吞掉异常；真实的系统或数据库异常必须向外传播，以便 dispatcher 重试。
-   */
+  /** 测试意图：reconcileIdle 不使用 catch(RuntimeException) 吞掉异常；真实的系统或数据库异常必须向外传播，以便 dispatcher 重试。 */
   @Test
   void reconcileIdlePropagatesRealExceptionsInsteadOfSwallowing() {
     String agent = createAgent();
