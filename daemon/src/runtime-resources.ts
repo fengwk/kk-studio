@@ -1,8 +1,10 @@
 import type { ResultContent, ResourceUploader } from './contracts.js'
+import type { ResourceUploadTicket, Envelope } from './generated/control_pb.js'
 import {
   createHttpPutObject,
   createResourceTransferClient,
   type PresignedPutSender,
+  type ResourceControlSender,
   type ResourceTransferClient,
 } from './transport/resources.js'
 
@@ -16,18 +18,14 @@ export interface ResourceRuntime {
   readonly client: ResourceTransferClient | null
   onConnectionLost(): void
   onConnectionReady(): void
-  onTicket(invocationId: string, payloadJson: string): void
+  onTicket(invocationId: string, ticket: ResourceUploadTicket): void
   close(): void
 }
 
 export function createResourceRuntime(options: {
   resources?: ResourceUploader
   putObject?: PresignedPutSender
-  sendControl(
-    messageType: 'RESOURCE_UPLOAD_REQUEST' | 'RESOURCE_UPLOAD_COMMIT',
-    invocationId: string,
-    payloadJson: string,
-  ): boolean
+  sendControl: ResourceControlSender
 }): ResourceRuntime {
   if (options.resources !== undefined) {
     return {
@@ -52,8 +50,8 @@ export function createResourceRuntime(options: {
     onConnectionReady(): void {
       client.onConnectionReady()
     },
-    onTicket(invocationId, payloadJson): void {
-      client.onTicket(invocationId, payloadJson)
+    onTicket(invocationId, ticket): void {
+      client.onTicket(invocationId, ticket)
     },
     close(): void {
       client.close()

@@ -1,31 +1,20 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AddressInfo } from 'node:net'
-import { WebSocketServer, type WebSocket } from 'ws'
+import { create } from '@bufbuild/protobuf'
 
 import {
-  CAPABILITY_CATALOG_VERSION,
-  decodeEnvelope,
-  encodeInvoke,
+  CancelSchema,
+  EnvelopeSchema,
+  ErrorSchema,
+  InvokeSchema,
+  MessageType,
   type Envelope,
-  type MessageType,
-} from '../../src/protocol.js'
+} from '../../src/generated/control_pb.js'
 import * as native from '../../src/native/index.js'
-import { serverMessage } from '../helpers.js'
-
-/**
- * 真实 Daemon 控制面测试基座：虚构 loopback control server + 真实 native private 数据目录。
- *
- * 供 main 装配回归与编译产物 CLI 回归共用，避免复制同一套 fixture。能力/权限/进程约束仍然走真实实现。
- */
+import { FakeStudioPeer } from './fake-studio.js'
 
 export const ENVIRONMENT_ID = '4e0d3c2b-1a09-4f8e-9d7c-6b5a49382716'
-export const WELCOME_PAYLOAD = {
-  maxResourceBytes: 1024 * 1024,
-  temporaryResourceTtlSeconds: 60,
-  temporaryResourceCleanupIntervalSeconds: 30,
-}
 export const TOKEN = 'main-acceptance-registration-token'
 
 export interface ControlFixture {
@@ -34,57 +23,94 @@ export interface ControlFixture {
   configPath: string
   tokenPath: string
   url: string
+  peer: FakeStudioPeer
   received: Envelope[]
-  send(type: MessageType, options?: { invocationId?: string | null; payload?: Record<string, unknown> }): void
-  /** 关闭 loopback server 并删除真实私有数据目录。 */
+  send(
+    typeOrEnvelope: MessageType | string | Envelope,
+    options?: { invocationId?: string | null; payload?: unknown },
+  ): void
   dispose(): Promise<void>
 }
 
-/** 真实 loopback control server：协商 permessage-deflate，对 HELLO 回 WELCOME。 */
 export async function createControlServer(): Promise<ControlFixture> {
-  const server = new WebSocketServer({ port: 0, perMessageDeflate: true })
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()))
-  const port = (server.address() as AddressInfo).port
-  const received: Envelope[] = []
-  const sockets: WebSocket[] = []
-  server.on('connection', (socket) => {
-    sockets.push(socket)
-    socket.on('message', (data, isBinary) => {
-      if (isBinary) {
-        return
-      }
-      const envelope = decodeEnvelope(data.toString('utf8'))
-      received.push(envelope)
-      if (envelope.messageType === 'HELLO') {
-        socket.send(serverMessage('WELCOME', { environmentId: ENVIRONMENT_ID, payload: WELCOME_PAYLOAD }))
-      }
-    })
-  })
+  const peer = new FakeStudioPeer({ autoControl: true, environmentId: ENVIRONMENT_ID })
+  await peer.start()
 
-  // 通过真实 native private 边界创建 owner-only 数据目录，Windows 由 DACL 承载。
   const root = await native.ensurePrivateDirectory(mkdtempSync(join(tmpdir(), 'kk-daemon-main-')))
   return {
     root,
     dataDir: root,
     configPath: join(root, 'daemon.json'),
     tokenPath: join(root, 'daemon.token'),
-    url: `http://127.0.0.1:${port}`,
-    received,
-    send(type, options = {}) {
-      const socket = sockets[sockets.length - 1]
-      socket?.send(serverMessage(type, { environmentId: ENVIRONMENT_ID, ...options }))
+    url: peer.origin,
+    peer,
+    received: peer.received,
+    send(typeOrEnvelope, options = {}) {
+      if (typeof typeOrEnvelope === 'object' && 'messageType' in typeOrEnvelope) {
+        peer.sendEnvelope(typeOrEnvelope as Envelope)
+        return
+      }
+      const rawType = typeOrEnvelope as string | MessageType
+      const messageType: MessageType =
+        typeof rawType === 'string'
+          ? (MessageType[rawType as keyof typeof MessageType] ?? MessageType.UNSPECIFIED)
+          : rawType
+
+      if (messageType === MessageType.INVOKE) {
+        const payload = options.payload as { capabilityId: string; argumentsJson: string; timeoutMillis?: bigint }
+        peer.sendEnvelope(
+          create(EnvelopeSchema, {
+            messageType: MessageType.INVOKE,
+            environmentId: ENVIRONMENT_ID,
+            invocationId: options.invocationId ?? '',
+            payload: {
+              case: 'invoke',
+              value: create(InvokeSchema, {
+                capabilityId: payload.capabilityId,
+                capabilityVersion: '3',
+                argumentsJson: payload.argumentsJson,
+                timeoutMillis: payload.timeoutMillis ?? 0n,
+              }),
+            },
+          }),
+        )
+      } else if (messageType === MessageType.CANCEL) {
+        peer.sendEnvelope(
+          create(EnvelopeSchema, {
+            messageType: MessageType.CANCEL,
+            environmentId: ENVIRONMENT_ID,
+            invocationId: options.invocationId ?? '',
+            payload: { case: 'cancel', value: create(CancelSchema, {}) },
+          }),
+        )
+      } else if (messageType === MessageType.ERROR) {
+        const payload = (options.payload ?? {}) as { code?: string; message?: string }
+        if (payload.code === 'REGISTRATION_REJECTED') {
+          peer.rejectAndClose(401)
+          return
+        }
+        peer.sendEnvelope(
+          create(EnvelopeSchema, {
+            messageType: MessageType.ERROR,
+            environmentId: ENVIRONMENT_ID,
+            invocationId: options.invocationId ?? '',
+            payload: {
+              case: 'error',
+              value: create(ErrorSchema, {
+                message: payload.message ?? 'error',
+              }),
+            },
+          }),
+        )
+      }
     },
     async dispose() {
-      for (const socket of sockets) {
-        socket.terminate()
-      }
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      await peer.close()
       rmSync(root, { recursive: true, force: true })
     },
   }
 }
 
-/** Windows 上没有系统 bash 时退回到常见 Git Bash 路径；其它平台交给配置默认值。 */
 export function resolveTestBash(): string | undefined {
   if (process.platform !== 'win32') {
     return undefined
@@ -96,7 +122,6 @@ export function resolveTestBash(): string | undefined {
   return candidates.find((candidate) => existsSync(candidate))
 }
 
-/** 用真实 native private 边界写入 daemon.json 与 owner-only daemon.token；studioUrl 指向 loopback server。 */
 export async function writeConfig(
   fixture: ControlFixture,
   overrides: Record<string, unknown> = {},
@@ -118,30 +143,36 @@ export function invoke(
   capabilityId: string,
   args: Record<string, unknown>,
   timeoutMillis = 0,
-): Record<string, unknown> {
-  return JSON.parse(
-    encodeInvoke({ capabilityId, capabilityVersion: CAPABILITY_CATALOG_VERSION, arguments: args, timeoutMillis }),
-  ) as Record<string, unknown>
+): { capabilityId: string; argumentsJson: string; timeoutMillis: bigint } {
+  return {
+    capabilityId,
+    argumentsJson: JSON.stringify(args),
+    timeoutMillis: BigInt(timeoutMillis),
+  }
 }
 
 export function response(
   fixture: ControlFixture,
   invocationId: string,
-  types: MessageType[],
+  types: (MessageType | keyof typeof MessageType | string)[],
 ): Envelope | undefined {
+  const numericTypes = types.map((t) => (typeof t === 'string' ? MessageType[t as keyof typeof MessageType] : t))
   return fixture.received.find(
-    (envelope) => envelope.invocationId === invocationId && types.includes(envelope.messageType),
+    (envelope) => envelope.invocationId === invocationId && numericTypes.includes(envelope.messageType),
   )
 }
 
-export function lastTerminal(fixture: ControlFixture, invocationId: string): MessageType | undefined {
+export function lastTerminal(
+  fixture: ControlFixture,
+  invocationId: string,
+): MessageType | undefined {
   for (let index = fixture.received.length - 1; index >= 0; index--) {
     const envelope = fixture.received[index] as Envelope
     if (
       envelope.invocationId === invocationId &&
-      (envelope.messageType === 'COMPLETED' ||
-        envelope.messageType === 'FAILED' ||
-        envelope.messageType === 'CANCELLED')
+      (envelope.messageType === MessageType.COMPLETED ||
+        envelope.messageType === MessageType.FAILED ||
+        envelope.messageType === MessageType.CANCELLED)
     ) {
       return envelope.messageType
     }
@@ -150,14 +181,16 @@ export function lastTerminal(fixture: ControlFixture, invocationId: string): Mes
 }
 
 export function contentOf(envelope: Envelope | undefined): string {
-  if (envelope === undefined) {
+  if (!envelope || envelope.payload.case !== 'completed') {
     return ''
   }
-  const result = envelope.payload.result as { contents?: Array<{ type: string; text?: string }> } | undefined
-  return (result?.contents ?? []).map((content) => content.text ?? '').join('')
+  const completed = envelope.payload.value
+  const contents = completed.result?.contents ?? []
+  return contents
+    .map((c) => (c.body.case === 'text' ? c.body.value.text : ''))
+    .join('')
 }
 
-/** bash 双引号：路径统一正斜杠，转义双引号、反斜杠与命令替换。 */
 export function shellQuote(value: string): string {
   return `"${unixPath(value).replace(/(["\\$`])/g, '\\$1')}"`
 }
@@ -166,16 +199,13 @@ export function unixPath(value: string): string {
   return value.replace(/\\/g, '/')
 }
 
-/** 长进程内联脚本：先写 `<pidFile>.tmp` 再 rename 原子发布，消费者不会读到空 PID（`Number('') === 0`）。 */
 export const LONG_RUNNING_PID_SCRIPT =
   'const fs=require("fs");fs.writeFileSync(process.argv[1]+".tmp",String(process.pid));fs.renameSync(process.argv[1]+".tmp",process.argv[1]);setInterval(function(){},1000)'
 
-/** 经 bash 引号保护地运行真实 Node：发布 PID 文件后持续存活，供取消/停机收敛断言使用。 */
 export function longRunningNodeCommand(pidFile: string): string {
   return `${shellQuote(process.execPath)} -e '${LONG_RUNNING_PID_SCRIPT}' ${shellQuote(unixPath(pidFile))}`
 }
 
-/** 短命令同样用真实 Node 执行，不依赖宿主 echo/sleep 的实现差异。 */
 export function shortNodeCommand(text: string): string {
   return `${shellQuote(process.execPath)} -e 'process.stdout.write(${JSON.stringify(text)})'`
 }

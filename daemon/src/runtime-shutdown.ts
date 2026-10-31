@@ -41,9 +41,14 @@ export function describeFailureType(error: unknown): string {
 }
 
 /** 独立执行一个停机步骤：失败记入聚合后继续，绝不把失败当成成功。 */
-export function releaseStep(failures: unknown[], phase: string, action: () => void): void {
+export function releaseStep(failures: unknown[], phase: string, action: () => void | Promise<void>): void {
   try {
-    action()
+    const result = action()
+    if (result instanceof Promise) {
+      result.catch((error) => {
+        recordShutdownFailure(failures, phase, error)
+      })
+    }
   } catch (error) {
     recordShutdownFailure(failures, phase, error)
   }

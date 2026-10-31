@@ -1,4 +1,11 @@
-import { ProtocolError, encodeUpdateResult, type UpdateCommand, type UpdateResult } from './protocol.js'
+import { create } from '@bufbuild/protobuf'
+
+import {
+  UpdatePhase,
+  UpdateResultSchema,
+  type Update,
+  type UpdateResult,
+} from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
 import type { UpdateOutcomeLike, UpdatePort, UpdateProgressReporter } from './runtime-ports.js'
 
@@ -20,13 +27,13 @@ export interface ActiveUpdate {
 }
 
 /**
- * 一条已完成 operation 的冻结事实：回执文本，加上「确实已被独立 OS 更新器接受」时才存在的许可释放步骤。
+ * 一条已完成 operation 的冻结事实：回执结果，加上「确实已被独立 OS 更新器接受」时才存在的许可释放步骤。
  *
  * <p>重放与重连重发只需要这一份事实：不再准备、下载或启动，但仍幂等重试许可释放。
  */
 export interface UpdateReceipt {
   commandKey: string
-  payloadJson: string
+  result: UpdateResult
   releasePermit?: () => Promise<void>
 }
 
@@ -35,31 +42,72 @@ export type UpdateDecision =
   | { kind: 'status' }
   | { kind: 'replay-cached'; receipt: UpdateReceipt }
   | { kind: 'reject'; receipt: UpdateReceipt }
-  | { kind: 'admit'; active: ActiveUpdate; command: UpdateCommand }
+  | { kind: 'admit'; active: ActiveUpdate; command: Update }
 
 /** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
-export function updateCommandKey(command: UpdateCommand): string {
+export function updateCommandKey(command: Update): string {
   return JSON.stringify([command.targetVersion, command.artifactUrl, command.artifactSha256])
 }
 
 export function normalizeUpdateResult(raw: UpdateOutcomeLike, operationId: string): UpdateResult {
-  const phase = raw.phase === 'FAILED' ? 'FAILED' : 'PREPARED'
-  const message = typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : null
-  return { operationId, phase, message }
+  const phase = raw.phase === 'FAILED' ? UpdatePhase.UPDATE_FAILED : UpdatePhase.UPDATE_PREPARED
+  const message = typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : undefined
+  return create(UpdateResultSchema, { operationId, phase, message })
 }
 
-export function acceptedReceipt(command: UpdateCommand): UpdateReceipt {
+export function acceptedReceipt(command: Update): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
-    payloadJson: encodeUpdateResult({ operationId: command.operationId, phase: 'ACCEPTED', message: null }),
+    result: create(UpdateResultSchema, {
+      operationId: command.operationId,
+      phase: UpdatePhase.UPDATE_ACCEPTED,
+    }),
   }
 }
 
-export function failedReceipt(command: UpdateCommand, message: string): UpdateReceipt {
+export function failedReceipt(command: Update, message: string): UpdateReceipt {
   return {
     commandKey: updateCommandKey(command),
-    payloadJson: encodeUpdateResult({ operationId: command.operationId, phase: 'FAILED', message }),
+    result: create(UpdateResultSchema, {
+      operationId: command.operationId,
+      phase: UpdatePhase.UPDATE_FAILED,
+      message,
+    }),
   }
+}
+
+export function preparedReceipt(active: ActiveUpdate, command: Update, prepared: UpdateOutcomeLike): UpdateReceipt {
+  return {
+    commandKey: active.commandKey,
+    result: create(UpdateResultSchema, {
+      operationId: command.operationId || active.operationId,
+      phase: UpdatePhase.UPDATE_PREPARED,
+      message: prepared.message ?? undefined,
+    }),
+    releasePermit: prepared.releasePermit,
+  }
+}
+
+export function executionFailureReceipt(
+  active: ActiveUpdate,
+  command: Update,
+  failure: Error | null,
+): UpdateReceipt {
+  return {
+    commandKey: active.commandKey,
+    result: create(UpdateResultSchema, {
+      operationId: command.operationId,
+      phase: UpdatePhase.UPDATE_FAILED,
+      message: messageOf(failure ?? new Error('update failed')),
+    }),
+  }
+}
+
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') {
+    return error.message
+  }
+  return 'capability execution failed'
 }
 
 /**
@@ -68,7 +116,7 @@ export function failedReceipt(command: UpdateCommand, message: string): UpdateRe
  * <p>同 operation 参数漂移直接抛协议错误；同目标的新请求与已经是目标版本都只刷新状态，不重复执行。
  */
 export function decideUpdate(input: {
-  command: UpdateCommand
+  command: Update
   active: ActiveUpdate | null
   cached: UpdateReceipt | undefined
   currentVersion: string
@@ -81,7 +129,7 @@ export function decideUpdate(input: {
   if (active !== null) {
     if (active.operationId === command.operationId) {
       if (active.commandKey !== commandKey) {
-        throw new ProtocolError('the same update operationId must not change its arguments')
+        throw new Error('the same update operationId must not change its arguments')
       }
       if (active.prepared) {
         return { kind: 'replay-active', active }
@@ -95,7 +143,7 @@ export function decideUpdate(input: {
   }
   if (input.cached !== undefined) {
     if (input.cached.commandKey !== commandKey) {
-      throw new ProtocolError('the same update operationId must not change its arguments')
+      throw new Error('the same update operationId must not change its arguments')
     }
     return { kind: 'replay-cached', receipt: input.cached }
   }
@@ -113,9 +161,9 @@ export function decideUpdate(input: {
     kind: 'admit',
     command,
     active: {
-      operationId: command.operationId,
+      operationId: command.operationId ?? '',
       commandKey,
-      targetVersion: command.targetVersion,
+      targetVersion: command.targetVersion ?? '',
       controller: new AbortController(),
       receipt,
       prepared: false,
@@ -123,7 +171,6 @@ export function decideUpdate(input: {
   }
 }
 
-/** 有界记住回执：新条目排到末尾，超出上界时丢掉最旧的。 */
 export function rememberUpdateResult(
   results: Map<string, UpdateReceipt>,
   operationId: string,
@@ -158,67 +205,38 @@ export interface UpdateExecution {
 }
 
 /**
- * 在已经建立的门闩上执行一次更新：先关空闲数据连接，再停 IDE，最后交给更新器。
- *
- * <p>本函数不改门闩、不编码回执。失败与 FAILED phase 都作为 failure 返回。
+ * 在已经建立的门闩上执行一次更新：先停 IDE，再交给更新器。
  */
 export async function executeUpdateAttempt(
   active: ActiveUpdate,
-  command: UpdateCommand,
+  command: Update,
   update: UpdatePort,
-  dataBind: { close(): Promise<void> } | null,
   ide: { stopForUpdate(signal: AbortSignal): Promise<void> } | null,
   config: Parameters<UpdatePort['handleUpdate']>[1],
   reportProgress: UpdateProgressReporter,
 ): Promise<UpdateExecution> {
   try {
-    if (dataBind !== null) {
-      await dataBind.close()
-    }
     const signal = active.controller?.signal ?? AbortSignal.abort('SHUTDOWN')
     if (ide !== null) {
       await ide.stopForUpdate(signal)
     }
+    const plainCommand: Record<string, unknown> = {
+      operationId: command.operationId,
+      targetVersion: command.targetVersion,
+      artifactUrl: command.artifactUrl,
+      artifactSha256: command.artifactSha256,
+    }
     const raw = await update.handleUpdate(
-      command as unknown as Record<string, unknown>,
+      plainCommand,
       config,
-      active.controller?.signal ?? AbortSignal.abort('SHUTDOWN'),
+      signal,
       reportProgress,
     )
     if (raw.phase === 'FAILED') {
-      return {
-        failure: new Error(typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : 'update failed'),
-        prepared: null,
-      }
+      return { failure: new Error(raw.message ?? 'managed update failed'), prepared: null }
     }
     return { failure: null, prepared: raw }
   } catch (error) {
-    return { failure: error instanceof Error ? error : new Error(messageOf(error)), prepared: null }
+    return { failure: error instanceof Error ? error : new Error(String(error)), prepared: null }
   }
-}
-
-export function preparedReceipt(active: ActiveUpdate, command: UpdateCommand, prepared: UpdateOutcomeLike): UpdateReceipt {
-  return {
-    commandKey: active.commandKey,
-    payloadJson: encodeUpdateResult(normalizeUpdateResult(prepared, command.operationId)),
-    ...(prepared.releasePermit === undefined ? {} : { releasePermit: prepared.releasePermit }),
-  }
-}
-
-export function executionFailureReceipt(active: ActiveUpdate, command: UpdateCommand, failure: Error | null): UpdateReceipt {
-  return {
-    commandKey: active.commandKey,
-    payloadJson: encodeUpdateResult({
-      operationId: command.operationId,
-      phase: 'FAILED',
-      message: messageOf(failure ?? new Error('update failed')),
-    }),
-  }
-}
-
-function messageOf(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== '') {
-    return error.message
-  }
-  return 'capability execution failed'
 }

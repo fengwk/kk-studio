@@ -191,10 +191,9 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 
 - `operatingSystem` 必填，取值为 `linux` / `macos` / `windows`。
 - `studioUrl` 必填，只能是 HTTP(S) origin：允许一个结尾 `/`（保存时去掉），拒绝 userinfo、
-  path、query、fragment 与非法端口。Daemon 由它派生 WebSocket 控制入口
-  `ws(s)://<authority>/api/harness/environment-daemon/v1`。IDE 复用数据连接地址由控制通道的 `DATA_BIND`
-  下发，路径固定为 `/api/harness/environment-data/v2/{environmentId}?ticket=<opaque>`，票据 30 秒一次性并绑定当前
-  READY 控制身份与 generation；Daemon 只使用该受控地址，不接受浏览器提供的目标。Studio 与受管环境在可信浏览器边界
+  path、query、fragment 与非法端口。Daemon 由它派生统一连接入口
+  `ws(s)://<authority>/api/harness/environment-daemon`。单条物理连接通过 HTTP/2 复用 Protobuf 控制流，
+  IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。Studio 与受管环境在可信浏览器边界
   （非沙箱）内协作，不需独立 IDE 域名。
 - `note` 可选，trim 后单行、最长 512 字符、不含控制字符；空值保存为省略/null。
 - `bashExecutable` 可选，非空白且不含控制字符；缺省为 `bash`。

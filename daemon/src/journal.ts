@@ -1,3 +1,8 @@
+import {
+  MessageType,
+  type Envelope,
+} from './generated/control_pb.js'
+
 /**
  * Invocation 去重与终态重放的最小 journal 端口及其内存实现。
  *
@@ -14,12 +19,15 @@
 
 export type InvocationState = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
-export type TerminalMessageType = 'COMPLETED' | 'FAILED' | 'CANCELLED'
+export type TerminalMessageType =
+  | MessageType.COMPLETED
+  | MessageType.FAILED
+  | MessageType.CANCELLED
 
 /** 可随已有 journal 条目重放的终态 wire 消息。 */
 export interface TerminalMessage {
   messageType: TerminalMessageType
-  payloadJson: string
+  envelope: Envelope
 }
 
 export interface JournalEntry {
@@ -59,11 +67,11 @@ export function isTerminalState(state: InvocationState): boolean {
 
 function stateFor(messageType: TerminalMessageType): InvocationState {
   switch (messageType) {
-    case 'COMPLETED':
+    case MessageType.COMPLETED:
       return 'COMPLETED'
-    case 'FAILED':
+    case MessageType.FAILED:
       return 'FAILED'
-    case 'CANCELLED':
+    case MessageType.CANCELLED:
       return 'CANCELLED'
   }
 }

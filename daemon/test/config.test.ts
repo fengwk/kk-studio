@@ -15,6 +15,7 @@ import {
   resolveDistributionDir,
   resolveExecutable,
 } from '../src/config.js'
+import { currentPlatformKey } from '../src/release.js'
 import { createDaemonRoot } from './helpers.js'
 
 function writeConfig(root: string, config: unknown): string {
@@ -36,7 +37,7 @@ describe('loadDaemonConfig', () => {
     expect(config.dataDir).toBe(root)
     expect(config.tokenPath).toBe(tokenPath(root))
     expect(config.studioUrl).toBe('https://studio.example.com')
-    expect(config.gatewayUri).toBe('wss://studio.example.com/api/harness/environment-daemon/v1')
+    expect(config.gatewayUri).toBe('wss://studio.example.com/api/harness/environment-daemon')
     expect(config.distributionDir).toBe(root)
     expect(config.note).toBeNull()
     expect(config.lsp).toEqual({})
@@ -47,7 +48,7 @@ describe('loadDaemonConfig', () => {
     const configPath = writeConfig(root, { studioUrl: 'http://127.0.0.1:8080/' })
     const config = loadDaemonConfig(configPath)
     expect(config.studioUrl).toBe('http://127.0.0.1:8080')
-    expect(config.gatewayUri).toBe('ws://127.0.0.1:8080/api/harness/environment-daemon/v1')
+    expect(config.gatewayUri).toBe('ws://127.0.0.1:8080/api/harness/environment-daemon')
   })
 
   it('rejects non-origin studio urls', () => {
@@ -344,5 +345,16 @@ describe('config field validation branches', () => {
 
   it('rejects unknown info flags', () => {
     expect(printInfoCommand(['--unknown']).handled).toBe(false)
+  })
+
+  it('maps platform and architecture to release keys correctly', () => {
+    expect(currentPlatformKey('linux', 'x64')).toBe('linux-amd64')
+    expect(currentPlatformKey('linux', 'arm64')).toBe('linux-arm64')
+    expect(currentPlatformKey('darwin', 'x64')).toBe('macos-amd64')
+    expect(currentPlatformKey('darwin', 'arm64')).toBe('macos-arm64')
+    expect(currentPlatformKey('win32', 'x64')).toBe('windows-amd64')
+    expect(() => currentPlatformKey('win32', 'arm64')).toThrow(/not covered/)
+    expect(() => currentPlatformKey('freebsd' as any, 'x64')).toThrow(/unsupported.*operating system/)
+    expect(() => currentPlatformKey('linux', 'ia32')).toThrow(/unsupported.*architecture/)
   })
 })

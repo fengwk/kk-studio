@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,8 +13,7 @@ import {
   validateDirectArgs,
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
-import { createWebSocketTransport } from './transport/control.js'
-import { createMuxUpstreamService } from './transport/mux-upstream.js'
+import { createDaemonTransport } from './transport/index.js'
 import { installOutboundNetwork, ProxyConfigurationError } from './network.js'
 import {
   UnsupportedPlatformError,
@@ -163,13 +163,13 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     })
     closers.push(() => ide.close())
 
-    // 一条 DATA_BIND 承载当前控制代际内的共享数据面，非重叠逻辑流复用同一物理连接。
-    // 更新准入时由 Runtime 关闭空闲连接，控制代际中止时由 bind signal 收敛。
-    const dataUpstream = createMuxUpstreamService({
-      studioUrl: config.studioUrl,
-      resolveView: ide.resolveView,
+    const transport = createDaemonTransport({
+      gatewayUri: config.gatewayUri,
+      config,
+      ide,
+      daemonInstanceId: randomUUID(),
     })
-    closers.push(() => dataUpstream.shutdown())
+    closers.push(() => transport.close())
 
     const capabilities: Record<string, CapabilityExecutor> = {
       ...fileCapabilities,
@@ -180,21 +180,18 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     }
     runtime = new Runtime({
       config,
-      transport: createWebSocketTransport(config.gatewayUri),
+      transport,
       capabilities,
       processes: supervisor,
       environment: detectEnvironmentInfo(config, join(dataDir, 'tmp')),
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,
-      // DATA_BIND 的共享 mux 数据面；解析目标只经由 IDE service 的视图校验，不接受任意 host/port。
-      dataBind: dataUpstream,
       // 受管更新以 supervisor 运行受控子进程；报告器只接收发行归档 body 的累计字节。
       update: {
         handleUpdate: (command, cfg, signal, reportProgress) =>
           handleUpdate(command, cfg, signal, supervisor, reportProgress),
       },
-      // WELCOME 下发的 TTL 热更直接驱动 Files 受控临时输出的同一份 lease 清扫。
       temporaryResources: {
         async sweep(ttlSeconds: number): Promise<void> {
           await sweepTextOutputStores(ttlSeconds)

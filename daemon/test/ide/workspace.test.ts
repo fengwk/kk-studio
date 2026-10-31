@@ -48,7 +48,6 @@ function config(dataDir: string): DaemonConfig {
 
 function backup(viewId: string, text = 'unsaved'): RecoveryBackup {
   return {
-    version: 1,
     viewId,
     bindingEpoch: '3',
     directory: '/project',

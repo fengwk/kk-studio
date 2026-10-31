@@ -1,10 +1,20 @@
 import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { create } from '@bufbuild/protobuf'
 
 import type { DaemonConfig, ProcessSupervisor, ManagedProcess, ProcessSpec } from '../src/contracts.js'
-import { PROTOCOL_VERSION, encodeEnvelope, type MessageType } from '../src/protocol.js'
-import type { ControlConnection, ControlTransport, ControlTransportListener } from '../src/transport/control.js'
+import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
+import type {
+  ControlConnection,
+  ControlTransport,
+  ControlTransportListener,
+} from '../src/transport/index.js'
+import {
+  EnvelopeSchema,
+  MessageType,
+  type Envelope,
+} from '../src/generated/control_pb.js'
 
 /** 创建一个 owner-only 的临时 daemon 根，含 daemon.json 与 daemon.token。 */
 export function createDaemonRoot(token = 'test-registration-token'): { root: string; configPath: string } {
@@ -25,7 +35,7 @@ export function testConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig 
     dataDir: root,
     tokenPath: join(root, 'daemon.token'),
     studioUrl: 'https://studio.example.com',
-    gatewayUri: 'wss://studio.example.com/api/harness/environment-daemon/v1',
+    gatewayUri: 'wss://studio.example.com/api/harness/environment-daemon',
     bashExecutable: 'bash',
     note: null,
     lsp: {},
@@ -43,14 +53,22 @@ export const fakeProcessSupervisor: ProcessSupervisor = {
 }
 
 export class FakeConnection implements ControlConnection {
-  sent: string[] = []
+  sent: Envelope[] = []
   open = true
+  sendInterceptor?: (envelope: Envelope) => boolean | void
 
-  async sendText(message: string): Promise<void> {
+  send(envelope: Envelope): boolean {
     if (!this.open) {
-      throw new Error('websocket is closed')
+      return false
     }
-    this.sent.push(message)
+    if (this.sendInterceptor) {
+      const res = this.sendInterceptor(envelope)
+      if (typeof res === 'boolean' && !res) {
+        return false
+      }
+    }
+    this.sent.push(envelope)
+    return true
   }
 
   close(): void {
@@ -76,12 +94,12 @@ export class FakeTransport implements ControlTransport {
     return this.connection
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.closed = true
   }
 
-  receive(message: string): void {
-    this.listener?.onMessage(message)
+  receive(envelope: Envelope): void {
+    this.listener?.onEnvelope(envelope)
   }
 
   disconnect(): void {
@@ -89,25 +107,12 @@ export class FakeTransport implements ControlTransport {
     if (connection !== null) {
       connection.open = false
     }
-    this.listener?.onDisconnected(new Error('connection lost'))
+    this.listener?.onDisconnected()
   }
 
-  get sent(): string[] {
+  get sent(): Envelope[] {
     return this.connection?.sent ?? []
   }
-}
-
-export function serverMessage(
-  messageType: MessageType,
-  options: { environmentId?: string | null; invocationId?: string | null; payload?: Record<string, unknown> } = {},
-): string {
-  return encodeEnvelope({
-    protocolVersion: PROTOCOL_VERSION,
-    messageType,
-    environmentId: options.environmentId ?? null,
-    invocationId: options.invocationId ?? null,
-    payload: options.payload ?? {},
-  })
 }
 
 /** 让已排队的 promise/microtask 与 setTimeout(0) 回调执行完。 */

@@ -1,9 +1,30 @@
-import { validateRuntimeStatus, type RuntimeStatus, type RuntimeStatusUpdate } from './protocol.js'
+import { create } from '@bufbuild/protobuf'
+
+import {
+  RuntimeBodySchema,
+  RuntimeSnapshotSchema,
+  UpdateProgressSchema,
+  type RuntimeSnapshot,
+} from './generated/control_pb.js'
 
 /** 更新器可上报的发行归档下载字节进度；总长未知时 totalBytes 为 null。 */
 export interface UpdateByteProgress {
   downloadedBytes: number
   totalBytes: number | null
+}
+
+export interface RuntimeStatusUpdate {
+  targetVersion: string
+  downloadedBytes: number
+  totalBytes: number | null
+}
+
+export interface RuntimeStatus {
+  revision: string
+  status: {
+    daemonVersion: string
+    update: RuntimeStatusUpdate | null
+  }
 }
 
 const LONG_MAX = 9223372036854775807n
@@ -20,17 +41,32 @@ export class RuntimeStatusTracker {
 
   constructor(private readonly daemonVersion: string) {}
 
-  snapshot(): RuntimeStatus {
-    return validateRuntimeStatus(
-      {
-        revision: this.revision.toString(),
-        status: {
-          daemonVersion: this.daemonVersion,
-          update: this.update === null ? null : { ...this.update },
-        },
+  snapshot(): RuntimeSnapshot {
+    return create(RuntimeSnapshotSchema, {
+      revision: this.revision,
+      status: create(RuntimeBodySchema, {
+        daemonVersion: this.daemonVersion,
+        ...(this.update === null
+          ? {}
+          : {
+              update: create(UpdateProgressSchema, {
+                targetVersion: this.update.targetVersion,
+                downloadedBytes: BigInt(this.update.downloadedBytes),
+                totalBytes: this.update.totalBytes === null ? undefined : BigInt(this.update.totalBytes),
+              }),
+            }),
+      }),
+    })
+  }
+
+  plainSnapshot(): RuntimeStatus {
+    return {
+      revision: this.revision.toString(),
+      status: {
+        daemonVersion: this.daemonVersion,
+        update: this.update === null ? null : { ...this.update },
       },
-      'runtime status',
-    )
+    }
   }
 
   getUpdate(): RuntimeStatusUpdate | null {

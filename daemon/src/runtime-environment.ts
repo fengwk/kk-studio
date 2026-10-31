@@ -1,14 +1,21 @@
 import { hostname, homedir, platform, userInfo } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { create } from '@bufbuild/protobuf'
+
 import type { DaemonConfig } from './contracts.js'
-import type { EnvironmentInfo } from './protocol.js'
+import {
+  Architecture,
+  EnvironmentInfoSchema,
+  OperatingSystem,
+  type EnvironmentInfo,
+} from './generated/control_pb.js'
 
 /** 采集真实进程宿主事实：OS family、时区、进程用户、canonical HOME、稳定说明与受控临时目录。 */
 export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: string): EnvironmentInfo {
   const operatingSystem = detectOperatingSystem()
   const home = canonicalHomeDirectory(homedir())
-  return {
+  return create(EnvironmentInfoSchema, {
     operatingSystem,
     architecture: detectArchitecture(),
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -16,28 +23,28 @@ export function detectEnvironmentInfo(config: DaemonConfig, tempDirectory?: stri
     homeDirectory: home,
     note: config.note ?? defaultNote(operatingSystem),
     tempDirectory: tempDirectory ?? join(resolve(config.dataDir), 'tmp'),
-  }
+  })
 }
 
-/** 把 Node 的 process.arch 归一到发行制品命名；不支持的架构失败关闭，绝不猜测。 */
-export function detectArchitecture(): EnvironmentInfo['architecture'] {
+/** 把 Node 的 process.arch 归一到发行架构枚举；不支持的架构失败关闭，绝不猜测。 */
+export function detectArchitecture(): Architecture {
   switch (process.arch) {
     case 'x64':
-      return 'amd64'
+      return Architecture.AMD64
     case 'arm64':
-      return 'arm64'
+      return Architecture.ARM64
     default:
       throw new Error(`unsupported daemon architecture: ${process.arch}`)
   }
 }
 
-function detectOperatingSystem(): EnvironmentInfo['operatingSystem'] {
+export function detectOperatingSystem(): OperatingSystem {
   const name = platform()
   if (name === 'win32') {
-    return 'windows'
+    return OperatingSystem.WINDOWS
   }
   if (name === 'darwin') {
-    return 'macos'
+    return OperatingSystem.MACOS
   }
   if (name === 'linux') {
     const env = process.env
@@ -47,9 +54,9 @@ function detectOperatingSystem(): EnvironmentInfo['operatingSystem'] {
       procContainsMicrosoft('/proc/version') ||
       procContainsMicrosoft('/proc/sys/kernel/osrelease')
     ) {
-      return 'wsl'
+      return OperatingSystem.WSL
     }
-    return 'linux'
+    return OperatingSystem.LINUX
   }
   throw new Error(`unsupported daemon operating system: ${name}`)
 }
@@ -79,15 +86,17 @@ function safeUserName(): string {
 }
 
 /** 按实测 OS 生成稳定默认说明；不构成 cwd、默认 workdir 或沙箱。 */
-export function defaultNote(operatingSystem: EnvironmentInfo['operatingSystem']): string {
+export function defaultNote(operatingSystem: OperatingSystem): string {
   switch (operatingSystem) {
-    case 'windows':
+    case OperatingSystem.WINDOWS:
       return 'Windows environment.'
-    case 'wsl':
+    case OperatingSystem.WSL:
       return 'WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.'
-    case 'linux':
+    case OperatingSystem.LINUX:
       return 'Linux environment.'
-    case 'macos':
+    case OperatingSystem.MACOS:
       return 'macOS environment.'
+    case OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED:
+      throw new Error('operatingSystem must not be unspecified')
   }
 }

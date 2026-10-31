@@ -28,9 +28,16 @@ vi.mock('../src/native/process-supervisor-windows.js', async (importOriginal) =>
 
 import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
-import { READY_CAPABILITIES_VERSION, type Envelope } from '../src/protocol.js'
+import {
+  Architecture,
+  MessageType,
+  OperatingSystem,
+  type Completed,
+  type Envelope,
+  type Ready,
+} from '../src/generated/control_pb.js'
 import * as native from '../src/native/index.js'
-import * as control from '../src/transport/control.js'
+import * as transportModule from '../src/transport/index.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
 import { windowsProcessDiagnosticHealth } from './support/windows-process-diagnostics.js'
@@ -351,7 +358,7 @@ describe('daemon main real assembly', () => {
 
     const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
     const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
-    const transportSpy = vi.spyOn(control, 'createWebSocketTransport')
+    const transportSpy = vi.spyOn(transportModule, 'createDaemonTransport')
     const captured = capture()
     let code: number
     let transportCalls = -1
@@ -406,102 +413,87 @@ describe('daemon main real assembly', () => {
       await writeConfig(fixture)
       const harness = startMain(fixture.configPath)
 
-      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
 
-      // HELLO 宣告注册凭证、能力目录版本与构建版本；凭据只出现在 HELLO payload。
-      const hello = fixture.received.find((envelope) => envelope.messageType === 'HELLO') as Envelope
-      const helloPayload = hello.payload as Record<string, unknown>
-      expect(hello.environmentId).toBeNull()
-      expect(helloPayload.registrationToken).toBe(TOKEN)
-      expect(helloPayload.capabilityCatalogVersion).toBe('3')
-      expect(helloPayload.daemonVersion).toBe(DAEMON_VERSION)
-      expect(typeof helloPayload.daemonInstanceId).toBe('string')
+      expect(fixture.peer.getHandshake()?.token).toBe(TOKEN)
 
-      // READY 是严格 schema v6：平台归一化与真实 detectEnvironmentInfo 规范一致，不硬编码单一平台。
-      const ready = fixture.received.find((envelope) => envelope.messageType === 'READY') as Envelope
-      const readyPayload = ready.payload as Record<string, unknown>
-      expect(readyPayload.version).toBe(READY_CAPABILITIES_VERSION)
+      const ready = fixture.received.find((envelope) => envelope.messageType === MessageType.READY) as Envelope
+      const readyPayload = ready.payload.value as Ready
       expect(readyPayload.daemonVersion).toBe(DAEMON_VERSION)
-      expect(readyPayload.runtimeStatus).toEqual({
-        revision: '1',
-        status: { daemonVersion: DAEMON_VERSION, update: null },
-      })
-      const environment = readyPayload.environment as Record<string, unknown>
-      const operatingSystem = environment.operatingSystem
-      expect(['windows', 'wsl', 'linux', 'macos']).toContain(operatingSystem)
+      expect(readyPayload.runtimeStatus?.status?.daemonVersion).toBe(DAEMON_VERSION)
+      expect(readyPayload.runtimeStatus?.revision).toBe(1n)
+      const environment = readyPayload.environment
+      expect(environment).toBeDefined()
       if (process.platform === 'win32') {
-        expect(operatingSystem).toBe('windows')
+        expect(environment?.operatingSystem).toBe(OperatingSystem.WINDOWS)
       } else if (process.platform === 'darwin') {
-        expect(operatingSystem).toBe('macos')
+        expect(environment?.operatingSystem).toBe(OperatingSystem.MACOS)
       } else {
-        expect(['linux', 'wsl']).toContain(operatingSystem)
+        expect([OperatingSystem.LINUX, OperatingSystem.WSL]).toContain(environment?.operatingSystem)
       }
-      const architecture = environment.architecture
       if (process.arch === 'x64') {
-        expect(architecture).toBe('amd64')
+        expect(environment?.architecture).toBe(Architecture.AMD64)
       } else if (process.arch === 'arm64') {
-        expect(architecture).toBe('arm64')
-      } else {
-        throw new Error(`unexpected test architecture: ${process.arch}`)
+        expect(environment?.architecture).toBe(Architecture.ARM64)
       }
-      expect(typeof environment.homeDirectory).toBe('string')
+      expect(typeof environment?.homeDirectory).toBe('string')
 
       // 真实 fs.write / fs.read：文件确实落到真实私有数据目录。
       const file = join(fixture.root, 'note.txt')
-      fixture.send('INVOKE', { invocationId: 'w1', payload: invoke('fs.write', { path: file, content: 'hello main' }) })
-      await waitFor(() => response(fixture, 'w1', ['COMPLETED']) !== undefined, 30_000)
+      fixture.send(MessageType.INVOKE, { invocationId: 'w1', payload: invoke('fs.write', { path: file, content: 'hello main' }, 30_000) })
+      await waitFor(() => response(fixture, 'w1', [MessageType.COMPLETED]) !== undefined, 30_000)
       expect(await readFileText(file)).toBe('hello main')
 
-      fixture.send('INVOKE', { invocationId: 'r1', payload: invoke('fs.read', { path: file }) })
-      await waitFor(() => response(fixture, 'r1', ['COMPLETED']) !== undefined, 30_000)
-      expect(contentOf(response(fixture, 'r1', ['COMPLETED']))).toContain('hello main')
+      fixture.send(MessageType.INVOKE, { invocationId: 'r1', payload: invoke('fs.read', { path: file }, 30_000) })
+      await waitFor(() => response(fixture, 'r1', [MessageType.COMPLETED]) !== undefined, 30_000)
+      expect(contentOf(response(fixture, 'r1', [MessageType.COMPLETED]))).toContain('hello main')
 
       // 真实 fs.find / fs.grep 在编译 Worker 中执行。
-      fixture.send('INVOKE', { invocationId: 'f1', payload: invoke('fs.find', { pattern: '*.txt', path: fixture.root }) })
-      await waitFor(() => response(fixture, 'f1', ['COMPLETED']) !== undefined, 30_000)
-      expect(contentOf(response(fixture, 'f1', ['COMPLETED']))).toContain('note.txt')
+      fixture.send(MessageType.INVOKE, { invocationId: 'f1', payload: invoke('fs.find', { pattern: '*.txt', path: fixture.root }, 30_000) })
+      await waitFor(() => response(fixture, 'f1', [MessageType.COMPLETED]) !== undefined, 30_000)
+      expect(contentOf(response(fixture, 'f1', [MessageType.COMPLETED]))).toContain('note.txt')
 
-      fixture.send('INVOKE', { invocationId: 'g1', payload: invoke('fs.grep', { pattern: 'hello', path: fixture.root }) })
-      await waitFor(() => response(fixture, 'g1', ['COMPLETED']) !== undefined, 30_000)
-      expect(contentOf(response(fixture, 'g1', ['COMPLETED']))).toContain('note.txt')
+      fixture.send(MessageType.INVOKE, { invocationId: 'g1', payload: invoke('fs.grep', { pattern: 'hello', path: fixture.root }, 30_000) })
+      await waitFor(() => response(fixture, 'g1', [MessageType.COMPLETED]) !== undefined, 30_000)
+      expect(contentOf(response(fixture, 'g1', [MessageType.COMPLETED]))).toContain('note.txt')
 
       // 真实 process.exec 走 native supervisor：短命令由真实 Node 执行并自然退出。
-      fixture.send('INVOKE', {
+      fixture.send(MessageType.INVOKE, {
         invocationId: 'p1',
         payload: invoke('process.exec', { command: shortNodeCommand('main-exec-ok'), workdir: fixture.root }, 30_000),
       })
-      await waitFor(() => response(fixture, 'p1', ['COMPLETED']) !== undefined, 60_000)
-      expect(contentOf(response(fixture, 'p1', ['COMPLETED']))).toContain('main-exec-ok')
+      await waitFor(() => response(fixture, 'p1', [MessageType.COMPLETED]) !== undefined, 60_000)
+      expect(contentOf(response(fixture, 'p1', [MessageType.COMPLETED]))).toContain('main-exec-ok')
 
       // 长进程 + CANCEL：在途执行必须真正收敛。
       const cancelledPidFile = join(fixture.root, 'cancel.pid')
-      fixture.send('INVOKE', {
+      fixture.send(MessageType.INVOKE, {
         invocationId: 'long-cancel',
         payload: invoke('process.exec', { command: longRunningNodeCommand(cancelledPidFile), workdir: fixture.root }, 120_000),
       })
       await waitFor(() => existsSync(cancelledPidFile), 30_000)
       const cancelledPid = Number(readFileSync(cancelledPidFile, 'utf8').trim())
       expect(isAlive(cancelledPid)).toBe(true)
-      fixture.send('CANCEL', { invocationId: 'long-cancel', payload: {} })
+      fixture.send(MessageType.CANCEL, { invocationId: 'long-cancel', payload: {} })
       // process 返回已完成清理的真实取消结果，由 COMPLETED 帧承载，不提前抢占成 CANCELLED。
-      await waitFor(() => lastTerminal(fixture, 'long-cancel') === 'COMPLETED', 30_000)
-      expect(response(fixture, 'long-cancel', ['COMPLETED'])?.payload.result).toMatchObject({
-        error: true,
-        details: { process: { outcome: 'CANCELLED' } },
-      })
+      await waitFor(() => lastTerminal(fixture, 'long-cancel') === MessageType.COMPLETED, 30_000)
+      const completed = response(fixture, 'long-cancel', [MessageType.COMPLETED])?.payload.value as Completed
+      expect(completed.result?.error).toBe(true)
+      const details = JSON.parse(completed.result?.detailsJson ?? '{}') as { process?: { outcome?: string } }
+      expect(details.process?.outcome).toBe('CANCELLED')
       expect(
         fixture.received
           .filter((envelope) =>
             envelope.invocationId === 'long-cancel' &&
-            ['COMPLETED', 'FAILED', 'CANCELLED'].includes(envelope.messageType),
+            [MessageType.COMPLETED, MessageType.FAILED, MessageType.CANCELLED].includes(envelope.messageType),
           )
           .map((envelope) => envelope.messageType),
-      ).toEqual(['COMPLETED'])
+      ).toEqual([MessageType.COMPLETED])
       expect(await awaitGone(cancelledPid, 30_000)).toBe(true)
 
       // 再起一个长进程，用信号事件停机：runtime 中止在途执行后才发布终止。
       const sigtermPidFile = join(fixture.root, 'sigterm.pid')
-      fixture.send('INVOKE', {
+      fixture.send(MessageType.INVOKE, {
         invocationId: 'long-sigterm',
         payload: invoke('process.exec', { command: longRunningNodeCommand(sigtermPidFile), workdir: fixture.root }, 120_000),
       })
@@ -535,7 +527,7 @@ describe('daemon main real assembly', () => {
       cleans.push(() => fixture.dispose())
       await writeConfig(fixture)
       const harness = startMain(fixture.configPath)
-      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+      await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
 
       // 资源 schema 目录就是能力目录的事实源：包含只读 edit preview 的十一项都必须被真实 main 装配。
       const schemaDir = fileURLToPath(new URL('../resources/capabilities', import.meta.url))
@@ -547,16 +539,16 @@ describe('daemon main real assembly', () => {
       expect(schemaIds).toContain('fs.edit.preview')
 
       for (const capabilityId of schemaIds) {
-        fixture.send('INVOKE', { invocationId: capabilityId, payload: invoke(capabilityId, {}) })
+        fixture.send(MessageType.INVOKE, { invocationId: capabilityId, payload: invoke(capabilityId, {}, 30_000) })
       }
       await waitFor(
-        () => schemaIds.every((id) => response(fixture, id, ['COMPLETED', 'FAILED']) !== undefined),
+        () => schemaIds.every((id) => response(fixture, id, [MessageType.COMPLETED, MessageType.FAILED]) !== undefined),
         60_000,
       )
       for (const capabilityId of schemaIds) {
-        const terminal = response(fixture, capabilityId, ['COMPLETED', 'FAILED']) as Envelope
+        const terminal = response(fixture, capabilityId, [MessageType.COMPLETED, MessageType.FAILED]) as Envelope
         // 装配缺失才会 FAILED 且说明 unknown capability；已装配的能力以 COMPLETED(error=true) 返回参数错误。
-        expect(terminal.messageType, `${capabilityId} must be assembled`).toBe('COMPLETED')
+        expect(terminal.messageType, `${capabilityId} must be assembled`).toBe(MessageType.COMPLETED)
       }
 
       // 注册被拒是终态失败：main 以非零码退出并输出安全诊断。
@@ -621,7 +613,7 @@ describe('daemon main cleanup fault injection', () => {
     await writeConfig(fixture)
     spySupervisor(() => true)
     const harness = startMain(fixture.configPath)
-    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
     fixture.send('ERROR', { payload: { code: 'REGISTRATION_REJECTED', message: 'no lease' } })
 
     await expect(harness.run).rejects.toBeInstanceOf(AggregateError)
@@ -637,7 +629,7 @@ describe('daemon main cleanup fault injection', () => {
     await writeConfig(fixture)
     spySupervisor(() => true)
     const harness = startMain(fixture.configPath)
-    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
     expect(harness.triggerShutdown()).toBe(true)
 
     await expect(harness.run).rejects.toBeInstanceOf(AggregateError)
@@ -651,20 +643,20 @@ describe('daemon main cleanup fault injection', () => {
     cleans.push(() => fixture.dispose())
     await writeConfig(fixture)
     // 注入真实 transport 的 close 失败：Runtime 的独立释放失败必须进入 main 的聚合，绝不静默报告成功。
-    const real = control.createWebSocketTransport
-    vi.spyOn(control, 'createWebSocketTransport').mockImplementation((uri: string, options) => {
-      const transport = real(uri, options)
+    const real = transportModule.createDaemonTransport
+    vi.spyOn(transportModule, 'createDaemonTransport').mockImplementation((options) => {
+      const transport = real(options)
       return {
         connect: (listener) => transport.connect(listener),
-        close: () => {
-          transport.close()
+        close: async () => {
+          await transport.close()
           throw new Error('injected: transport close failed after real convergence')
         },
       }
     })
 
     const harness = startMain(fixture.configPath)
-    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
+    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
     expect(harness.triggerShutdown()).toBe(true)
 
     await expect(harness.run).rejects.toBeInstanceOf(AggregateError)
@@ -720,7 +712,7 @@ describe('daemon main unsupported platform', () => {
           platformSpy.mockRestore()
         }
       })
-      const transportSpy = vi.spyOn(control, 'createWebSocketTransport')
+      const transportSpy = vi.spyOn(transportModule, 'createDaemonTransport')
       const captured = capture()
       let code: number
       let supervisorCalls = 0

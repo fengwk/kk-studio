@@ -1,6 +1,6 @@
 import type { Readable, Writable } from 'node:stream'
 
-import type { DataBind, IdeLease } from './protocol.js'
+import type { IdeLease } from './generated/control_pb.js'
 
 /** Runtime boundaries shared by capability, native process and transport implementations. */
 export interface DaemonConfig {
@@ -206,7 +206,7 @@ export interface IdeStreamUpstream {
 
 export interface IdeService extends IdeLeaseHandler {
   handle(command: IdeCommand, signal: AbortSignal): Promise<IdeReply>
-  /** 只有不存在 OPEN/CLOSING/创建预留与活动 mux 流时才允许进入更新。 */
+  /** 只有不存在 OPEN/CLOSING/创建预留与活动流时才允许进入更新。 */
   canStartUpdate(): boolean
   /** 更新准入后停止闲置 code-server，并确认受管进程范围已收敛。 */
   stopForUpdate(signal: AbortSignal): Promise<void>
@@ -217,15 +217,6 @@ export interface IdeService extends IdeLeaseHandler {
   resolveView(viewId: string, bindingEpoch: string, request: IdeStreamRequest): Promise<IdeStreamUpstream>
   /** 在显式恢复路径中把私有恢复数据交还普通文本编辑器；不写用户盘文件。 */
   restoreBackup(viewId: string, signal: AbortSignal): Promise<{ restored: number; skipped: number }>
-  close(): Promise<void>
-}
-
-/** 受控 Studio 数据连接绑定处理器；由 data transport 片实现，Runtime 只做严格解码与代际内派发。 */
-export interface DataBindHandler {
-  bind(binding: DataBind, signal: AbortSignal): Promise<void> | void
-  /** 当前物理绑定上的活动逻辑流数量；仅用于更新准入，不表示物理连接是否建立。 */
-  activeStreamCount(): number
-  /** 关闭当前物理绑定并等待其收敛；成功返回后仍可接受后续代际的 bind。 */
   close(): Promise<void>
 }
 

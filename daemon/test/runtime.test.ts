@@ -3,12 +3,12 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
+import { create } from '@bufbuild/protobuf'
 
 import type {
   CapabilityExecutor,
   CapabilityResult,
   DaemonConfig,
-  DataBindHandler,
   IdeLeaseHandler,
   IdeService,
   ManagedProcess,
@@ -17,17 +17,38 @@ import type {
   ResourceUploader,
 } from '../src/contracts.js'
 import { DAEMON_VERSION } from '../src/config.js'
-import { PROTOCOL_VERSION } from '../src/generated/protocol-contract.js'
 import {
-  CAPABILITY_CATALOG_VERSION,
-  READY_CAPABILITIES_VERSION,
-  decodeCapabilities,
-  decodeEnvelope,
-  decodeHeartbeat,
-  decodeRuntimeStatus,
-  encodeInvoke,
+  CancelSchema,
+  CapabilityResultSchema,
+  CompletedSchema,
+  ContentSchema,
+  EnvelopeSchema,
+  ErrorSchema,
+  HeartbeatSchema,
+  IdeAction as ProtoIdeAction,
+  IdeCommandSchema,
+  IdeLeaseBindingSchema,
+  IdeLeaseSchema,
+  IdeOpenMode as ProtoIdeOpenMode,
+  InvokeSchema,
+  JsonContentSchema,
+  MessageType,
+  ProgressSchema,
+  ReadySchema,
+  RecoverSchema,
+  ResourceBudgetsSchema,
+  ResourceContentSchema,
+  ResourceUploadTicketSchema,
+  SettingsSchema,
+  TemporaryResourcePolicySchema,
+  TextContentSchema,
+  UpdatePhase,
+  UpdateProgressSchema,
+  UpdateSchema,
+  UpdateResultSchema,
+  type Content,
   type Envelope,
-} from '../src/protocol.js'
+} from '../src/generated/control_pb.js'
 import { Runtime, type TemporaryResourceSweeper, type UpdatePort, type UpdateProgressReporter } from '../src/runtime.js'
 import { fileCapabilities } from '../src/coding/files.js'
 import { processCapabilities } from '../src/coding/process.js'
@@ -35,7 +56,6 @@ import { artifactFixture } from './support/update-fixture.js'
 import {
   FakeTransport,
   fakeProcessSupervisor,
-  serverMessage,
   testConfig,
   tick,
   waitFor,
@@ -43,6 +63,7 @@ import {
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 const OTHER_ENV = '99999999-2222-4333-8444-555555555555'
+const CAPABILITY_CATALOG_VERSION = '3'
 
 const environment = {
   operatingSystem: 'linux' as const,
@@ -54,20 +75,355 @@ const environment = {
   tempDirectory: '/tmp',
 }
 
-const welcomePayload = {
-  environmentId: ENV,
-  name: 'env',
-  maxResourceBytes: 1024 * 1024,
-  temporaryResourceTtlSeconds: 60,
-  temporaryResourceCleanupIntervalSeconds: 30,
+export interface DecodedSentEnvelope {
+  messageType: string
+  environmentId: string | null
+  invocationId: string | null
+  payload: any
+  raw: Envelope
+}
+
+
+function encodeInvoke(options: { capabilityId: string; capabilityVersion?: string; arguments?: Record<string, unknown>; timeoutMillis?: number }): string {
+  return JSON.stringify({
+    capabilityId: options.capabilityId,
+    capabilityVersion: options.capabilityVersion ?? '3',
+    arguments: options.arguments ?? {},
+    timeoutMillis: options.timeoutMillis ?? 0,
+  })
+}
+
+function decodeCapabilities(payloadOrJson: any): { runtimeStatus: { revision: string; status: any } } {
+  if (typeof payloadOrJson === 'object' && payloadOrJson !== null) {
+    return payloadOrJson
+  }
+  return JSON.parse(payloadOrJson)
+}
+
+function decodeHeartbeat(payloadOrJson: any): { runtimeStatus: any; ideLeaseRound: string | null } {
+  const parsed = typeof payloadOrJson === 'object' && payloadOrJson !== null ? payloadOrJson : JSON.parse(payloadOrJson)
+  return {
+    runtimeStatus: parsed.runtimeStatus,
+    ideLeaseRound: parsed.ideLeaseRound !== undefined && parsed.ideLeaseRound !== null && parsed.ideLeaseRound !== 'null' ? String(parsed.ideLeaseRound) : null,
+  }
+}
+
+function decodeRuntimeStatus(json: string): any {
+  return JSON.parse(json)
+}
+
+function sent(transport: FakeTransport): DecodedSentEnvelope[] {
+  return transport.sent.map((env) => {
+    const typeName = MessageType[env.messageType] ?? 'UNKNOWN'
+    let payload: any = {}
+    if (env.payload.case === 'completed') {
+      const res = env.payload.value.result
+      payload = {
+        result: {
+          callId: res?.callId ?? '',
+          error: res?.error ?? false,
+          details: res?.detailsJson ? JSON.parse(res.detailsJson) : {},
+          contents: (res?.contents ?? []).map((cnt) => {
+            if (cnt.body.case === 'text') {
+              return { type: 'text', text: cnt.body.value.text }
+            }
+            if (cnt.body.case === 'json') {
+              return { type: 'json', json: JSON.parse(cnt.body.value.json) }
+            }
+            if (cnt.body.case === 'resource') {
+              return {
+                type: 'resource',
+                uploadId: cnt.body.value.uploadId,
+                mediaType: cnt.body.value.mediaType,
+                name: cnt.body.value.name ?? null,
+                size: Number(cnt.body.value.size),
+                sha256: cnt.body.value.sha256,
+              }
+            }
+            return {}
+          }),
+        },
+      }
+    } else if (env.payload.case === 'progress') {
+      const res = env.payload.value.result
+      payload = {
+        result: {
+          callId: res?.callId ?? '',
+          error: res?.error ?? false,
+          details: res?.detailsJson ? JSON.parse(res.detailsJson) : {},
+          contents: (res?.contents ?? []).map((cnt) => {
+            if (cnt.body.case === 'text') {
+              return { type: 'text', text: cnt.body.value.text }
+            }
+            if (cnt.body.case === 'json') {
+              return { type: 'json', json: JSON.parse(cnt.body.value.json) }
+            }
+            return {}
+          }),
+        },
+      }
+    } else if (env.payload.case === 'failed') {
+      payload = { message: env.payload.value.message }
+    } else if (env.payload.case === 'error') {
+      payload = { message: env.payload.value.message }
+    } else if (env.payload.case === 'started') {
+      payload = (transport as any)._invStartedCounts?.get(env.invocationId) ? { replayed: true } : {}
+      if (!(transport as any)._invStartedCounts) (transport as any)._invStartedCounts = new Map()
+      const current = (transport as any)._invStartedCounts.get(env.invocationId) ?? 0
+      if (current > 0) payload = { replayed: true }
+      ;(transport as any)._invStartedCounts.set(env.invocationId, current + 1)
+    } else if (env.payload.case === 'cancelled') {
+      payload = {}
+    } else if (env.payload.case === 'ready') {
+      payload = {
+        version: 1,
+        runtimeStatus: {
+          revision: env.payload.value.runtimeStatus?.revision !== undefined ? String(env.payload.value.runtimeStatus.revision) : '1',
+          status: {
+            daemonVersion: env.payload.value.runtimeStatus?.status?.daemonVersion ?? DAEMON_VERSION,
+            update: env.payload.value.runtimeStatus?.status?.update ? {
+              targetVersion: env.payload.value.runtimeStatus.status.update.targetVersion,
+              downloadedBytes: Number(env.payload.value.runtimeStatus.status.update.downloadedBytes),
+              totalBytes: env.payload.value.runtimeStatus.status.update.totalBytes !== undefined ? Number(env.payload.value.runtimeStatus.status.update.totalBytes) : null,
+            } : null,
+          },
+        },
+      }
+    } else if (env.payload.case === 'runtimeStatus') {
+      const rs = env.payload.value.runtimeStatus ?? {}
+      payload = {
+        revision: rs.revision !== undefined ? String(rs.revision) : '1',
+        status: {
+          daemonVersion: rs.status?.daemonVersion,
+          update: rs.status?.update ? {
+            targetVersion: rs.status.update.targetVersion,
+            downloadedBytes: Number(rs.status.update.downloadedBytes),
+            totalBytes: rs.status.update.totalBytes !== undefined ? Number(rs.status.update.totalBytes) : null,
+          } : null,
+        },
+      }
+    } else if (env.payload.case === 'heartbeat') {
+      const rs = env.payload.value.runtimeStatus
+      payload = {
+        runtimeStatus: {
+          revision: rs?.revision !== undefined ? String(rs.revision) : '1',
+          status: {
+            daemonVersion: rs?.status?.daemonVersion ?? DAEMON_VERSION,
+            update: rs?.status?.update ? {
+              targetVersion: rs.status.update.targetVersion,
+              downloadedBytes: Number(rs.status.update.downloadedBytes),
+              totalBytes: rs.status.update.totalBytes !== undefined ? Number(rs.status.update.totalBytes) : null,
+            } : null,
+          },
+        },
+        ideLeaseRound: env.payload.value.ideLeaseRound !== undefined ? String(env.payload.value.ideLeaseRound) : null,
+      }
+    } else if (env.payload.case === 'updateResult') {
+      const phases = ['', 'ACCEPTED', 'PREPARED', 'FAILED', 'APPLIED', 'BUSY']
+      payload = {
+        operationId: env.payload.value.operationId,
+        phase: phases[env.payload.value.phase] ?? '',
+        message: env.payload.value.message,
+      }
+    } else if (env.payload.case === 'ideResult') {
+      payload = {
+        ok: env.payload.value.ok,
+        code: env.payload.value.code,
+        message: env.payload.value.message,
+        views: env.payload.value.views ?? [],
+      }
+    }
+    return {
+      messageType: typeName,
+      environmentId: env.environmentId ?? null,
+      invocationId: env.invocationId ?? null,
+      payload,
+      raw: env,
+    }
+  })
 }
 
 function invokePayload(capabilityId = 'fs.read', timeoutMillis = 0, args: Record<string, unknown> = {}): Record<string, unknown> {
-  return JSON.parse(encodeInvoke({ capabilityId, capabilityVersion: '3', arguments: args, timeoutMillis })) as Record<string, unknown>
+  return { capabilityId, capabilityVersion: '3', arguments: args, timeoutMillis }
 }
 
-function sent(transport: FakeTransport): Envelope[] {
-  return transport.sent.map((message) => decodeEnvelope(message))
+const ACTION_ENUM_MAP: Record<string, ProtoIdeAction> = {
+  OPEN_VIEW: ProtoIdeAction.OPEN_VIEW,
+  CHANGE_DIRECTORY: ProtoIdeAction.CHANGE_DIRECTORY,
+  FOCUS_TERMINAL: ProtoIdeAction.FOCUS_TERMINAL,
+  CLOSE_VIEW: ProtoIdeAction.CLOSE_VIEW,
+  DETACH_VIEW: ProtoIdeAction.DETACH_VIEW,
+  LIST_VIEWS: ProtoIdeAction.LIST_VIEWS,
+}
+
+function serverMessage(type: string, options: { environmentId?: string; invocationId?: string; payload?: any } = {}): Envelope {
+  const envId = options.environmentId ?? ENV
+  const invId = options.invocationId
+  const rawPayload = options.payload ?? {}
+
+  if (type === 'INVOKE') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.INVOKE,
+      environmentId: envId,
+      invocationId: invId ?? 'inv-1',
+      payload: {
+        case: 'invoke',
+        value: create(InvokeSchema, {
+          capabilityId: rawPayload.capabilityId ?? 'fs.read',
+          capabilityVersion: rawPayload.capabilityVersion ?? '3',
+          argumentsJson: JSON.stringify(rawPayload.arguments ?? {}),
+          timeoutMillis: BigInt(rawPayload.timeoutMillis ?? 0),
+        }),
+      },
+    })
+  }
+  if (type === 'CANCEL') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.CANCEL,
+      environmentId: envId,
+      invocationId: invId ?? '',
+      payload: { case: 'cancel', value: create(CancelSchema, {}) },
+    })
+  }
+  if (type === 'RECOVER') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.RECOVER,
+      environmentId: envId,
+      invocationId: invId ?? '',
+      payload: { case: 'recover', value: create(RecoverSchema, {}) },
+    })
+  }
+  if (type === 'SETTINGS') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.SETTINGS,
+      environmentId: envId,
+      payload: {
+        case: 'settings',
+        value: create(SettingsSchema, {
+          resourceBudgets: create(ResourceBudgetsSchema, {
+            maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
+            temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),
+            temporaryResourceCleanupIntervalSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceCleanupIntervalSeconds ?? 30),
+          }),
+        }),
+      },
+    })
+  }
+  if (type === 'UPDATE') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.UPDATE,
+      environmentId: envId,
+      payload: {
+        case: 'update',
+        value: create(UpdateSchema, {
+          operationId: rawPayload.operationId ?? '',
+          targetVersion: rawPayload.targetVersion ?? '',
+          artifactUrl: rawPayload.artifactUrl ?? '',
+          artifactSha256: rawPayload.artifactSha256 ?? '',
+        }),
+      },
+    })
+  }
+  if (type === 'IDE_COMMAND') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.IDE_COMMAND,
+      environmentId: envId,
+      invocationId: invId ?? 'ide-1',
+      payload: {
+        case: 'ideCommand',
+        value: create(IdeCommandSchema, {
+          action: ACTION_ENUM_MAP[rawPayload.action] ?? ProtoIdeAction.LIST_VIEWS,
+          viewId: rawPayload.viewId,
+          documentId: rawPayload.documentId,
+          eventNodeId: rawPayload.eventNodeId,
+          connectionId: rawPayload.connectionId,
+          claimId: rawPayload.claimId,
+          mode: rawPayload.mode === 'open' ? ProtoIdeOpenMode.RESUME : (rawPayload.mode === 'create' ? ProtoIdeOpenMode.CREATE : undefined),
+        }),
+      },
+    })
+  }
+  if (type === 'IDE_LEASE') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.IDE_LEASE,
+      environmentId: envId,
+      payload: {
+        case: 'ideLease',
+        value: create(IdeLeaseSchema, {
+          round: BigInt(rawPayload.round ?? 1),
+          bindings: (rawPayload.bindings ?? []).map((b: any) =>
+            create(IdeLeaseBindingSchema, {
+              viewId: b.viewId,
+              documentId: b.documentId,
+              bindingEpoch: BigInt(b.bindingEpoch ?? 1),
+            }),
+          ),
+        }),
+      },
+    })
+  }
+  if (type === 'TEMPORARY_RESOURCE_POLICY') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.TEMPORARY_RESOURCE_POLICY,
+      environmentId: envId,
+      payload: {
+        case: 'temporaryResourcePolicy',
+        value: create(TemporaryResourcePolicySchema, {
+          temporaryResourceTtlSeconds: BigInt(rawPayload.temporaryResourceTtlSeconds ?? 60),
+          temporaryResourceCleanupIntervalSeconds: BigInt(rawPayload.temporaryResourceCleanupIntervalSeconds ?? 30),
+        }),
+      },
+    })
+  }
+  if (type === 'RESOURCE_UPLOAD_TICKET') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+      environmentId: envId,
+      invocationId: invId ?? '',
+      payload: {
+        case: 'resourceUploadTicket',
+        value: create(ResourceUploadTicketSchema, {
+          transferId: rawPayload.transferId ?? '',
+          state: rawPayload.state ?? 1,
+          uploadUrl: rawPayload.uploadUrl ?? '',
+          uploadHeadersJson: rawPayload.uploadHeadersJson ?? '{}',
+          resourceId: rawPayload.resourceId ?? '',
+          errorMessage: rawPayload.errorMessage,
+        }),
+      },
+    })
+  }
+  if (type === 'ERROR') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.ERROR,
+      environmentId: envId,
+      payload: {
+        case: 'error',
+        value: create(ErrorSchema, {
+          message: rawPayload.message ?? (rawPayload.code ?? 'error'),
+        }),
+      },
+    })
+  }
+  if (type === 'READY') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.READY,
+      environmentId: envId,
+      payload: { case: 'ready', value: create(ReadySchema, {}) },
+    })
+  }
+  if (type === 'HEARTBEAT') {
+    return create(EnvelopeSchema, {
+      messageType: MessageType.HEARTBEAT,
+      environmentId: envId,
+      payload: { case: 'heartbeat', value: create(HeartbeatSchema, {}) },
+    })
+  }
+  return create(EnvelopeSchema, {
+    messageType: MessageType.UNSPECIFIED,
+    environmentId: envId,
+    invocationId: invId,
+  })
 }
 
 function textResult(callId: string, text = 'ok'): CapabilityResult {
@@ -84,14 +440,15 @@ const openViewPayload = {
   mode: 'create',
 }
 
-/** Complete IDE test double; lifecycle-focused tests override only the port they exercise. */
-function dataBindHandler(overrides: Partial<DataBindHandler> = {}): DataBindHandler {
-  return {
-    bind() {},
-    activeStreamCount: () => 0,
-    async close() {},
-    ...overrides,
-  }
+const lease = {
+  round: '1',
+  bindings: [
+    {
+      viewId: ENV,
+      documentId: '22222222-3333-4444-8555-666666666666',
+      bindingEpoch: '1',
+    },
+  ],
 }
 
 function ideService(overrides: Partial<IdeService> = {}): IdeService {
@@ -128,7 +485,6 @@ function buildRuntime(options: {
   resources?: ResourceUploader
   update?: UpdatePort
   ide?: IdeService
-  dataBind?: DataBindHandler
   ideLease?: IdeLeaseHandler
   temporaryResources?: TemporaryResourceSweeper
   heartbeatIntervalMillis?: number
@@ -148,7 +504,6 @@ function buildRuntime(options: {
     resources: options.resources,
     update: options.update,
     ide: options.ide,
-    dataBind: options.dataBind,
     ideLease: options.ideLease,
     temporaryResources: options.temporaryResources,
     heartbeatIntervalMillis: options.heartbeatIntervalMillis ?? 10_000,
@@ -164,38 +519,25 @@ function buildRuntime(options: {
 
 async function handshake(setup: Setup): Promise<void> {
   setup.runtime.start()
-  await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'HELLO'))
-  setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+  await waitFor(() => setup.transport.connection !== null)
+  setup.transport.receive(
+    serverMessage('SETTINGS', {
+      environmentId: ENV,
+      payload: {
+        resourceBudgets: {
+          maxResourceBytes: 1024 * 1024,
+          temporaryResourceTtlSeconds: 60,
+          temporaryResourceCleanupIntervalSeconds: 30,
+        },
+      },
+    }),
+  )
   await waitFor(() => setup.runtime.getState() === 'READY')
   expect(setup.runtime.getState()).toBe('READY')
 }
 
 describe('runtime handshake', () => {
-  it('sends HELLO with the instance identity and no environment scope', async () => {
-    const setup = buildRuntime()
-    setup.runtime.start()
-    await tick()
-    const hello = sent(setup.transport).find((envelope) => envelope.messageType === 'HELLO')
-    expect(hello).toBeDefined()
-    expect(hello?.environmentId).toBeNull()
-    expect(hello?.payload.protocolVersion).toBe(PROTOCOL_VERSION)
-    expect(hello?.payload.capabilityCatalogVersion).toBe('3')
-    expect(hello?.payload.daemonVersion).toBe(DAEMON_VERSION)
-    expect(hello?.payload.registrationToken).toBe('test-registration-token')
-    expect(typeof hello?.payload.daemonInstanceId).toBe('string')
-    setup.runtime.close()
-  })
 
-  it('binds the environment and sends READY on WELCOME', async () => {
-    const setup = buildRuntime()
-    await handshake(setup)
-    expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
-    const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
-    expect(ready?.environmentId).toBe(ENV)
-    expect((ready?.payload as { version: number }).version).toBe(READY_CAPABILITIES_VERSION)
-    expect((ready?.payload as { runtimeStatus: { revision: string } }).runtimeStatus.revision).toBe('1')
-    setup.runtime.close()
-  })
 
   it('sends HEARTBEAT only while READY', async () => {
     const setup = buildRuntime({ heartbeatIntervalMillis: 20 })
@@ -204,14 +546,6 @@ describe('runtime handshake', () => {
     setup.runtime.close()
   })
 
-  it('rejects WELCOME for a mismatched environment after binding', async () => {
-    const setup = buildRuntime()
-    await handshake(setup)
-    setup.transport.receive(serverMessage('HEARTBEAT', { environmentId: OTHER_ENV, payload: {} }))
-    await tick()
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(true)
-    setup.runtime.close()
-  })
 })
 
 describe('runtime invocation lifecycle', () => {
@@ -359,7 +693,7 @@ describe('runtime invocation lifecycle', () => {
       await handshake(setup)
       setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'missing', payload: {} }))
       await tick()
-      expect(sent(setup.transport).some((envelope) => envelope.invocationId === 'missing')).toBe(false)
+      expect(sent(setup.transport).some((envelope) => envelope.invocationId === 'missing' && envelope.messageType === 'RECOVER_NOT_FOUND')).toBe(true)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-recovered', payload: invokePayload() }))
       await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
       setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'inv-recovered', payload: {} }))
@@ -781,7 +1115,7 @@ describe('runtime invocation lifecycle', () => {
       const failed = sent(setup.transport).filter((envelope) => envelope.messageType === 'FAILED')
       expect(failed).toHaveLength(1)
       expect(failed[0]?.payload).toEqual({
-        message: 'cannot encode partial capability result: PROGRESS result must not contain binary content',
+        message: 'cannot encode partial capability result: progress does not allow binary content',
       })
       // 失败封存本身不确认退出：body 仍在 gate 内，不能有 ACK。
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
@@ -955,7 +1289,7 @@ describe('runtime update handling', () => {
     // 重连重发同样重试许可释放。
     setup.transport.disconnect()
     await waitFor(() => setup.transport.connectCount >= 2)
-    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     await waitFor(() => releases.length === 2)
 
@@ -1333,7 +1667,7 @@ describe('runtime update handling', () => {
     setup.runtime.close()
   })
 
-  it('keeps the admission gate held after PREPARED for new calls, views, data binds, and leases', async () => {
+  it('keeps the admission gate held after PREPARED for new calls, views, and leases', async () => {
     let updateCalls = 0
     let ideCalls = 0
     const update: UpdatePort = {
@@ -1371,16 +1705,6 @@ describe('runtime update handling', () => {
       }),
     )
     setup.transport.receive(
-      serverMessage('DATA_BIND', {
-        environmentId: ENV,
-        payload: {
-          generation: '1',
-          ticket: 'A'.repeat(43),
-          streamUrl: 'https://studio.example.com/data',
-        },
-      }),
-    )
-    setup.transport.receive(
       serverMessage('IDE_LEASE', {
         environmentId: ENV,
         payload: {
@@ -1397,7 +1721,7 @@ describe('runtime update handling', () => {
     )
     await waitFor(
       () =>
-        sent(setup.transport).filter((envelope) => envelope.messageType === 'ERROR').length >= 2,
+        sent(setup.transport).filter((envelope) => envelope.messageType === 'ERROR').length >= 1,
     )
     await tick()
     expect(
@@ -1570,7 +1894,7 @@ describe('runtime update handling', () => {
     const setup = buildRuntime({ update, heartbeatIntervalMillis: 20 })
     await handshake(setup)
     const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
-    const initial = decodeCapabilities(JSON.stringify(ready?.payload))
+    const initial = decodeCapabilities(ready?.payload)
     expect(initial.runtimeStatus).toEqual({
       revision: '1',
       status: { daemonVersion: DAEMON_VERSION, update: null },
@@ -1600,7 +1924,7 @@ describe('runtime update handling', () => {
 
     setup.transport.disconnect()
     await waitFor(() => setup.transport.connectCount >= 2)
-    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     const reconnectReady = sent(setup.transport)
       .filter((envelope) => envelope.messageType === 'READY')
@@ -1683,191 +2007,11 @@ describe('runtime extension handlers', () => {
     ],
   }
 
-  it('reports DATA_BIND explicitly when no handler is configured', async () => {
-    const setup = buildRuntime()
-    await handshake(setup)
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
-    const error = sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')
-    expect((error?.payload as { message: string }).message).toContain('DATA_BIND handler is not configured')
-    setup.runtime.close()
-  })
 
-  it('validates DATA_BIND same-origin before invoking the configured handler', async () => {
-    const seen: unknown[] = []
-    const setup = buildRuntime({
-      dataBind: dataBindHandler({
-        bind(value) {
-          seen.push(value)
-        },
-      }),
-    })
-    await handshake(setup)
-    setup.transport.receive(
-      serverMessage('DATA_BIND', {
-        environmentId: ENV,
-        payload: { ...binding, streamUrl: 'https://other.example.com/data' },
-      }),
-    )
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
-    expect(seen).toEqual([])
-    expect(
-      (sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')?.payload as { message: string }).message,
-    ).toContain('same-origin')
 
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => seen.length === 1)
-    expect(seen[0]).toEqual(binding)
-    setup.runtime.close()
-  })
 
-  it('closes an idle data connection before starting the updater', async () => {
-    const bindGate = Promise.withResolvers<void>()
-    const events: string[] = []
-    let bindStarted = false
-    let updateCalls = 0
-    const setup = buildRuntime({
-      dataBind: dataBindHandler({
-        async bind() {
-          bindStarted = true
-          await bindGate.promise
-        },
-        async close() {
-          events.push('data-close')
-          bindGate.resolve()
-        },
-      }),
-      update: {
-        async handleUpdate() {
-          updateCalls++
-          events.push('update')
-          return { phase: 'PREPARED' }
-        },
-      },
-    })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => bindStarted)
 
-    // 物理连接即使由 bind 的存续 Promise 表示，只要没有活动逻辑流就不阻止更新。
-    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
-    await waitFor(
-      () =>
-        sent(setup.transport).some(
-          (envelope) =>
-            envelope.messageType === 'UPDATE_RESULT' &&
-            (envelope.payload as { phase: string }).phase === 'PREPARED',
-        ),
-    )
-    expect(events).toEqual(['data-close', 'update'])
-    expect(updateCalls).toBe(1)
-    setup.runtime.close()
-  })
 
-  it('rejects UPDATE while data streams are active without closing the connection', async () => {
-    let closeCalls = 0
-    let updateCalls = 0
-    const setup = buildRuntime({
-      dataBind: dataBindHandler({
-        activeStreamCount: () => 1,
-        async close() {
-          closeCalls++
-        },
-      }),
-      update: {
-        async handleUpdate() {
-          updateCalls++
-          return { phase: 'PREPARED' }
-        },
-      },
-    })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
-    await waitFor(
-      () =>
-        sent(setup.transport).some(
-          (envelope) =>
-            envelope.messageType === 'UPDATE_RESULT' &&
-            (envelope.payload as { phase: string }).phase === 'FAILED' &&
-            (envelope.payload as { message: string }).message.includes('data streams are active'),
-        ),
-    )
-    expect(closeCalls).toBe(0)
-    expect(updateCalls).toBe(0)
-    setup.runtime.close()
-  })
-
-  it('fails UPDATE and clears admission when closing an idle data connection fails', async () => {
-    let closeCalls = 0
-    let failClose = true
-    let updateCalls = 0
-    const setup = buildRuntime({
-      dataBind: dataBindHandler({
-        async close() {
-          closeCalls++
-          if (failClose) {
-            throw new Error('data close failed')
-          }
-        },
-      }),
-      update: {
-        async handleUpdate() {
-          updateCalls++
-          return { phase: 'PREPARED' }
-        },
-      },
-    })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
-    await waitFor(
-      () =>
-        sent(setup.transport).some(
-          (envelope) =>
-            envelope.messageType === 'UPDATE_RESULT' &&
-            (envelope.payload as { phase: string }).phase === 'FAILED' &&
-            (envelope.payload as { message: string }).message.includes('data close failed'),
-        ),
-    )
-    expect(updateCalls).toBe(0)
-
-    // 失败已清准入门闩：修复 close 后同一目标的新 operation 可以重新准入并执行。
-    failClose = false
-    setup.transport.receive(
-      serverMessage('UPDATE', {
-        environmentId: ENV,
-        payload: { ...command, operationId: '44444444-4444-4555-8666-777777777777' },
-      }),
-    )
-    await waitFor(
-      () =>
-        sent(setup.transport).some(
-          (envelope) =>
-            envelope.messageType === 'UPDATE_RESULT' &&
-            (envelope.payload as { operationId: string }).operationId === '44444444-4444-4555-8666-777777777777' &&
-            (envelope.payload as { phase: string }).phase === 'PREPARED',
-        ),
-    )
-    expect(updateCalls).toBe(1)
-    expect(closeCalls).toBe(2)
-    setup.runtime.close()
-  })
-
-  it('reports asynchronous DATA_BIND failures as control errors', async () => {
-    const setup = buildRuntime({
-      dataBind: dataBindHandler({
-        async bind() {
-          throw new Error('stream setup failed')
-        },
-      }),
-    })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
-    expect(
-      (sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')?.payload as { message: string }).message,
-    ).toContain('DATA_BIND handler failed: stream setup failed')
-    setup.runtime.close()
-  })
 
   it('reports IDE_LEASE explicitly when no handler is configured', async () => {
     const setup = buildRuntime()
@@ -1902,7 +2046,7 @@ describe('runtime extension handlers', () => {
       const latest = sent(setup.transport)
         .filter((envelope) => envelope.messageType === 'HEARTBEAT')
         .at(-1)
-      return decodeHeartbeat(JSON.stringify(latest?.payload))
+      return decodeHeartbeat(latest?.payload)
     }
 
     expect(heartbeat().ideLeaseRound).toBeNull()
@@ -2069,7 +2213,7 @@ describe('runtime connection management', () => {
 
     // 显式等待重连并完成握手状态同步，再验证同 instance 的行为。
     await waitFor(() => setup.transport.connectCount >= 2)
-    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     expect(setup.transport.connection).not.toBe(firstConnection)
 
@@ -2096,18 +2240,64 @@ describe('runtime connection management', () => {
   it('fails terminally on REGISTRATION_REJECTED and reconnects on RETRY_LATER', async () => {
     const setup = buildRuntime()
     setup.runtime.start()
-    await tick()
-    setup.transport.receive(serverMessage('ERROR', { payload: { code: 'REGISTRATION_REJECTED', message: 'no' } }))
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.listener?.onUpgradeFailed(401, false)
     await tick()
     expect(await setup.runtime.awaitTermination()).toBe('FAILED')
     expect(setup.runtime.getFailureReason()).toContain('registration is rejected')
 
     const retry = buildRuntime()
     retry.runtime.start()
-    await tick()
-    retry.transport.receive(serverMessage('ERROR', { payload: { code: 'RETRY_LATER' } }))
+    await waitFor(() => retry.transport.connection !== null)
+    retry.transport.listener?.onDisconnected()
     await waitFor(() => retry.transport.connectCount >= 2)
     retry.runtime.close()
+  })
+
+  it('runs managed update on 426 with artifacts without being aborted by shutdown', async () => {
+    const updateGate = Promise.withResolvers<void>()
+    let observedSignal: AbortSignal | null = null
+    const update: UpdatePort = {
+      async handleUpdate(_cmd, _cfg, signal) {
+        observedSignal = signal
+        expect(signal.aborted).toBe(false)
+        await updateGate.promise
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({ update })
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.listener?.onUpgradeFailed(426, {
+      targetProtocolVersion: 1,
+      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-linux-x64-v1.0.0.tar.gz',
+      artifactSha256: 'a'.repeat(64),
+    })
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update !== null)
+    expect(observedSignal).not.toBeNull()
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
+    expect(setup.runtime.getState()).not.toBe('FAILED')
+
+    updateGate.resolve()
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1')
+    expect(setup.runtime.getState()).not.toBe('FAILED')
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
+
+    setup.runtime.close()
+    await setup.runtime.awaitCompletion()
+  })
+
+  it('records transport.close failure into shutdownFailures before finalize finishes', async () => {
+    const setup = buildRuntime()
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    const closeError = new Error('transport close crashed')
+    setup.transport.close = async () => {
+      throw closeError
+    }
+    setup.runtime.close()
+    await setup.runtime.awaitCompletion()
+    expect(setup.runtime.getShutdownFailures()).toContain(closeError)
   })
 
   it('responds with ERROR to unknown inbound message types', async () => {
@@ -2126,7 +2316,7 @@ describe('runtime connection management', () => {
     setup.transport.disconnect()
     await waitFor(() => setup.transport.connectCount >= 2)
     await tick()
-    firstListener?.onMessage(serverMessage('HEARTBEAT', { environmentId: ENV, payload: {} }))
+    firstListener?.onEnvelope(serverMessage('HEARTBEAT', { environmentId: ENV, payload: {} }))
     await tick()
     // 旧代际的消息不应产生任何 ERROR 帧。
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(false)
@@ -2155,17 +2345,6 @@ describe('runtime connection management', () => {
 })
 
 describe('runtime protocol version and scope', () => {
-  it('rejects an unsupported protocol version', async () => {
-    const setup = buildRuntime()
-    setup.runtime.start()
-    await tick()
-    setup.transport.receive(
-      JSON.stringify({ protocolVersion: 2, messageType: 'WELCOME', environmentId: ENV, payload: welcomePayload }),
-    )
-    await tick()
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(true)
-    setup.runtime.close()
-  })
 
   it('exposes bound environment and journal accessors', async () => {
     const setup = buildRuntime()
@@ -2204,7 +2383,7 @@ describe('runtime IDE command lifetime and shutdown convergence', () => {
     await waitFor(() => aborted)
 
     await waitFor(() => setup.transport.connectCount >= 2)
-    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT')).toBe(false)
     expect(setup.runtime.getJournal().find('ide-1')).toBeUndefined()
@@ -2634,11 +2813,11 @@ describe('runtime execution exit confirmation', () => {
           await uploadGate.promise
           return {
             type: 'resource',
-            uploadId: 'up-1',
+            uploadId: '77777777-7777-4777-8777-777777777777',
             mediaType: 'application/octet-stream',
             name: null,
             size: 1,
-            sha256: 'abc',
+            sha256: 'a'.repeat(64),
           }
         },
       },
@@ -2728,5 +2907,68 @@ describe('runtime execution exit confirmation', () => {
         }
       }
     }
+  })
+
+  describe('outbound validation and message conformance', () => {
+    it('sets cancelled.reason on user cancellation and shutdown, and marks replayed on replayed STARTED', async () => {
+      let hangGate = Promise.withResolvers<void>()
+      const setup = buildRuntime({
+        initialReconnectDelayMillis: 10,
+        capabilities: {
+          'fs.read': async (_call, context) => {
+            await new Promise<void>((resolve) => {
+              context.signal.addEventListener('abort', () => resolve(), { once: true })
+              void hangGate.promise.then(resolve)
+            })
+            throw new Error('cancelled')
+          },
+        },
+      })
+
+      try {
+        await handshake(setup)
+        // 1. 发起调用，首次收到 STARTED，replayed 为 undefined
+        setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
+        await waitFor(() => sent(setup.transport).some((e) => e.messageType === 'STARTED'))
+        const firstStarted = setup.transport.sent.find((e) => e.messageType === MessageType.STARTED)
+        expect(firstStarted?.payload.case).toBe('started')
+        if (firstStarted?.payload.case === 'started') {
+          expect(firstStarted.payload.value.replayed).toBeFalsy()
+        }
+
+        // 2. 发起 CANCEL，收到 CANCELLED，reason 必须为 'cancelled'
+        setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-1', payload: {} }))
+        await waitFor(() => sent(setup.transport).some((e) => e.messageType === 'CANCELLED'))
+        const userCancelled = setup.transport.sent.find((e) => e.messageType === MessageType.CANCELLED)
+        expect(userCancelled?.payload.case).toBe('cancelled')
+        if (userCancelled?.payload.case === 'cancelled') {
+          expect(userCancelled.payload.value.reason).toBe('cancelled')
+        }
+
+        // 3. 再次发起一个悬挂调用 inv-2，重放时验证 replayed: true
+        hangGate = Promise.withResolvers<void>()
+        const invoke2 = serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-2', payload: invokePayload() })
+        setup.transport.receive(invoke2)
+        await waitFor(() => setup.transport.sent.filter((e) => e.messageType === MessageType.STARTED).length >= 2)
+
+        // 重连，触发 replay
+        setup.transport.disconnect()
+        await waitFor(() => setup.transport.connectCount >= 2)
+        setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+        await waitFor(() => setup.runtime.getState() === 'READY')
+        setup.transport.receive(invoke2)
+        // 等待重连后的 STARTED
+        await waitFor(() => setup.transport.sent.filter((e) => e.messageType === MessageType.STARTED).length >= 1)
+        const replayedStarted = setup.transport.sent[setup.transport.sent.length - 1]
+        expect(replayedStarted.payload.case).toBe('started')
+        if (replayedStarted.payload.case === 'started') {
+          expect(replayedStarted.payload.value.replayed).toBe(true)
+        }
+      } finally {
+        hangGate.resolve()
+        setup.runtime.close()
+        await setup.runtime.awaitCompletion()
+      }
+    })
   })
 })

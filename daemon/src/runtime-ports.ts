@@ -1,16 +1,15 @@
 import type {
   CapabilityExecutor,
   DaemonConfig,
-  DataBindHandler,
   IdeLeaseHandler,
   IdeService,
   ProcessSupervisor,
   ResourceUploader,
 } from './contracts.js'
 import type { InvocationJournal } from './journal.js'
-import type { EnvironmentInfo } from './protocol.js'
+import type { EnvironmentInfo } from './generated/control_pb.js'
 import type { UpdateByteProgress } from './runtime-status.js'
-import type { ControlTransport } from './transport/control.js'
+import type { ControlTransport } from './transport/index.js'
 import type { PresignedPutSender } from './transport/resources.js'
 
 /** 受控临时资源清扫端口；具体 workspace 存储由 coding 片提供。 */
@@ -54,8 +53,8 @@ export interface RuntimeOptions {
   processes: ProcessSupervisor
   /** READY 上报的宿主 metadata；缺省时按当前进程检测。 */
   environment?: EnvironmentInfo
-  capabilityCatalogVersion?: string
   daemonVersion?: string
+  capabilityCatalogVersion?: string
   journal?: InvocationJournal
   /** 自定义资源上传端口；缺省时使用内置控制面客户端。 */
   resources?: ResourceUploader
@@ -63,16 +62,13 @@ export interface RuntimeOptions {
   putObject?: PresignedPutSender
   update?: UpdatePort
   ide?: IdeService
-  /** 受控数据连接绑定处理器；未配置时 DATA_BIND 必须显式报错，不能静默成功。 */
-  dataBind?: DataBindHandler
   /** IDE 使用证明处理器；未配置时 IDE_LEASE 必须显式报错。 */
   ideLease?: IdeLeaseHandler
   temporaryResources?: TemporaryResourceSweeper
+  monotonicNow?: () => number
   heartbeatIntervalMillis?: number
   initialReconnectDelayMillis?: number
   maxReconnectDelayMillis?: number
   maxConcurrentInvocations?: number
   ideCommandTimeoutMillis?: number
-  /** IDE 租约轮次的新鲜度判定时钟；缺省使用单调的 performance.now。 */
-  monotonicNow?: () => number
 }

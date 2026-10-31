@@ -7,8 +7,18 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { DaemonConfig } from '../src/contracts.js'
 import { acquireFileLock, type DirectoryLock } from '../src/native/index.js'
-import { encodeUpdateCommand, PROTOCOL_VERSION, encodeEnvelope } from '../src/protocol.js'
+import { PROTOCOL_VERSION } from '../src/protocol/control/codec.js'
 import { Runtime, type UpdatePort } from '../src/runtime.js'
+import {
+  EnvelopeSchema,
+  MessageType,
+  ResourceBudgetsSchema,
+  SettingsSchema,
+  UpdatePhase,
+  UpdateSchema,
+  type UpdateResult,
+} from '../src/generated/control_pb.js'
+import { create } from '@bufbuild/protobuf'
 import {
   HANDOFF_FILE,
   MANAGED_ENTRY,
@@ -120,7 +130,6 @@ async function startEntry(): Promise<EntryHarness> {
       await writeFile(
         path.join(destination, RUNTIME_MANIFEST),
         JSON.stringify({
-          schemaVersion: 1,
           daemonVersion: TARGET_VERSION,
           codeServerVersion: '4.143.1-kk.1',
           codeServer: {
@@ -155,30 +164,28 @@ async function startEntry(): Promise<EntryHarness> {
   })
   const originalConnect = transport.connect.bind(transport)
   transport.connect = async (listener) => {
-    const connection = await originalConnect(listener)
-    const originalSend = connection.sendText.bind(connection)
-    // 同步判定：sendText 在同一同步块内先于许可释放被调用，因此这里读取的就是「回执到达时」的真实状态。
-    // PREPARED 出站时模拟已接管互斥的更新器，确保真实的 releasePermit 只有在 takeover + kernel lock 后释放。
-    connection.sendText = async (message: string): Promise<void> => {
-      const envelope = JSON.parse(message) as { messageType?: string; payload?: { phase?: string } }
-      if (envelope.messageType === 'UPDATE_RESULT') {
+    const connection = (await originalConnect(listener)) as FakeConnection
+    connection.sendInterceptor = (envelope) => {
+      if (envelope.messageType === MessageType.UPDATE_RESULT) {
         permitAtReceipt.push(existsSync(permitPath))
-        if (envelope.payload?.phase === 'PREPARED') {
-          const handoff = JSON.parse(await readFile(handoffPath, 'utf8')) as { startupToken: string }
-          await writeFile(
-            takeoverPath,
-            `${JSON.stringify({
-              operationId: OPERATION_ID,
-              targetVersion: TARGET_VERSION,
-              token: handoff.startupToken,
-              pid: process.pid,
-            })}\n`,
-            { mode: 0o600 },
-          )
-          updaterLock = await acquireFileLock(installLockPath)
+        const res = envelope.payload.value as UpdateResult
+        if (res.phase === UpdatePhase.UPDATE_PREPARED) {
+          void (async () => {
+            const handoff = JSON.parse(await readFile(handoffPath, 'utf8')) as { startupToken: string }
+            await writeFile(
+              takeoverPath,
+              `${JSON.stringify({
+                operationId: OPERATION_ID,
+                targetVersion: TARGET_VERSION,
+                token: handoff.startupToken,
+                pid: process.pid,
+              })}\n`,
+              { mode: 0o600 },
+            )
+            updaterLock = await acquireFileLock(installLockPath)
+          })()
         }
       }
-      return originalSend(message)
     }
     return connection
   }
@@ -193,7 +200,6 @@ async function startEntry(): Promise<EntryHarness> {
       },
       async close() {},
     },
-    environment,
     update,
     heartbeatIntervalMillis: 10_000,
     initialReconnectDelayMillis: 5,
@@ -201,7 +207,22 @@ async function startEntry(): Promise<EntryHarness> {
   })
   runtime.start()
   await tick()
-  transport.receive(serverMessage('WELCOME', { environmentId: ENVIRONMENT_ID, payload: welcomePayload }))
+  transport.receive(
+    create(EnvelopeSchema, {
+      messageType: MessageType.SETTINGS,
+      environmentId: ENVIRONMENT_ID,
+      payload: {
+        case: 'settings',
+        value: create(SettingsSchema, {
+          resourceBudgets: create(ResourceBudgetsSchema, {
+            maxResourceBytes: 1048576n,
+            temporaryResourceTtlSeconds: 60n,
+            temporaryResourceCleanupIntervalSeconds: 30n,
+          }),
+        }),
+      },
+    }),
+  )
   await tick()
   expect(runtime.getState()).toBe('READY')
   return { runtime, transport, config, downloaded, permitAtReceipt, permitPath }
@@ -210,26 +231,26 @@ async function startEntry(): Promise<EntryHarness> {
 describe('managed update real entry', () => {
   it('downloads the official platform archive for the wire command and releases the permit after the receipt', async () => {
     const harness = await startEntry()
-    const wire = encodeUpdateCommand({
-      operationId: OPERATION_ID,
-      targetVersion: TARGET_VERSION,
-      artifactUrl: ARTIFACT_URL,
-      artifactSha256: artifactFixture.artifactSha256,
-    })
-    // 平台真实装配：命令先在 wire 上编码，再作为 UPDATE 载荷进入 Daemon。
     harness.transport.receive(
-      encodeEnvelope({
-        protocolVersion: PROTOCOL_VERSION,
-        messageType: 'UPDATE',
+      create(EnvelopeSchema, {
+          messageType: MessageType.UPDATE,
         environmentId: ENVIRONMENT_ID,
-        invocationId: null,
-        payload: JSON.parse(wire) as Record<string, unknown>,
+        payload: {
+          case: 'update',
+          value: create(UpdateSchema, {
+            operationId: OPERATION_ID,
+            targetVersion: TARGET_VERSION,
+            artifactUrl: ARTIFACT_URL,
+            artifactSha256: artifactFixture.artifactSha256,
+          }),
+        },
       }),
     )
     await waitFor(() =>
-      harness.transport.sent.some(message => {
-        const payload = JSON.parse(message) as { messageType: string; payload: { phase?: string } }
-        return payload.messageType === 'UPDATE_RESULT' && payload.payload.phase === 'PREPARED'
+      harness.transport.sent.some((envelope) => {
+        if (envelope.messageType !== MessageType.UPDATE_RESULT) return false
+        const payload = envelope.payload.value as UpdateResult
+        return payload.phase === UpdatePhase.UPDATE_PREPARED
       }),
     )
 
@@ -238,10 +259,9 @@ describe('managed update real entry', () => {
     expect(createHash('sha256').update(ARCHIVE).digest('hex')).toBe(artifactFixture.artifactSha256)
 
     const phases = harness.transport.sent
-      .map(message => JSON.parse(message) as { messageType: string; payload: { phase?: string } })
-      .filter(envelope => envelope.messageType === 'UPDATE_RESULT')
-      .map(envelope => envelope.payload.phase)
-    expect(phases).toEqual(['ACCEPTED', 'PREPARED'])
+      .filter((envelope) => envelope.messageType === MessageType.UPDATE_RESULT)
+      .map((envelope) => (envelope.payload.value as UpdateResult).phase)
+    expect(phases).toEqual([UpdatePhase.UPDATE_ACCEPTED, UpdatePhase.UPDATE_PREPARED])
     // 许可必须在 PREPARED 回执出站之后才释放，且此时确实已释放。
     expect(harness.permitAtReceipt).toEqual([false, false])
     await waitFor(() => existsSync(harness.permitPath))

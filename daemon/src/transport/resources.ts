@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { create } from '@bufbuild/protobuf'
 
 import type { ResourceUploader, ResultContent } from '../contracts.js'
 import { getOutboundNetwork } from '../network.js'
 import {
-  decodeUploadTicket,
-  encodeUploadCommit,
-  encodeUploadRequest,
+  EnvelopeSchema,
+  MessageType,
+  ResourceUploadCommitSchema,
+  ResourceUploadRequestSchema,
+  TicketState,
+  type Envelope,
   type PresignedPut,
-  type UploadRequest,
-  type UploadTicket,
-} from '../protocol.js'
+  type ResourceUploadTicket,
+} from '../generated/control_pb.js'
 
 /**
  * Daemon 侧 invocation 作用域资源上传客户端：把内存字节经控制面直传全局对象存储。
@@ -22,14 +25,8 @@ import {
  * 确定失败，绝不吞掉中断后继续等待。预签名 URL 与已签名 headers 只出现在实际 PUT 请求里，绝不进入错误文本。
  */
 
-export type ResourceTransferMessageType = 'RESOURCE_UPLOAD_REQUEST' | 'RESOURCE_UPLOAD_COMMIT'
-
 /** 出站控制帧递交端口；返回 false 表示连接当前不可用（帧确定未发送）。 */
-export type ResourceControlSender = (
-  messageType: ResourceTransferMessageType,
-  invocationId: string,
-  payloadJson: string,
-) => boolean
+export type ResourceControlSender = (envelope: Envelope) => boolean
 
 export type PresignedPutSender = (presigned: PresignedPut, bytes: Uint8Array, signal: AbortSignal) => Promise<void>
 
@@ -46,7 +43,7 @@ export interface ResourceTransferClientOptions {
 
 export interface ResourceTransferClient extends ResourceUploader {
   /** 接收一条服务端票据帧；(invocationId, transferId) 匹配时唤醒等待方，否则丢弃。 */
-  onTicket(invocationId: string, payloadJson: string): void
+  onTicket(invocationId: string, ticket: ResourceUploadTicket): void
   /** 连接失效：唤醒等待方进入重连等待。 */
   onConnectionLost(): void
   /** 连接已 READY：放行等待重连的上传继续重放同一 transfer。 */
@@ -61,8 +58,16 @@ const FAILURE_MESSAGE = 'resource upload failed'
 const REJECTED_PREFIX = 'resource upload was rejected by storage'
 
 interface PendingTicket {
-  resolve(ticket: UploadTicket): void
+  resolve(ticket: ResourceUploadTicket): void
   reject(error: Error): void
+}
+
+interface UploadRequest {
+  transferId: string
+  mediaType: string
+  name: string | null
+  size: number
+  sha256: string
 }
 
 /** 生产预签名 PUT：只发送票据声明的已签名方法/headers，失败只报告状态码，绝不回显 URL 或签名。 */
@@ -70,9 +75,9 @@ export function createHttpPutObject(): PresignedPutSender {
   return async (presigned, bytes, signal) => {
     // 预签名 PUT 绝不跟随重定向：跨目标复用已签名 headers/body 会泄漏签名与对象内容。
     await getOutboundNetwork().withResponse(
-      presigned.url,
+      presigned.url!,
       {
-        method: presigned.method,
+        method: presigned.method!,
         headers: presigned.headers,
         body: Buffer.from(bytes),
         redirect: 'error',
@@ -108,15 +113,8 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
     this.connectionPollMillis = requirePositive(options.connectionPollMillis ?? DEFAULT_CONNECTION_POLL_MILLIS, 'connectionPollMillis')
   }
 
-  onTicket(invocationId: string, payloadJson: string): void {
-    let ticket: UploadTicket
-    try {
-      ticket = decodeUploadTicket(payloadJson)
-    } catch {
-      // 非法票据是服务端的协议问题；客户端不因单条控制帧内容破坏已建立的连接。
-      return
-    }
-    if (invocationId.trim() === '') {
+  onTicket(invocationId: string, ticket: ResourceUploadTicket): void {
+    if (invocationId.trim() === '' || !ticket.transferId) {
       return
     }
     const pending = this.pending.get(transferKey(invocationId, ticket.transferId))
@@ -163,22 +161,49 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
       for (;;) {
         this.throwIfAborted(signal)
         await this.awaitConnection(signal)
-        let ticket: UploadTicket
+        let ticket: ResourceUploadTicket
         try {
           ticket = uploaded
             ? await this.control(
                 invocationId,
                 key,
-                'RESOURCE_UPLOAD_COMMIT',
-                encodeUploadCommit({ transferId: request.transferId, uploadId: uploadId as string }),
+                create(EnvelopeSchema, {
+                  messageType: MessageType.RESOURCE_UPLOAD_COMMIT,
+                  invocationId,
+                  payload: {
+                    case: 'resourceUploadCommit',
+                    value: create(ResourceUploadCommitSchema, {
+                      transferId: request.transferId,
+                      uploadId: uploadId as string,
+                    }),
+                  },
+                }),
                 signal,
               )
-            : await this.control(invocationId, key, 'RESOURCE_UPLOAD_REQUEST', encodeUploadRequest(request), signal)
+            : await this.control(
+                invocationId,
+                key,
+                create(EnvelopeSchema, {
+                  messageType: MessageType.RESOURCE_UPLOAD_REQUEST,
+                  invocationId,
+                  payload: {
+                    case: 'resourceUploadRequest',
+                    value: create(ResourceUploadRequestSchema, {
+                      transferId: request.transferId,
+                      mediaType: request.mediaType,
+                      name: request.name ?? undefined,
+                      size: BigInt(request.size),
+                      sha256: request.sha256,
+                    }),
+                  },
+                }),
+                signal,
+              )
         } catch {
           await this.backoff(signal)
           continue
         }
-        if (ticket.state === 'READY') {
+        if (ticket.state === TicketState.TICKET_READY) {
           return {
             type: 'resource',
             uploadId: ticket.uploadId as string,
@@ -188,7 +213,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
             sha256: request.sha256,
           }
         }
-        if (ticket.state === 'FAILED') {
+        if (ticket.state === TicketState.TICKET_FAILED) {
           // 提交失败说明对象确实不在存储中，回到上传阶段；申请失败则本来就没有上传过。
           uploaded = false
           uploadId = null
@@ -200,7 +225,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           // 服务端回放了尚未提交的申请票据：只重新提交，绝不重复上传字节。
           await this.backoff(signal)
         } else {
-          uploadId = ticket.uploadId
+          uploadId = ticket.uploadId ?? null
           uploaded = true
           try {
             await this.putObject(ticket.presignedPut as PresignedPut, bytes, signal)
@@ -218,14 +243,13 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
   private async control(
     invocationId: string,
     key: string,
-    messageType: ResourceTransferMessageType,
-    payloadJson: string,
+    envelope: Envelope,
     signal: AbortSignal,
-  ): Promise<UploadTicket> {
+  ): Promise<ResourceUploadTicket> {
     if (!this.connectionAvailable) {
       throw new Error('resource upload control is unavailable')
     }
-    const promise = new Promise<UploadTicket>((resolve, reject) => {
+    const promise = new Promise<ResourceUploadTicket>((resolve, reject) => {
       this.pending.set(key, { resolve, reject })
     })
     const onAbort = (): void => {
@@ -237,7 +261,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
     }
     signal.addEventListener('abort', onAbort, { once: true })
     try {
-      if (!this.sendControl(messageType, invocationId, payloadJson)) {
+      if (!this.sendControl(envelope)) {
         throw new Error('resource upload control is unavailable')
       }
       return await withTimeout(promise, this.ticketWaitMillis, FAILURE_MESSAGE)

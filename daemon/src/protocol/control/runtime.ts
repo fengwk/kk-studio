@@ -15,7 +15,7 @@ export interface TextOptions {
 }
 
 /** Counts UTF-8 bytes and rejects unpaired surrogates instead of replacing them. */
-export function utf8ByteLength(value: string, name: string): number {
+function utf8ByteLength(value: string, name: string): number {
   let bytes = 0
   for (let index = 0; index < value.length; index++) {
     const code = value.charCodeAt(index)
@@ -134,35 +134,31 @@ function requireJsonText(value: unknown, name: string, maxBytes: number): string
 function detectJsonViolations(text: string, name: string): void {
   const seen = new Map<string, Set<string>>()
   let violation: string | null = null
-  try {
-    visit(
-      text,
-      {
-        onObjectProperty(property, _offset, _length, _line, _character, pathSupplier) {
-          if (violation !== null) {
-            return
-          }
-          const path = JSON.stringify(pathSupplier())
-          let properties = seen.get(path)
-          if (properties === undefined) {
-            properties = new Set()
-            seen.set(path, properties)
-          }
-          if (properties.has(property)) {
-            violation = `contains duplicate field: ${property}`
-            return
-          }
-          properties.add(property)
-        },
-        onError() {
-          violation ??= 'must be valid JSON'
-        },
+  visit(
+    text,
+    {
+      onObjectProperty(property, _offset, _length, _line, _character, pathSupplier) {
+        if (violation !== null) {
+          return
+        }
+        const path = JSON.stringify(pathSupplier())
+        let properties = seen.get(path)
+        if (properties === undefined) {
+          properties = new Set()
+          seen.set(path, properties)
+        }
+        if (properties.has(property)) {
+          violation = `contains duplicate field: ${property}`
+          return
+        }
+        properties.add(property)
       },
-      { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false },
-    )
-  } catch {
-    throw new Error(`${name} must be valid JSON`)
-  }
+      onError() {
+        violation ??= 'must be valid JSON'
+      },
+    },
+    { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false },
+  )
   if (violation !== null) {
     throw new Error(`${name} ${violation}`)
   }

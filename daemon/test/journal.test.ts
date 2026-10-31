@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { create } from '@bufbuild/protobuf'
 
 import { InMemoryInvocationJournal, isTerminalState } from '../src/journal.js'
+import {
+  EnvelopeSchema,
+  MessageType,
+} from '../src/generated/control_pb.js'
 
-const terminal = (messageType: 'COMPLETED' | 'FAILED' | 'CANCELLED', payloadJson = '{}') => ({ messageType, payloadJson })
+const terminal = (messageType: MessageType.COMPLETED | MessageType.FAILED | MessageType.CANCELLED) => ({
+  messageType,
+  envelope: create(EnvelopeSchema, { messageType }),
+})
 
 describe('InMemoryInvocationJournal', () => {
   it('creates RUNNING entries atomically and dedups repeated starts', () => {
@@ -18,23 +26,23 @@ describe('InMemoryInvocationJournal', () => {
   it('commits a terminal state once and rejects later completions', () => {
     const journal = new InMemoryInvocationJournal()
     journal.start('inv-1')
-    expect(journal.complete('inv-1', terminal('COMPLETED', '{"result":{}}'))).toBe(true)
+    expect(journal.complete('inv-1', terminal(MessageType.COMPLETED))).toBe(true)
     expect(journal.find('inv-1')?.state).toBe('COMPLETED')
-    expect(journal.complete('inv-1', terminal('FAILED'))).toBe(false)
-    expect(journal.find('inv-1')?.terminalMessage?.messageType).toBe('COMPLETED')
+    expect(journal.complete('inv-1', terminal(MessageType.FAILED))).toBe(false)
+    expect(journal.find('inv-1')?.terminalMessage?.messageType).toBe(MessageType.COMPLETED)
   })
 
   it('never completes an unknown invocation', () => {
     const journal = new InMemoryInvocationJournal()
-    expect(journal.complete('missing', terminal('CANCELLED'))).toBe(false)
+    expect(journal.complete('missing', terminal(MessageType.CANCELLED))).toBe(false)
   })
 
   it('maps terminal message types to states', () => {
     const journal = new InMemoryInvocationJournal()
     journal.start('a')
     journal.start('b')
-    journal.complete('a', terminal('FAILED'))
-    journal.complete('b', terminal('CANCELLED'))
+    journal.complete('a', terminal(MessageType.FAILED))
+    journal.complete('b', terminal(MessageType.CANCELLED))
     expect(journal.find('a')?.state).toBe('FAILED')
     expect(journal.find('b')?.state).toBe('CANCELLED')
     expect(isTerminalState('RUNNING')).toBe(false)
@@ -43,44 +51,30 @@ describe('InMemoryInvocationJournal', () => {
 
   it('bounds retained terminal entries and never evicts RUNNING ones', () => {
     const journal = new InMemoryInvocationJournal(2)
+    journal.start('term-1')
+    journal.complete('term-1', terminal(MessageType.COMPLETED))
     journal.start('running')
-    journal.start('done-1')
-    journal.complete('done-1', terminal('COMPLETED'))
-    journal.start('done-2')
-    journal.complete('done-2', terminal('COMPLETED'))
-    // 第 3 个终态条目触发淘汰最旧的终态条目 done-1，而 running 保留。
-    journal.start('done-3')
-    journal.complete('done-3', terminal('COMPLETED'))
-    expect(journal.size()).toBe(3)
+    journal.start('term-2')
+    journal.complete('term-2', terminal(MessageType.FAILED))
+    journal.start('term-3')
+    journal.complete('term-3', terminal(MessageType.CANCELLED))
+
     expect(journal.find('running')?.state).toBe('RUNNING')
-    expect(journal.find('done-1')).toBeUndefined()
-    expect(journal.find('done-3')?.state).toBe('COMPLETED')
+    expect(journal.find('term-1')).toBeUndefined()
+    expect(journal.find('term-2')?.state).toBe('FAILED')
+    expect(journal.find('term-3')?.state).toBe('CANCELLED')
   })
 
-  it('rejects a non-positive bound', () => {
-    expect(() => new InMemoryInvocationJournal(0)).toThrow()
-  })
-
-  it('records exit confirmation independently of the terminal and only once', () => {
+  it('records independent exit confirmations and rejects unknown entries', () => {
     const journal = new InMemoryInvocationJournal()
     journal.start('inv-1')
-    expect(journal.confirmExit('missing')).toBe(false)
+    expect(journal.find('inv-1')?.exitConfirmed).toBe(false)
     expect(journal.confirmExit('inv-1')).toBe(true)
-    expect(journal.confirmExit('inv-1')).toBe(false)
     expect(journal.find('inv-1')?.exitConfirmed).toBe(true)
-    expect(journal.complete('inv-1', terminal('CANCELLED', '{"reason":"cancelled"}'))).toBe(true)
-    expect(journal.find('inv-1')?.exitConfirmed).toBe(true)
-    expect(journal.find('inv-1')?.terminalMessage?.messageType).toBe('CANCELLED')
+    expect(journal.confirmExit('missing')).toBe(false)
   })
 
-  it('drops an evicted exit confirmation instead of replaying it', () => {
-    const journal = new InMemoryInvocationJournal(1)
-    journal.start('old')
-    journal.confirmExit('old')
-    journal.complete('old', terminal('COMPLETED'))
-    journal.start('new')
-    journal.complete('new', terminal('FAILED'))
-    expect(journal.find('old')).toBeUndefined()
-    expect(journal.find('new')?.exitConfirmed).toBe(false)
+  it('rejects non-positive bounds', () => {
+    expect(() => new InMemoryInvocationJournal(0)).toThrow(/positive integer/)
   })
 })

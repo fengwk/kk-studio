@@ -10,7 +10,7 @@ import type {
   IdeViewSummary,
   ProcessSupervisor,
 } from '../contracts.js'
-import type { IdeLease } from '../protocol.js'
+import type { IdeLease } from '../generated/control_pb.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { createIdeBridge, type BridgeDocument, type BridgeResult, type IdeBridge } from './bridge.js'
 import {
@@ -709,7 +709,6 @@ export async function createIdeService(
       const documents: BridgeDocument[] = result.documents ?? []
       const complete = result.complete !== false && (result.omitted ?? 0) === 0
       const backup: RecoveryBackup = {
-        version: 1,
         viewId: view.viewId,
         bindingEpoch: view.bindingEpoch,
         directory: view.directory,
@@ -1170,13 +1169,13 @@ export async function createIdeService(
       return
     }
     for (const binding of lease.bindings) {
-      const view = views.get(binding.viewId)
+      const view = views.get(binding.viewId!)
       if (
         view === undefined ||
         view.state !== 'OPEN' ||
         view.detachedAt !== null ||
         view.documentId !== binding.documentId ||
-        view.bindingEpoch !== binding.bindingEpoch
+        view.bindingEpoch !== binding.bindingEpoch!.toString()
       ) {
         continue
       }

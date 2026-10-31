@@ -26,7 +26,7 @@ import {
   type IdeServiceEvent,
 } from '../../src/ide/service.js'
 import { listViews, openCommand, signal } from './lifecycle-fixtures.js'
-import { decodeIdeReply, encodeIdeReply } from '../../src/protocol.js'
+import { toProtoIdeResult } from '../../src/runtime-ide.js'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -410,14 +410,16 @@ describe('managed IDE claim and tenant lifecycle', () => {
     for (const mode of ['create', 'resume'] as const) {
       const reply = await service.handle(open(viewId, documentId, randomUUID(), project, mode), signal())
       expect(reply.ok).toBe(true)
-      expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
-      expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)
+      const result = toProtoIdeResult(reply)
+      expect(result.ok).toBe(true)
+      expect(result.viewId).toBe(viewId)
       expect(reply).not.toHaveProperty('state')
     }
     const listed = await listViews(service)
     expect(listed.views?.[0]?.state).toBe('OPEN')
-    expect(decodeIdeReply(JSON.stringify(listed))).toEqual(listed)
-    expect(decodeIdeReply(encodeIdeReply(listed))).toEqual(listed)
+    const listedResult = toProtoIdeResult(listed)
+    expect(listedResult.ok).toBe(true)
+    expect(listedResult.views?.length).toBe(1)
   })
 
   it('round-trips the actual CHANGE_DIRECTORY service reply with its confirmed canonical directory', async () => {
@@ -437,9 +439,10 @@ describe('managed IDE claim and tenant lifecycle', () => {
     )
     // The service sends the realpath to the bridge, not the browser-supplied spelling.
     expect(bridge.commands.at(-1)?.command).toEqual({ op: 'changeDirectory', directory: confirmed })
-    const encoded = encodeIdeReply(reply)
-    expect(decodeIdeReply(encoded)).toEqual({ ok: true, viewId, directory: confirmed })
-    expect(JSON.parse(encoded)).toEqual({ ok: true, viewId, directory: confirmed })
+    const result = toProtoIdeResult(reply)
+    expect(result.ok).toBe(true)
+    expect(result.viewId).toBe(viewId)
+    expect(result.directory).toBe(confirmed)
     expect(service.getViewState(viewId)?.directory).toBe(confirmed)
   })
 
@@ -453,8 +456,9 @@ describe('managed IDE claim and tenant lifecycle', () => {
       const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
       const reply = await service.handle(boundCommand(action, state, action === 'CLOSE_VIEW' ? { discard: true } : {}), signal())
       expect(reply).toEqual({ ok: true, viewId })
-      expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
-      expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)
+      const result = toProtoIdeResult(reply)
+      expect(result.ok).toBe(true)
+      expect(result.viewId).toBe(viewId)
     },
   )
 
