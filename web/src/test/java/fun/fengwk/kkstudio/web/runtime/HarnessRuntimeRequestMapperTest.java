@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -211,38 +213,29 @@ class HarnessRuntimeRequestMapperTest {
   @Test
   void strictScalarParsersRejectNonCanonicalAndOverflowValues() {
     // UUID 与 decimal cursor 不能接受大小写、前导零、负数或 bigint 溢出。
-    assertEquals(id(1), HarnessRuntimeRequestMapper.parseUuid(idText(1), "id"));
-    assertThrows(
-        IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.parseUuid(null, "id"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseUuid("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "id"));
+    assertEquals(id(1), Uuids.parseCanonical(idText(1), "id"));
+    assertThrows(IllegalArgumentException.class, () -> Uuids.parseCanonical(null, "id"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseUuid("not-a-uuid", "id"));
+        () -> Uuids.parseCanonical("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "id"));
+    assertThrows(IllegalArgumentException.class, () -> Uuids.parseCanonical("not-a-uuid", "id"));
 
-    assertEquals(1L, HarnessRuntimeRequestMapper.parsePositiveDecimal("1", "sequence"));
+    assertEquals(1L, DecimalLongs.parsePositive("1", "sequence"));
+    assertThrows(IllegalArgumentException.class, () -> DecimalLongs.parsePositive("0", "sequence"));
+    assertThrows(
+        IllegalArgumentException.class, () -> DecimalLongs.parsePositive("01", "sequence"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("0", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("01", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parsePositiveDecimal("9223372036854775808", "sequence"));
+        () -> DecimalLongs.parsePositive("9223372036854775808", "sequence"));
 
-    assertEquals(0L, HarnessRuntimeRequestMapper.parseNonNegativeDecimal("0", "version"));
+    assertEquals(0L, DecimalLongs.parseNonNegative("0", "version"));
+    assertThrows(
+        IllegalArgumentException.class, () -> DecimalLongs.parseNonNegative("-1", "version"));
+    assertThrows(
+        IllegalArgumentException.class, () -> DecimalLongs.parseNonNegative("01", "version"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseNonNegativeDecimal("-1", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.parseNonNegativeDecimal("01", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.parseNonNegativeDecimal("9223372036854775808", "version"));
+        () -> DecimalLongs.parseNonNegative("9223372036854775808", "version"));
   }
 
   @Test

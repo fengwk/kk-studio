@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.browser;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.ArrayList;
@@ -49,8 +51,8 @@ public record IdeBrowserUse(UUID documentId, long revision, List<IdeBrowserUseVi
   public static IdeBrowserUse parse(
       String documentId, String revision, List<IdeBrowserUseView> views) {
     return new IdeBrowserUse(
-        ConnectionIdentity.parseCanonicalUuid(documentId, "documentId"),
-        IdeBrowserUseView.parsePositiveLong(revision, "revision"),
+        Uuids.parseCanonical(documentId, "documentId"),
+        DecimalLongs.parsePositive(revision, "revision"),
         views);
   }
 

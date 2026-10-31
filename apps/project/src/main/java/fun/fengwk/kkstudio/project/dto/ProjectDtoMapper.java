@@ -5,6 +5,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -33,17 +34,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /** Project 与 Issue 领域模型与公开 wire DTO 之间的权威双向转换器。 */
 @Component
 public class ProjectDtoMapper {
-
-  private static final Pattern UUID_PATTERN =
-      Pattern.compile(
-          "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          Pattern.CASE_INSENSITIVE);
-  private static final Pattern DECIMAL_LONG_PATTERN = Pattern.compile("^(0|[1-9][0-9]*)$");
 
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
@@ -51,33 +45,6 @@ public class ProjectDtoMapper {
   public ProjectDtoMapper(ProjectWorkflowJsonCodec workflowCodec, ObjectMapper objectMapper) {
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-  }
-
-  public static UUID parseUuid(String value, String fieldName) {
-    if (value == null || !UUID_PATTERN.matcher(value.trim()).matches()) {
-      throw new IllegalArgumentException(fieldName + " must be a valid UUID string");
-    }
-    try {
-      return UUID.fromString(value.trim().toLowerCase());
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(fieldName + " must be a valid UUID string");
-    }
-  }
-
-  public static long parseNonNegativeLong(String value, String fieldName) {
-    if (value == null || !DECIMAL_LONG_PATTERN.matcher(value.trim()).matches()) {
-      throw new IllegalArgumentException(
-          fieldName + " must be a canonical non-negative decimal string");
-    }
-    try {
-      long parsed = Long.parseLong(value.trim());
-      if (parsed < 0) {
-        throw new IllegalArgumentException(fieldName + " must be non-negative");
-      }
-      return parsed;
-    } catch (NumberFormatException e) {
-      throw new IllegalArgumentException(fieldName + " exceeds long range");
-    }
   }
 
   public static String formatUuid(UUID uuid) {
@@ -109,7 +76,7 @@ public class ProjectDtoMapper {
       String instructions = stateDto.getInstructions();
       Integer maxRuns = null;
       if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
-        long parsed = parseNonNegativeLong(stateDto.getMaxRuns(), "maxRuns");
+        long parsed = DecimalLongs.parseNonNegative(stateDto.getMaxRuns(), "maxRuns");
         if (parsed > Integer.MAX_VALUE) {
           throw new IllegalArgumentException("maxRuns exceeds int range");
         }

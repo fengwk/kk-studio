@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.protocol;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -201,19 +203,14 @@ public record IdeCommand(
 
   /** 校验 wire 的规范正十进制 epoch 字符串，并解析为 long。 */
   public static long parseBindingEpoch(String value) {
-    if (value == null || value.isEmpty() || value.charAt(0) < '1' || value.charAt(0) > '9') {
-      throw new IllegalArgumentException("bindingEpoch must be a canonical positive decimal");
-    }
-    for (int i = 1; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c < '0' || c > '9') {
-        throw new IllegalArgumentException("bindingEpoch must be a canonical positive decimal");
-      }
-    }
     try {
-      return Long.parseLong(value);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException("bindingEpoch must fit in a signed 64-bit decimal");
+      return DecimalLongs.parsePositive(value, "bindingEpoch");
+    } catch (IllegalArgumentException error) {
+      String message = error.getMessage();
+      if (message != null && message.contains("exceeds long range")) {
+        throw new IllegalArgumentException("bindingEpoch must fit in a signed 64-bit decimal");
+      }
+      throw new IllegalArgumentException("bindingEpoch must be a canonical positive decimal");
     }
   }
 

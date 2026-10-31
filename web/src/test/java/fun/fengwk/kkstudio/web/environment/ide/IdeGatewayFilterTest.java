@@ -68,6 +68,22 @@ class IdeGatewayFilterTest {
     verifyNoInteractions(dataPlane);
   }
 
+  @Test
+  void rejectsUppercaseViewIdAsNotFound() throws Exception {
+    // 测试意图：大写 viewId 不是 canonical，网关必须保持 404，且不能进入数据面。
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(dataPlane, mock(IdeBrowserWebSocketGateway.class));
+    HttpServletRequest request =
+        request("/environment-ide/" + ENV + "/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/file", null);
+    HttpServletResponse response = mock(HttpServletResponse.class);
+
+    filter.doFilter(request, response, mock(FilterChain.class));
+
+    verify(response).sendError(HttpServletResponse.SC_NOT_FOUND);
+    verifyNoInteractions(dataPlane);
+  }
+
   private static HttpServletRequest request(String uri, String query) {
     HttpServletRequest request = mock(HttpServletRequest.class);
     when(request.getRequestURI()).thenReturn(uri);

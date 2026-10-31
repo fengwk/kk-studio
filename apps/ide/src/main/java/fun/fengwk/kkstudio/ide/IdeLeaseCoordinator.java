@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.ide;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
@@ -162,11 +163,11 @@ public final class IdeLeaseCoordinator {
     if (value == null) {
       throw new IllegalArgumentException(field + " is missing");
     }
-    UUID parsed = UUID.fromString(value);
-    if (!parsed.toString().equals(value)) {
+    try {
+      return Uuids.parseCanonical(value, field);
+    } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(field + " is not canonical");
     }
-    return parsed;
   }
 
   private record Group(UUID eventNodeId, UUID connectionId, UUID documentId) {}
