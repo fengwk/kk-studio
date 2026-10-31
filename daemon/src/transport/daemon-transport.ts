@@ -183,6 +183,9 @@ export class DaemonWebSocketTransport implements ControlTransport {
 
     ws.on('unexpected-response', (_req, res) => {
       clearInterval(timer)
+      if (controlTimer) {
+        clearTimeout(controlTimer)
+      }
       const statusCode = res.statusCode ?? 500
       if (statusCode === 426) {
         const chunks: Buffer[] = []
@@ -200,13 +203,26 @@ export class DaemonWebSocketTransport implements ControlTransport {
             rejectConnect(new Error(`handshake failed with 426`))
           }
           listener.onUpgradeFailed(426, upgradeRequired)
+          try {
+            session.destroy()
+          } catch {}
+          try {
+            ws.terminate()
+          } catch {}
         })
       } else {
+        res.resume()
         if (!connectResolved) {
           connectResolved = true
           rejectConnect(new Error(`handshake failed with status ${statusCode}`))
         }
         listener.onUpgradeFailed(statusCode)
+        try {
+          session.destroy()
+        } catch {}
+        try {
+          ws.terminate()
+        } catch {}
       }
     })
 
@@ -372,14 +388,14 @@ export class DaemonWebSocketTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closed = true
-    if (this.activeSession && !this.activeSession.closed && !this.activeSession.destroyed) {
+    if (this.activeSession && !this.activeSession.destroyed) {
       try {
-        this.activeSession.close()
+        this.activeSession.destroy()
       } catch {}
     }
-    if (this.activeWs && this.activeWs.readyState === WebSocket.OPEN) {
+    if (this.activeWs) {
       try {
-        this.activeWs.close()
+        this.activeWs.terminate()
       } catch {}
     }
   }

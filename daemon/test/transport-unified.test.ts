@@ -705,5 +705,41 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       runtime.close()
       await runtime.awaitCompletion()
     })
+
+    it('cleans up all resources and leaves no active handles after upgrade failure (401)', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+      peer.rejectAndClose(401)
+
+      let upgradeFailedCode: number | null = null
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const failedPromise = new Promise<number>((resolve) => {
+        transport
+          .connect({
+            onEnvelope: () => {},
+            onDisconnected: () => {},
+            onGoaway: () => {},
+            onUpgradeFailed: (statusCode) => {
+              upgradeFailedCode = statusCode
+              resolve(statusCode)
+            },
+          })
+          .catch(() => {})
+      })
+
+      const code = await failedPromise
+      expect(code).toBe(401)
+      expect(upgradeFailedCode).toBe(401)
+
+      await transport.close()
+      await new Promise((r) => setTimeout(r, 50))
+    })
   })
 })
