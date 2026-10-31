@@ -99,6 +99,8 @@ export interface ThreadComposerProps {
   hashFile?: HashFile
   /** 当前交互作用域是否允许全局 Escape 把焦点恢复到此 Composer。 */
   focusOnEscape?: boolean
+  /** 命令面板可见性变化轻量通知（只在 open 变化时回调，不发起网络请求）。 */
+  onCommandPaletteVisibilityChange?: (visible: boolean) => void
   /** false 时由同一 Composer 区域的 interaction panel 接管；组件保持挂载以保留上传状态。 */
   active?: boolean
   restoreOnActivate?: boolean
@@ -135,6 +137,7 @@ export function ThreadComposer({
   storageService,
   hashFile,
   focusOnEscape = false,
+  onCommandPaletteVisibilityChange,
   active = true,
   restoreOnActivate = true,
   settings,
@@ -292,6 +295,16 @@ export function ThreadComposer({
           : null
       : null
   const paletteOpen = paletteMode != null
+
+  useEffect(() => {
+    onCommandPaletteVisibilityChange?.(paletteOpen)
+    return () => {
+      if (paletteOpen) {
+        onCommandPaletteVisibilityChange?.(false)
+      }
+    }
+  }, [paletteOpen, onCommandPaletteVisibilityChange])
+
   const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
   const filteredCommands = useFilteredThreadCommands(query, commands)
 

@@ -305,6 +305,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     decideApproval: vi.fn(),
     renameSession: vi.fn(),
     renameThread: vi.fn(),
+    getCompactionAvailability: vi.fn(),
     getThreadTree: vi.fn(),
   },
 }))
@@ -380,13 +381,13 @@ function snapshot(
   return {
     version: currentThread.version,
     thread: currentThread,
+    baseEntryId: null,
     entries: [],
     queuedCommands: [],
     executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
-    manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
     unconfirmedExecutions: [],
     ...overrides,
@@ -525,6 +526,10 @@ beforeEach(() => {
     results: models,
   })
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
+  vi.mocked(harnessService.getCompactionAvailability).mockResolvedValue({
+    available: false,
+    disabledReason: 'not available',
+  })
   // Debug 结构化投影默认不可用：只有显式声明的用例才渲染 Debug 区。
   vi.mocked(harnessService.getModelRequestDebug)
     .mockReset()
@@ -1045,9 +1050,13 @@ describe('AgentPane orchestration', () => {
     expect(screen.getByRole('option', { name: /^compact/ })).toHaveAttribute('aria-disabled', 'true')
     await user.keyboard('{Escape}')
 
+    vi.mocked(harnessService.getCompactionAvailability).mockResolvedValue({
+      available: true,
+      disabledReason: null,
+    })
     client.setQueryData(
-      queryKeys.threads.snapshot(THREAD_ID),
-      snapshot(thread(), { manualCompaction: { available: true, disabledReason: null } }),
+      queryKeys.threads.compactionAvailability(THREAD_ID),
+      { available: true, disabledReason: null },
     )
     await user.click(composer)
     await user.keyboard('/')
@@ -1191,7 +1200,7 @@ describe('AgentPane orchestration', () => {
     await user.click(screen.getByRole('button', { name: '关闭' }))
     await user.click(await screen.findByRole('option', { name: /first/ }))
     await user.click(await screen.findByRole('option', { name: /thread preview/ }))
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID, expect.anything()))
     expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )).toContain('BOUND_THREAD')
@@ -4413,7 +4422,7 @@ describe('AgentPane root control and child observation', () => {
       back.compareDocumentPosition(childTranscript) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
-    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything())
 
     const layers = document.querySelectorAll('.chat-pane-layer')
     expect(layers).toHaveLength(2)
@@ -4620,7 +4629,7 @@ describe('AgentPane root control mounting', () => {
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
     await waitFor(() =>
-      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID))
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything()))
     expect(controlMounts.mount).not.toHaveBeenCalled()
     expect(controlMounts.unmount).not.toHaveBeenCalled()
     expect(uploadMounts.mount).not.toHaveBeenCalled()
@@ -4640,7 +4649,7 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() =>
-      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID))
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything()))
 
     await act(async () => {
       resolveSnapshot?.(childSnapshot())
@@ -4699,10 +4708,10 @@ describe('AgentPane root control mounting', () => {
     )
     expect(Object.keys(seeded ?? {}).sort()).toEqual([
       'activeAssistantOutput',
+      'baseEntryId',
       'entries',
       'executionStatus',
       'generationFailures',
-      'manualCompaction',
       'queuedCommands',
       'stopReceipts',
       'thread',
@@ -5086,7 +5095,7 @@ describe('AgentPane root control mounting', () => {
     expect(request.target.type).toBe('NEW_THREAD')
     expect(JSON.stringify(request.commands)).toContain('先把契约梳理清楚')
     // 验收后绑定新根：身份展示在 workspace 顶栏，面板侧以目标完成绑定为证据。
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(NEW_ROOT_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(NEW_ROOT_ID, expect.anything()))
   })
 
   it('keeps the tree-wide Stop available and on the root when the tree query fails', async () => {

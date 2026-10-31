@@ -119,6 +119,7 @@ function snapshotOf(
   return {
     version: currentThread.version,
     thread: currentThread,
+    baseEntryId: null,
     entries: [],
     queuedCommands: [],
     executionStatus: 'IDLE',
@@ -127,7 +128,6 @@ function snapshotOf(
     generationFailures: [],
     stopReceipts: [],
     unconfirmedExecutions: [],
-    manualCompaction: { available: false, disabledReason: null },
     ...extras,
   }
 }

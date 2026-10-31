@@ -126,16 +126,13 @@ function snapshotOf(
   return {
     version: currentThread.version,
     thread: currentThread,
+    baseEntryId: null,
     entries: [],
     queuedCommands: [],
     executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
-    manualCompaction: {
-      available: false,
-      disabledReason: 'Thread snapshot is not loaded',
-    },
     stopReceipts: [],
     unconfirmedExecutions: [],
     ...extras,
@@ -1526,7 +1523,7 @@ describe('useAgentThreadController', () => {
 
   it('runs manual compaction with the snapshot version and clears conflict on success', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+      snapshotOf(threadFixture()),
     )
     vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture({ version: '1' }),
@@ -1556,7 +1553,7 @@ describe('useAgentThreadController', () => {
 
   it('reports compaction unavailability and surfaces 409/non-conflict failures distinctly', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+      snapshotOf(threadFixture()),
     )
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -1589,20 +1586,28 @@ describe('useAgentThreadController', () => {
     invalidateSpy.mockRestore()
   })
 
-  it('reports compaction unavailability when the advisory sidecar is missing', async () => {
+  it('submits compaction with expectedVersion guarded by server authority', async () => {
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture({ version: '7' })),
+    )
+    vi.mocked(harnessService.compactThread).mockResolvedValueOnce({
+      thread: threadFixture({ version: '8' }),
+      turnStartEntryId: 'turn-8',
+      childThreadId: null,
+    })
     const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
     await act(async () => {
       await result.current.compactThread()
     })
-    expect(harnessService.compactThread).not.toHaveBeenCalled()
-    // 无 advisory sidecar：使用 fallback 的 disabledReason。
-    expect(result.current.actionError).toContain('Thread snapshot is not loaded')
+    expect(harnessService.compactThread).toHaveBeenCalledWith(THREAD_ID, {
+      expectedVersion: '7',
+    })
   })
 
   it('routes runCommand to stop/compact and reports unknown commands', async () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture(), { manualCompaction: { available: true, disabledReason: null } }),
+      snapshotOf(threadFixture()),
     )
     vi.mocked(harnessService.compactThread).mockResolvedValue({
       thread: threadFixture(),
@@ -2238,9 +2243,7 @@ describe('useAgentThreadController', () => {
     const threadA = threadFixture({ threadId: THREAD_ID })
     const threadB = threadFixture({ threadId: THREAD_ID_2 })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
-      return snapshotOf(tid === THREAD_ID ? threadA : threadB, {
-        manualCompaction: { available: true, disabledReason: null },
-      })
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
     })
 
     let resolveCompactEpoch0!: (res: HarnessThreadCompactResultDTO) => void

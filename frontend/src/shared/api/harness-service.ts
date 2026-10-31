@@ -5,6 +5,7 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import type {
   HarnessAcceptedCommandsDTO,
+  HarnessManualCompactionDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
   HarnessNameUpdateDTO,
@@ -32,7 +33,8 @@ import type {
  * - GET /sessions/{id}/threads
  * - GET /sessions/{id}/entries
  * - PUT /sessions/{id}/name
- * - GET /threads/{id}（Thread snapshot 查询）
+ * - GET /threads/{id}（Thread snapshot 查询，支持 afterEntryId 游标增量）
+ * - GET /threads/{id}/compaction-availability（Thread 手动压缩可用性查询）
  * - POST /threads/{id}/stream-catchup（RUNNING model attempt 的 best-effort 追帧）
  * - GET /threads/{id}/tree（真实 root 的父子 Agent 关系树）
  * - PUT /threads/{id}/name
@@ -43,6 +45,15 @@ import type {
  * - POST /threads/{threadId}/executions/{executionId}/abandon
  * - PUT /threads/{threadId}/tool-invocations/{invocationId}/approval
  */
+export interface GetThreadSnapshotOptions {
+  afterEntryId?: string | null
+  signal?: AbortSignal
+}
+
+export interface GetCompactionAvailabilityOptions {
+  signal?: AbortSignal
+}
+
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
     acceptCommandBatch: (
@@ -75,8 +86,25 @@ export function createHarnessService(client: HttpClient = apiClient) {
     ): Promise<HarnessSessionDTO> =>
       client.put(`/sessions/${encodeURIComponent(sessionId)}/name`, data),
 
-    getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
-      client.get(`/threads/${encodeURIComponent(threadId)}`),
+    getThreadSnapshot: (
+      threadId: string,
+      options?: GetThreadSnapshotOptions,
+    ): Promise<HarnessThreadSnapshotDTO> => {
+      const params = options?.afterEntryId ? { afterEntryId: options.afterEntryId } : undefined
+      return client.get(`/threads/${encodeURIComponent(threadId)}`, {
+        params,
+        signal: options?.signal,
+      })
+    },
+
+    getCompactionAvailability: (
+      threadId: string,
+      options?: GetCompactionAvailabilityOptions,
+    ): Promise<HarnessManualCompactionDTO> =>
+      client.get(
+        `/threads/${encodeURIComponent(threadId)}/compaction-availability`,
+        { signal: options?.signal },
+      ),
 
     /** 202 只表示 best-effort 请求被接受；客户端不得据此推断 owner 在线或 checkpoint 已推进。 */
     requestStreamCatchup: (

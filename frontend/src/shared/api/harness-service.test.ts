@@ -101,10 +101,40 @@ describe('harnessService', () => {
     await service.getThreadSnapshot('thread /1')
     await service.compactThread('thread /1', { expectedVersion: '4' })
 
-    expect(http.get).toHaveBeenCalledWith('/threads/thread%20%2F1')
+    expect(http.get).toHaveBeenCalledWith('/threads/thread%20%2F1', {
+      params: undefined,
+      signal: undefined,
+    })
     expect(http.post).toHaveBeenCalledWith(
       '/threads/thread%20%2F1/compact',
       { expectedVersion: '4' },
+    )
+  })
+
+  /**
+   * 测试意图：验证 Thread snapshot 支持 afterEntryId 游标与 AbortSignal 透传，
+   * 并在 GET /threads/{id}/compaction-availability 上支持独立 advisory 读取与 signal。
+   */
+  it('supports cursor and signal on getThreadSnapshot and compaction-availability endpoint', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    const controller = new AbortController()
+
+    await service.getThreadSnapshot('thread /1', {
+      afterEntryId: 'entry-cursor-1',
+      signal: controller.signal,
+    })
+    expect(http.get).toHaveBeenCalledWith('/threads/thread%20%2F1', {
+      params: { afterEntryId: 'entry-cursor-1' },
+      signal: controller.signal,
+    })
+
+    await service.getCompactionAvailability('thread /1', {
+      signal: controller.signal,
+    })
+    expect(http.get).toHaveBeenCalledWith(
+      '/threads/thread%20%2F1/compaction-availability',
+      { signal: controller.signal },
     )
   })
 

@@ -331,13 +331,13 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     client.setQueryData<HarnessThreadSnapshotDTO>(key, {
       version: response.thread.version,
       thread: response.thread,
+      baseEntryId: null,
       entries: isDraftHistoryTarget(targetRef.current) ? draftHistoryEntries : [],
       queuedCommands: response.acceptedCommands,
       executionStatus: 'IDLE',
       activeAssistantOutput: null,
       toolInvocations: [],
       generationFailures: [],
-      manualCompaction: { available: false, disabledReason: null },
       stopReceipts: [],
       unconfirmedExecutions: [],
     })
