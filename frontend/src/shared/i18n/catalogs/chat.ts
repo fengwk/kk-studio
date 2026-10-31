@@ -598,6 +598,14 @@ export const chatCatalog = {
     'en-US': 'There is nothing to compact',
     'zh-CN': '没有可压缩的内容',
   },
+  'ai.runtime.command.disabled.compaction.checking': {
+    'en-US': 'Checking compaction availability...',
+    'zh-CN': '正在检查压缩可用性...',
+  },
+  'ai.runtime.command.disabled.compaction.checkFailed': {
+    'en-US': 'Failed to check compaction availability',
+    'zh-CN': '检查压缩可用性失败',
+  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files',
     'zh-CN': '上传文件',

@@ -55,8 +55,8 @@ for (const scenario of ['pane-root', 'pane-child']) {
               argumentsJson: '{"command":"pwd","workdir":"/srv/frozen-workdir"}',
             }] } }),
           }],
+          baseEntryId: null,
           queuedCommands: [], executionStatus: 'RUNNING', activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
-          manualCompaction: { available: false, disabledReason: null },
           toolInvocations: [{
             id: 'inv-wait', threadId: id, turnStartEntryId: 'turn-wait', assistantEntryId: 'assistant-wait', callIndex: 0,
             status, attempt: 1, toolCallId: 'call-wait', toolName: 'bash', rendererKey: 'bash',

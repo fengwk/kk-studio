@@ -74,13 +74,13 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
         createTime: 1774958450,
       },
     ],
+    baseEntryId: null,
     executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
     stopReceipts: [],
     unconfirmedExecutions: [],
-    manualCompaction: { available: false, disabledReason: null },
     ...overrides,
   }
 }
@@ -107,7 +107,6 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     bodyRef: { current: null },
     queuedCommands: snapshot.queuedCommands,
     queuedCustomMessages,
-    manualCompaction: snapshot.manualCompaction,
     stopReceipts: snapshot.stopReceipts,
     unconfirmedExecutions: snapshot.unconfirmedExecutions,
     activeAssistantOutput: snapshot.activeAssistantOutput,

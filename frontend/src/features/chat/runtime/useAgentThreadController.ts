@@ -128,7 +128,7 @@ export function useAgentThreadController(
   const queryClient = useQueryClient()
 
   // 命令与控制面仅消费 required 投影，不再自建订阅，也不再使用空串关闭技巧。
-  const { thread, queuedCommands, stopReceipts, manualCompaction, snapshotQuery } = projection
+  const { thread, queuedCommands, stopReceipts, snapshotQuery } = projection
   const bound = projection.bound
 
 
@@ -596,13 +596,6 @@ export function useAgentThreadController(
     if (!thread || !requireBoundThread('ai.runtime.action.compactFailed')) {
       return Promise.resolve()
     }
-    if (!manualCompaction.available) {
-      setActionError(
-        manualCompaction.disabledReason
-        || t('ai.runtime.action.compactUnavailable'),
-      )
-      return Promise.resolve()
-    }
     setActionError(null)
     setConflict(null)
     const operationThreadId = threadId
@@ -660,7 +653,6 @@ export function useAgentThreadController(
     stopThread,
     compactThread,
     compactPending: compactMutation.isPending,
-    manualCompaction,
     runCommand,
     decideApproval,
     approvalPending,

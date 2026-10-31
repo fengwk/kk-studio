@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
+import { compareCatalogVersions } from '@/features/chat/chat-utils'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { normalizeThreadName } from '@/features/chat/thread-name'
@@ -294,10 +295,14 @@ export function usePaneRename(options: PaneRenameOptions) {
   function patchThreadNameCache(threadId: string, thread: HarnessThreadDTO): void {
     const snapshotKey = queryKeys.threads.snapshot(threadId)
     const snapshot = queryClient.getQueryData<HarnessThreadSnapshotDTO>(snapshotKey)
-    if (snapshot != null && snapshot.thread.threadId === threadId) {
+    if (
+      snapshot != null
+      && snapshot.thread.threadId === threadId
+      && compareCatalogVersions(snapshot.version, thread.version) <= 0
+    ) {
       queryClient.setQueryData<HarnessThreadSnapshotDTO>(
         snapshotKey,
-        { ...snapshot, thread },
+        { ...snapshot, thread, version: thread.version, baseEntryId: null },
       )
     }
     for (const [key, data] of queryClient.getQueriesData<HarnessThreadSummaryDTO[]>({

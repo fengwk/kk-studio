@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
-import { harnessService } from '@/shared/api/harness-service'
 import { toAgentModelViews } from '@/features/catalog'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { readInteractionsChangedRoot } from '@/shared/app-events'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
+import { fetchThreadSnapshot } from '@/features/chat/runtime/thread-snapshot-cache'
 
 export function useAgentThreadQueries(threadId: string) {
   const queryClient = useQueryClient()
@@ -20,7 +20,7 @@ export function useAgentThreadQueries(threadId: string) {
   })
   const snapshotQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
-    queryFn: () => harnessService.getThreadSnapshot(threadId),
+    queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
     enabled: Boolean(threadId),
   })
   const snapshot = snapshotQuery.data
@@ -80,9 +80,5 @@ export function useAgentThreadQueries(threadId: string) {
     generationFailures,
     stopReceipts,
     unconfirmedExecutions,
-    manualCompaction: snapshot?.manualCompaction ?? {
-      available: false,
-      disabledReason: 'Thread snapshot is not loaded',
-    },
   }
 }

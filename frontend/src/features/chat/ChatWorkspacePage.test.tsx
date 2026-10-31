@@ -143,13 +143,13 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
   return {
     version: currentThread.version,
     thread: currentThread,
+    baseEntryId: null,
     entries: [],
     queuedCommands: [],
     executionStatus: 'IDLE',
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
-    manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
     unconfirmedExecutions: [],
   }
