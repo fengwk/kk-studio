@@ -15,6 +15,16 @@ public final class IdeOriginPolicy {
 
   private IdeOriginPolicy() {}
 
+  /** 判断请求是否为 WebSocket Upgrade 请求。 */
+  public static boolean isWebSocketUpgrade(HttpServletRequest request) {
+    String upgrade = request.getHeader("Upgrade");
+    String connection = request.getHeader("Connection");
+    return upgrade != null
+        && upgrade.equalsIgnoreCase("websocket")
+        && connection != null
+        && connection.toLowerCase(Locale.ROOT).contains("upgrade");
+  }
+
   /** 非 WS 的 HTTP 请求准入：所有方法都要求同源声明，OPTIONS 不代理。 */
   public static boolean httpRequestAllowed(HttpServletRequest request) {
     String method = request.getMethod();
