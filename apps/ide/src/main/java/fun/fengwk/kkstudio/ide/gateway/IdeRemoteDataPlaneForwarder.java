@@ -4,6 +4,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -44,7 +45,9 @@ public class IdeRemoteDataPlaneForwarder {
   private final HttpClient httpClient;
   private final IdeClusterClient clusterClient;
 
-  public IdeRemoteDataPlaneForwarder(HttpClient httpClient, IdeClusterClient clusterClient) {
+  public IdeRemoteDataPlaneForwarder(
+      @Qualifier("clusterInternalHttpClient") HttpClient httpClient,
+      IdeClusterClient clusterClient) {
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
     this.clusterClient = Objects.requireNonNull(clusterClient, "clusterClient");
   }
