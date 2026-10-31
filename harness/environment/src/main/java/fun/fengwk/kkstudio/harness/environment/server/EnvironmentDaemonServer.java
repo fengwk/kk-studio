@@ -30,6 +30,8 @@ import fun.fengwk.kkstudio.harness.environment.protocol.Settings;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,6 +48,8 @@ import java.util.function.Supplier;
 /** Environment daemon 的服务端会话核心：组合准入与会话注册、单连接会话、调用跟踪、上传协调、IDE 命令与更新控制。 */
 public final class EnvironmentDaemonServer
     implements DaemonSessions, EnvironmentTunnels, EnvironmentCapabilityTransport {
+
+  private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
 
   public static final int MAX_INVOCATION_TOMBSTONES =
       DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES;
@@ -87,19 +91,20 @@ public final class EnvironmentDaemonServer
     this.settingsSupplier = Objects.requireNonNull(settings, "settings");
   }
 
+  private static void logFailure(String stage, Throwable failure) {
+    LOG.log(
+        Level.WARNING,
+        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
+  }
+
   @Override
   public DaemonAdmission admit(DaemonHandshake handshake) {
     Objects.requireNonNull(handshake, "handshake");
     String token = requireNonBlank(handshake.registrationToken(), "registrationToken");
     String instanceId = requireNonBlank(handshake.daemonInstanceId(), "daemonInstanceId");
 
-    Optional<DaemonRegistration> registrationOpt;
-    try {
-      registrationOpt = registrationDirectory.findByRegistrationToken(token);
-    } catch (RuntimeException error) {
-      throw new ControlProtocolException(
-          "registration directory error: " + error.getMessage(), error);
-    }
+    Optional<DaemonRegistration> registrationOpt =
+        registrationDirectory.findByRegistrationToken(token);
     if (registrationOpt.isEmpty()) {
       return new DaemonAdmission.Rejected();
     }
@@ -137,18 +142,21 @@ public final class EnvironmentDaemonServer
         List<ActiveInvocation> abandoned =
             invocationTracker.takeAbandonedInvocations(environmentId);
         for (ActiveInvocation active : abandoned) {
-          active.listener.onError(
-              new EnvironmentCapabilitySendUncertainException(
-                  "Environment daemon instance changed for "
-                      + environmentId
-                      + "; capability invocation outcome is uncertain."));
+          try {
+            active.listener.onError(
+                new EnvironmentCapabilitySendUncertainException(
+                    "Environment daemon instance changed for "
+                        + environmentId
+                        + "; capability invocation outcome is uncertain."));
+          } catch (Throwable ignored) {
+          }
           transferCoordinator.releaseAllTransfers(active, ticketService);
         }
         try {
           sessionListener.onDaemonInstanceReplaced(
               new DaemonConnectionIdentity(environmentId, replacedInstanceId));
         } catch (RuntimeException error) {
-          // notification exception logged
+          logFailure("daemon instance replaced notification", error);
         }
         ideCoordinator.failPendingIdeCalls(environmentId);
       }
@@ -375,7 +383,7 @@ public final class EnvironmentDaemonServer
 
   public boolean holdsReadyLease(EnvironmentId environmentId) {
     DaemonConnectionSession session = sessionOf(environmentId);
-    if (session == null || !session.isReady()) {
+    if (session == null) {
       return false;
     }
     UUID leaseToken = session.leaseToken();
@@ -390,8 +398,23 @@ public final class EnvironmentDaemonServer
   }
 
   public Optional<DaemonRuntimeSnapshot> runtimeStatus(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
     DaemonConnectionSession session = sessionOf(environmentId);
-    return session == null ? Optional.empty() : session.runtimeStatus();
+    if (session == null || !session.isReady()) {
+      return Optional.empty();
+    }
+    UUID leaseToken = session.leaseToken();
+    if (leaseToken == null) {
+      return Optional.empty();
+    }
+    try {
+      if (!leaseStore.holdsReadyLease(environmentId, leaseToken)) {
+        return Optional.empty();
+      }
+    } catch (RuntimeException error) {
+      return Optional.empty();
+    }
+    return session.runtimeStatus();
   }
 
   public Set<EnvironmentId> readyEnvironments() {
@@ -415,7 +438,8 @@ public final class EnvironmentDaemonServer
 
   public void beginUpdate(EnvironmentId environmentId, String operationId) {
     DaemonConnectionSession session = sessionOf(environmentId);
-    updateCoordinator.beginUpdate(environmentId, operationId, session);
+    int inFlight = invocationTracker.activeInvocationCount(environmentId);
+    updateCoordinator.beginUpdate(environmentId, operationId, session, inFlight);
   }
 
   public void endUpdate(EnvironmentId environmentId, String operationId) {

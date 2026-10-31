@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.Architecture;
 import fun.fengwk.kkstudio.harness.environment.protocol.Cancel;
 import fun.fengwk.kkstudio.harness.environment.protocol.CapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.protocol.Content;
+import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.EnvironmentInfo;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.JsonContent;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
 import fun.fengwk.kkstudio.harness.environment.protocol.OperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.protocol.Ready;
+import fun.fengwk.kkstudio.harness.environment.protocol.Recover;
 import fun.fengwk.kkstudio.harness.environment.protocol.ResourceContent;
 import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeBody;
 import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeSnapshot;
@@ -170,21 +172,26 @@ final class DaemonConnectionSession implements DaemonSession {
   }
 
   DaemonOfferResult offerResult(Envelope envelope) {
-    try {
-      DaemonOfferResult outcome = control.offer(envelope);
-      if (envelope.getMessageType() == MessageType.CANCEL
-          && (outcome == DaemonOfferResult.BUSY || outcome == DaemonOfferResult.CLOSED)) {
-        close();
+    DaemonOfferResult outcome;
+    synchronized (stateLock) {
+      if (cleaned || leaseToken == null) {
+        return DaemonOfferResult.CLOSED;
       }
-      return outcome;
-    } catch (RuntimeException error) {
-      close();
-      return DaemonOfferResult.CLOSED;
+      outcome = control.offer(envelope);
     }
+    if (envelope.getMessageType() == MessageType.CANCEL
+        && (outcome == DaemonOfferResult.BUSY || outcome == DaemonOfferResult.CLOSED)) {
+      close();
+    }
+    return outcome;
   }
 
   boolean offer(Envelope envelope) {
-    return offerResult(envelope) == DaemonOfferResult.ACCEPTED;
+    try {
+      return offerResult(envelope) == DaemonOfferResult.ACCEPTED;
+    } catch (RuntimeException error) {
+      return false;
+    }
   }
 
   void initializeSettings(EnvironmentServerSettings initial) {
@@ -206,6 +213,7 @@ final class DaemonConnectionSession implements DaemonSession {
         backlogFull = true;
       } else {
         try {
+          ControlProtocolCodec.validate(envelope);
           if (envelope.hasEnvironmentId()
               && !environmentId.value().toString().equals(envelope.getEnvironmentId())) {
             throw new ControlProtocolException(
@@ -540,14 +548,18 @@ final class DaemonConnectionSession implements DaemonSession {
           continue;
         }
         boolean recover = !active.isCancelled();
-        Envelope envelope =
+        Envelope.Builder envelope =
             Envelope.newBuilder()
                 .setMessageType(recover ? MessageType.RECOVER : MessageType.CANCEL)
                 .setEnvironmentId(environmentId.value().toString())
-                .setInvocationId(active.invocationId.toString())
-                .build();
+                .setInvocationId(active.invocationId.toString());
+        if (recover) {
+          envelope.setRecover(Recover.getDefaultInstance());
+        } else {
+          envelope.setCancel(Cancel.getDefaultInstance());
+        }
         try {
-          outcome = control.offer(envelope);
+          outcome = control.offer(envelope.build());
         } catch (RuntimeException transportFailure) {
           outcome = null;
         }
@@ -609,7 +621,11 @@ final class DaemonConnectionSession implements DaemonSession {
     builder.getErrorBuilder().setMessage(message);
     Envelope errorEnvelope = builder.build();
     try {
-      control.offer(errorEnvelope);
+      if (control.offer(errorEnvelope) == DaemonOfferResult.ACCEPTED) {
+        synchronized (stateLock) {
+          closeAfterFlush = true;
+        }
+      }
     } catch (RuntimeException ignored) {
     }
     close();
@@ -784,7 +800,7 @@ final class DaemonConnectionSession implements DaemonSession {
     throw new IllegalStateException("cleanup diagnostic failure is not unchecked", failure);
   }
 
-  private static void logFailure(String stage, Throwable failure) {
+  static void logFailure(String stage, Throwable failure) {
     LOG.log(
         Level.WARNING,
         "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());

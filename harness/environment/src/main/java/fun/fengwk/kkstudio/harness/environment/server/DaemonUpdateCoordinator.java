@@ -23,18 +23,31 @@ final class DaemonUpdateCoordinator {
   private final Map<EnvironmentId, String> updatingByEnvironment = new HashMap<>();
 
   void beginUpdate(
-      EnvironmentId environmentId, String operationId, DaemonConnectionSession session) {
+      EnvironmentId environmentId,
+      String operationId,
+      DaemonConnectionSession session,
+      int inFlightCount) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(operationId, "operationId");
+    if (operationId.isBlank()) {
+      throw new IllegalArgumentException("operationId must not be blank");
+    }
     synchronized (lock) {
-      String existing = updatingByEnvironment.get(environmentId);
-      if (existing != null) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " is already in update " + existing);
-      }
       if (session == null || !session.isReady()) {
         throw new EnvironmentCapabilityUnavailableException(
             environmentId + " is not ready for update");
+      }
+      String existing = updatingByEnvironment.get(environmentId);
+      if (existing != null) {
+        if (existing.equals(operationId)) {
+          return;
+        }
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " already has an update in progress");
+      }
+      if (inFlightCount > 0) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " has " + inFlightCount + " in-flight invocations");
       }
       updatingByEnvironment.put(environmentId, operationId);
     }
@@ -122,8 +135,17 @@ final class DaemonUpdateCoordinator {
           default -> throw new IllegalArgumentException(
               "unrecognized update phase: " + result.getPhase());
         };
+    String message =
+        result.hasMessage() && !result.getMessage().isBlank() ? result.getMessage() : null;
     DaemonUpdateResult domainResult =
-        new DaemonUpdateResult(result.getOperationId(), phase, result.getMessage());
-    deferred.add(() -> updateListener.onUpdateResult(environmentId, domainResult));
+        new DaemonUpdateResult(result.getOperationId(), phase, message);
+    deferred.add(
+        () -> {
+          try {
+            updateListener.onUpdateResult(environmentId, domainResult);
+          } catch (RuntimeException error) {
+            DaemonConnectionSession.logFailure("update result notification", error);
+          }
+        });
   }
 }

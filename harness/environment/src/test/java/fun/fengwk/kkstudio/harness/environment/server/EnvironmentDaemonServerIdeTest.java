@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
 
@@ -37,6 +38,7 @@ class EnvironmentDaemonServerIdeTest {
   private static IdeCommand openCommand() {
     return IdeCommand.newBuilder()
         .setAction(IdeAction.OPEN_VIEW)
+        .setMode(IdeOpenMode.CREATE)
         .setViewId(VIEW_ID)
         .setDocumentId("66666666-7777-8888-9999-aaaaaaaaaaaa")
         .setEventNodeId("bbbbbbbb-cccc-dddd-eeee-ffffffffffff")

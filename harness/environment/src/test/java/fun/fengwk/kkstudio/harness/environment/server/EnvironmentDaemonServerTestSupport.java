@@ -199,11 +199,15 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static Envelope startedEnvelope(UUID invocationId, boolean replayed) {
+    Started.Builder started = Started.newBuilder();
+    if (replayed) {
+      started.setReplayed(true);
+    }
     return Envelope.newBuilder()
         .setMessageType(MessageType.STARTED)
         .setEnvironmentId(ENVIRONMENT_ID.value().toString())
         .setInvocationId(invocationId.toString())
-        .setStarted(Started.newBuilder().setReplayed(replayed).build())
+        .setStarted(started.build())
         .build();
   }
 
@@ -302,16 +306,28 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static Envelope cancelledEnvelope(UUID invocationId) {
+    return cancelledEnvelope(invocationId, "cancelled");
+  }
+
+  static Envelope cancelledEnvelope(UUID invocationId, String reason) {
+    Cancelled.Builder cancelled = Cancelled.newBuilder();
+    if (reason != null) {
+      cancelled.setReason(reason);
+    }
     return Envelope.newBuilder()
         .setMessageType(MessageType.CANCELLED)
         .setEnvironmentId(ENVIRONMENT_ID.value().toString())
         .setInvocationId(invocationId.toString())
-        .setCancelled(Cancelled.getDefaultInstance())
+        .setCancelled(cancelled.build())
         .build();
   }
 
   static Envelope cancelledEnvelope(String invocationId) {
     return cancelledEnvelope(UUID.fromString(invocationId));
+  }
+
+  static Envelope cancelledEnvelope(String invocationId, String reason) {
+    return cancelledEnvelope(UUID.fromString(invocationId), reason);
   }
 
   static Envelope executionExitedEnvelope(UUID invocationId) {
@@ -583,6 +599,11 @@ final class EnvironmentDaemonServerTestSupport {
 
     FakeControlChannel connectReady(
         EnvironmentId environmentId, String connectionId, String daemonInstanceId, String token) {
+      for (Map.Entry<FakeControlChannel, DaemonSession> entry : sessions.entrySet()) {
+        if (connectionId.equals(entry.getKey().connectionId)) {
+          entry.getValue().close();
+        }
+      }
       DaemonAdmission admission = server.admit(new DaemonHandshake(token, daemonInstanceId));
       if (!(admission instanceof DaemonAdmission.Admitted admitted)) {
         throw new IllegalStateException("admission failed: " + admission);

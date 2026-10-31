@@ -67,6 +67,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeLeaseBinding;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
 import fun.fengwk.kkstudio.harness.environment.protocol.Started;
 import fun.fengwk.kkstudio.harness.environment.protocol.TicketState;
@@ -673,7 +674,7 @@ class EnvironmentDaemonServerTest {
     RecordingListener listener = new RecordingListener();
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
-    fixture.receive(channel, cancelledEnvelope(CALL_ONE.toString()));
+    fixture.receive(channel, cancelledEnvelope(CALL_ONE.toString(), "stop"));
 
     assertInstanceOf(EnvironmentCapabilityCancelledException.class, listener.error);
     assertEquals("stop", listener.error.getMessage());
@@ -1179,7 +1180,7 @@ class EnvironmentDaemonServerTest {
         second.messageTypes(),
         "重连时新连接必须重放 CANCEL 帧");
 
-    fixture.receive(second, cancelledEnvelope(CALL_ONE.toString()));
+    fixture.receive(second, cancelledEnvelope(CALL_ONE.toString(), "cancelled by client"));
     assertInstanceOf(EnvironmentCapabilityCancelledException.class, listener.error);
     assertEquals("cancelled by client", listener.error.getMessage());
     assertEquals(List.of(uploadId), fixture.ticketService.releases, "终态到达时正常释放 transfer");
@@ -1702,26 +1703,26 @@ class EnvironmentDaemonServerTest {
 
     // 设置未变：心跳不得产生策略帧。
     fixture.receive(channel, heartbeatEnvelope());
-    assertEquals(0, channel.countOf(MessageType.SETTINGS));
+    assertEquals(0, channel.countOf(MessageType.TEMPORARY_RESOURCE_POLICY));
 
     // 设置热更后，下一次心跳把当前策略推送给已 READY 连接。
     fixture.updateSettings(1L, 2L);
     fixture.receive(channel, heartbeatEnvelope());
 
-    assertEquals(1, channel.countOf(MessageType.SETTINGS));
+    assertEquals(1, channel.countOf(MessageType.TEMPORARY_RESOURCE_POLICY));
     Envelope policy =
         channel.envelopes().stream()
-            .filter(envelope -> envelope.getMessageType() == MessageType.SETTINGS)
+            .filter(envelope -> envelope.getMessageType() == MessageType.TEMPORARY_RESOURCE_POLICY)
             .reduce((first, second) -> second)
             .orElseThrow();
     assertEquals(ENVIRONMENT_ID.value().toString(), policy.getEnvironmentId());
-    assertEquals(1L, policy.getSettings().getResourceBudgets().getTemporaryResourceTtlSeconds());
+    assertEquals(1L, policy.getTemporaryResourcePolicy().getTemporaryResourceTtlSeconds());
     assertEquals(
-        2L, policy.getSettings().getResourceBudgets().getTemporaryResourceCleanupIntervalSeconds());
+        2L, policy.getTemporaryResourcePolicy().getTemporaryResourceCleanupIntervalSeconds());
 
     // 已送达的策略不再重复推送。
     fixture.receive(channel, heartbeatEnvelope());
-    assertEquals(1, channel.countOf(MessageType.SETTINGS));
+    assertEquals(1, channel.countOf(MessageType.TEMPORARY_RESOURCE_POLICY));
   }
 
   /** 测试意图：READY 时围栏已失效不得进入 READY，必须按协议错误关闭连接。 */
@@ -2526,7 +2527,12 @@ class EnvironmentDaemonServerTest {
   private static final IdeCommand OPEN_VIEW_COMMAND =
       IdeCommand.newBuilder()
           .setAction(IdeAction.OPEN_VIEW)
+          .setMode(IdeOpenMode.CREATE)
           .setViewId("11111111-1111-1111-1111-111111111111")
+          .setDocumentId("22222222-2222-2222-2222-222222222222")
+          .setEventNodeId("33333333-3333-3333-3333-333333333333")
+          .setConnectionId("44444444-4444-4444-4444-444444444444")
+          .setClaimId("55555555-5555-5555-5555-555555555555")
           .build();
 
   /** 测试意图：宿主 READY 与更新回执通知失败只记录固定阶段与异常类名，不改变会话状态，也不阻断后续帧处理。 */
@@ -3302,9 +3308,12 @@ class EnvironmentDaemonServerTest {
 
   private static final class ThrowingLogHandler implements AutoCloseable {
 
-    private final Logger logger = Logger.getLogger(EnvironmentDaemonServer.class.getName());
-    private final Level previousLevel = logger.getLevel();
-    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<Logger> loggers =
+        List.of(
+            Logger.getLogger(EnvironmentDaemonServer.class.getName()),
+            Logger.getLogger(DaemonConnectionSession.class.getName()));
+    private final List<Level> previousLevels = new ArrayList<>();
+    private final List<Boolean> previousUseParentHandlers = new ArrayList<>();
     private final RuntimeException failure;
     private final Handler handler =
         new Handler() {
@@ -3323,16 +3332,23 @@ class EnvironmentDaemonServerTest {
     private ThrowingLogHandler(RuntimeException failure) {
       this.failure = failure;
       handler.setLevel(Level.ALL);
-      logger.addHandler(handler);
-      logger.setLevel(Level.ALL);
-      logger.setUseParentHandlers(false);
+      for (Logger logger : loggers) {
+        previousLevels.add(logger.getLevel());
+        previousUseParentHandlers.add(logger.getUseParentHandlers());
+        logger.addHandler(handler);
+        logger.setLevel(Level.ALL);
+        logger.setUseParentHandlers(false);
+      }
     }
 
     @Override
     public void close() {
-      logger.removeHandler(handler);
-      logger.setLevel(previousLevel);
-      logger.setUseParentHandlers(previousUseParentHandlers);
+      for (int i = 0; i < loggers.size(); i++) {
+        Logger logger = loggers.get(i);
+        logger.removeHandler(handler);
+        logger.setLevel(previousLevels.get(i));
+        logger.setUseParentHandlers(previousUseParentHandlers.get(i));
+      }
     }
   }
 
@@ -3343,9 +3359,12 @@ class EnvironmentDaemonServerTest {
    */
   private static final class CoreLogCapture implements AutoCloseable {
 
-    private final Logger logger = Logger.getLogger(EnvironmentDaemonServer.class.getName());
-    private final Level previousLevel = logger.getLevel();
-    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<Logger> loggers =
+        List.of(
+            Logger.getLogger(EnvironmentDaemonServer.class.getName()),
+            Logger.getLogger(DaemonConnectionSession.class.getName()));
+    private final List<Level> previousLevels = new ArrayList<>();
+    private final List<Boolean> previousUseParentHandlers = new ArrayList<>();
     private final List<LogRecord> records = Collections.synchronizedList(new ArrayList<>());
     private final Handler handler =
         new Handler() {
@@ -3363,9 +3382,13 @@ class EnvironmentDaemonServerTest {
 
     private CoreLogCapture() {
       handler.setLevel(Level.ALL);
-      logger.addHandler(handler);
-      logger.setLevel(Level.ALL);
-      logger.setUseParentHandlers(false);
+      for (Logger logger : loggers) {
+        previousLevels.add(logger.getLevel());
+        previousUseParentHandlers.add(logger.getUseParentHandlers());
+        logger.addHandler(handler);
+        logger.setLevel(Level.ALL);
+        logger.setUseParentHandlers(false);
+      }
     }
 
     List<LogRecord> records() {
@@ -3391,9 +3414,12 @@ class EnvironmentDaemonServerTest {
 
     @Override
     public void close() {
-      logger.removeHandler(handler);
-      logger.setLevel(previousLevel);
-      logger.setUseParentHandlers(previousUseParentHandlers);
+      for (int i = 0; i < loggers.size(); i++) {
+        Logger logger = loggers.get(i);
+        logger.removeHandler(handler);
+        logger.setLevel(previousLevels.get(i));
+        logger.setUseParentHandlers(previousUseParentHandlers.get(i));
+      }
     }
   }
 }

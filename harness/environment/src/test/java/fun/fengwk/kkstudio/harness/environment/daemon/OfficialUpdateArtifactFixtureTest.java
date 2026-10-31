@@ -71,13 +71,13 @@ class OfficialUpdateArtifactFixtureTest {
       assertThrows(
           ControlProtocolException.class,
           () -> {
-            DaemonUpdateCommand command =
-                new DaemonUpdateCommand(
-                    fixture.get("operationId").stringValue(),
-                    fixture.get("targetVersion").stringValue(),
-                    entry.get("artifactUrl").stringValue(),
-                    fixture.get("artifactSha256").stringValue());
-            Update proto = ControlProtocolCodec.toProtoUpdate(command);
+            Update proto =
+                Update.newBuilder()
+                    .setOperationId(fixture.get("operationId").stringValue())
+                    .setTargetVersion(fixture.get("targetVersion").stringValue())
+                    .setArtifactUrl(entry.get("artifactUrl").stringValue())
+                    .setArtifactSha256(fixture.get("artifactSha256").stringValue())
+                    .build();
             ControlProtocolCodec.validateUpdate(proto);
           },
           "the production codec must refuse the rejected artifact: " + entry.get("name"));
