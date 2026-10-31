@@ -409,7 +409,7 @@ export class Runtime {
       return
     }
     if (statusCode === 426) {
-      if (upgradeRequired?.artifactUrl && upgradeRequired?.artifactSha256) {
+      if (upgradeRequired?.artifactUrl && upgradeRequired?.artifactSha256 && this.update !== null) {
         const updateCommand = create(EnvelopeSchema, {
           messageType: MessageType.UPDATE,
           environmentId: this.boundEnvironmentId ?? undefined,
@@ -439,7 +439,16 @@ export class Runtime {
           prepared: false,
         }
         this.activeUpdate = active
-        void this.track(this.executeUpdate(active, updateCommand.payload.value as Update))
+        this.runtimeStatus.beginUpdate(String(upgradeRequired.targetProtocolVersion))
+        void this.track(
+          (async () => {
+            await this.executeUpdate(active, updateCommand.payload.value as Update)
+            if (!active.prepared) {
+              this.failTerminal('daemon requires protocol upgrade')
+            }
+          })(),
+        )
+        return
       }
       this.failTerminal('daemon requires protocol upgrade')
       return
@@ -1418,13 +1427,10 @@ export class Runtime {
     if (this.activeUpdate !== null) {
       this.activeUpdate.controller = null
     }
-    this.release('transport close', async () => {
-      await this.transport.close()
-    })
     void this.finalize(terminalState)
   }
 
-  private release(phase: string, action: () => void | Promise<void>): void {
+  private release(phase: string, action: () => void): void {
     releaseStep(this.shutdownFailures, phase, action)
   }
 
@@ -1456,6 +1462,11 @@ export class Runtime {
   }
 
   private async finalize(terminalState: RuntimeState): Promise<void> {
+    try {
+      await this.transport.close()
+    } catch (error) {
+      this.recordShutdownFailure('transport close', error)
+    }
     const settled = await Promise.allSettled([...this.inFlight])
     for (const outcome of settled) {
       if (outcome.status === 'rejected') {

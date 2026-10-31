@@ -2254,6 +2254,52 @@ describe('runtime connection management', () => {
     retry.runtime.close()
   })
 
+  it('runs managed update on 426 with artifacts without being aborted by shutdown', async () => {
+    const updateGate = Promise.withResolvers<void>()
+    let observedSignal: AbortSignal | null = null
+    const update: UpdatePort = {
+      async handleUpdate(_cmd, _cfg, signal) {
+        observedSignal = signal
+        expect(signal.aborted).toBe(false)
+        await updateGate.promise
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({ update })
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    setup.transport.listener?.onUpgradeFailed(426, {
+      targetProtocolVersion: 1,
+      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-linux-x64-v1.0.0.tar.gz',
+      artifactSha256: 'a'.repeat(64),
+    })
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update !== null)
+    expect(observedSignal).not.toBeNull()
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
+    expect(setup.runtime.getState()).not.toBe('FAILED')
+
+    updateGate.resolve()
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1')
+    expect(setup.runtime.getState()).not.toBe('FAILED')
+    expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
+
+    setup.runtime.close()
+    await setup.runtime.awaitCompletion()
+  })
+
+  it('records transport.close failure into shutdownFailures before finalize finishes', async () => {
+    const setup = buildRuntime()
+    setup.runtime.start()
+    await waitFor(() => setup.transport.connection !== null)
+    const closeError = new Error('transport close crashed')
+    setup.transport.close = async () => {
+      throw closeError
+    }
+    setup.runtime.close()
+    await setup.runtime.awaitCompletion()
+    expect(setup.runtime.getShutdownFailures()).toContain(closeError)
+  })
+
   it('responds with ERROR to unknown inbound message types', async () => {
     const setup = buildRuntime()
     await handshake(setup)
