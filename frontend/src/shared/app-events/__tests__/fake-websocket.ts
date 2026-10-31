@@ -33,7 +33,7 @@ export class FakeWebSocket {
     }
     this.sent.push(data)
     if (this.onSendResponse != null) {
-      this.onmessage?.({ data: JSON.stringify({ version: 2, ...this.onSendResponse }) })
+      this.onmessage?.({ data: JSON.stringify({ ...this.onSendResponse }) })
     }
   }
 
@@ -65,11 +65,10 @@ export class FakeWebSocket {
   }
 
   /**
-   * 以真实 wire 帧派发 server 消息：自动补齐协议 version=2，
-   * 连接端 codec 会做完整严格校验。
+   * 以真实 wire 帧派发 server 消息：连接端 codec 会做完整严格校验。
    */
   emitServer(message: ApplicationEventServerMessage): void {
-    this.onmessage?.({ data: JSON.stringify({ version: 2, ...message }) })
+    this.onmessage?.({ data: JSON.stringify(message) })
   }
 
   sentMessages(): ApplicationEventClientMessage[] {

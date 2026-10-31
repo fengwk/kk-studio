@@ -166,22 +166,22 @@ async function installChatApi(
       grandCompleted = true
       for (const socket of sockets) {
         socket.send(JSON.stringify({
-          version: 2, type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
+          type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
           name: 'version', data: { version: '1' }, cursor: '1',
         }))
         socket.send(JSON.stringify({
-          version: 2, type: 'event', resource: { kind: 'tree', id: THREAD_ID },
+          type: 'event', resource: { kind: 'tree', id: THREAD_ID },
           name: 'changed', data: {},
         }))
       }
     },
   }
-  await page.routeWebSocket(/\/api\/events\/v2$/, (socket) => {
+  await page.routeWebSocket(/\/api\/events$/, (socket) => {
     sockets.push(socket)
     socket.onMessage((message) => {
       const frame = JSON.parse(String(message))
       if (frame.type === 'subscribe') {
-        socket.send(JSON.stringify({ version: 2, type: 'subscribed', resource: frame.resource, cursor: '0' }))
+        socket.send(JSON.stringify({ type: 'subscribed', resource: frame.resource, cursor: '0' }))
       }
     })
   })

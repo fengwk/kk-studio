@@ -28,13 +28,12 @@ const detail: IssueDetailDTO = {
 }
 
 async function transport(page: Page) {
-  await page.routeWebSocket('**/api/events/v2', (socket) => {
+  await page.routeWebSocket('**/api/events', (socket) => {
     let connected = false
     socket.onMessage((raw) => {
       if (!connected) {
         connected = true
         socket.send(JSON.stringify({
-          version: 2,
           type: 'connected',
           eventNodeId: 'b0000000-0000-4000-8000-000000000001',
           connectionId: 'b0000000-0000-4000-8000-000000000002',
@@ -42,7 +41,7 @@ async function transport(page: Page) {
       }
       const message = JSON.parse(String(raw))
       if (message.type === 'subscribe') socket.send(JSON.stringify({
-        version: 2, type: 'subscribed', resource: message.resource, cursor: '0',
+        type: 'subscribed', resource: message.resource, cursor: '0',
       }))
     })
   })

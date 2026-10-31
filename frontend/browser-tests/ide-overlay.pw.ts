@@ -93,7 +93,6 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       if (!connected) {
         connected = true
         socket.send(JSON.stringify({
-          version: 2,
           type: 'connected',
           eventNodeId: EVENT_NODE,
           connectionId: currentConnection,
@@ -101,7 +100,6 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       }
       if (message.type === 'subscribe') {
         socket.send(JSON.stringify({
-          version: 2,
           type: 'subscribed',
           resource: message.resource,
           cursor: '0',
@@ -109,7 +107,6 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       } else if (message.type === 'ide-use') {
         state.usageFrames.push(message as unknown as UsageFrame)
         socket.send(JSON.stringify({
-          version: 2,
           type: 'ide-use-accepted',
           revision: message.revision,
         }))

@@ -312,10 +312,10 @@ export class ApplicationEventConnection {
   }
 }
 
-/** 由当前 api base（/api）构造 ws(s)://<host>/api/events/v2；清除 search/hash。 */
+/** 由当前 api base（/api）构造 ws(s)://<host>/api/events；清除 search/hash。 */
 export function createApplicationEventUrl(): string {
   const base = new URL(apiBaseUrl, window.location.href)
-  base.pathname = `${base.pathname.replace(/\/+$/, '')}/events/v2`
+  base.pathname = `${base.pathname.replace(/\/+$/, '')}/events`
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.search = ''
   base.hash = ''

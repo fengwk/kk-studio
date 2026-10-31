@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import jakarta.servlet.ServletContext;
@@ -33,8 +34,9 @@ import java.util.regex.Pattern;
  */
 class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
 
-  /** Tomcat 的 {@code server.info} 形如 {@code Apache Tomcat/11.0.24}；只取 major，不写死 patch。 */
-  private static final Pattern TOMCAT_MAJOR_VERSION = Pattern.compile("Tomcat/(\\d+)");
+  /** Jetty 的 {@code server.info} 形如 {@code jetty/12.1.12}；只取 major，不写死 patch。 */
+  private static final Pattern JETTY_MAJOR_VERSION =
+      Pattern.compile("jetty/(\\d+)", Pattern.CASE_INSENSITIVE);
 
   /** 每个 Netty 构件都自带该清单，逐条记录自身 artifactId 与版本，用于核对构件间是否一致。 */
   private static final String NETTY_VERSION_MANIFEST = "META-INF/io.netty.versions.properties";
@@ -46,11 +48,11 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
   @Autowired private ApplicationContext applicationContext;
 
   /**
-   * 测试意图：Boot 4.0.x 只支持 Servlet 6.1 容器（Tomcat 11.0.x）。真实 HTTP 往返证明端口上确实有一个按 Servlet 6.1 提供服务的
-   * Tomcat 11，而不是仅类路径里存在 API。
+   * 测试意图：Boot 4.0.x 支持 Servlet 6.1 容器（Jetty 12.x）。真实 HTTP 往返证明端口上确实有一个按 Servlet 6.1 提供服务的 Jetty
+   * 12，且 classpath 上没有任何 Tomcat 构件。
    */
   @Test
-  void embeddedContainerServesServlet61OnTomcat11() throws Exception {
+  void embeddedContainerServesServlet61OnJetty12() throws Exception {
     assertTrue(port > 0, "the embedded container must listen on a real port");
     ServletContext servletContext =
         ((ServletWebServerApplicationContext) applicationContext).getServletContext();
@@ -73,12 +75,17 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
             + servletContext.getMinorVersion());
 
     String serverInfo = servletContext.getServerInfo();
-    Matcher tomcatMajor = TOMCAT_MAJOR_VERSION.matcher(serverInfo);
-    assertTrue(tomcatMajor.find(), "the embedded container must be Tomcat, actual=" + serverInfo);
+    Matcher jettyMajor = JETTY_MAJOR_VERSION.matcher(serverInfo);
+    assertTrue(jettyMajor.find(), "the embedded container must be Jetty, actual=" + serverInfo);
     assertEquals(
-        11,
-        Integer.parseInt(tomcatMajor.group(1)),
-        "Boot 4 supports Tomcat 11.0.x, actual=" + serverInfo);
+        12,
+        Integer.parseInt(jettyMajor.group(1)),
+        "Boot 4 supports Jetty 12.x, actual=" + serverInfo);
+
+    assertThrows(
+        ClassNotFoundException.class,
+        () -> Class.forName("org.apache.catalina." + "startup.Tomcat"),
+        "Tomcat classes must not be present on the classpath");
   }
 
   /**

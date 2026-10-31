@@ -85,8 +85,6 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 当前空库启动与旧库拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 当前启动验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.startup.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
-| 同源 IDE 数据面真实链（真实 Tomcat HTTP/WS 与 mux peer，需 Docker） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeDataPlaneIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
-| 跨语言 mux 互通（Java 引擎与 Node 24 Daemon 传输，需先构建 Daemon） | 先 `npm --prefix daemon ci && npm --prefix daemon run build`，再 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=MuxCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 受管 code-server 真实视图验收（需冻结发行目录，默认跳过） | `KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> npm --prefix daemon run test -- test/ide/acceptance.test.ts`（Node 24；未设置该变量时用例整组跳过） |
 | Studio → 生产 Daemon → code-server 真实链路（需 Node 24、Docker、已构建 Daemon 与发行目录） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeProductionChainAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false -Dkk-studio.it.ide.node="$(command -v node)" -Dkk-studio.it.ide.code-server-release=<absolute-release-dir>`；追加 `-Dkk-studio.it.ide.playwright-module=<absolute-frontend/node_modules/@playwright/test>` 运行真实 Chromium，用例不拦截网络；显式无效路径使测试失败 |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
@@ -420,8 +418,8 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
-事件 L1 使用 `/api/events/v2`：heartbeat case 校验首帧 `connected` 的
-`eventNodeId` / `connectionId` 与 version 2 保活帧，Project case 验证全局失效通知。
+事件 L1 使用 `/api/events`：heartbeat case 校验首帧 `connected` 的
+`eventNodeId` / `connectionId` 与保活帧，Project case 验证全局失效通知。
 L4 `daemon.ready` 与 L5 租约投影校验 catalog 3（含内部 `fs.edit.preview`、`skill.sync`）；
 它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
 
@@ -666,7 +664,7 @@ TERM 都执行 `down --volumes --remove-orphans`。
 `1.6` 的非 test-scope aggregate BOM；OWASP Dependency-Check `13.0.0` 输出 HTML/JSON/SARIF，
 `failBuildOnCVSS=0`、`failOnError=true`、关闭 OSS Index、启用 NVD update。
 
-Boot 保持 `4.0.8`，Servlet 容器与 Netty 仍在受支持的 Tomcat 11.0.x / Servlet 6.1、
+Boot 保持 `4.0.8`，Servlet 容器与 Netty 仍在受支持的 Jetty 12.1.x / Servlet 6.1、
 Netty 4.2.x 平台上。安全修订统一由根 POM 的 `dependencyManagement` 管理，模块不得另行覆盖；
 Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声明优先规则生效。
 `run.sh test` 的声明守卫、

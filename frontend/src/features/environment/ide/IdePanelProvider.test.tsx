@@ -150,7 +150,7 @@ function renderPanel() {
   const sockets = new FakeWebSocketHarness()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
         <IdePanelProvider storage={{ sessionStorage, localStorage }}>
           <Harness />
         </IdePanelProvider>
@@ -172,7 +172,6 @@ function connect(
     if (frame.type === 'ide-use' && frame.revision != null) {
       socket.onmessage?.({
         data: JSON.stringify({
-          version: 2,
           type: 'ide-use-accepted',
           revision: frame.revision,
         }),

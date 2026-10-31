@@ -3,28 +3,34 @@ package fun.fengwk.kkstudio.web.events;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import jakarta.websocket.CloseReason;
-import jakarta.websocket.RemoteEndpoint.Async;
-import jakarta.websocket.SendHandler;
-import jakarta.websocket.SendResult;
-import jakarta.websocket.Session;
+import org.eclipse.jetty.websocket.api.Callback;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.StatusCode;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
-/** AsyncTextSender：串行发送链、有界队列、send timeout、溢出/失败关闭与 error 帧兜底。 */
+/** AsyncTextSender：Jetty 原生异步串行发送链、有界队列、显式截止时间超时、ping/文本按序互斥不并发、溢出/失败关闭与 error 帧兜底。 */
 class AsyncTextSenderTest {
 
   /** 与 SystemSettings.Advanced 默认一致的仓库级发送软策略（测试用显式值，不依赖生产默认常量）。 */
@@ -32,48 +38,93 @@ class AsyncTextSenderTest {
 
   private static final long SEND_TIMEOUT_MILLIS = 10_000L;
 
+  private ScheduledExecutorService scheduler;
+
+  @BeforeEach
+  void setUp() {
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+  }
+
+  @AfterEach
+  void tearDown() {
+    scheduler.shutdownNow();
+  }
+
   @Test
-  void setsBoundedSendTimeoutOnTheAsyncRemote() {
-    Async async = mock(Async.class);
+  void constructorRejectsNullSchedulerOrNonPositiveLimits() {
     Session session = mock(Session.class);
-    when(session.getAsyncRemote()).thenReturn(async);
-
-    new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
-
-    verify(async).setSendTimeout(SEND_TIMEOUT_MILLIS);
+    assertThrows(
+        NullPointerException.class,
+        () -> new AsyncTextSender(null, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler));
+    assertThrows(
+        NullPointerException.class,
+        () -> new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AsyncTextSender(session, 0, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AsyncTextSender(session, 4, 0L, SEND_TIMEOUT_MILLIS, scheduler));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, 0L, scheduler));
   }
 
   @Test
   void sendsFramesStrictlySeriallyInEnqueueOrder() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session(remote), 8, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 8, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a"));
     assertTrue(sender.enqueue("b"));
     assertTrue(sender.enqueue("c"));
 
-    assertEquals(1, remote.sent.size(), "only the first frame may be in flight");
-    assertEquals("a", remote.sent.get(0).text);
-    assertNotNull(remote.sent.get(0).handler, "a send handler must be attached");
+    assertEquals(1, fake.calls.size(), "only the first frame may be in flight");
+    assertEquals("a", fake.calls.get(0).text);
+    assertNotNull(fake.calls.get(0).callback, "a callback must be attached");
 
-    remote.complete(0);
-    assertEquals(2, remote.sent.size());
-    assertEquals("b", remote.sent.get(1).text);
+    fake.complete(0);
+    assertEquals(2, fake.calls.size());
+    assertEquals("b", fake.calls.get(1).text);
 
-    remote.complete(1);
-    assertEquals(3, remote.sent.size());
-    assertEquals("c", remote.sent.get(2).text);
+    fake.complete(1);
+    assertEquals(3, fake.calls.size());
+    assertEquals("c", fake.calls.get(2).text);
 
-    remote.complete(2);
-    assertEquals(3, remote.sent.size(), "nothing further after queue drains");
+    fake.complete(2);
+    assertEquals(3, fake.calls.size(), "nothing further after queue drains");
+  }
+
+  @Test
+  void textDoesNotConcurrentlySendWhenPingIsInFlight() {
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
+
+    assertTrue(sender.enqueuePing());
+    assertTrue(sender.enqueue("text-after-ping"));
+
+    assertEquals(1, fake.calls.size(), "only the ping frame must be in flight");
+    assertTrue(fake.calls.get(0).isPing(), "first in-flight call must be ping");
+
+    // ping 尚未完成时，后续文本绝不能并发发出
+    assertEquals(1, fake.calls.size());
+
+    // ping 完成回调驱动下一帧文本发出
+    fake.complete(0);
+    assertEquals(2, fake.calls.size(), "text frame sends only after ping completes");
+    assertFalse(fake.calls.get(1).isPing());
+    assertEquals("text-after-ping", fake.calls.get(1).text);
+
+    fake.complete(1);
   }
 
   @Test
   void enqueueRejectsWhenQueueIsFull() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session(remote), 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a")); // in-flight
     assertTrue(sender.enqueue("b")); // queued
@@ -82,86 +133,78 @@ class AsyncTextSenderTest {
   }
 
   @Test
-  void failFlushesErrorFrameThenClosesSession() throws Exception {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    Session session = session(remote);
+  void failFlushesErrorFrameThenClosesSession() {
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     sender.enqueue("a");
-    sender.fail(
-        "{\"type\":\"error\",\"message\":\"boom\"}", CloseReason.CloseCodes.VIOLATED_POLICY);
+    sender.fail("{\"type\":\"error\",\"message\":\"boom\"}", StatusCode.POLICY_VIOLATION);
 
-    assertEquals(1, remote.sent.size(), "in-flight frame completes first");
-    remote.complete(0);
-    assertEquals(2, remote.sent.size());
-    assertEquals("{\"type\":\"error\",\"message\":\"boom\"}", remote.sent.get(1).text);
-    remote.complete(1);
+    assertEquals(1, fake.calls.size(), "in-flight frame completes first");
+    fake.complete(0);
+    assertEquals(2, fake.calls.size());
+    assertEquals("{\"type\":\"error\",\"message\":\"boom\"}", fake.calls.get(1).text);
+    fake.complete(1);
 
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
-    verify(session).close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.VIOLATED_POLICY, reasonCaptor.getValue().getCloseCode());
+    ArgumentCaptor<Integer> codeCaptor = ArgumentCaptor.forClass(Integer.class);
+    verify(fake.session).close(codeCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.POLICY_VIOLATION, codeCaptor.getValue());
     assertFalse(sender.enqueue("x"), "failed sender rejects further enqueues");
   }
 
   @Test
-  void failedSendClosesSessionAndStopsTheChain() throws Exception {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    Session session = session(remote);
+  void failedSendClosesSessionAndStopsTheChain() {
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     sender.enqueue("a");
     sender.enqueue("b");
-    remote.fail(0, new IllegalStateException("broken pipe"));
+    fake.fail(0, new IllegalStateException("broken pipe"));
 
-    verify(session).close(any(CloseReason.class));
-    assertEquals(1, remote.sent.size(), "chain must stop after send failure");
+    verify(fake.session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
+    assertEquals(1, fake.calls.size(), "chain must stop after send failure");
     assertFalse(sender.enqueue("c"));
   }
 
   @Test
-  void failingWithoutInFlightSendStillEmitsErrorFrameAndCloses() throws Exception {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    Session session = session(remote);
+  void failingWithoutInFlightSendStillEmitsErrorFrameAndCloses() {
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
-    sender.fail("{\"type\":\"error\",\"message\":\"bad\"}", CloseReason.CloseCodes.VIOLATED_POLICY);
-    assertEquals(1, remote.sent.size());
-    assertEquals("{\"type\":\"error\",\"message\":\"bad\"}", remote.sent.get(0).text);
-    remote.complete(0);
-    verify(session).close(any(CloseReason.class));
+    sender.fail("{\"type\":\"error\",\"message\":\"bad\"}", StatusCode.POLICY_VIOLATION);
+    assertEquals(1, fake.calls.size());
+    assertEquals("{\"type\":\"error\",\"message\":\"bad\"}", fake.calls.get(0).text);
+    fake.complete(0);
+    verify(fake.session)
+        .close(eq(StatusCode.POLICY_VIOLATION), any(String.class), any(Callback.class));
   }
 
   @Test
-  void synchronousSendTextExceptionClosesSessionAndStopsTheChain() throws Exception {
-    Async async = mock(Async.class);
+  void synchronousSendTextExceptionClosesSessionAndStopsTheChain() {
+    Session session = mock(Session.class);
     doAnswer(
             inv -> {
               throw new IllegalStateException("session already closed");
             })
-        .when(async)
-        .sendText(any(String.class), any(SendHandler.class));
-    Session session = mock(Session.class);
-    when(session.getAsyncRemote()).thenReturn(async);
+        .when(session)
+        .sendText(any(String.class), any(Callback.class));
     AsyncTextSender sender =
-        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a"));
 
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
-    verify(session).close(reasonCaptor.capture());
-    assertEquals(
-        CloseReason.CloseCodes.UNEXPECTED_CONDITION, reasonCaptor.getValue().getCloseCode());
+    verify(session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
     assertFalse(sender.enqueue("b"), "failed sender rejects further enqueues");
   }
 
   @Test
   void enqueueRejectsWhenTotalPendingUtf8BytesExceedMax() {
-    // maxBytes=6：三帧 2 字节各入队后，第四帧使总量 7 > 6 被拒；在途帧（2B）计入上限。
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 8, 6L, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("ab")); // in-flight 2B
     assertTrue(sender.enqueue("cd")); // queued 2B
@@ -172,9 +215,9 @@ class AsyncTextSenderTest {
 
   @Test
   void countsUtf8BytesNotCharacters() {
-    // "中文" 是 2 个字符、6 个 UTF-8 字节；maxBytes=6 时单帧通过、再加 1 字节帧即拒绝。
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 8, 6L, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("中文"));
     assertFalse(sender.enqueue("x"), "multibyte frames must count UTF-8 bytes");
@@ -182,56 +225,63 @@ class AsyncTextSenderTest {
 
   @Test
   void inFlightFrameCountsTowardsByteLimitUntilCompleted() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 8, 6L, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("abcd")); // in-flight 4B
     assertTrue(sender.enqueue("ef")); // queued 2B，总量 6B 到限
     assertFalse(sender.enqueue("g"));
 
-    remote.complete(0); // in-flight 完成，queued "ef" 变为新 in-flight
-    assertEquals("ef", remote.sent.get(1).text);
+    fake.complete(0); // in-flight 完成，queued "ef" 变为新 in-flight
+    assertEquals("ef", fake.calls.get(1).text);
     assertFalse(sender.enqueue("12345"), "in-flight bytes still count until completion");
 
-    remote.complete(1);
+    fake.complete(1);
     assertTrue(sender.enqueue("x"), "bytes are released after the frame completes");
   }
 
   @Test
   void oversizedSingleFrameIsRejectedWithoutBreakingTheChain() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    AsyncTextSender sender = new AsyncTextSender(session(remote), 8, 6L, SEND_TIMEOUT_MILLIS);
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 8, 6L, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertFalse(sender.enqueue("abcdefg"), "a single frame above maxBytes must be rejected");
     assertTrue(sender.enqueue("ab"));
-    assertEquals(1, remote.sent.size(), "rejected frames must not start or break the chain");
-    remote.complete(0);
+    assertEquals(1, fake.calls.size(), "rejected frames must not start or break the chain");
+    fake.complete(0);
   }
 
   @Test
   void nativePingSharesTheSerialChainAndBoundedCapacity() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session(remote), 3, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 3, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a"));
     assertTrue(sender.enqueuePing());
     assertTrue(sender.enqueue("b"));
-    assertEquals(1, remote.sent.size(), "text is the only in-flight frame");
-    assertEquals("a", remote.sent.getFirst().text);
-    assertTrue(remote.pings.isEmpty(), "ping waits behind in-flight text");
+    assertEquals(1, fake.calls.size(), "text is the only in-flight frame");
+    assertEquals("a", fake.calls.get(0).text);
 
-    remote.complete(0);
-    assertEquals(1, remote.pings.size(), "ping uses the same serial drain");
-    assertEquals("b", remote.sent.get(1).text);
-    remote.complete(1);
+    // 完成第 0 帧（文本），触发第 1 帧（ping）发送；ping 异步回调未完成前，第 2 帧绝不发出
+    fake.complete(0);
+    assertEquals(2, fake.calls.size(), "ping uses the same serial drain");
+    assertTrue(fake.calls.get(1).isPing(), "second frame must be ping");
+
+    // ping 完成回调驱动第 2 帧（文本）发送
+    fake.complete(1);
+    assertEquals(3, fake.calls.size(), "text after ping is sent strictly after ping completes");
+    assertEquals("b", fake.calls.get(2).text);
+    fake.complete(2);
   }
 
   @Test
   void pingCountsAgainstTheQueueEvenWithZeroBytes() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session(remote), 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a")); // in-flight
     assertTrue(sender.enqueuePing()); // queued
@@ -239,90 +289,158 @@ class AsyncTextSenderTest {
   }
 
   @Test
-  void pingFailureClosesTheSharedWriterAndStopsTheChain() throws Exception {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
-    remote.pingThrows = true;
-    Session session = session(remote);
+  void pingFailureClosesTheSharedWriterAndStopsTheChain() {
+    FakeJettySession fake = new FakeJettySession();
     AsyncTextSender sender =
-        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a"));
     assertTrue(sender.enqueuePing());
     assertTrue(sender.enqueue("b"));
-    remote.complete(0); // drain ping -> IOException -> close
+    fake.complete(0); // 文本完成，触发 ping
 
-    verify(session).close(any(CloseReason.class));
-    assertEquals(1, remote.sent.size(), "text after the failed ping must not be sent");
+    fake.fail(1, new IOException("ping failed")); // ping 失败回调
+
+    verify(fake.session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
+    assertEquals(2, fake.calls.size(), "text after the failed ping must not be sent");
     assertFalse(sender.enqueue("c"));
   }
 
   @Test
-  void discardDropsQueuedFramesAndStopsTheChain() {
-    FakeAsyncRemote remote = new FakeAsyncRemote();
+  void synchronousSendPingExceptionClosesSessionAndStopsTheChain() {
+    Session session = mock(Session.class);
+    doAnswer(
+            inv -> {
+              throw new IllegalStateException("ping failed synchronously");
+            })
+        .when(session)
+        .sendPing(any(ByteBuffer.class), any(Callback.class));
     AsyncTextSender sender =
-        new AsyncTextSender(session(remote), 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
+
+    assertTrue(sender.enqueuePing());
+
+    verify(session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
+    assertFalse(sender.enqueue("b"), "failed sender rejects further enqueues");
+  }
+
+  @Test
+  void sendTimeoutClosesConnectionAndLateCallbackDoesNotDriveFurtherSends() throws Exception {
+    FakeJettySession fake = new FakeJettySession();
+    // 设置 50ms 超时
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, 50L, scheduler);
+
+    assertTrue(sender.enqueue("slow-frame"));
+    assertTrue(sender.enqueue("queued-frame"));
+    assertEquals(1, fake.calls.size());
+    assertFalse(sender.isFailed());
+
+    // 不调用 fake.complete(0)，等待 50ms 超时触发
+    Thread.sleep(120);
+
+    assertTrue(sender.isFailed(), "sender must be marked failed after timeout");
+    verify(fake.session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
+    assertFalse(sender.enqueue("next"), "new enqueues must be rejected after timeout");
+
+    // 迟到的 succeed 回调绝不能驱动发送队列中的下一帧（"queued-frame"）
+    fake.complete(0);
+    assertEquals(1, fake.calls.size(), "late callback must not drive further sends");
+
+    // 迟到的 fail 回调也安全忽略
+    fake.fail(0, new IOException("late network failure"));
+    assertEquals(1, fake.calls.size());
+  }
+
+  @Test
+  void schedulerExceptionImmediatelyFailsSendWithoutSwallowing() {
+    ScheduledExecutorService brokenScheduler = mock(ScheduledExecutorService.class);
+    when(brokenScheduler.schedule(any(Runnable.class), any(long.class), any(TimeUnit.class)))
+        .thenThrow(new RejectedExecutionException("scheduler shut down"));
+
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(
+            fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, brokenScheduler);
+
+    assertTrue(sender.enqueue("frame"));
+    assertTrue(sender.isFailed(), "sender must fail when scheduler rejects task");
+    verify(fake.session).close(eq(StatusCode.SERVER_ERROR), any(String.class), any(Callback.class));
+    assertEquals(0, fake.calls.size(), "frame must not be sent when scheduling fails");
+  }
+
+  @Test
+  void discardDropsQueuedFramesAndStopsTheChain() {
+    FakeJettySession fake = new FakeJettySession();
+    AsyncTextSender sender =
+        new AsyncTextSender(fake.session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS, scheduler);
 
     assertTrue(sender.enqueue("a"));
     assertTrue(sender.enqueue("b"));
     sender.discard();
-    remote.complete(0);
+    fake.complete(0);
 
-    assertEquals(1, remote.sent.size(), "queued frames must be released on discard");
+    assertEquals(1, fake.calls.size(), "queued frames must be released on discard");
     assertFalse(sender.enqueue("c"), "discard must stop further enqueues");
   }
 
-  private static Session session(FakeAsyncRemote remote) {
-    Async async = mock(Async.class);
-    doAnswer(
-            inv -> {
-              String text = inv.getArgument(0);
-              SendHandler handler = inv.getArgument(1);
-              remote.sent.add(new Sent(text, handler));
-              return null;
-            })
-        .when(async)
-        .sendText(any(String.class), any(SendHandler.class));
-    try {
+  private static final class OutboundCall {
+    private final String text;
+    private final Callback callback;
+
+    private OutboundCall(String text, Callback callback) {
+      this.text = text;
+      this.callback = callback;
+    }
+
+    private boolean isPing() {
+      return text == null;
+    }
+  }
+
+  private static final class FakeJettySession {
+    private final Session session = mock(Session.class);
+    private final List<OutboundCall> calls = new ArrayList<>();
+    private final AtomicInteger inFlight = new AtomicInteger(0);
+
+    private FakeJettySession() {
       doAnswer(
               inv -> {
-                if (remote.pingThrows) {
-                  throw new IOException("ping failed");
+                int current = inFlight.incrementAndGet();
+                if (current > 1) {
+                  throw new AssertionError("Concurrent write detected: inFlight = " + current);
                 }
-                remote.pings.add(inv.getArgument(0));
+                String text = inv.getArgument(0);
+                Callback callback = inv.getArgument(1);
+                calls.add(new OutboundCall(text, callback));
                 return null;
               })
-          .when(async)
-          .sendPing(any(ByteBuffer.class));
-    } catch (IOException error) {
-      throw new UncheckedIOException(error);
+          .when(session)
+          .sendText(any(String.class), any(Callback.class));
+
+      doAnswer(
+              inv -> {
+                int current = inFlight.incrementAndGet();
+                if (current > 1) {
+                  throw new AssertionError("Concurrent write detected: inFlight = " + current);
+                }
+                Callback callback = inv.getArgument(1);
+                calls.add(new OutboundCall(null, callback));
+                return null;
+              })
+          .when(session)
+          .sendPing(any(ByteBuffer.class), any(Callback.class));
     }
-    Session session = mock(Session.class);
-    when(session.getAsyncRemote()).thenReturn(async);
-    return session;
-  }
-
-  private static final class Sent {
-    private final String text;
-    private final SendHandler handler;
-
-    private Sent(String text, SendHandler handler) {
-      this.text = text;
-      this.handler = handler;
-    }
-  }
-
-  private static final class FakeAsyncRemote {
-    private final List<Sent> sent = new ArrayList<>();
-    private final List<ByteBuffer> pings = new ArrayList<>();
-    private boolean pingThrows;
 
     private void complete(int index) {
-      assertNotNull(sent.get(index).handler, "no handler recorded for frame " + index);
-      sent.get(index).handler.onResult(new SendResult());
+      inFlight.decrementAndGet();
+      assertNotNull(calls.get(index).callback, "no callback for frame " + index);
+      calls.get(index).callback.succeed();
     }
 
     private void fail(int index, Throwable error) {
-      sent.get(index).handler.onResult(new SendResult(error));
+      inFlight.decrementAndGet();
+      calls.get(index).callback.fail(error);
     }
   }
 }

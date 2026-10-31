@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.web.events;
 
 import jakarta.annotation.PreDestroy;
-import jakarta.websocket.CloseReason;
-import jakarta.websocket.Session;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.StatusCode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -34,11 +34,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
 /**
- * 浏览器事件通道 {@code /api/events/v2} 的 Spring WebSocket 适配器。
+ * 浏览器事件通道 {@code /api/events} 的 Spring WebSocket 适配器。
  *
- * <p>连接建立时解包 {@link NativeWebSocketSession} 获得 {@link jakarta.websocket.Session}，正文与原生 ping 全部经
- * {@link AsyncTextSender}（jakarta AsyncRemote）异步串行发送，不使用同步 Spring sendMessage。会话状态（订阅表、发送队列、IDE
- * 使用登记）按物理连接维护：重复 subscribe 幂等、断线释放全部订阅与本次连接自己的 IDE 证明。
+ * <p>连接建立时解包 {@link NativeWebSocketSession} 获得 {@link Session}，正文与原生 ping 全部经 {@link
+ * AsyncTextSender} 异步串行发送，不使用同步 Spring sendMessage。会话状态（订阅表、发送队列、IDE 使用登记）按物理连接维护：重复 subscribe
+ * 幂等、断线释放全部订阅与本次连接自己的 IDE 证明。
  *
  * <p>连接建立后的第一帧是 {@code connected{eventNodeId,connectionId}}。服务端每 15 秒发送原生 ping，45 秒没有收到有效 pong 即停止
  * 为该连接提供使用证明并关闭连接；浏览器的后台 JS 定时器不参与保活。资源不存在只回资源级 error（{@code RESOURCE_NOT_FOUND}）并保持连接；
@@ -47,7 +47,7 @@ import java.util.function.LongSupplier;
 @Component
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
 
-  public static final String PATH = "/api/events/v2";
+  public static final String PATH = "/api/events";
 
   static final long PING_INTERVAL_MILLIS = 15_000L;
   static final long PONG_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(45);
@@ -59,6 +59,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   private final int senderCapacity;
   private final long maxBytes;
   private final long sendTimeoutMillis;
+  private final ScheduledExecutorService heartbeatScheduler;
   private final LongSupplier nanoClock;
   private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
   private final ScheduledFuture<?> heartbeatTask;
@@ -111,19 +112,16 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     this.senderCapacity = settings.queueCapacity();
     this.maxBytes = settings.maxBytes();
     this.sendTimeoutMillis = settings.sendTimeoutMillis();
+    this.heartbeatScheduler = Objects.requireNonNull(heartbeatScheduler, "heartbeatScheduler");
     this.heartbeatTask =
-        heartbeatScheduler == null
-            ? null
-            : heartbeatScheduler.scheduleAtFixedRate(
-                this::heartbeat,
-                settings.heartbeatIntervalMillis(),
-                settings.heartbeatIntervalMillis(),
-                TimeUnit.MILLISECONDS);
+        heartbeatScheduler.scheduleAtFixedRate(
+            this::heartbeat,
+            settings.heartbeatIntervalMillis(),
+            settings.heartbeatIntervalMillis(),
+            TimeUnit.MILLISECONDS);
     this.pingTask =
-        heartbeatScheduler == null
-            ? null
-            : heartbeatScheduler.scheduleAtFixedRate(
-                this::ping, PING_INTERVAL_MILLIS, PING_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
+        heartbeatScheduler.scheduleAtFixedRate(
+            this::ping, PING_INTERVAL_MILLIS, PING_INTERVAL_MILLIS, TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -131,7 +129,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     Session nativeSession = requireNativeSession(session);
     // 先构造发送器再登记：发送器构造失败时不会留下无主的 IDE 使用登记。
     AsyncTextSender sender =
-        new AsyncTextSender(nativeSession, senderCapacity, maxBytes, sendTimeoutMillis);
+        new AsyncTextSender(
+            nativeSession, senderCapacity, maxBytes, sendTimeoutMillis, heartbeatScheduler);
     ConnectionIdentity identity = new ConnectionIdentity(eventNodeId, UUID.randomUUID());
     long generation = browserUseRegistry.register(identity);
     ConnectionState state =
@@ -181,12 +180,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
    */
   @PreDestroy
   public void shutdown() {
-    if (heartbeatTask != null) {
-      heartbeatTask.cancel(false);
-    }
-    if (pingTask != null) {
-      pingTask.cancel(false);
-    }
+    heartbeatTask.cancel(false);
+    pingTask.cancel(false);
     for (ConnectionState state : connections.values()) {
       state.shutdown();
     }
@@ -224,12 +219,12 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
   private static Session requireNativeSession(WebSocketSession session) {
     if (session instanceof NativeWebSocketSession nativeWebSocketSession) {
       Object nativeSession = nativeWebSocketSession.getNativeSession();
-      if (nativeSession instanceof Session jakartaSession) {
-        return jakartaSession;
+      if (nativeSession instanceof Session jettySession) {
+        return jettySession;
       }
     }
     throw new IllegalStateException(
-        "event channel requires a servlet NativeWebSocketSession with a jakarta Session");
+        "event channel requires a servlet NativeWebSocketSession with a Jetty native Session");
   }
 
   /** 单连接的协议状态：订阅表 + 发送队列 + 使用证明；closeLock 使建立、登记与关闭互斥。 */
@@ -269,10 +264,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return;
         }
         if (!sender.enqueue(codec.connected(identity.eventNodeId(), identity.connectionId()))) {
-          fail(
-              EventFrameCodec.BACKPRESSURE,
-              "event queue is full",
-              CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
         }
       }
     }
@@ -292,7 +284,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         fail(
             EventFrameCodec.INVALID_FRAME,
             "invalid frame: " + error.getMessage(),
-            CloseReason.CloseCodes.PROTOCOL_ERROR);
+            StatusCode.PROTOCOL);
         return;
       }
       switch (frame) {
@@ -322,19 +314,13 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           // 资源不存在：只回资源级 error，保持连接。
           if (!sender.enqueue(
               codec.error(EventFrameCodec.RESOURCE_NOT_FOUND, "Resource not found", resource))) {
-            fail(
-                EventFrameCodec.BACKPRESSURE,
-                "event queue is full",
-                CloseReason.CloseCodes.TRY_AGAIN_LATER);
+            fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
           }
           return;
         }
         if (!sender.enqueue(codec.subscribed(resource, subscription.cursor()))) {
           subscription.close();
-          fail(
-              EventFrameCodec.BACKPRESSURE,
-              "event queue is full",
-              CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
           return;
         }
         subscription.activate();
@@ -361,10 +347,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         switch (acceptance) {
           case ACCEPTED, UNCHANGED -> {
             if (!sender.enqueue(codec.ideUseAccepted(usage.revision()))) {
-              fail(
-                  EventFrameCodec.BACKPRESSURE,
-                  "event queue is full",
-                  CloseReason.CloseCodes.TRY_AGAIN_LATER);
+              fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
             }
           }
           case DOCUMENT_MISMATCH -> rejectIdeUse("documentId is fixed for this connection");
@@ -379,10 +362,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
     private void rejectIdeUse(String message) {
       if (!sender.enqueue(codec.error(EventFrameCodec.IDE_USE_REJECTED, message))) {
-        fail(
-            EventFrameCodec.BACKPRESSURE,
-            "event queue is full",
-            CloseReason.CloseCodes.TRY_AGAIN_LATER);
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }
     }
 
@@ -391,10 +371,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       String frame =
           signal instanceof Signal.Resync ? codec.resync(resource) : codec.event(resource, signal);
       if (!sender.enqueue(frame)) {
-        fail(
-            EventFrameCodec.BACKPRESSURE,
-            "event queue is full",
-            CloseReason.CloseCodes.TRY_AGAIN_LATER);
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }
     }
 
@@ -404,10 +381,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return;
         }
         if (!sender.enqueue(codec.heartbeat())) {
-          fail(
-              EventFrameCodec.BACKPRESSURE,
-              "event queue is full",
-              CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
         }
       }
     }
@@ -420,17 +394,14 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         }
         expired = nowNanos - lastPongNanos >= PONG_TIMEOUT_NANOS;
         if (!expired && !sender.enqueuePing()) {
-          fail(
-              EventFrameCodec.BACKPRESSURE,
-              "event queue is full",
-              CloseReason.CloseCodes.TRY_AGAIN_LATER);
+          fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
           return;
         }
       }
       if (expired) {
         // 先撤销证明与订阅，再关闭物理连接；两者都在 closeLock 内完成测量，迟到 pong 不能复活本代际。
         close();
-        sender.close(CloseReason.CloseCodes.TRY_AGAIN_LATER, "pong timeout");
+        sender.close(StatusCode.TRY_AGAIN_LATER, "pong timeout");
       }
     }
 
@@ -443,7 +414,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     }
 
     /** 发送 error 帧并在其出队后关闭连接；立即撤销本代际的订阅与使用证明。 */
-    private void fail(String code, String message, CloseReason.CloseCodes closeCode) {
+    private void fail(String code, String message, int closeCode) {
       sender.fail(codec.error(code, message), closeCode);
       close();
     }
@@ -469,7 +440,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       fail(
           EventFrameCodec.SEND_FAILED,
           "event channel is shutting down",
-          CloseReason.CloseCodes.SERVICE_RESTART);
+          StatusCode.SERVICE_RESTART);
       close();
     }
   }

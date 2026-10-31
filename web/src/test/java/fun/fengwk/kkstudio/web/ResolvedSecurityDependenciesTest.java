@@ -25,7 +25,13 @@ class ResolvedSecurityDependenciesTest {
   @Test
   void resolvedSecurityFamiliesUseCentralRevisions() throws Exception {
     Map<String, Set<String>> versions = readArtifactVersions();
-    assertFamily(versions, "org.apache.tomcat.embed:", "11.0.26");
+    assertFalse(
+        versions.keySet().stream()
+            .anyMatch(coordinate -> coordinate.startsWith("org.apache.tomcat")),
+        "no Tomcat dependencies may enter the runtime classpath");
+    assertFamily(versions, "org.eclipse.jetty:", "12.1.12");
+    assertFamily(versions, "org.eclipse.jetty.ee11:", "12.1.12");
+    assertFamily(versions, "org.eclipse.jetty.ee11.websocket:", "12.1.12");
     assertFamily(versions, "io.netty:", "4.2.18.Final");
     assertFamily(versions, "org.apache.httpcomponents.core5:", "5.4.4");
     assertFamily(versions, "org.apache.httpcomponents.client5:", "5.6.4");
@@ -46,9 +52,9 @@ class ResolvedSecurityDependenciesTest {
     }
     for (String required :
         Set.of(
-            "org.apache.tomcat.embed:tomcat-embed-core",
-            "org.apache.tomcat.embed:tomcat-embed-el",
-            "org.apache.tomcat.embed:tomcat-embed-websocket",
+            "org.eclipse.jetty:jetty-server",
+            "org.eclipse.jetty.ee11:jetty-ee11-servlet",
+            "org.eclipse.jetty.ee11.websocket:jetty-ee11-websocket-jakarta-server",
             "org.apache.httpcomponents.core5:httpcore5",
             "org.apache.httpcomponents.core5:httpcore5-h2",
             "org.apache.httpcomponents.client5:httpclient5",
@@ -105,16 +111,13 @@ class ResolvedSecurityDependenciesTest {
             addVersion(versions, properties.getProperty("groupId") + ":" + artifact, version);
           }
         }
-        // Tomcat / Kotlin 不带 Maven 元数据；读取各实际 JAR 的发布 manifest，而非文件名猜版本。
-        if (name.startsWith("tomcat-embed-") || name.startsWith("kotlin-stdlib")) {
+        // Kotlin 不带 Maven 元数据；读取各实际 JAR 的发布 manifest，而非文件名猜版本。
+        if (name.startsWith("kotlin-stdlib")) {
           Attributes attributes = jar.getManifest().getMainAttributes();
           String artifact = name.replaceFirst("-\\d.*\\.jar$", "");
           addVersion(
               versions,
-              (name.startsWith("tomcat-embed-")
-                      ? "org.apache.tomcat.embed:"
-                      : "org.jetbrains.kotlin:")
-                  + artifact,
+              "org.jetbrains.kotlin:" + artifact,
               attributes.getValue("Implementation-Version"));
         }
       }

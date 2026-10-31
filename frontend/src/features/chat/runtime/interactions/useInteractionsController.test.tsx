@@ -15,7 +15,7 @@ describe('useInteractionsController', () => {
 
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
         {children}
       </ApplicationEventProvider>
     </QueryClientProvider>
@@ -599,7 +599,7 @@ describe('useInteractionsController', () => {
     expect(listSpy).toHaveBeenCalledTimes(1)
     const socket = sockets.openLatest()
     expect(socket.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: { kind: 'interactions' } },
+      { type: 'subscribe', resource: { kind: 'interactions' } },
     ])
 
     act(() => {

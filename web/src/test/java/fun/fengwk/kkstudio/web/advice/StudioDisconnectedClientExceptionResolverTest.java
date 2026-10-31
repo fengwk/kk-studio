@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.apache.catalina.connector.ClientAbortException;
+import org.eclipse.jetty.io.EofException;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -33,12 +33,11 @@ class StudioDisconnectedClientExceptionResolverTest {
     return resolver.resolveException(request(), response, new Object(), ex);
   }
 
-  /** 测试意图：Tomcat ClientAbortException 被识别为断连并隔离为无 body。 */
+  /** 测试意图：Jetty EofException 被识别为断连并隔离为无 body。 */
   @Test
-  void clientAbortExceptionIsHandledWithoutBody() throws Exception {
+  void jettyEofExceptionIsHandledWithoutBody() throws Exception {
     MockHttpServletResponse response = new MockHttpServletResponse();
-    ModelAndView mav =
-        resolve(new ClientAbortException(new IOException("Connection reset")), response);
+    ModelAndView mav = resolve(new EofException(new IOException("Connection reset")), response);
     assertNotNull(mav);
     assertTrue(mav.isEmpty());
     assertEquals("", response.getContentAsString());
