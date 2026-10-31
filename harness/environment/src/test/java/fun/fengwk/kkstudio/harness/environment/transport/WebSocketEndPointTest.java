@@ -85,6 +85,44 @@ class WebSocketEndPointTest {
   }
 
   @Test
+  void exactlyOneDemandPerConsumedMessage() throws Exception {
+    endPoint.onOpen();
+    assertEquals(1, pipe.demandCount.get(), "打开时触发恰好一次 demand");
+
+    // 第一条消息：分两次消费，消费完毕才触发第二次 demand
+    AtomicBoolean msg1Done = new AtomicBoolean(false);
+    endPoint.onInboundData(
+        ByteBuffer.wrap(new byte[] {1, 2, 3, 4}),
+        Callback.from(() -> msg1Done.set(true), ignored -> {}));
+    assertEquals(1, pipe.demandCount.get(), "收到消息未完全消费时不得触发额外 demand");
+
+    endPoint.fill(ByteBuffer.allocate(2));
+    assertFalse(msg1Done.get());
+    assertEquals(1, pipe.demandCount.get(), "部分消费不得触发 demand");
+
+    endPoint.fill(ByteBuffer.allocate(2));
+    assertTrue(msg1Done.get());
+    assertEquals(2, pipe.demandCount.get(), "消息完全消费后恰好触发一次 demand");
+
+    // 第二条消息：一次性完整消费
+    AtomicBoolean msg2Done = new AtomicBoolean(false);
+    endPoint.onInboundData(
+        ByteBuffer.wrap(new byte[] {5, 6}), Callback.from(() -> msg2Done.set(true), ignored -> {}));
+    assertEquals(2, pipe.demandCount.get());
+
+    endPoint.fill(ByteBuffer.allocate(10));
+    assertTrue(msg2Done.get());
+    assertEquals(3, pipe.demandCount.get(), "整条消息消费完毕后恰好触发一次 demand");
+
+    // 第三条消息：空 payload 消息，直接完成并触发一次 demand
+    AtomicBoolean msg3Done = new AtomicBoolean(false);
+    endPoint.onInboundData(
+        ByteBuffer.allocate(0), Callback.from(() -> msg3Done.set(true), ignored -> {}));
+    assertTrue(msg3Done.get());
+    assertEquals(4, pipe.demandCount.get(), "空消息直接完成并恰好触发一次 demand");
+  }
+
+  @Test
   void fillReturnsZeroWhenEmptyAndMinusOneOnEof() throws Exception {
     ByteBuffer target = ByteBuffer.allocate(10);
     assertEquals(0, endPoint.fill(target));
@@ -175,6 +213,37 @@ class WebSocketEndPointTest {
     assertTrue(pipe.closed);
     assertThrows(
         ClosedChannelException.class, () -> endPoint.flush(ByteBuffer.wrap(new byte[] {1})));
+  }
+
+  @Test
+  void onInboundErrorClosesEndpointAndPropagatesToFillAndFlush() throws Exception {
+    endPoint.onInboundError(new IOException("simulated network loss"));
+    assertThrows(IOException.class, () -> endPoint.fill(ByteBuffer.allocate(10)));
+    assertThrows(IOException.class, () -> endPoint.flush(ByteBuffer.wrap(new byte[] {1})));
+  }
+
+  @Test
+  void inboundDataRejectedAfterClose() throws Exception {
+    endPoint.close();
+    AtomicBoolean completed = new AtomicBoolean(false);
+    endPoint.onInboundData(
+        ByteBuffer.wrap(new byte[] {1, 2}),
+        Callback.from(() -> completed.set(true), ignored -> {}));
+    assertTrue(completed.get());
+    assertEquals(-1, endPoint.fill(ByteBuffer.allocate(10)));
+  }
+
+  @Test
+  void addressAndPipeAccessors() {
+    assertEquals(pipe, endPoint.getTransport());
+    assertEquals(pipe.getLocalSocketAddress(), endPoint.getLocalSocketAddress());
+    assertEquals(pipe.getRemoteSocketAddress(), endPoint.getRemoteSocketAddress());
+  }
+
+  @Test
+  void shutdownOutputClosesPipe() {
+    endPoint.shutdownOutput();
+    assertTrue(pipe.closed);
   }
 
   private static final class TestPipe implements WebSocketPipe {

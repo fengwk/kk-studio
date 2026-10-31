@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.transport;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -313,6 +314,88 @@ class DaemonEnvironmentTunnelTest {
     ExecutionException err = assertThrows(ExecutionException.class, r1::get);
     assertTrue(err.getCause() instanceof IOException);
     assertThrows(IllegalStateException.class, () -> tunnel.openHttp(request));
+  }
+
+  @Test
+  void requestValidationAndIdentity() {
+    assertEquals(IDENTITY, tunnel.identity());
+    assertThrows(IllegalArgumentException.class, () -> tunnel.openHttp(null));
+    assertThrows(IllegalArgumentException.class, () -> tunnel.openWebSocket(null));
+  }
+
+  @Test
+  void writeValidationAndEndOutput() throws Exception {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/write-test", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TunnelStream stream = exchange.stream();
+
+    assertThrows(IllegalArgumentException.class, () -> stream.write(null));
+    assertThrows(IllegalArgumentException.class, () -> stream.write(ByteBuffer.allocate(0)));
+
+    CompletableFuture<Void> endFuture = stream.endOutput().toCompletableFuture();
+    session.streamsCreated.get(0).completeLatestData();
+    endFuture.get(2, TimeUnit.SECONDS);
+    // 重复 endOutput 返回相同 completed future
+    assertDoesNotThrow(() -> stream.endOutput().toCompletableFuture().get(2, TimeUnit.SECONDS));
+
+    assertThrows(
+        IllegalStateException.class, () -> stream.write(ByteBuffer.wrap(new byte[] {1, 2})));
+  }
+
+  @Test
+  void closeCancelsActiveReadAndWrites() {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/cancel-test", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TunnelStream stream = exchange.stream();
+
+    CompletableFuture<ByteBuffer> readFuture = stream.read().toCompletableFuture();
+    exchange.close();
+
+    assertThrows(CancellationException.class, readFuture::get);
+  }
+
+  @Test
+  void onResetAndOnFailureFailsActiveStream() {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/stream-fail", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    CompletableFuture<ByteBuffer> readFuture = tunnelStream.read().toCompletableFuture();
+    stream.listener.onReset(stream, new ResetFrame(1, 8), Callback.NOOP);
+    assertThrows(ExecutionException.class, readFuture::get);
+
+    stream.listener.onFailure(stream, 8, "err", new IOException("broken"), Callback.NOOP);
+
+    // 失败后调用 read/write/endOutput 均返回 failedFuture
+    assertThrows(ExecutionException.class, () -> tunnelStream.read().toCompletableFuture().get());
+    assertThrows(
+        ExecutionException.class,
+        () -> tunnelStream.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture().get());
+    assertThrows(
+        CancellationException.class, () -> tunnelStream.endOutput().toCompletableFuture().get());
+  }
+
+  @Test
+  void closedStreamRejectsOperationsWithCancellation() {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/closed-stream", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TunnelStream stream = exchange.stream();
+
+    // 先压入一个 pending write
+    CompletableFuture<Void> writeFuture =
+        stream.write(ByteBuffer.wrap(new byte[] {1, 2})).toCompletableFuture();
+    exchange.close();
+
+    // 挂起的写 Future 被 cancel
+    assertThrows(CancellationException.class, writeFuture::get);
+
+    // 关闭后后续操作返回 CancellationException
+    assertThrows(CancellationException.class, () -> stream.read().toCompletableFuture().get());
+    assertThrows(
+        CancellationException.class,
+        () -> stream.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture().get());
+    assertThrows(CancellationException.class, () -> stream.endOutput().toCompletableFuture().get());
   }
 
   private static final class TestSession implements Session {

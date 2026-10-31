@@ -111,10 +111,15 @@ public class EnvironmentDaemonAdmissionController {
       return;
     }
 
-    DaemonHandshake handshake = new DaemonHandshake(token, instanceId);
     DaemonAdmission admission;
     try {
+      DaemonHandshake handshake = new DaemonHandshake(token, instanceId);
       admission = sessions.admit(handshake);
+    } catch (IllegalArgumentException e) {
+      log.warn("rejected malformed daemon handshake parameters");
+      response.sendError(
+          HttpServletResponse.SC_BAD_REQUEST, "Malformed daemon handshake parameters");
+      return;
     } catch (Exception e) {
       log.error("daemon admission adjudication failed", e);
       response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);

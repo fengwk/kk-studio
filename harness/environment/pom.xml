@@ -125,7 +125,19 @@
                                         <include>fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.tunnel.*</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.transport.*</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.harness.environment.transport</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -418,6 +418,7 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 | `fun.fengwk.kkstudio.harness.environment.protocol` | 控制协议的 protobuf binary：单一 `control.proto` 生成类型、四字节成帧与应用层校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷 |
 | `fun.fengwk.kkstudio.harness.environment.server` | 会话、调用、transfer、IDE 通道与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
 | `fun.fengwk.kkstudio.harness.environment.tunnel` | 本节点隧道、HTTP 交换与 WebSocket 隧道（RFC 8441 extended CONNECT）端口及值对象；不选择传输引擎。测试 fake 使用零缓冲 rendezvous 与 16KiB 分段，通过 environment test-jar 复用 |
+| `fun.fengwk.kkstudio.harness.environment.transport` | 基于 Jetty 12 的传输实现：`WebSocketEndPoint`（单槽 demand 驱动 backpressure、flush 模式缓冲维护）、`DaemonHttp2ClientSession`（HTTP/2 会话生命周期、15s PING/30s ACK 超时、GOAWAY 状态与优雅终止）、`DaemonControlStream`（`POST /control` 封帧、256 帧/16 MiB 预算与 BUSY 背压、10s 超时）、`DaemonEnvironmentTunnel`（流式 HTTP 交换与 RFC 8441 扩展 CONNECT 双向字节管道） |
 
 ## 源码与测试
 
@@ -434,8 +435,9 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 - [`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java) 与 [`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：INVOKE 四个必填字段、PROGRESS 内容限制、终态预算预检先于上传、无字节 resource wire。
 - [`DaemonResourceTransferCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodecTest.java) 与 [`DaemonWorkdirSyntaxTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntaxTest.java)：票据三态互斥字段与预签名 PUT 约束；workdir 占位符、长度、跨 OS 与分隔符归一规则。
 - [`EnvironmentDaemonServerTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭；[`EnvironmentDaemonServerIdeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerIdeTest.java) 覆盖 IDE 通道的准入、单次回执与断线收尾。基座 [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java) 只表达核心依赖的窄端口语义。
+- [`WebSocketEndPointTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/WebSocketEndPointTest.java)、[`DaemonControlStreamTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonControlStreamTest.java)、[`DaemonEnvironmentTunnelTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonEnvironmentTunnelTest.java)、[`DaemonHttp2ClientSessionTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonHttp2ClientSessionTest.java)、[`DaemonHttp2SessionLoopbackTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonHttp2SessionLoopbackTest.java)：通过管道和内存 HTTP/2 验证端到端握手、控制通道背压/超限、通道生命周期、PING/ACK 存活心跳超时与断线清理。
 
-覆盖率门禁为 POM 中绑定到 `verify` 的 JaCoCo `check`：能力目录、envelope codec 与 `EnvironmentDaemonServer` 的行覆盖率不低于 `0.90`。
+覆盖率门禁为 POM 中绑定到 `verify` 的 JaCoCo `check`：能力目录、envelope codec、`EnvironmentDaemonServer` 以及传输实现（`fun.fengwk.kkstudio.harness.environment.transport.*`）的行覆盖率不低于 `0.90`。
 
 ---
 

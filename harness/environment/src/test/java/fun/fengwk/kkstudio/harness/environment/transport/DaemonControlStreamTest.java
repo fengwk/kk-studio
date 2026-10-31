@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonSession;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -178,6 +179,64 @@ class DaemonControlStreamTest {
     Envelope errEnv = ControlProtocolCodec.decodeFrame(errorBytes);
     assertTrue(errEnv.hasError());
     assertTrue(errEnv.getError().getMessage().contains("invalid inbound frame length"));
+  }
+
+  @Test
+  void offerRejectsWhenClosedOrDraining() {
+    controlStream.bindSession(daemonSession);
+    controlStream.close();
+    assertFalse(controlStream.isOpen());
+    assertEquals(DaemonOfferResult.CLOSED, controlStream.offer(createCancelEnvelope("inv-closed")));
+  }
+
+  @Test
+  void offerRejectsWithBusyWhenPendingBudgetExceeded() {
+    controlStream.bindSession(daemonSession);
+    Envelope env = createCancelEnvelope("inv-busy");
+    for (int i = 0; i <= DaemonControlStream.MAX_PENDING_FRAMES; i++) {
+      assertEquals(DaemonOfferResult.ACCEPTED, controlStream.offer(env));
+    }
+    assertEquals(DaemonOfferResult.BUSY, controlStream.offer(env));
+  }
+
+  @Test
+  void closeImmediatelyResetsStreamAndNotifiesSessionCloser() {
+    controlStream.bindSession(daemonSession);
+    controlStream.offer(createCancelEnvelope("inv-reset"));
+    controlStream.close();
+    assertFalse(controlStream.isOpen());
+    assertTrue(daemonSession.closed);
+  }
+
+  @Test
+  void onResetAndOnFailureNotifyChannelFailure() {
+    controlStream.bindSession(daemonSession);
+    controlStream.listener().onReset(stream, new ResetFrame(1, 8), Callback.NOOP);
+    assertTrue(sessionClosed.get());
+
+    controlStream
+        .listener()
+        .onFailure(stream, 8, "internal error", new IOException("stream fail"), Callback.NOOP);
+  }
+
+  @Test
+  void corruptedEnvelopeBodyTriggersErrorOffer() {
+    controlStream.bindSession(daemonSession);
+    byte[] badBody = new byte[] {0x7F, 0x7F, 0x7F, 0x7F};
+    ByteBuffer buf =
+        ByteBuffer.allocate(4 + badBody.length).putInt(badBody.length).put(badBody).flip();
+    stream.inboundDataQueue.add(new TestData(buf, false));
+    controlStream.listener().onDataAvailable(stream);
+
+    assertEquals(1, stream.sentFrames.size());
+  }
+
+  @Test
+  void peerEndStreamTriggersClose() {
+    controlStream.bindSession(daemonSession);
+    stream.inboundDataQueue.add(new TestData(ByteBuffer.allocate(0), true));
+    controlStream.listener().onDataAvailable(stream);
+    assertTrue(daemonSession.closed);
   }
 
   private static final class TestScheduler extends ScheduledExecutorScheduler {

@@ -239,6 +239,31 @@ class EnvironmentDaemonAdmissionControllerTest {
     assertNoSecretLeak(response);
   }
 
+  @Test
+  void malformedHandshakeThrowsIllegalArgumentReturns400() throws Exception {
+    testSessions.admitException =
+        new IllegalArgumentException("invalid canonical lowercase UUID instanceId");
+    MockHttpServletRequest request = newRequest();
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(400, response.getStatus());
+    assertNoSecretLeak(response);
+  }
+
+  @Test
+  void admissionInternalErrorReturns500() throws Exception {
+    testSessions.admitException = new IllegalStateException("database unavailable");
+    MockHttpServletRequest request = newRequest();
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    controller.handle(request, response);
+
+    assertEquals(500, response.getStatus());
+    assertNoSecretLeak(response);
+  }
+
   private void assertNoSecretLeak(MockHttpServletResponse response) throws Exception {
     String content = response.getContentAsString();
     assertFalse(
@@ -265,10 +290,14 @@ class EnvironmentDaemonAdmissionControllerTest {
 
   private static final class TestSessions implements DaemonSessions {
     private DaemonAdmission admission = new DaemonAdmission.Admitted(ENV_ID, INSTANCE_ID);
+    private RuntimeException admitException;
     private final List<DaemonAdmission.Admitted> abandoned = new ArrayList<>();
 
     @Override
     public DaemonAdmission admit(DaemonHandshake handshake) {
+      if (admitException != null) {
+        throw admitException;
+      }
       return admission;
     }
 
