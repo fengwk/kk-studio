@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.common.number;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Canonical ASCII 十进制 long 文本。
@@ -9,6 +10,9 @@ import java.util.Objects;
  * 开始。
  */
 public final class DecimalLongs {
+
+  private static final Pattern NON_NEGATIVE = Pattern.compile("0|[1-9][0-9]*");
+  private static final Pattern POSITIVE = Pattern.compile("[1-9][0-9]*");
 
   private DecimalLongs() {}
 
@@ -27,37 +31,15 @@ public final class DecimalLongs {
     if (value == null) {
       throw new IllegalArgumentException(field + " must not be null");
     }
-    if (value.isEmpty()) {
-      throw invalid(field, value, allowZero);
+    if (!(allowZero ? NON_NEGATIVE : POSITIVE).matcher(value).matches()) {
+      String expectation =
+          allowZero ? "a canonical non-negative decimal" : "a canonical positive decimal";
+      throw new IllegalArgumentException(field + " must be " + expectation + ": " + value);
     }
-    int start = allowZero && value.charAt(0) == '0' ? 1 : 0;
-    if (start == 1) {
-      if (value.length() != 1) {
-        throw invalid(field, value, allowZero);
-      }
-      return 0L;
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(field + " exceeds long range: " + value, error);
     }
-    if (value.charAt(0) < '1' || value.charAt(0) > '9') {
-      throw invalid(field, value, allowZero);
-    }
-    long parsed = 0L;
-    for (int i = 0; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c < '0' || c > '9') {
-        throw invalid(field, value, allowZero);
-      }
-      int digit = c - '0';
-      if (parsed > (Long.MAX_VALUE - digit) / 10L) {
-        throw new IllegalArgumentException(field + " exceeds long range: " + value);
-      }
-      parsed = parsed * 10L + digit;
-    }
-    return parsed;
-  }
-
-  private static IllegalArgumentException invalid(String field, String value, boolean allowZero) {
-    String expectation =
-        allowZero ? "a canonical non-negative decimal" : "a canonical positive decimal";
-    return new IllegalArgumentException(field + " must be " + expectation + ": " + value);
   }
 }

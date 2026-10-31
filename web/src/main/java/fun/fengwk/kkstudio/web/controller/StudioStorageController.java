@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 全局 Blob 存储 HTTP 边界。
@@ -49,13 +48,13 @@ public class StudioStorageController {
   /** 完成上传：校验直传对象的大小与 SHA-256 后绑定 blob，返回 READY。 */
   @PostMapping("/uploads/{uploadId}/complete")
   public ApiResponse<StorageUploadDTO> complete(@PathVariable("uploadId") String uploadIdText) {
-    return ApiResponse.ok(uploadService.complete(parseUuid(uploadIdText, "uploadId")));
+    return ApiResponse.ok(uploadService.complete(Uuids.parseCanonical(uploadIdText, "uploadId")));
   }
 
   /** 逻辑删除上传：事务内持久化 cleanup request，READY 同事务 release upload 引用；对象与行由 Storage Maintenance 异步回收。 */
   @DeleteMapping("/uploads/{uploadId}")
   public ApiResponse<Void> delete(@PathVariable("uploadId") String uploadIdText) {
-    uploadService.delete(parseUuid(uploadIdText, "uploadId"));
+    uploadService.delete(Uuids.parseCanonical(uploadIdText, "uploadId"));
     return ApiResponse.noContent();
   }
 
@@ -63,16 +62,14 @@ public class StudioStorageController {
   @PostMapping("/blobs/{blobId}/download-url")
   public ApiResponse<StoragePresignedUrlDTO> downloadUrl(
       @PathVariable("blobId") String blobIdText) {
-    return ApiResponse.ok(blobManager.presignOriginalUrl(parseUuid(blobIdText, "blobId")));
+    return ApiResponse.ok(
+        blobManager.presignOriginalUrl(Uuids.parseCanonical(blobIdText, "blobId")));
   }
 
   /** 为 ACTIVE blob 的 webp 预览签发 GET 预签名 URL。 */
   @PostMapping("/blobs/{blobId}/preview-url")
   public ApiResponse<StoragePresignedUrlDTO> previewUrl(@PathVariable("blobId") String blobIdText) {
-    return ApiResponse.ok(blobManager.presignPreviewUrl(parseUuid(blobIdText, "blobId")));
-  }
-
-  private static UUID parseUuid(String text, String name) {
-    return Uuids.parseCanonical(text, name);
+    return ApiResponse.ok(
+        blobManager.presignPreviewUrl(Uuids.parseCanonical(blobIdText, "blobId")));
   }
 }

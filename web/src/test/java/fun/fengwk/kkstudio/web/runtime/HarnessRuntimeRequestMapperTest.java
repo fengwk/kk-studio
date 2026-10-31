@@ -9,8 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -211,31 +209,21 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void strictScalarParsersRejectNonCanonicalAndOverflowValues() {
-    // UUID 与 decimal cursor 不能接受大小写、前导零、负数或 bigint 溢出。
-    assertEquals(id(1), Uuids.parseCanonical(idText(1), "id"));
-    assertThrows(IllegalArgumentException.class, () -> Uuids.parseCanonical(null, "id"));
+  void mapperRejectsNonCanonicalIdentityAndVersion() {
+    // 测试意图：真实 DTO 映射必须把大写 UUID 与越界版本交给共同解析器，而不是只重复测试解析器本身。
+    HarnessThreadCompactDTO uppercase = new HarnessThreadCompactDTO();
+    uppercase.setExpectedVersion("1");
     assertThrows(
         IllegalArgumentException.class,
-        () -> Uuids.parseCanonical("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", "id"));
-    assertThrows(IllegalArgumentException.class, () -> Uuids.parseCanonical("not-a-uuid", "id"));
+        () ->
+            HarnessRuntimeRequestMapper.toCompactThreadCommand(
+                "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", uppercase));
 
-    assertEquals(1L, DecimalLongs.parsePositive("1", "sequence"));
-    assertThrows(IllegalArgumentException.class, () -> DecimalLongs.parsePositive("0", "sequence"));
-    assertThrows(
-        IllegalArgumentException.class, () -> DecimalLongs.parsePositive("01", "sequence"));
+    HarnessThreadCompactDTO overflow = new HarnessThreadCompactDTO();
+    overflow.setExpectedVersion("9223372036854775808");
     assertThrows(
         IllegalArgumentException.class,
-        () -> DecimalLongs.parsePositive("9223372036854775808", "sequence"));
-
-    assertEquals(0L, DecimalLongs.parseNonNegative("0", "version"));
-    assertThrows(
-        IllegalArgumentException.class, () -> DecimalLongs.parseNonNegative("-1", "version"));
-    assertThrows(
-        IllegalArgumentException.class, () -> DecimalLongs.parseNonNegative("01", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> DecimalLongs.parseNonNegative("9223372036854775808", "version"));
+        () -> HarnessRuntimeRequestMapper.toCompactThreadCommand(idText(1), overflow));
   }
 
   @Test

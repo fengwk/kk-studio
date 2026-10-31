@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
@@ -108,8 +109,15 @@ public final class IdeInternalDataPlaneController {
   }
 
   private static UUID requireViewId(HttpServletRequest request) {
-    return RequestParameters.ideViewId(
-        request.getParameter(IdeDataInternalPaths.VIEW_ID_PARAMETER));
+    String value = request.getParameter(IdeDataInternalPaths.VIEW_ID_PARAMETER);
+    if (value == null) {
+      throw new AiValidationException("environment", "internal IDE viewId is missing");
+    }
+    try {
+      return Uuids.parseCanonical(value, "viewId");
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("environment", "internal IDE viewId is invalid");
+    }
   }
 
   private void requireLocalOwner(EnvironmentId environmentId) {

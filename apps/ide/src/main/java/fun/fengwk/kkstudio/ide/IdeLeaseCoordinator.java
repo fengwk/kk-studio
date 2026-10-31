@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
@@ -95,9 +95,9 @@ public final class IdeLeaseCoordinator {
       try {
         Group group =
             new Group(
-                parseUuid(view.getEventNodeId(), "eventNodeId"),
-                parseUuid(view.getConnectionId(), "connectionId"),
-                parseUuid(view.getDocumentId(), "documentId"));
+                Uuids.parseCanonical(view.getEventNodeId(), "eventNodeId"),
+                Uuids.parseCanonical(view.getConnectionId(), "connectionId"),
+                Uuids.parseCanonical(view.getDocumentId(), "documentId"));
         groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(view);
       } catch (IllegalArgumentException ignored) {
         // UI 服务返回的 DTO 已在写入时校验；这里仍然 fail-closed 地跳过坏条目。
@@ -120,9 +120,9 @@ public final class IdeLeaseCoordinator {
       }
       for (EnvironmentIdeViewDTO view : entry.getValue()) {
         try {
-          UUID viewId = parseUuid(view.getViewId(), "viewId");
-          UUID documentId = parseUuid(view.getDocumentId(), "documentId");
-          long epoch = IdeCommand.parseBindingEpoch(view.getBindingEpoch());
+          UUID viewId = Uuids.parseCanonical(view.getViewId(), "viewId");
+          UUID documentId = Uuids.parseCanonical(view.getDocumentId(), "documentId");
+          long epoch = DecimalLongs.parsePositive(view.getBindingEpoch(), "bindingEpoch");
           if (hasExactProof(proofs.get(), environmentId, viewId, documentId, epoch)) {
             bindings.add(new DaemonIdeLease.Binding(viewId, documentId, epoch));
           }
@@ -157,17 +157,6 @@ public final class IdeLeaseCoordinator {
       }
     }
     return false;
-  }
-
-  private static UUID parseUuid(String value, String field) {
-    if (value == null) {
-      throw new IllegalArgumentException(field + " is missing");
-    }
-    try {
-      return Uuids.parseCanonical(value, field);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " is not canonical");
-    }
   }
 
   private record Group(UUID eventNodeId, UUID connectionId, UUID documentId) {}

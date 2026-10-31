@@ -21,17 +21,9 @@ public record EnvironmentId(UUID value) {
   /** 解析 canonical UUID 文本；{@code null}、空白、大小写变体或非法形状都抛 {@link IllegalArgumentException}。 */
   public static EnvironmentId parse(String raw) {
     if (raw == null) {
-      throw new NullPointerException("raw");
+      throw new IllegalArgumentException("environmentId must not be null");
     }
-    try {
-      return new EnvironmentId(Uuids.parseCanonical(raw, "environmentId"));
-    } catch (IllegalArgumentException error) {
-      if (raw.isBlank()) {
-        throw new IllegalArgumentException("environmentId must not be blank");
-      }
-      throw new IllegalArgumentException(
-          "environmentId must be a canonical UUID string: " + raw, error);
-    }
+    return new EnvironmentId(Uuids.parseCanonical(raw, "environmentId"));
   }
 
   /** 从已存在的 UUID 构造。 */
