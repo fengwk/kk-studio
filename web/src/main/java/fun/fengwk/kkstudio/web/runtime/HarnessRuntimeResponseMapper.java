@@ -287,11 +287,8 @@ public final class HarnessRuntimeResponseMapper {
    * <p>{@code entryPath} 的每个 Entry 都带上读取时费用投影：Thread 历史与 Session Entry tree 走同一份投影，因此前端无需为费用额外请求。
    */
   public static HarnessThreadSnapshotDTO toSnapshotDto(
-      ThreadSnapshot snapshot,
-      ManualCompactionAvailability manualCompaction,
-      Map<UUID, HarnessUsageCostDTO> usageCosts) {
+      ThreadSnapshot snapshot, Map<UUID, HarnessUsageCostDTO> usageCosts) {
     Objects.requireNonNull(snapshot, "snapshot");
-    Objects.requireNonNull(manualCompaction, "manualCompaction");
     Objects.requireNonNull(usageCosts, "usageCosts");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
     dto.setVersion(Long.toString(snapshot.thread().version()));
@@ -336,11 +333,7 @@ public final class HarnessRuntimeResponseMapper {
       failures.add(failureDto);
     }
     dto.setGenerationFailures(List.copyOf(failures));
-    HarnessManualCompactionDTO manualCompactionDto = new HarnessManualCompactionDTO();
-    manualCompactionDto.setAvailable(manualCompaction.available());
-    manualCompactionDto.setDisabledReason(
-        manualCompaction.available() ? null : manualCompaction.disabledReason().name());
-    dto.setManualCompaction(manualCompactionDto);
+    dto.setBaseEntryId(null);
     dto.setStopReceipts(toStopReceiptDtos(snapshot.stopReceipts()));
     List<HarnessExecutionExitDTO> executions =
         new ArrayList<>(snapshot.unconfirmedExecutions().size());
@@ -354,6 +347,16 @@ public final class HarnessRuntimeResponseMapper {
       executions.add(execution);
     }
     dto.setUnconfirmedExecutions(List.copyOf(executions));
+    return dto;
+  }
+
+  /** 映射独立压缩 advisory；可用时 disabledReason 显式为 null。 */
+  public static HarnessManualCompactionDTO toManualCompactionDto(
+      ManualCompactionAvailability availability) {
+    Objects.requireNonNull(availability, "availability");
+    HarnessManualCompactionDTO dto = new HarnessManualCompactionDTO();
+    dto.setAvailable(availability.available());
+    dto.setDisabledReason(availability.available() ? null : availability.disabledReason().name());
     return dto;
   }
 

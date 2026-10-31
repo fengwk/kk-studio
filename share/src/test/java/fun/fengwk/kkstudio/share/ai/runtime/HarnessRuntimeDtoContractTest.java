@@ -505,15 +505,43 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
-  void snapshotCarriesManualCompactionAvailabilityAndNullableReason() {
-    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
-    HarnessManualCompactionDTO availability = new HarnessManualCompactionDTO();
-    availability.setAvailable(true);
-    availability.setDisabledReason(null);
-    snapshot.setManualCompaction(availability);
+  void snapshotAlwaysExposesNullableBaseEntryIdAndDropsManualCompaction() throws Exception {
+    // 意图：完整快照的 baseEntryId 必须显式为 null；manualCompaction 已迁到独立 endpoint，不能留在快照上。
+    Field baseEntryId = HarnessThreadSnapshotDTO.class.getDeclaredField("baseEntryId");
+    JsonInclude include = baseEntryId.getAnnotation(JsonInclude.class);
+    assertEquals(String.class, baseEntryId.getType());
+    assertNotNull(include);
+    assertEquals(JsonInclude.Include.ALWAYS, include.value());
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadSnapshotDTO.class.getDeclaredField("manualCompaction"));
 
-    assertTrue(snapshot.getManualCompaction().getAvailable());
-    assertNull(snapshot.getManualCompaction().getDisabledReason());
+    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+    assertNull(snapshot.getBaseEntryId());
+    String json = MAPPER.writeValueAsString(snapshot);
+    assertTrue(json.contains("\"baseEntryId\":null"));
+    assertFalse(json.contains("manualCompaction"));
+  }
+
+  @Test
+  void manualCompactionDtoAlwaysSerializesNullableDisabledReason() throws Exception {
+    // 意图：独立 advisory 仍显式输出 disabledReason，可用时为 null，不可用时保留稳定原因名。
+    Field disabledReason = HarnessManualCompactionDTO.class.getDeclaredField("disabledReason");
+    JsonInclude include = disabledReason.getAnnotation(JsonInclude.class);
+    assertNotNull(include);
+    assertEquals(JsonInclude.Include.ALWAYS, include.value());
+
+    HarnessManualCompactionDTO available = new HarnessManualCompactionDTO();
+    available.setAvailable(true);
+    available.setDisabledReason(null);
+    assertTrue(MAPPER.writeValueAsString(available).contains("\"disabledReason\":null"));
+
+    HarnessManualCompactionDTO disabled = new HarnessManualCompactionDTO();
+    disabled.setAvailable(false);
+    disabled.setDisabledReason("BELOW_MINIMUM");
+    assertEquals(
+        "BELOW_MINIMUM",
+        MAPPER.readTree(MAPPER.writeValueAsString(disabled)).get("disabledReason").asString());
   }
 
   /**

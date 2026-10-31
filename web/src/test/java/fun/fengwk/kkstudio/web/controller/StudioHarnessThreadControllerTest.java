@@ -112,8 +112,6 @@ class StudioHarnessThreadControllerTest {
   void snapshotProjectsIdleParentStatusAndParentThreadId() throws Exception {
     when(runtime.getThreadSnapshot(id(1)))
         .thenReturn(HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)));
-    when(runtime.manualCompactionAvailability(id(1)))
-        .thenReturn(ManualCompactionAvailability.enabled());
 
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
@@ -130,8 +128,6 @@ class StudioHarnessThreadControllerTest {
     // ROOT -> TURN_START -> USER -> ASSISTANT -> TURN_END：费用只落在记录了用量的 ASSISTANT Entry 上。
     when(runtime.getThreadSnapshot(id(1)))
         .thenReturn(HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
-    when(runtime.manualCompactionAvailability(id(1)))
-        .thenReturn(ManualCompactionAvailability.enabled());
     HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
     cost.setCurrency("USD");
     cost.setAmount("0.500000000000");
@@ -194,8 +190,6 @@ class StudioHarnessThreadControllerTest {
             false);
     Instant deadline = Instant.parse("2026-10-08T12:00:00Z");
     when(runtime.getThreadSnapshot(id(1))).thenReturn(snapshot);
-    when(runtime.manualCompactionAvailability(id(1)))
-        .thenReturn(ManualCompactionAvailability.enabled());
     when(runtime.listEnvironmentToolWaits(any()))
         .thenReturn(
             List.of(
@@ -260,22 +254,49 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
   }
 
-  /** 意图：验证 GET /api/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */
+  /** 意图：完整快照显式返回 baseEntryId=null，且不再调用完整压缩判断。 */
   @Test
-  void snapshotProjectsManualCompactionAvailabilityFromHarnessRuntime() throws Exception {
+  void snapshotExposesNullBaseEntryIdWithoutCompactionAvailability() throws Exception {
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
-    when(runtime.manualCompactionAvailability(id(1)))
-        .thenReturn(
-            ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
 
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
-        .andExpect(jsonPath("$.data.manualCompaction.available").value(false))
-        .andExpect(jsonPath("$.data.manualCompaction.disabledReason").value("BELOW_MINIMUM"));
+        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()))
+        .andExpect(jsonPath("$.data.manualCompaction").doesNotExist());
+
+    verify(runtime, never()).manualCompactionAvailability(any());
+  }
+
+  /** 意图：独立 advisory 端点按需返回既有压缩判断，非法 id 为 400、缺失 Thread 为 404。 */
+  @Test
+  void compactionAvailabilityIsASeparateEndpoint() throws Exception {
+    when(runtime.manualCompactionAvailability(id(1)))
+        .thenReturn(
+            ManualCompactionAvailability.disabled(
+                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
+
+    mockMvc
+        .perform(get("/api/threads/" + idText(1) + "/compaction-availability"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.available").value(false))
+        .andExpect(jsonPath("$.data.disabledReason").value("BELOW_MINIMUM"));
+    verify(runtime).manualCompactionAvailability(id(1));
+    verify(runtime, never()).getThreadSnapshot(any());
+
+    mockMvc
+        .perform(get("/api/threads/1-1-1-1-1/compaction-availability"))
+        .andExpect(status().isBadRequest());
+
+    when(runtime.manualCompactionAvailability(id(999)))
+        .thenThrow(
+            new HarnessRuntimeNotFoundException("thread " + idText(999) + " does not exist"));
+    mockMvc
+        .perform(get("/api/threads/" + idText(999) + "/compaction-availability"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
   }
 
   /** 意图：放弃执行确认严格解析字符串版本并返回最新快照，不限制目标必须为执行根。 */
@@ -283,8 +304,6 @@ class StudioHarnessThreadControllerTest {
   void abandonExecutionMapsVersionAndReturnsSnapshotForChildThread() throws Exception {
     when(runtime.abandonExecution(id(7), id(9), 4L))
         .thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(id(7)));
-    when(runtime.manualCompactionAvailability(id(7)))
-        .thenReturn(ManualCompactionAvailability.enabled());
 
     mockMvc
         .perform(

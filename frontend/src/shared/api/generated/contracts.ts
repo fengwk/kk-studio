@@ -1321,13 +1321,13 @@ export interface HarnessThreadDTO {
 export interface HarnessThreadSnapshotDTO {
   version: string
   thread: HarnessThreadDTO
+  baseEntryId: string | null
   entries: HarnessSessionEntryDTO[]
   queuedCommands: HarnessThreadCommandDTO[]
   executionStatus: string
   activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
   generationFailures: HarnessGenerationFailureDTO[]
   toolInvocations: ToolInvocationDTO[]
-  manualCompaction: HarnessManualCompactionDTO
   stopReceipts: HarnessStoppedThreadReceiptDTO[]
   unconfirmedExecutions: HarnessExecutionExitDTO[]
 }
