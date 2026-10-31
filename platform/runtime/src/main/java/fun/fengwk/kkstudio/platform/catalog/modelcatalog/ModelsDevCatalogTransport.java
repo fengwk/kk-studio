@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,10 +13,9 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
-import java.util.Map;
 
 /**
- * 仅访问两个固定的 models.dev HTTPS 端点；20 秒超时、响应上限 32 MiB、禁止重定向。
+ * 仅访问固定的 models.dev HTTPS 端点；20 秒超时、响应上限 32 MiB、禁止重定向。
  *
  * <p>Content-Type 必须是 JSON，HTML 或任意错误页不会被当作目录解析。下载结果只保留内存字符串，不落库。
  */
@@ -27,8 +24,7 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
 
   static final int MAX_BYTES = 32 * 1024 * 1024;
   static final Duration TIMEOUT = Duration.ofSeconds(20);
-
-  private static final Map<ModelCatalogSource, URI> ENDPOINTS = endpoints();
+  static final URI ENDPOINT = URI.create("https://models.dev/experimental/v2.0/api.json");
 
   private final HttpClient httpClient =
       HttpClient.newBuilder()
@@ -37,10 +33,9 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
           .build();
 
   @Override
-  public String fetch(ModelCatalogSource source) {
-    URI endpoint = ENDPOINTS.get(source);
+  public String fetch() {
     HttpRequest request =
-        HttpRequest.newBuilder(endpoint)
+        HttpRequest.newBuilder(ENDPOINT)
             .timeout(TIMEOUT)
             .header("Accept", "application/json")
             .GET()
@@ -50,13 +45,11 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
           httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
       try (InputStream body = response.body()) {
         if (response.statusCode() != 200) {
-          throw new ModelCatalogFetchException(
-              "catalog source " + source.value() + " returned HTTP " + response.statusCode());
+          throw new ModelCatalogFetchException("models.dev returned HTTP " + response.statusCode());
         }
         String contentType = response.headers().firstValue("content-type").orElse("");
         if (!contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
-          throw new ModelCatalogFetchException(
-              "catalog source " + source.value() + " did not return JSON");
+          throw new ModelCatalogFetchException("models.dev did not return JSON");
         }
         return readBounded(body);
       }
@@ -64,7 +57,7 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
       Thread.currentThread().interrupt();
       throw new ModelCatalogFetchException("catalog refresh was interrupted");
     } catch (IOException error) {
-      throw new ModelCatalogFetchException("catalog source " + source.value() + " is unavailable");
+      throw new ModelCatalogFetchException("models.dev is unavailable");
     }
   }
 
@@ -84,11 +77,5 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
       output.write(buffer, 0, read);
     }
     return output.toString(StandardCharsets.UTF_8);
-  }
-
-  static Map<ModelCatalogSource, URI> endpoints() {
-    return Map.of(
-        ModelCatalogSource.MODELS_DEV_V2,
-        URI.create("https://models.dev/experimental/v2.0/api.json"));
   }
 }

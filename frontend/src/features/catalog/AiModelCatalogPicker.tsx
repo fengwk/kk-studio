@@ -13,7 +13,7 @@ import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
 
 /**
  * 单 Model 的原位目录候选区：只读展示来源，逐行点击预览，每行一键填入。
- * 请求带 epoch；来源/代际切换后的迟到响应不会混入当前草稿。
+ * 请求带 epoch；迟到响应不会混入当前草稿。
  */
 export function ModelCatalogPicker({
   onApply,
@@ -23,16 +23,12 @@ export function ModelCatalogPicker({
   const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<ModelDefaultCandidateDTO[]>([])
-  const [source, setSource] = useState<ModelCatalogPageDTO['source'] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const requestEpoch = useRef(0)
   const currentQuery = useRef('')
-  // 来源/代际用于隔离迟到响应；放在 ref 中避免 accept/load 身份变化再次触发查询，
-  // 从而在首次加载后清空用户刚展开的候选 preview。
-  const sourceRef = useRef<ModelCatalogPageDTO['source'] | null>(null)
   const generationRef = useRef('')
   const pageSize = 20
 
@@ -40,19 +36,9 @@ export function ModelCatalogPicker({
     if (epoch !== requestEpoch.current) {
       return
     }
-    // 来源切换后旧 source/generation 的响应直接丢弃；新来源必须从空列表重新开始。
-    if (
-      sourceRef.current != null
-      && generationRef.current !== ''
-      && page.source !== sourceRef.current
-      && page.generation === generationRef.current
-    ) {
-      return
-    }
-    sourceRef.current = page.source
+    const isNewGeneration = generationRef.current !== '' && page.generation !== generationRef.current
     generationRef.current = page.generation
-    setSource(page.source)
-    setItems((current) => (append ? [...current, ...page.items] : page.items))
+    setItems((current) => (append && !isNewGeneration ? [...current, ...page.items] : page.items))
     setNextCursor(page.nextCursor ?? null)
     setError(page.error ?? null)
   }, [])

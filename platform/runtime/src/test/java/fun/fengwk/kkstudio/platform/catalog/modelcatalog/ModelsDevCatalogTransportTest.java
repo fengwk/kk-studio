@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -20,8 +18,7 @@ class ModelsDevCatalogTransportTest {
   void pinsHttpsEndpointsTimeoutAndResponseLimit() {
     assertEquals(
         URI.create("https://models.dev/experimental/v2.0/api.json"),
-        ModelsDevCatalogTransport.endpoints().get(ModelCatalogSource.MODELS_DEV_V2));
-    assertEquals(1, ModelsDevCatalogTransport.endpoints().size());
+        ModelsDevCatalogTransport.ENDPOINT);
     assertEquals(Duration.ofSeconds(20), ModelsDevCatalogTransport.TIMEOUT);
     assertEquals(32 * 1024 * 1024, ModelsDevCatalogTransport.MAX_BYTES);
   }

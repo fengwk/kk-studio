@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
@@ -36,20 +35,20 @@ public class ModelCatalogService {
   static final int MAX_CURSOR_LENGTH = 512;
 
   private final ModelCatalogTransport transport;
-  private final ModelsDevV2Adapter adapter;
+  private final ModelsDevCatalogParser parser;
   private final Clock clock;
-  private final SourceState state = new SourceState();
+  private final CatalogState state = new CatalogState();
   private final Object lock = new Object();
   private final AtomicLong generation = new AtomicLong();
 
   @Autowired
-  public ModelCatalogService(ModelCatalogTransport transport, ModelsDevV2Adapter v2Adapter) {
-    this(transport, v2Adapter, Clock.systemUTC());
+  public ModelCatalogService(ModelCatalogTransport transport, ModelsDevCatalogParser parser) {
+    this(transport, parser, Clock.systemUTC());
   }
 
-  ModelCatalogService(ModelCatalogTransport transport, ModelsDevV2Adapter v2Adapter, Clock clock) {
+  ModelCatalogService(ModelCatalogTransport transport, ModelsDevCatalogParser parser, Clock clock) {
     this.transport = Objects.requireNonNull(transport, "transport");
-    this.adapter = Objects.requireNonNull(v2Adapter, "v2Adapter");
+    this.parser = Objects.requireNonNull(parser, "parser");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -68,7 +67,7 @@ public class ModelCatalogService {
       try {
         load.future().join();
       } catch (CompletionException ignored) {
-        // 错误已经记录在来源状态中；保留旧快照语义。
+        // 错误已记录在目录状态中，上次成功的快照保持不变。
       }
     }
     synchronized (lock) {
@@ -76,7 +75,7 @@ public class ModelCatalogService {
     }
   }
 
-  /** 手动刷新当前来源；存在进行中的 single-flight 时直接复用。 */
+  /** 手动刷新目录；存在进行中的 single-flight 时直接复用。 */
   public ModelCatalogPageDTO refresh() {
     synchronized (lock) {
       startLoadLocked(state);
@@ -84,7 +83,7 @@ public class ModelCatalogService {
     }
   }
 
-  private void startLoadLocked(SourceState state) {
+  private void startLoadLocked(CatalogState state) {
     if (state.loading) {
       return;
     }
@@ -96,8 +95,8 @@ public class ModelCatalogService {
         CompletableFuture.runAsync(
             () -> {
               try {
-                String json = transport.fetch(ModelCatalogSource.MODELS_DEV_V2);
-                List<ModelDefaultCandidateDTO> candidates = adapter.adapt(json);
+                String json = transport.fetch();
+                List<ModelDefaultCandidateDTO> candidates = parser.parse(json);
                 synchronized (lock) {
                   if (loadGeneration == generation.get()) {
                     state.snapshot = List.copyOf(candidates);
@@ -121,7 +120,7 @@ public class ModelCatalogService {
   }
 
   private ModelCatalogPageDTO pageLocked(
-      SourceState state, String query, String cursor, int pageSize) {
+      CatalogState state, String query, String cursor, int pageSize) {
     int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
     String generationText = Long.toString(state.generation);
     int offset = cursorOffset(cursor, generationText);
@@ -129,7 +128,6 @@ public class ModelCatalogService {
     int from = Math.min(offset, filtered.size());
     int to = Math.min(from + size, filtered.size());
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
-    page.setSource(ModelCatalogSource.MODELS_DEV_V2);
     page.setGeneration(generationText);
     page.setFetchedAt(state.fetchedAt);
     page.setLoading(state.loading);
@@ -183,7 +181,7 @@ public class ModelCatalogService {
     return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
   }
 
-  private boolean expired(SourceState state) {
+  private boolean expired(CatalogState state) {
     return state.fetchedAt == null || !state.fetchedAt.plus(TTL).isAfter(Instant.now(clock));
   }
 
@@ -214,7 +212,7 @@ public class ModelCatalogService {
     return message == null || message.isBlank() ? "catalog refresh failed" : message;
   }
 
-  private static final class SourceState {
+  private static final class CatalogState {
 
     private List<ModelDefaultCandidateDTO> snapshot;
     private Instant fetchedAt;

@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultLimitDTO;
@@ -31,11 +30,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * models.dev v2 适配器：{@code cost.text.input/output.price}、cache read/write、字段级 overrides、
- * multipliers 与 utc_hours/utc_days 条件；地区倍率整条忽略并提示，其他未知且可能影响 token 价格的条件拒绝导入该候选价格。
+ * models.dev 目录解析器：{@code cost.text.input/output.price}、cache read/write、字段级 overrides、 multipliers
+ * 与 utc_hours/utc_days 条件；地区倍率整条忽略并提示，其他未知且可能影响 token 价格的条件拒绝导入该候选价格。
  */
 @Component
-public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
+public class ModelsDevCatalogParser {
 
   private static final Set<String> COST_KEYS =
       Set.of("text", "multipliers", "audio", "image", "video", "web_search");
@@ -57,13 +56,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
   private static final Set<String> TOKEN_UNITS =
       Set.of("token", "tokens", "per_million", "million_tokens");
 
-  @Override
-  public ModelCatalogSource source() {
-    return ModelCatalogSource.MODELS_DEV_V2;
-  }
-
-  @Override
-  public List<ModelDefaultCandidateDTO> adapt(String json) {
+  public List<ModelDefaultCandidateDTO> parse(String json) {
     JsonNode root = CatalogJson.parse(json);
     List<ModelDefaultCandidateDTO> candidates = new ArrayList<>();
     for (Map.Entry<String, JsonNode> providerEntry : root.properties()) {
@@ -88,12 +81,14 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     return candidates;
   }
 
+  private static final String ID_PREFIX = "models_dev_v2:";
+
   private ModelDefaultCandidateDTO toCandidate(
       String provider, String fallbackModelId, JsonNode model) {
     String modelId = CatalogJson.text(model.get("id"), fallbackModelId);
     List<String> issues = new ArrayList<>();
     ModelDefaultCandidateDTO candidate = new ModelDefaultCandidateDTO();
-    candidate.setId(source().value() + ":" + provider + ":" + modelId);
+    candidate.setId(ID_PREFIX + provider + ":" + modelId);
     candidate.setProvider(provider);
     candidate.setModelId(modelId);
     candidate.setName(CatalogJson.text(model.get("name"), modelId));

@@ -30,17 +30,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-/** models.dev v2：字段级 overrides、倍率、时间/日期条件、TTL 与拒绝半份价格的契约。 */
-class ModelsDevV2AdapterTest {
+/** models.dev：字段级 overrides、倍率、时间/日期条件、TTL 与拒绝半份价格的契约。 */
+class ModelsDevCatalogParserTest {
 
-  private final ModelsDevV2Adapter adapter = new ModelsDevV2Adapter();
+  private final ModelsDevCatalogParser parser = new ModelsDevCatalogParser();
   private Map<String, ModelDefaultCandidateDTO> real;
   private Map<String, ModelDefaultCandidateDTO> validation;
 
   @BeforeEach
   void setUp() {
-    real = index(adapter.adapt(resource("models-dev-v2.json")));
-    validation = index(adapter.adapt(resource("models-dev-v2-validation.json")));
+    real = index(parser.parse(resource("models-dev-v2.json")));
+    validation = index(parser.parse(resource("models-dev-v2-validation.json")));
   }
 
   @Test
@@ -118,7 +118,7 @@ class ModelsDevV2AdapterTest {
   @Test
   void parsesClaudeOpusAndCalculatesCostWithoutRegionMultiplier() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(adapter.adapt(resource("models-dev-v2-claude-opus-5-5.json")));
+        index(parser.parse(resource("models-dev-v2-claude-opus-5-5.json")));
     ModelDefaultCandidateDTO opus = candidates.get("anthropic/claude-opus-5-5");
     assertNotNull(opus);
     assertTrue(opus.isPricingSupported());
@@ -190,7 +190,7 @@ class ModelsDevV2AdapterTest {
   @Test
   void skipsMultiplierWhenRegionIsNestedOrMixed() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(adapter.adapt(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-v2-region.json")));
 
     for (String key :
         List.of(
@@ -215,7 +215,7 @@ class ModelsDevV2AdapterTest {
   @Test
   void rejectsRegionWithUnknownConditionOrInvalidFactor() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(adapter.adapt(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-v2-region.json")));
     assertRejected(candidates.get("provider/region-unknown-condition"));
     assertRejected(candidates.get("provider/region-unknown-clause"));
     assertRejected(candidates.get("provider/region-not-unknown"));
@@ -230,7 +230,7 @@ class ModelsDevV2AdapterTest {
   @Test
   void rejectsRegionConditionInOverrides() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(adapter.adapt(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-v2-region.json")));
     assertRejected(candidates.get("provider/region-input-override"));
     assertRejected(candidates.get("provider/region-output-override"));
     assertRejected(candidates.get("provider/region-nested-override"));
@@ -352,7 +352,7 @@ class ModelsDevV2AdapterTest {
         }}}
         """
             .formatted(tooDeep, manyNodes, manyNodes);
-    Map<String, ModelDefaultCandidateDTO> candidates = index(adapter.adapt(json));
+    Map<String, ModelDefaultCandidateDTO> candidates = index(parser.parse(json));
     assertRejected(candidates.get("p/too-deep"));
     assertRejected(candidates.get("p/too-many"));
     assertRejected(candidates.get("p/region-too-many"));

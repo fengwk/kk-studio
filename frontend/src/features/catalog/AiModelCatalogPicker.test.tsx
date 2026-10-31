@@ -35,11 +35,10 @@ function candidate(id: string): ModelDefaultCandidateDTO {
 }
 
 function page(
-  source: ModelCatalogPageDTO['source'],
   generation: string,
   items: ModelDefaultCandidateDTO[],
 ): ModelCatalogPageDTO {
-  return { source, generation, loading: false, items, nextCursor: null }
+  return { generation, loading: false, items, nextCursor: null }
 }
 
 describe('ModelCatalogPicker request fencing', () => {
@@ -64,7 +63,7 @@ describe('ModelCatalogPicker request fencing', () => {
       vi.advanceTimersByTime(250)
     })
     await act(async () => {
-      first.resolve(page('models_dev_v2', 'gen-1', [candidate('initial')]))
+      first.resolve(page('gen-1', [candidate('initial')]))
       await first.promise
     })
     expect(screen.getByText('catalog-provider / initial')).toBeInTheDocument()
@@ -81,14 +80,14 @@ describe('ModelCatalogPicker request fencing', () => {
     })
     expect(agentService.listModelDefaults).toHaveBeenCalledTimes(3)
     await act(async () => {
-      current.resolve(page('models_dev_v2', 'gen-2', [candidate('refreshed')]))
+      current.resolve(page('gen-2', [candidate('refreshed')]))
       await current.promise
     })
     expect(screen.getByText('catalog-provider / refreshed')).toBeInTheDocument()
 
     // 旧 query 的响应在新请求之后才返回：epoch 已过期，不得覆盖较新的结果。
     await act(async () => {
-      stale.resolve(page('models_dev_v2', 'gen-1', [candidate('stale')]))
+      stale.resolve(page('gen-1', [candidate('stale')]))
       await stale.promise
     })
     expect(screen.queryByText('catalog-provider / stale')).not.toBeInTheDocument()
@@ -113,7 +112,7 @@ describe('ModelCatalogPicker request fencing', () => {
       },
     }
     vi.mocked(agentService.listModelDefaults).mockResolvedValueOnce(
-      page('models_dev_v2', 'gen-1', [item]),
+      page('gen-1', [item]),
     )
     const onApply = vi.fn()
 
@@ -146,7 +145,7 @@ describe('ModelCatalogPicker request fencing', () => {
       pricingSupported: false,
     }
     vi.mocked(agentService.listModelDefaults).mockResolvedValueOnce(
-      page('models_dev_v2', 'gen-1', [unsupportedItem]),
+      page('gen-1', [unsupportedItem]),
     )
 
     render(<ModelCatalogPicker onApply={vi.fn()} />)
@@ -166,5 +165,34 @@ describe('ModelCatalogPicker request fencing', () => {
     expect(
       screen.getByText('Pricing is not fully supported; existing prices are kept.'),
     ).toBeInTheDocument()
+  })
+
+  it('resets items without cross-generation appending when generation changes on loadMore', async () => {
+    setLocale('zh-CN')
+    vi.useFakeTimers()
+    const initialPage = {
+      ...page('gen-1', [candidate('m1')]),
+      nextCursor: 'cursor-1',
+    }
+    const nextGenPage = page('gen-2', [candidate('m2')])
+    vi.mocked(agentService.listModelDefaults)
+      .mockResolvedValueOnce(initialPage)
+      .mockResolvedValueOnce(nextGenPage)
+
+    render(<ModelCatalogPicker onApply={vi.fn()} />)
+    await act(async () => {
+      vi.advanceTimersByTime(250)
+    })
+    expect(screen.getByText('catalog-provider / m1')).toBeInTheDocument()
+
+    // 点击加载更多，后端返回新 generation 的内容
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // generation 改变，重置列表，不与旧代际混合
+    expect(screen.queryByText('catalog-provider / m1')).not.toBeInTheDocument()
+    expect(screen.getByText('catalog-provider / m2')).toBeInTheDocument()
   })
 })

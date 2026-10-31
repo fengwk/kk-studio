@@ -10,8 +10,6 @@ import java.util.List;
 @Data
 public class ModelCatalogPageDTO {
 
-  private ModelCatalogSource source;
-
   private String generation;
 
   private @Nullable Instant fetchedAt;
