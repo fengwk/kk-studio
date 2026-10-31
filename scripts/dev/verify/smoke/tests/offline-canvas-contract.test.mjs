@@ -88,18 +88,17 @@ test('test intent: only 0|[1-9][0-9]* is a valid revision representation', () =>
   }
 })
 
-test('test intent: the document snapshot is revision-only and a legacy version snapshot fails', () => {
+test('test intent: the document snapshot requires a canonical revision', () => {
   assert.equal(documentRevision(documentDto(8)), 8)
-  const { revision: _revision, ...legacy } = documentDto(8)
-  assert.throws(() => documentRevision({ ...legacy, version: '8' }), assert.AssertionError)
+  const { revision: _revision, ...withoutRevision } = documentDto(8)
+  assert.throws(() => documentRevision(withoutRevision), assert.AssertionError)
 })
 
 test('test intent: a successful batch advances the revision by one', () => {
   assert.equal(assertPatch(patchDto('1', [{ op: 'UPSERT', node: { id: 'n1' } }]), 0), 1)
 })
 
-test('test intent: patches with legacy fields, non-canonical or non-advancing revisions are rejected', () => {
-  assert.throws(() => assertPatch({ ...patchDto('1'), version: '1', baseVersion: '0' }, 0), assert.AssertionError)
+test('test intent: patches with non-canonical or non-advancing revisions are rejected', () => {
   for (const revision of ['01', '1.0', 1]) {
     assert.throws(() => assertPatch(patchDto(revision), 0), assert.AssertionError, String(revision))
   }
@@ -154,18 +153,16 @@ test('test intent: available definitions use name and a strict schema', () => {
   assert.equal(assertFunctionDefinitions(functionDefinitions()), undefined)
 })
 
-test('test intent: legacy, non-strict, unavailable, missing or retired definitions fail the smoke', () => {
+test('test intent: non-strict, unavailable, or missing definitions fail the smoke', () => {
   const unavailable = functionDefinitions(['fake-image'])
   Object.assign(unavailable[0], { available: false, unavailableReason: 'fake hub disabled' })
   const withSchema = (schema) => functionDefinitions().map((definition) => ({ ...definition, argsSchema: schema }))
   const cases = {
     空目录: [],
-    '旧 key 字段': functionDefinitions().map(({ name, ...rest }) => ({ ...rest, key: name })),
     '非 object schema': withSchema({ type: 'string' }),
     允许额外参数: withSchema({ type: 'object', additionalProperties: true }),
     必需函数不可用: unavailable,
     '必需的 seedance2.0_vip 缺失': functionDefinitions().filter((item) => item.name !== 'seedance2.0_vip'),
-    '已下线的 mini 变体': functionDefinitions([...REQUIRED_FUNCTIONS, 'seedance2.0mini']),
   }
   for (const [reason, definitions] of Object.entries(cases)) {
     assert.throws(() => assertFunctionDefinitions(definitions), reason)

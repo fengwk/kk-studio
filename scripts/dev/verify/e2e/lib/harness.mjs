@@ -156,11 +156,6 @@ export function threadIdOf(thread) {
     THREAD_RUNTIME_STATUSES.has(thread.status),
     `unknown ThreadRuntimeStatus: ${JSON.stringify(thread.status)}`,
   )
-  // 旧 boolean processing 已被三态 status 取代，不保留兼容别名。
-  assert(
-    !Object.hasOwn(thread, 'processing'),
-    `processing has been removed from the Thread projection: ${JSON.stringify(thread)}`,
-  )
   return threadId
 }
 

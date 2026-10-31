@@ -542,7 +542,6 @@ export function buildSummary({
       ? 'pass'
       : 'fail'
   return {
-    schemaVersion: 1,
     runId,
     startedAt,
     finishedAt,

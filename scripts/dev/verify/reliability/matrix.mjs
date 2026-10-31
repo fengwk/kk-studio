@@ -18,7 +18,7 @@ export const DEFAULT_MAX_COST_USD = 5
 export const CASE_TIMEOUT_MS = 10 * 60 * 1000
 export const MAX_HARD_COST_USD = 5
 export const WRITE_PROOF_PATH = '.reliability-write-proof.txt'
-export const WRITE_PROOF_MARKER = 'RELIABILITY_WRITE_PROOF_V1'
+export const WRITE_PROOF_MARKER = 'RELIABILITY_WRITE_PROOF'
 
 // modelName 是 Agent / ModelSelection 使用的全局逻辑模型名；ref 仅作为报告中的可读 provider 标签。
 export const MODELS = Object.freeze([
