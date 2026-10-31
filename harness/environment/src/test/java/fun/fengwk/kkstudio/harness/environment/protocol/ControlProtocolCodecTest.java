@@ -14,7 +14,7 @@ class ControlProtocolCodecTest {
 
   /** 各类消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
   @Test
-  void validatesRemainingMessages() {
+  void validatesMessageBoundaries() {
     Envelope settings =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("settings.bin"));
     assertThrows(
