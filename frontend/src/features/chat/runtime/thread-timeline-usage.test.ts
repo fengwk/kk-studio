@@ -278,7 +278,7 @@ describe('Turn usage after TURN_END', () => {
 
   it('does not leak usage from an unclosed turn into the next TURN_END', () => {
     // 上一 turn 的 assistant 已带 usage，但该 turn 没有 TURN_END（快照截断）：
-    // 新 TURN_START 必须丢弃残留，下一个 TURN_END 不再投影旧 usage。
+    // 新 TURN_START 必须丢弃残留，下一个 TURN_END 投影当前 usage。
     const timeline = buildThreadTimeline(
       [
         turnStart('turn-1'),

@@ -14,7 +14,7 @@ function backendSource(path: string): string {
 }
 
 describe('settings backend field contract', () => {
-  // 对照后端字段事实，避免前端 DTO、草稿和 mock 同时保留旧字段而让测试假通过。
+  // 对照后端字段事实，确保前端 DTO、草稿和 mock 与后端定义严格一致。
   it('matches every section DTO on both loading and submission', () => {
     const dto = makeSettingsDto()
     const draft = settingsSectionsToDraft(dto)

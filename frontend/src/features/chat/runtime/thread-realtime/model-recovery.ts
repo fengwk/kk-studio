@@ -27,7 +27,7 @@ export interface ModelRecovery {
   buffered: Map<number, RealtimeModelDelta>
   bufferedBytes: number
   highestObservedSequence: number
-  /** 缓冲超限后不再信任已丢弃的 suffix，只能等待覆盖它的下一 checkpoint。 */
+  /** 缓冲超限后不信任已丢弃的 suffix，只能等待覆盖它的下一 checkpoint。 */
   overflowed: boolean
   /** 本恢复 episode 已发过 catchup（或已被订阅 catchup 覆盖）。 */
   requested: boolean

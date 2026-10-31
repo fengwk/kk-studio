@@ -437,7 +437,7 @@ function projectInvocationOverlays(
       environmentWaitFreshnessAt: invocation.environmentWaitFreshnessAt,
       // environmentId 是环境路由身份，绝不能当作审批目标 Thread。
       threadId: threadId || undefined,
-      // 终态结果已经可见时，旧 partial 不能再盖过正文和错误。
+      // 终态结果已经可见时，partial 不能盖过正文和错误。
       partialContents:
         terminalResult == null && overlay?.text
           ? [{ type: 'text', text: overlay.text }]

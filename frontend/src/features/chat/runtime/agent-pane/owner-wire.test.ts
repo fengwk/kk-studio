@@ -60,7 +60,7 @@ describe('owner-free HTTP wire', () => {
   beforeEach(() => captured.splice(0))
 
   it('serializes a Chat container creation with owner and a NEW_SESSION target', async () => {
-    // 测试意图：创建型批次仍走 owner 契约，且真实序列化后不再携带 legacy id 字段。
+    // 测试意图：创建型批次走 owner 契约，序列化为 { type, chatId }。
     const created = buildAcceptanceRequest({
       owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },

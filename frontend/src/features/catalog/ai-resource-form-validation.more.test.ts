@@ -123,7 +123,7 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
   })
 
-  /** 空思考强度表示协议默认，不再被自动补全；显式 effort 原样保留。 */
+  /** 空思考强度表示协议默认，不被自动补全；显式 effort 原样保留。 */
   it('keeps blank reasoning effort as the protocol default and preserves explicit effort', () => {
     const withBlankEffort = model({ reasoning: true })
     const blankResult = validate(

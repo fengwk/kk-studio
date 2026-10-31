@@ -92,7 +92,7 @@ describe('harnessService', () => {
   })
 
   /**
-   * 测试意图：验证 Thread snapshot 改为直接 GET /threads/{id}，不再包含 /snapshot 后缀；
+   * 测试意图：验证 Thread snapshot 直接 GET /threads/{id}，不包含 /snapshot 后缀；
    * 同时验证 manual compaction 使用 POST /threads/{id}/compact。
    */
   it('queries thread snapshot via GET /threads/{id} and triggers compaction via POST /threads/{id}/compact', async () => {

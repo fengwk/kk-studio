@@ -260,7 +260,7 @@ describe('NotificationEntryBlock', () => {
     expect(block).toHaveAttribute('data-entry-kind', 'notification')
     expect(block).toHaveAttribute('data-notification-kind', 'SUBAGENT_RESULT')
     expect(block).toHaveAttribute('data-subagent-state', 'completed')
-    // 无标题栏图标列或左缩进：不再走 thread-entry-row / thread-entry-icon 结构。
+    // 无标题栏图标列或左缩进：不使用 thread-entry-row / thread-entry-icon 结构。
     expect(container.querySelector('.thread-system-message-header')).toBeNull()
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()

@@ -316,8 +316,8 @@ describe('projects codecs', () => {
       expect(detail.stageBudgets).toEqual([])
     })
 
-    it('decodeProjectSnapshot should decode project and issues without dependencies', () => {
-      // 测试意图：验证 ProjectSnapshot 只包含 project 和 issues，不含旧 dependencies
+    it('decodeProjectSnapshot should decode project and issues', () => {
+      // 测试意图：验证 ProjectSnapshot 正确解析 project、issues 与 referencedStateCodes
       const snap = decodeProjectSnapshot({
         project: validProject,
         issues: [

@@ -807,7 +807,7 @@ describe('Attachment uploads lifecycle & safety', () => {
         })
       })
 
-      // 关键断言：已移除项绝不复活到 UI 中
+      // 关键断言：已删除项绝不复活到 UI 中
       expect(result.current.uploads).toHaveLength(0)
     })
   })

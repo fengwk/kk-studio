@@ -113,7 +113,7 @@ describe('useChatListController', () => {
     )
   })
 
-  // 验证切换 Agent 后提交：Chat 只持久化 title/agentName/yolo/environment，不再有任何目录状态
+  // 验证切换 Agent 后提交：Chat 只持久化 title/agentName/yolo/environment，不持久化目录状态
   it('creates a Chat after switching Agent without any workspace state', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (

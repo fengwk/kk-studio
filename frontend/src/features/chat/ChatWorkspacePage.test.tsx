@@ -351,7 +351,7 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // 既有 Thread 走 per-thread 写入口，不再经过创建批次端点。
+    // 既有 Thread 走 per-thread 写入口，不经过创建批次端点。
     await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
