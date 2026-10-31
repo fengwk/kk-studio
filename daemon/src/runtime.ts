@@ -16,6 +16,7 @@ import type {
 import { DAEMON_VERSION } from './config.js'
 import {
   CancelSchema,
+  CancelledSchema,
   CapabilityResultSchema,
   CompletedSchema,
   ContentSchema,
@@ -70,6 +71,7 @@ import {
   type JournalEntry,
   type TerminalMessage,
 } from './journal.js'
+import { validate } from './protocol/control/codec.js'
 import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate, type UpdateByteProgress } from './runtime-status.js'
 import { detectEnvironmentInfo } from './runtime-environment.js'
 import {
@@ -166,7 +168,6 @@ export class Runtime {
   private readonly ideCommandTimeoutMillis: number
   private readonly monotonicNow: () => number
   private readonly runtimeStatus: RuntimeStatusTracker
-  private readonly daemonInstanceId = randomUUID()
   private readonly running = new Map<string, RunningInvocation>()
   private readonly ideInFlight = new Map<string, AbortController>()
   private readonly updateResults = new Map<string, UpdateReceipt>()
@@ -508,6 +509,7 @@ export class Runtime {
     if (this.activeConnection !== connection || !connection.connection.isOpen()) {
       return false
     }
+    validate(envelope)
     try {
       return connection.connection.send(envelope)
     } catch {
@@ -809,11 +811,15 @@ export class Runtime {
       }
       const reason = invocation.controller.signal.reason
       if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
+        const cancelledReason = reason === 'SHUTDOWN' ? 'daemon shutdown' : 'cancelled'
         const envelope = create(EnvelopeSchema, {
           messageType: MessageType.CANCELLED,
           environmentId: this.boundEnvironmentId ?? undefined,
           invocationId: invocation.invocationId,
-          payload: { case: 'cancelled', value: { $typeName: 'kkstudio.environment.control.Cancelled' } },
+          payload: {
+            case: 'cancelled',
+            value: create(CancelledSchema, { reason: cancelledReason }),
+          },
         })
         this.terminal(invocation.invocationId, MessageType.CANCELLED, envelope, reason)
         if (executorFailed) {
@@ -957,7 +963,7 @@ export class Runtime {
           messageType: MessageType.STARTED,
           environmentId: this.boundEnvironmentId ?? undefined,
           invocationId: entry.invocationId,
-          payload: { case: 'started', value: create(StartedSchema, {}) },
+          payload: { case: 'started', value: create(StartedSchema, { replayed: true }) },
         }),
       )
     } else {
@@ -1395,7 +1401,10 @@ export class Runtime {
             messageType: MessageType.CANCELLED,
             environmentId: this.boundEnvironmentId ?? undefined,
             invocationId: invocation.invocationId,
-            payload: { case: 'cancelled', value: { $typeName: 'kkstudio.environment.control.Cancelled' } },
+            payload: {
+              case: 'cancelled',
+              value: create(CancelledSchema, { reason: 'daemon shutdown' }),
+            },
           }),
         })
       })

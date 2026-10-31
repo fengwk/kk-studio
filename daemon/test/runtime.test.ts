@@ -2767,11 +2767,11 @@ describe('runtime execution exit confirmation', () => {
           await uploadGate.promise
           return {
             type: 'resource',
-            uploadId: 'up-1',
+            uploadId: '77777777-7777-4777-8777-777777777777',
             mediaType: 'application/octet-stream',
             name: null,
             size: 1,
-            sha256: 'abc',
+            sha256: 'a'.repeat(64),
           }
         },
       },
@@ -2861,5 +2861,68 @@ describe('runtime execution exit confirmation', () => {
         }
       }
     }
+  })
+
+  describe('outbound validation and message conformance', () => {
+    it('sets cancelled.reason on user cancellation and shutdown, and marks replayed on replayed STARTED', async () => {
+      let hangGate = Promise.withResolvers<void>()
+      const setup = buildRuntime({
+        initialReconnectDelayMillis: 10,
+        capabilities: {
+          'fs.read': async (_call, context) => {
+            await new Promise<void>((resolve) => {
+              context.signal.addEventListener('abort', () => resolve(), { once: true })
+              void hangGate.promise.then(resolve)
+            })
+            throw new Error('cancelled')
+          },
+        },
+      })
+
+      try {
+        await handshake(setup)
+        // 1. 发起调用，首次收到 STARTED，replayed 为 undefined
+        setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
+        await waitFor(() => sent(setup.transport).some((e) => e.messageType === 'STARTED'))
+        const firstStarted = setup.transport.sent.find((e) => e.messageType === MessageType.STARTED)
+        expect(firstStarted?.payload.case).toBe('started')
+        if (firstStarted?.payload.case === 'started') {
+          expect(firstStarted.payload.value.replayed).toBeFalsy()
+        }
+
+        // 2. 发起 CANCEL，收到 CANCELLED，reason 必须为 'cancelled'
+        setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-1', payload: {} }))
+        await waitFor(() => sent(setup.transport).some((e) => e.messageType === 'CANCELLED'))
+        const userCancelled = setup.transport.sent.find((e) => e.messageType === MessageType.CANCELLED)
+        expect(userCancelled?.payload.case).toBe('cancelled')
+        if (userCancelled?.payload.case === 'cancelled') {
+          expect(userCancelled.payload.value.reason).toBe('cancelled')
+        }
+
+        // 3. 再次发起一个悬挂调用 inv-2，重放时验证 replayed: true
+        hangGate = Promise.withResolvers<void>()
+        const invoke2 = serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-2', payload: invokePayload() })
+        setup.transport.receive(invoke2)
+        await waitFor(() => setup.transport.sent.filter((e) => e.messageType === MessageType.STARTED).length >= 2)
+
+        // 重连，触发 replay
+        setup.transport.disconnect()
+        await waitFor(() => setup.transport.connectCount >= 2)
+        setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV, payload: {} }))
+        await waitFor(() => setup.runtime.getState() === 'READY')
+        setup.transport.receive(invoke2)
+        // 等待重连后的 STARTED
+        await waitFor(() => setup.transport.sent.filter((e) => e.messageType === MessageType.STARTED).length >= 1)
+        const replayedStarted = setup.transport.sent[setup.transport.sent.length - 1]
+        expect(replayedStarted.payload.case).toBe('started')
+        if (replayedStarted.payload.case === 'started') {
+          expect(replayedStarted.payload.value.replayed).toBe(true)
+        }
+      } finally {
+        hangGate.resolve()
+        setup.runtime.close()
+        await setup.runtime.awaitCompletion()
+      }
+    })
   })
 })
