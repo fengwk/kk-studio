@@ -763,7 +763,6 @@ public final class HarnessRuntime {
     };
   }
 
-  /** 按永久 {@code parentThreadId} 深度优先收集整棵树；重复出现即环路，fail closed。 */
   /** 读取 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）；Session 不存在抛 NotFound。 */
   public List<Entry> getSessionEntries(UUID sessionId) {
     Objects.requireNonNull(sessionId, "sessionId");

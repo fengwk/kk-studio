@@ -402,6 +402,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
 返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
 
+Thread 快照增量读取属于免费 L1：`thread_snapshot.incremental_read` 用缺失 Agent 的回合快速收敛，不调用模型，
+验证非法 `afterEntryId` 返回 400、祖先游标只返回其后的 Entry、游标即 head 时为空增量、非祖先游标回退完整历史。
+
 安装配置与安装码兑换属于免费 L1 API 契约。可用
 `node scripts/dev/verify/e2e/run-matrix.mjs --only environment.install_script_code_roundtrip`
 定向验证五分钟一次性安装码、重签替换、未消费码的轮换失效，以及兑换生成 fresh token 和推进版本。
