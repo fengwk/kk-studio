@@ -110,7 +110,13 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
 派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
-`unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）；
+`unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）。
+可选的 `afterEntryId`（canonical UUID，否则 400）请求增量历史：游标是当前 head 的祖先时，`baseEntryId` 等于游标，
+`entries` 只含游标之后的 Entry（游标即 head 时为空）；游标未知、位于其它分支或 Session 时返回完整历史，`baseEntryId` 为 null。
+无论完整还是增量，Thread、队列、当前输出、工具与退出事实都是同一事务的完整当前值，`usageCost` 只投影本次返回的 Entry。
+Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compaction-availability` 按需返回 `available` 与可空的
+`disabledReason`，按完整历史判断 token 阈值、ownership 与模型。它只是提示；`POST /api/threads/{threadId}/compact`
+仍以 `expectedVersion` 与服务端判断为准。
 `POST /api/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、

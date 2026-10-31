@@ -75,6 +75,16 @@ Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot �
 Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；
 没有 EventSource，也不用固定轮询兜底。
 
+Thread Snapshot 只有一份 query 缓存，所有读取都经
+[`thread-snapshot-cache.ts`](../../frontend/src/features/chat/runtime/thread-snapshot-cache.ts) 的同一 fetcher。
+缓存始终是完整的 root-to-head 历史；只有末 Entry 确为当前 head 时才以它为 `afterEntryId` 请求增量。
+响应到达时按当时的缓存合并：完整响应替换缓存，增量保留到 `baseEntryId` 的前缀再按 Entry id 幂等接上，
+较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
+增量永远不会被当作完整缓存写入。resync 与重连只重新执行同一查询，服务端对非祖先游标返回完整历史。
+手动压缩可用性不在 Snapshot 内：根控制区只在命令面板显示时按需查询
+`/api/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
+它只影响命令提示，压缩提交仍由服务端按 `expectedVersion` 判断。
+
 执行树按执行根订阅，服务端聚合后代写入后推送 changed，只回读该根，根本地空闲也保持订阅。
 交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
 环境注册表与连接租约订阅 environments：changed、subscribed 与 resync 都回读权威列表；

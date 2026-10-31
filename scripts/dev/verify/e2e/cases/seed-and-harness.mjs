@@ -2402,7 +2402,7 @@ registerCase({
   id: 'thread_snapshot.incremental_read',
   level: 'L1',
   title: 'Thread 快照 afterEntryId 增量读取与边界回退',
-  docs: 'GET /api/threads/{id}?afterEntryId：非法 UUID 返回 400；cursor=head 时返回空 delta 且 baseEntryId=head；非祖先游标回退全量快照且 baseEntryId=null；无真实 Provider 调用',
+  docs: 'GET /api/threads/{id}?afterEntryId：非法 UUID 返回 400；ROOT 游标只返回其后的 Entry 且 baseEntryId=ROOT；cursor=head 时返回空 delta 且 baseEntryId=head；非祖先游标回退全量快照且 baseEntryId=null；无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -2431,13 +2431,25 @@ registerCase({
         { status: 400 },
       )
 
-      // 2. cursor=head -> 空 delta，baseEntryId=head
+      // 2. ROOT 是 head 的祖先 -> 只返回 ROOT 之后的 Entry，顺序与完整历史一致
+      const rootId = full.entries[0].entryId
+      assert(full.entries.length > 1, 'quiescent thread must have entries after ROOT')
+      const { json: afterRootJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${rootId}`)
+      const afterRootData = envelopeData(afterRootJson)
+      assert.strictEqual(afterRootData.baseEntryId, rootId, 'ancestor cursor must be echoed as baseEntryId')
+      assert.deepStrictEqual(
+        afterRootData.entries.map((entry) => entry.entryId),
+        full.entries.slice(1).map((entry) => entry.entryId),
+        'ancestor cursor must return only the entries after it',
+      )
+
+      // 3. cursor=head -> 空 delta，baseEntryId=head
       const { json: atHeadJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${headId}`)
       const atHeadData = envelopeData(atHeadJson)
       assert.strictEqual(atHeadData.baseEntryId, headId, 'cursor at head must return baseEntryId as head')
       assert.strictEqual(atHeadData.entries.length, 0, 'cursor at head must return empty entries list')
 
-      // 3. 非祖先游标 -> 回退全量，baseEntryId=null
+      // 4. 非祖先游标 -> 回退全量，baseEntryId=null
       const nonAncestorId = '00000000-0000-0000-0000-000000000999'
       const { json: nonAncestorJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${nonAncestorId}`)
       const nonAncestorData = envelopeData(nonAncestorJson)
