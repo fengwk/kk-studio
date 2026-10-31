@@ -224,6 +224,10 @@ class EnvironmentIdeServiceImplTest {
 
     assertThrows(
         AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
+    // 大写 viewId 是非法 HTTP 身份，必须在发命令前按校验错误拒绝，不能当成缺失视图。
+    assertThrows(
+        AiValidationException.class,
+        () -> service.closeView(ENV, VIEW.toString().toUpperCase(), request));
     assertTrue(
         transport.commands.stream().noneMatch(command -> command.action() == IdeAction.CLOSE_VIEW));
 

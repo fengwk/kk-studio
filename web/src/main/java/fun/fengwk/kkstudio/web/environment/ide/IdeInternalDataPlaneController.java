@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.io.IOException;
@@ -75,7 +76,7 @@ public final class IdeInternalDataPlaneController {
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = parseEnvironmentId(environmentId);
+    EnvironmentId environment = RequestParameters.environmentId(environmentId);
     requireLocalOwner(environment);
     UUID viewId = requireViewId(request);
     String rawPathAndQuery = requirePathParameter(request);
@@ -107,19 +108,8 @@ public final class IdeInternalDataPlaneController {
   }
 
   private static UUID requireViewId(HttpServletRequest request) {
-    String value = request.getParameter(IdeDataInternalPaths.VIEW_ID_PARAMETER);
-    if (value == null) {
-      throw new AiValidationException("environment", "internal IDE viewId is missing");
-    }
-    try {
-      UUID parsed = UUID.fromString(value);
-      if (!parsed.toString().equals(value)) {
-        throw new IllegalArgumentException("viewId is not canonical");
-      }
-      return parsed;
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environment", "internal IDE viewId is invalid");
-    }
+    return RequestParameters.ideViewId(
+        request.getParameter(IdeDataInternalPaths.VIEW_ID_PARAMETER));
   }
 
   private void requireLocalOwner(EnvironmentId environmentId) {
@@ -128,14 +118,6 @@ public final class IdeInternalDataPlaneController {
     if (!local) {
       throw new AiValidationException(
           "environment", "internal IDE request does not match this node's READY owner route");
-    }
-  }
-
-  private static EnvironmentId parseEnvironmentId(String text) {
-    try {
-      return EnvironmentId.parse(text);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
   }
 

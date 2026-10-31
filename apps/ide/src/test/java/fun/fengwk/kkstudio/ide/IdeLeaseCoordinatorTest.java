@@ -129,6 +129,21 @@ class IdeLeaseCoordinatorTest {
   }
 
   @Test
+  void uppercaseViewIdentityIsSkippedBeforeLease() {
+    // 测试意图：Daemon 回报的大写 viewId 不是 canonical，续租必须跳过该条目且不发送租约。
+    EnvironmentIdeViewDTO reported = view(VIEW_2, 7L);
+    reported.setViewId(VIEW_2.toString().toUpperCase());
+    views.response = views(reported);
+    gateway.proofs.put(
+        new Group(EVENT_NODE, CONNECTION, DOCUMENT),
+        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_2, DOCUMENT, 7L))));
+
+    coordinator.onHeartbeat(ENV, IDENTITY, 44L);
+
+    assertEquals(List.of(), transport.leases.getFirst().bindings());
+  }
+
+  @Test
   void noHeartbeatRoundDoesNothing() {
     coordinator.onHeartbeat(ENV, IDENTITY, null);
 

@@ -11,6 +11,7 @@
 | `fun.fengwk.kkstudio.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
 | `fun.fengwk.kkstudio.common.hash` | SHA-256 摘要与 64 位小写十六进制编码的唯一入口 | 只依赖 JDK；被哈希的字节与领域分隔由调用方决定 |
 | `fun.fengwk.kkstudio.common.id` | canonical UUID 文本解析的唯一入口 | 只依赖 JDK；要求与 `UUID.toString()` 往返一致，不做大小写归一 |
+| `fun.fengwk.kkstudio.common.number` | canonical 非负与正数十进制 long 解析的唯一入口 | 只依赖 JDK；拒绝空白、符号、前导零和超过 `Long.MAX_VALUE` 的值 |
 | `fun.fengwk.kkstudio.common.io` | send 前冻结预算的响应体 deadline 包装：到期主动关闭底层流并把超时统一为超时失败 | 纯 JDK 流包装，不构造 HTTP 客户端、不持有凭据；协议与凭据分类由调用方适配 |
 | `fun.fengwk.kkstudio.common.page` | 共享分页值对象与安全 offset 计算 | 只保存分页元数据、当前结果集与逐项映射；不包含查询执行、排序或与存储相关的计算 |
 | `fun.fengwk.kkstudio.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
@@ -69,6 +70,7 @@
 - Result：[`ResultContent.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputSchema.java)、[`InputValidator.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodec.java)
 - 标识：[`Uuids.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/id/Uuids.java) 解析 canonical UUID，Canvas 与 Storage 的 HTTP 边界直接调用它
+- 十进制：[`DecimalLongs.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/number/DecimalLongs.java) 解析 canonical 非负与正数 long，Catalog、Harness 与 Project 的 HTTP 边界直接调用它
 - 调度状态：[`WorkState.java`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)；有界调度骨架见 [Durable Work](work.md)。插件响应体截止时间见 [Platform Plugin API](platform-plugin-api.md#公共辅助)。
 - [`ResourceRefTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/resource/ResourceRefTest.java) 覆盖各类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../common/src/test/java/fun/fengwk/kkstudio/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 

@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
@@ -57,10 +58,8 @@ public class StudioHarnessSessionProviderRequestPreviewController {
       return ApiResponse.ok(
           StudioHarnessSessionController.withRuntimeTranslation(
               () -> {
-                UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
-                UUID startEntryId =
-                    HarnessRuntimeRequestMapper.parseUuid(
-                        request.getStartEntryId(), "startEntryId");
+                UUID id = Uuids.parseCanonical(sessionId, "sessionId");
+                UUID startEntryId = Uuids.parseCanonical(request.getStartEntryId(), "startEntryId");
                 List<NewThreadCommand> commands =
                     HarnessRuntimeRequestMapper.toNewThreadCommands(
                         request.getCommands(), "commands");
@@ -79,8 +78,8 @@ public class StudioHarnessSessionProviderRequestPreviewController {
       return ApiResponse.ok(
           StudioHarnessSessionController.withRuntimeTranslation(
               () -> {
-                UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
-                UUID entry = HarnessRuntimeRequestMapper.parseUuid(entryId, "entryId");
+                UUID id = Uuids.parseCanonical(sessionId, "sessionId");
+                UUID entry = Uuids.parseCanonical(entryId, "entryId");
                 return previewService.previewHistorical(id, entry);
               }));
     } catch (ProviderRequestPreviewUnavailableException error) {

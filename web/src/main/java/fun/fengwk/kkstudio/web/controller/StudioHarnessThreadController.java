@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -97,8 +98,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () ->
                 HarnessRuntimeResponseMapper.toThreadTreeDtos(
-                    runtime.getThreadTree(
-                        HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId")))));
+                    runtime.getThreadTree(Uuids.parseCanonical(threadId, "threadId")))));
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）；entryPath 的每个 Entry 都带上读取时费用投影。 */
@@ -108,8 +108,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () ->
                 snapshotResponse(
-                    runtime.getThreadSnapshot(
-                        HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId")))));
+                    runtime.getThreadSnapshot(Uuids.parseCanonical(threadId, "threadId")))));
   }
 
   /**
@@ -173,7 +172,7 @@ public class StudioHarnessThreadController {
               HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
                   HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
               return modelRequestDebugService.getModelRequestDebug(
-                  HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId"),
+                  Uuids.parseCanonical(threadId, "threadId"),
                   selection.model(),
                   selection.environmentName());
             }));

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
@@ -46,7 +47,7 @@ public class StudioHarnessProviderRequestPreviewController {
       return ApiResponse.ok(
           StudioHarnessThreadController.withRuntimeTranslation(
               () -> {
-                UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
+                UUID id = Uuids.parseCanonical(threadId, "threadId");
                 AcceptCommandsCommand command =
                     HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(threadId, request);
                 return previewService.preview(id, command);

@@ -57,47 +57,12 @@ class ProjectDtoMapperTest {
   private final ProjectDtoMapper mapper = new ProjectDtoMapper(codec, httpMapper);
 
   @Test
-  void testParseUuidValidAndInvalid() {
-    // 测试意图：验证有效 UUID 返回小写规范对象，非法 UUID 抛出 IllegalArgumentException
-    UUID expected = UUID.randomUUID();
-    assertEquals(expected, ProjectDtoMapper.parseUuid(expected.toString(), "id"));
-    assertEquals(expected, ProjectDtoMapper.parseUuid(expected.toString().toUpperCase(), "id"));
-
-    assertThrows(IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid(null, "id"));
-    assertThrows(IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid("", "id"));
-    IllegalArgumentException invalidUuid =
-        assertThrows(
-            IllegalArgumentException.class, () -> ProjectDtoMapper.parseUuid("invalid-uuid", "id"));
-    assertEquals("id must be a valid UUID string", invalidUuid.getMessage());
-    assertNull(invalidUuid.getCause());
-  }
-
-  @Test
-  void testParseNonNegativeLongValidAndInvalid() {
-    // 测试意图：验证非负十进制 long 字符串解析，拒绝前导零/负数/小数/非数字/溢出
-    assertEquals(0L, ProjectDtoMapper.parseNonNegativeLong("0", "version"));
-    assertEquals(12345L, ProjectDtoMapper.parseNonNegativeLong("12345", "version"));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDtoMapper.parseNonNegativeLong(null, "version"));
-    assertThrows(
-        IllegalArgumentException.class, () -> ProjectDtoMapper.parseNonNegativeLong("", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDtoMapper.parseNonNegativeLong("-1", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDtoMapper.parseNonNegativeLong("012", "version"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectDtoMapper.parseNonNegativeLong("1.5", "version"));
-    IllegalArgumentException overflow =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDtoMapper.parseNonNegativeLong("9999999999999999999999999999", "version"));
-    assertEquals("version exceeds long range", overflow.getMessage());
-    assertNull(overflow.getCause());
+  void testWorkflowMaxRunsRejectsNonCanonicalDecimal() {
+    // 测试意图：maxRuns 走共享 canonical 十进制；空白仍表示缺省，前后空白不再被裁剪后接受。
+    ProjectWorkflowDTO padded = maxRunsWorkflow(" 1");
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> mapper.toWorkflow(padded));
+    assertTrue(error.getMessage().contains("maxRuns"));
   }
 
   @Test

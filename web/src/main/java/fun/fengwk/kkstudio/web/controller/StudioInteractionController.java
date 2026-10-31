@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
@@ -65,9 +66,7 @@ public class StudioInteractionController {
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               UUID root =
-                  rootThreadId == null
-                      ? null
-                      : HarnessRuntimeRequestMapper.parseUuid(rootThreadId, "rootThreadId");
+                  rootThreadId == null ? null : Uuids.parseCanonical(rootThreadId, "rootThreadId");
               return interactionQueryService.listInteractions(root, cursor, parseLimit(limit));
             }));
   }

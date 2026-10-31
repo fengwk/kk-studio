@@ -8,6 +8,7 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
@@ -91,11 +92,7 @@ final class IdeDataHandshakeInterceptor implements HandshakeInterceptor {
     }
     UUID viewId;
     try {
-      viewId = UUID.fromString(viewIds.getFirst());
-      if (!viewId.toString().equals(viewIds.getFirst())) {
-        log.debug("IDE data handshake rejected; phase=view-id; browser={}", browser);
-        return false;
-      }
+      viewId = Uuids.parseCanonical(viewIds.getFirst(), "viewId");
     } catch (IllegalArgumentException error) {
       log.debug("IDE data handshake rejected; phase=view-id; browser={}", browser);
       return false;

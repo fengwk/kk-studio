@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -142,7 +142,7 @@ public class StudioAgentTaskController {
   }
 
   private static UUID parse(String ticketId) {
-    return HarnessRuntimeRequestMapper.parseUuid(ticketId, "ticketId");
+    return Uuids.parseCanonical(ticketId, "ticketId");
   }
 
   private static String requireText(String value, String field) {
