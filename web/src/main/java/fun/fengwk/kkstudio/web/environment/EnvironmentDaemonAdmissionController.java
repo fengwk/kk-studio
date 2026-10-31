@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.environment;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.ee11.websocket.server.JettyWebSocketServerContainer;
+import org.eclipse.jetty.io.ByteBufferPool;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,9 +23,9 @@ import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseProvider;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseTarget;
 
 import java.io.IOException;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 
 /**
  * Daemon 接入准入与 WebSocket 升级端点 ({@value #PATH})。
@@ -50,14 +51,20 @@ public class EnvironmentDaemonAdmissionController {
   private final DaemonSessions sessions;
   private final ObjectProvider<DaemonReleaseProvider> releaseProvider;
   private final Scheduler scheduler;
+  private final Executor executor;
+  private final ByteBufferPool bufferPool;
 
   public EnvironmentDaemonAdmissionController(
       DaemonSessions sessions,
       ObjectProvider<DaemonReleaseProvider> releaseProvider,
-      @Qualifier("daemonTransportScheduler") Scheduler scheduler) {
+      @Qualifier("daemonTransportScheduler") Scheduler scheduler,
+      @Qualifier("daemonTransportExecutor") Executor executor,
+      @Qualifier("daemonTransportByteBufferPool") ByteBufferPool bufferPool) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.releaseProvider = Objects.requireNonNull(releaseProvider, "releaseProvider");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.executor = Objects.requireNonNull(executor, "executor");
+    this.bufferPool = Objects.requireNonNull(bufferPool, "bufferPool");
   }
 
   @GetMapping(PATH)
@@ -132,9 +139,7 @@ public class EnvironmentDaemonAdmissionController {
   }
 
   private void performUpgrade(
-      DaemonAdmission.Admitted admitted,
-      HttpServletRequest request,
-      HttpServletResponse response)
+      DaemonAdmission.Admitted admitted, HttpServletRequest request, HttpServletResponse response)
       throws IOException {
     JettyWebSocketServerContainer container =
         JettyWebSocketServerContainer.getContainer(request.getServletContext());
@@ -148,7 +153,8 @@ public class EnvironmentDaemonAdmissionController {
       upgraded =
           container.upgrade(
               (upgradeRequest, upgradeResponse) ->
-                  new EnvironmentDaemonWebSocketListener(admitted, sessions, scheduler),
+                  new EnvironmentDaemonWebSocketListener(
+                      admitted, sessions, scheduler, executor, bufferPool),
               request,
               response);
     } catch (Exception e) {
@@ -161,7 +167,8 @@ public class EnvironmentDaemonAdmissionController {
     }
 
     if (!upgraded) {
-      log.warn("websocket upgrade rejected by container for environment {}", admitted.environmentId());
+      log.warn(
+          "websocket upgrade rejected by container for environment {}", admitted.environmentId());
       sessions.abandon(admitted);
       if (!response.isCommitted()) {
         response.sendError(HttpServletResponse.SC_BAD_REQUEST, "WebSocket upgrade failed");
@@ -188,8 +195,7 @@ public class EnvironmentDaemonAdmissionController {
     response.flushBuffer();
   }
 
-  private void populateArtifactMetadata(
-      UpgradeRequired.Builder builder, String platformHeader) {
+  private void populateArtifactMetadata(UpgradeRequired.Builder builder, String platformHeader) {
     DaemonReleaseProvider provider = releaseProvider.getIfAvailable();
     if (provider == null) {
       return;

@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
 import org.eclipse.jetty.util.thread.Scheduler;
+import org.eclipse.jetty.websocket.api.Callback;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -99,44 +99,41 @@ class WebSocketEndPointTest {
       payload[i] = (byte) (i & 0x7f);
     }
 
-    AtomicBoolean writeCompleted = new AtomicBoolean(false);
-    endPoint.write(
-        Callback.from(() -> writeCompleted.set(true), ignored -> {}), ByteBuffer.wrap(payload));
+    ByteBuffer buffer = ByteBuffer.wrap(payload);
+    // 第一次 flush 发出第 1 个 1 MiB 块，仍有剩余返回 false
+    assertFalse(endPoint.flush(buffer));
 
-    // 第一次发送应该发出第 1 个 1 MiB 块
     assertEquals(1, pipe.sentMessages.size());
     assertEquals(WebSocketEndPoint.MAX_MESSAGE_BYTES, pipe.sentMessages.get(0).remaining());
-    assertFalse(writeCompleted.get());
 
     // 模拟底层第 1 块发送成功，驱动 completeWrite
     pipe.completeLatestSend();
 
-    // 应该发出第 2 个 1 MiB 块
+    // 第二次 flush 发出第 2 个 1 MiB 块
+    assertFalse(endPoint.flush(buffer));
     assertEquals(2, pipe.sentMessages.size());
     assertEquals(WebSocketEndPoint.MAX_MESSAGE_BYTES, pipe.sentMessages.get(1).remaining());
-    assertFalse(writeCompleted.get());
 
     // 模拟底层第 2 块发送成功
     pipe.completeLatestSend();
 
-    // 应该发出最后剩余的 100 字节
+    // 第三次 flush 发出最后剩余的 100 字节
+    assertFalse(endPoint.flush(buffer));
     assertEquals(3, pipe.sentMessages.size());
     assertEquals(100, pipe.sentMessages.get(2).remaining());
-    assertFalse(writeCompleted.get());
 
     // 模拟底层最后一块发送成功
     pipe.completeLatestSend();
-    assertTrue(writeCompleted.get());
+    // 缓冲区已空，返回 true
+    assertTrue(endPoint.flush(buffer));
   }
 
   @Test
-  void writeFailurePropagatesToFlusherAndClosesEndPoint() {
-    AtomicBoolean failed = new AtomicBoolean(false);
-    endPoint.write(
-        Callback.from(() -> {}, err -> failed.set(true)), ByteBuffer.wrap(new byte[] {1, 2, 3}));
+  void writeFailurePropagatesToFlusherAndClosesEndPoint() throws Exception {
+    ByteBuffer buffer = ByteBuffer.wrap(new byte[] {1, 2, 3});
+    assertFalse(endPoint.flush(buffer));
 
     pipe.failLatestSend(new IOException("transport down"));
-    assertTrue(failed.get());
     assertThrows(IOException.class, () -> endPoint.fill(ByteBuffer.allocate(10)));
   }
 
@@ -185,14 +182,14 @@ class WebSocketEndPointTest {
     void completeLatestSend() {
       Callback cb = pendingCallbacks.poll();
       if (cb != null) {
-        cb.succeeded();
+        cb.succeed();
       }
     }
 
     void failLatestSend(Throwable cause) {
       Callback cb = pendingCallbacks.poll();
       if (cb != null) {
-        cb.failed(cause);
+        cb.fail(cause);
       }
     }
   }

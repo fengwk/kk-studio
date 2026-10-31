@@ -137,6 +137,10 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     return identity;
   }
 
+  public WebSocketEndPoint endPoint() {
+    return endPoint;
+  }
+
   public DaemonEnvironmentTunnel tunnel() {
     return tunnel;
   }

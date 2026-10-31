@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.transport;
 
-import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.websocket.api.Callback;
 
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;

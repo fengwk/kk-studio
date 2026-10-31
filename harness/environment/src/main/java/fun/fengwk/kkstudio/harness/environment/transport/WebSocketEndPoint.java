@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.harness.environment.transport;
 
 import org.eclipse.jetty.io.AbstractEndPoint;
 import org.eclipse.jetty.util.BufferUtil;
-import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.thread.Scheduler;
+import org.eclipse.jetty.websocket.api.Callback;
 
 import java.io.IOException;
 import java.net.SocketAddress;
@@ -52,7 +52,7 @@ public class WebSocketEndPoint extends AbstractEndPoint {
   public void onInboundData(ByteBuffer data, Callback callback) {
     if (data == null || !data.hasRemaining()) {
       if (callback != null) {
-        callback.succeeded();
+        callback.succeed();
       }
       pipe.demand();
       return;
@@ -68,7 +68,7 @@ public class WebSocketEndPoint extends AbstractEndPoint {
 
     if (!accepted) {
       if (callback != null) {
-        callback.succeeded();
+        callback.succeed();
       }
       return;
     }
@@ -127,7 +127,7 @@ public class WebSocketEndPoint extends AbstractEndPoint {
     }
 
     if (callbackToComplete != null) {
-      callbackToComplete.succeeded();
+      callbackToComplete.succeed();
     }
     if (needDemand) {
       pipe.demand();
