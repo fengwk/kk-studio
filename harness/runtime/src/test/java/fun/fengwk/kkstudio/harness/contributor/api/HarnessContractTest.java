@@ -175,7 +175,7 @@ class HarnessContractTest {
     ToolResult successResult =
         new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}");
     ToolResult errorResult = ToolResult.error("call-1", "failed");
-    AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{}");
+    AppendCustomEntry entry = new AppendCustomEntry("state", "{}");
 
     ToolOutcome outcomeWithEffects = new ToolOutcome(successResult, List.of(entry));
     assertEquals(successResult, outcomeWithEffects.result());

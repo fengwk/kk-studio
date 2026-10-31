@@ -49,7 +49,7 @@ class PostgresqlContributorCustomPathTest {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
+            new CustomEntryPayload("test.contributor", "type.a", "{\"step\":1}"));
 
     cteCounter.set(0);
 
@@ -70,7 +70,7 @@ class PostgresqlContributorCustomPathTest {
             store,
             baseline.sessionId(),
             baseline.rootEntryId(),
-            new CustomEntryPayload("test.contributor", "type.a", 1, "{\"step\":1}"));
+            new CustomEntryPayload("test.contributor", "type.a", "{\"step\":1}"));
 
     cteCounter.set(0);
 

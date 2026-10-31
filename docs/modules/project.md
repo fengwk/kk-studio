@@ -80,7 +80,7 @@ YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代�
 Thread `BranchSettings` 的带外重写。
 
 `branch` 上的 [`ProjectRunScope`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn/ProjectRunScope.java)
-以 contributor `project` / customType `run` / schemaVersion 1 冻结本次 Run 的 issue/project/stage 上下文与
+以 contributor `project` / customType `run` 冻结本次 Run 的 issue/project/stage 上下文与
 `sourceThreadId`，并显式记录 `active`：Run 接受时为 true，结束时在同一业务锁内接受一条同一 runId、
 `active=false` 的纯 `SET_CONTRIBUTOR_STATE` 快照；projector 对已关闭 scope 输出空，业务写工具拒绝
 已关闭 scope，新 Run 的 true 快照按命令顺序覆盖旧 scope。`issue_transition` 从冻结 scope 取得 runId，

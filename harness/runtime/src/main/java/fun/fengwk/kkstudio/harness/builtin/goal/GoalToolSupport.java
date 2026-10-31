@@ -88,8 +88,7 @@ final class GoalToolSupport {
   /** Agent 进度声明：只追加 goal-id-bound 的 {@code goal.progress} 快照，不改动 Goal 正文或业务状态。 */
   static ToolOutcome progressChange(ToolCall call, GoalProgress progress) {
     AppendCustomEntry entry =
-        new AppendCustomEntry(
-            GoalFeature.PROGRESS_TYPE, GoalProgressCodec.SCHEMA_VERSION, CODEC.encode(progress));
+        new AppendCustomEntry(GoalFeature.PROGRESS_TYPE, CODEC.encode(progress));
     return new ToolOutcome(successResult(call.id(), CODEC.encode(progress)), List.of(entry));
   }
 

@@ -385,8 +385,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     ToolEffectBatch effects =
         new ToolEffectBatch(
             List.of(
-                new CustomEntryPayload("goal", "state", 1, "{\"step\":1}"),
-                new CustomEntryPayload("goal", "state", 1, "{\"step\":2}")));
+                new CustomEntryPayload("goal", "state", "{\"step\":1}"),
+                new CustomEntryPayload("goal", "state", "{\"step\":2}")));
     succeedToolWith(
         fixture.store,
         chain.toolInvocationIds().get(0),
@@ -404,9 +404,9 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     List<Entry> batchEntries = path(fixture.store, chain.turn().threadId()).entries();
     assertEquals(9, batchEntries.size());
     assertEquals(
-        new CustomEntryPayload("goal", "state", 1, "{\"step\":1}"), batchEntries.get(4).payload());
+        new CustomEntryPayload("goal", "state", "{\"step\":1}"), batchEntries.get(4).payload());
     assertEquals(
-        new CustomEntryPayload("goal", "state", 1, "{\"step\":2}"), batchEntries.get(5).payload());
+        new CustomEntryPayload("goal", "state", "{\"step\":2}"), batchEntries.get(5).payload());
     assertTrue(batchEntries.get(6).payload() instanceof MessagePayload);
     assertTrue(batchEntries.get(7).payload() instanceof MessagePayload);
     // applyToolBatch 同事务删除全部 child ToolInvocation 行与 parent ModelInvocation 行。

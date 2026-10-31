@@ -77,8 +77,7 @@ class IssueTransitionToolTest {
   private static ToolExecutionContext context(UUID threadId) {
     BranchView branch = mock(BranchView.class);
     when(branch.latestCustomEntry(ProjectRunScope.CUSTOM_TYPE))
-        .thenReturn(
-            Optional.of(new CustomStateSnapshot(ProjectRunScope.SCHEMA_VERSION, SCOPE_JSON)));
+        .thenReturn(Optional.of(new CustomStateSnapshot(SCOPE_JSON)));
     return new ToolExecutionContext(INVOCATION_ID, threadId, Instant.now(), branch);
   }
 
@@ -111,7 +110,7 @@ class IssueTransitionToolTest {
   /** 测试意图：被接受的交接返回可读回执，并提示模型收尾（不再发起新的业务写）。 */
   @Test
   void returnsAcceptedHandoffReceipt() {
-    when(service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, SCOPE_JSON, "REVIEW"))
+    when(service.accept(THREAD_ID, SCOPE_JSON, "REVIEW"))
         .thenReturn(
             new IssueTransitionService.IssueTransitionResult("DESIGN", "REVIEW", RUN_ID, false));
 
@@ -126,7 +125,7 @@ class IssueTransitionToolTest {
   /** 测试意图：幂等重放回执必须与首次接受可区分，避免模型误判自己没有交接成功而重复尝试。 */
   @Test
   void returnsReplayReceiptForIdempotentRetry() {
-    when(service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, SCOPE_JSON, "REVIEW"))
+    when(service.accept(THREAD_ID, SCOPE_JSON, "REVIEW"))
         .thenReturn(
             new IssueTransitionService.IssueTransitionResult("DESIGN", "REVIEW", RUN_ID, true));
 
@@ -157,8 +156,7 @@ class IssueTransitionToolTest {
   /** 测试意图：业务拒绝原因必须原样回到模型，否则模型无法修正目标阶段。 */
   @Test
   void returnsValidationMessageFromService() {
-    when(service.accept(
-            eq(THREAD_ID), eq(ProjectRunScope.SCHEMA_VERSION), eq(SCOPE_JSON), anyString()))
+    when(service.accept(eq(THREAD_ID), eq(SCOPE_JSON), anyString()))
         .thenThrow(
             new AiValidationException("issue_run", "state DESIGN cannot transition to DONE"));
 
@@ -171,8 +169,7 @@ class IssueTransitionToolTest {
   /** 测试意图：未知失败绝不回显内部细节，只给出稳定的通用错误。 */
   @Test
   void hidesUnknownFailureDetail() {
-    when(service.accept(
-            eq(THREAD_ID), eq(ProjectRunScope.SCHEMA_VERSION), eq(SCOPE_JSON), anyString()))
+    when(service.accept(eq(THREAD_ID), eq(SCOPE_JSON), anyString()))
         .thenThrow(new IllegalStateException("jdbc connection lost"));
 
     ToolResult result = execute("{\"to_state\":\"REVIEW\"}", context(THREAD_ID));

@@ -57,10 +57,10 @@ class DatabaseContributorBranchViewLoaderTest {
     BranchView view = loader.load(entryId, "goal");
 
     assertEquals(
-        List.of(new CustomStateSnapshot(1, "{\"state\":\"ok\"}")),
+        List.of(new CustomStateSnapshot("{\"state\":\"ok\"}")),
         view.customEntries("goal.progress"));
     assertEquals(
-        Optional.of(new CustomStateSnapshot(1, "{\"state\":\"ok\"}")),
+        Optional.of(new CustomStateSnapshot("{\"state\":\"ok\"}")),
         view.latestCustomEntry("goal.progress"));
     assertTrue(view.customEntries("other.type").isEmpty());
     // 用户 Goal 来自 branch 生效 settings，而不是 contributor 自定义状态。
@@ -118,7 +118,7 @@ class DatabaseContributorBranchViewLoaderTest {
         id,
         sessionId,
         parentId,
-        new CustomEntryPayload(contributorId, customType, 1, dataJson),
+        new CustomEntryPayload(contributorId, customType, dataJson),
         Instant.parse("2026-01-01T00:00:01Z"));
   }
 }

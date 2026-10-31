@@ -195,7 +195,6 @@ class IssueRunServiceTest {
     CustomEntryPayload state = stateCommand.state();
     assertEquals(ProjectRunScope.CONTRIBUTOR_ID, state.contributorId());
     assertEquals(ProjectRunScope.CUSTOM_TYPE, state.customType());
-    assertEquals(ProjectRunScope.SCHEMA_VERSION, state.schemaVersion());
     ProjectRunScope scope = new ProjectRunScopeJsonCodec().decode(state.dataJson());
     assertEquals(run.getId(), scope.runId());
     assertEquals(ISSUE_ID, scope.issueId());
@@ -255,7 +254,6 @@ class IssueRunServiceTest {
                 new CustomEntryPayload(
                     ProjectRunScope.CONTRIBUTOR_ID,
                     ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
                     new ProjectRunScopeJsonCodec().encode(frozen))),
             UUID.randomUUID(),
             "0".repeat(64),

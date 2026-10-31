@@ -11,7 +11,6 @@ function makeEntry(overrides: Partial<HarnessSessionEntryDTO> = {}): HarnessSess
     payloadJson: JSON.stringify({
       contributorId: 'builtin',
       customType: 'goal.progress',
-      schemaVersion: 1,
       data: {
         goalId: 'goal-123',
         status: 'complete',
@@ -41,7 +40,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'goal-123',
           status: 'complete',
@@ -68,7 +66,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         dataJson: JSON.stringify({
           goalId: 'goal-123',
           status: 'blocked',
@@ -95,7 +92,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'old-goal-456',
           status: 'complete',
@@ -122,7 +118,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'old-goal-456',
           status: 'complete',
@@ -143,7 +138,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'goal-123',
           status: 'blocked',
@@ -157,7 +151,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'goal-123',
           status: 'complete',
@@ -178,7 +171,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'current-goal',
           status: 'complete',
@@ -192,7 +184,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: {
           goalId: 'other-or-stale-goal',
           status: 'blocked',
@@ -209,20 +200,11 @@ describe('parseGoalProgress', () => {
     expect(result.stale).toBeNull()
   })
 
-  it('ignores entries with invalid schemaVersion, contributorId, customType, or status', () => {
+  it('ignores entries with invalid contributorId, customType, or status', () => {
     const invalidContributor = makeEntry({
       payloadJson: JSON.stringify({
         contributorId: 'other-plugin',
         customType: 'goal.progress',
-        schemaVersion: 1,
-        data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
-      }),
-    })
-    const invalidSchema = makeEntry({
-      payloadJson: JSON.stringify({
-        contributorId: 'builtin',
-        customType: 'goal.progress',
-        schemaVersion: 2,
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
       }),
     })
@@ -230,7 +212,6 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'other.progress',
-        schemaVersion: 1,
         data: { goalId: 'goal-123', status: 'complete', reason: 'ok' },
       }),
     })
@@ -238,13 +219,11 @@ describe('parseGoalProgress', () => {
       payloadJson: JSON.stringify({
         contributorId: 'builtin',
         customType: 'goal.progress',
-        schemaVersion: 1,
         data: { goalId: 'goal-123', status: 'in_progress', reason: 'ok' },
       }),
     })
 
     expect(parseGoalProgress([invalidContributor], 'goal-123')).toEqual({ active: null, stale: null })
-    expect(parseGoalProgress([invalidSchema], 'goal-123')).toEqual({ active: null, stale: null })
     expect(parseGoalProgress([invalidType], 'goal-123')).toEqual({ active: null, stale: null })
     expect(parseGoalProgress([invalidStatus], 'goal-123')).toEqual({ active: null, stale: null })
   })

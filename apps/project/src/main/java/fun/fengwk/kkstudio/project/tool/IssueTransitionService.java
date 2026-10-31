@@ -60,13 +60,8 @@ public class IssueTransitionService {
 
   /** 接受一次阶段交接请求；返回已登记的目标与是否为幂等重放。 */
   @Transactional
-  public IssueTransitionResult accept(
-      UUID callingThreadId, int scopeSchemaVersion, String runScopeJson, String toState) {
+  public IssueTransitionResult accept(UUID callingThreadId, String runScopeJson, String toState) {
     Objects.requireNonNull(callingThreadId, "callingThreadId");
-    if (scopeSchemaVersion != ProjectRunScope.SCHEMA_VERSION) {
-      throw new AiValidationException(
-          "issue_run", "unsupported run context schema version: " + scopeSchemaVersion);
-    }
     ProjectRunScope scope = decodeScope(runScopeJson);
     if (!scope.active()) {
       throw new AiValidationException(

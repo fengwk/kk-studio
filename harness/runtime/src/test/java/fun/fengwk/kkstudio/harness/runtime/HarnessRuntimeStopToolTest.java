@@ -92,7 +92,7 @@ class HarnessRuntimeStopToolTest {
     markRunningTool(store, ids.get(4));
     ToolEffectBatch effects =
         new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}")));
+            List.of(new CustomEntryPayload("goal", "state", "{\"status\":\"active\"}")));
     succeedTool(store, ids.get(4), effects);
     cancelTool(store, ids.get(5));
     approveTool(store, ids.get(6));
@@ -113,7 +113,7 @@ class HarnessRuntimeStopToolTest {
     EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(13, path.entries().size());
     assertEquals(
-        new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}"),
+        new CustomEntryPayload("goal", "state", "{\"status\":\"active\"}"),
         path.entries().get(8).payload());
     for (int callIndex = 0; callIndex < ids.size(); callIndex++) {
       Entry entry = path.entries().get(resultEntryIndex(callIndex));

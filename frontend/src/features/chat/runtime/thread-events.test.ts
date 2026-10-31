@@ -171,7 +171,7 @@ describe('buildThreadEventTimeline', () => {
         },
         ownerThreadId: 't1',
       }),
-      entry('custom-1', 'CUSTOM', { contributorId: 'c1', customType: 'note', schemaVersion: 1, data: {} }),
+      entry('custom-1', 'CUSTOM', { contributorId: 'c1', customType: 'note', data: {} }),
       entry('unknown-1', 'UNKNOWN_TYPE' as EntryType, {}),
     ]
 
@@ -925,7 +925,6 @@ describe('buildThreadEventTimeline', () => {
       entry('custom-full', 'CUSTOM', {
         contributorId: 'goal-contributor',
         customType: 'goal-status',
-        schemaVersion: 1,
         data: {},
       }),
     ]
@@ -941,7 +940,6 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(events[0]!.rawJson!)).toEqual({
       contributorId: 'goal-contributor',
       customType: 'goal-status',
-      schemaVersion: 1,
       data: {},
     })
   })

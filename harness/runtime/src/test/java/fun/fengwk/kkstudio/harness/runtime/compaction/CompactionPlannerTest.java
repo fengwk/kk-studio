@@ -1204,7 +1204,7 @@ class CompactionPlannerTest {
               id(cur),
               id(100L),
               parentId(),
-              new CustomEntryPayload(contributorId, customType, 1, "{\"s\":1}"),
+              new CustomEntryPayload(contributorId, customType, "{\"s\":1}"),
               BASE));
       return this;
     }

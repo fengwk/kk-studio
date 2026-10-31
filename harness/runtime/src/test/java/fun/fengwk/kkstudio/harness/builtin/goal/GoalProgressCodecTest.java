@@ -39,8 +39,7 @@ class GoalProgressCodecTest {
         new GoalProgress(GOAL_ID, GoalStatus.BLOCKED, "needs input", REPORTED_AT);
 
     String encoded = codec.encode(progress);
-    GoalProgress decoded =
-        codec.decode(new CustomStateSnapshot(GoalProgressCodec.SCHEMA_VERSION, encoded));
+    GoalProgress decoded = codec.decode(new CustomStateSnapshot(encoded));
 
     assertEquals(
         "{\"goalId\":\""
@@ -52,13 +51,13 @@ class GoalProgressCodecTest {
   }
 
   /**
-   * 非 {@code schemaVersion = 1}、非 object、字段集不符、UUID/状态/文本/时间戳非法，以及空白或 malformed 原始文本一律 fail-closed
-   * 拒绝；每个用例都来自真实 fixture，而不是为覆盖率构造的路径。
+   * 非 object、字段集不符、UUID/状态/文本/时间戳非法，以及空白或 malformed 原始文本一律 fail-closed 拒绝；每个用例都来自真实
+   * fixture，而不是为覆盖率构造的路径。
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource("invalidProgress")
   void rejectsInvalidProgressFixtures(
-      String name, String mode, int schemaVersion, String document, String errorFragment) {
+      String name, String mode, String document, String errorFragment) {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
@@ -66,7 +65,7 @@ class GoalProgressCodecTest {
               if ("parse".equals(mode)) {
                 codec.parse(document, "goal progress");
               } else {
-                codec.decode(new CustomStateSnapshot(schemaVersion, document));
+                codec.decode(new CustomStateSnapshot(document));
               }
             });
     assertTrue(
@@ -85,11 +84,7 @@ class GoalProgressCodecTest {
               : FIXTURE_MAPPER.writeValueAsString(fixture.get("data"));
       cases.add(
           Arguments.of(
-              fixture.get("name").asString(),
-              mode,
-              fixture.get("schemaVersion").asInt(),
-              document,
-              fixture.get("error").asString()));
+              fixture.get("name").asString(), mode, document, fixture.get("error").asString()));
     }
     return cases.stream();
   }

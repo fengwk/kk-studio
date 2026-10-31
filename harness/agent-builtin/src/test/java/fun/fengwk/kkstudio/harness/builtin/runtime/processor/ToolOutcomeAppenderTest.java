@@ -149,8 +149,8 @@ class ToolOutcomeAppenderTest {
         new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"),
         new ToolEffectBatch(
             List.of(
-                new CustomEntryPayload("goal", "type-a", 1, "{\"a\":1}"),
-                new CustomEntryPayload("goal", "type-b", 2, "{\"b\":2}"))));
+                new CustomEntryPayload("goal", "type-a", "{\"a\":1}"),
+                new CustomEntryPayload("goal", "type-b", "{\"b\":2}"))));
     ToolInvocation invocation = tool(store, toolId);
     var before = path(store, chain.turn().threadId());
 

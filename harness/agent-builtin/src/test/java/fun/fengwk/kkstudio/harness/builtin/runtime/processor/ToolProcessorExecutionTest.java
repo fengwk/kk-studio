@@ -838,8 +838,7 @@ class ToolProcessorExecutionTest {
     Fixture fixture = approvedFixture();
     AtomicInteger calls = new AtomicInteger();
     ToolEffectBatch effects =
-        new ToolEffectBatch(
-            List.of(new CustomEntryPayload("goal", "materialized-effect", 1, "{}")));
+        new ToolEffectBatch(List.of(new CustomEntryPayload("goal", "materialized-effect", "{}")));
     fixture.gateway.queueRun(
         progress ->
             new ToolGateway.Succeeded(

@@ -695,7 +695,7 @@ class PostgresqlStopReceiptTest {
             1,
             UUID.randomUUID(),
             new SetContributorStateCommandPayload(
-                new CustomEntryPayload("com.example.issue", "issue-scope", 1, dataJson)));
+                new CustomEntryPayload("com.example.issue", "issue-scope", dataJson)));
     StoppedThreadReceipt rootReceipt =
         new StoppedThreadReceipt(
             tree.rootThreadId(), rootStopRequestId, null, 1, List.of(cancelled));

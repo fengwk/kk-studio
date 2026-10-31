@@ -564,7 +564,6 @@ public class IssueRunService {
                 new CustomEntryPayload(
                     ProjectRunScope.CONTRIBUTOR_ID,
                     ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
                     RUN_SCOPE_CODEC.encode(scope.closed()))),
             commandKey(run.getId(), "scope-closed"));
     IssueThreadView view = threadExecutions.readThread(threadId);
@@ -758,7 +757,6 @@ public class IssueRunService {
                 new CustomEntryPayload(
                     ProjectRunScope.CONTRIBUTOR_ID,
                     ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
                     RUN_SCOPE_CODEC.encode(scope))),
             runId,
             "contributor-state"),

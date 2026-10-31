@@ -123,8 +123,8 @@ class GoalFeatureTest {
     SimpleBranchView branch =
         new SimpleBranchView()
             .withGoal(GOAL)
-            .withEntry(GoalProgressCodec.SCHEMA_VERSION, codec.encode(stale))
-            .withEntry(GoalProgressCodec.SCHEMA_VERSION, codec.encode(current));
+            .withEntry(codec.encode(stale))
+            .withEntry(codec.encode(current));
 
     ToolOutcome outcome = executeTool(new GetGoalTool(), branch, T2, "get-1", "{}");
     assertFalse(outcome.result().error());
@@ -161,9 +161,7 @@ class GoalFeatureTest {
     assertEquals(1, outcome.customEntries().size());
     AppendCustomEntry entry = outcome.customEntries().get(0);
     assertEquals("goal.progress", entry.customType());
-    assertEquals(GoalProgressCodec.SCHEMA_VERSION, entry.schemaVersion());
-    GoalProgress progress =
-        codec.decode(new CustomStateSnapshot(entry.schemaVersion(), entry.dataJson()));
+    GoalProgress progress = codec.decode(new CustomStateSnapshot(entry.dataJson()));
     assertEquals(GOAL_ID, progress.goalId());
     assertEquals(GoalStatus.COMPLETE, progress.status());
     assertEquals("All checks passed", progress.reason());
@@ -177,9 +175,7 @@ class GoalFeatureTest {
   void updateGoalRejectsStaleReportAndMissingGoal() {
     GoalProgress reported = new GoalProgress(GOAL_ID, GoalStatus.COMPLETE, "done", T1);
     SimpleBranchView alreadyReported =
-        new SimpleBranchView()
-            .withGoal(GOAL)
-            .withEntry(GoalProgressCodec.SCHEMA_VERSION, codec.encode(reported));
+        new SimpleBranchView().withGoal(GOAL).withEntry(codec.encode(reported));
 
     ToolOutcome late =
         executeTool(
@@ -339,9 +335,9 @@ class GoalFeatureTest {
       return new SimpleBranchView(entries, value);
     }
 
-    private SimpleBranchView withEntry(int version, String dataJson) {
+    private SimpleBranchView withEntry(String dataJson) {
       List<CustomStateSnapshot> next = new ArrayList<>(entries);
-      next.add(new CustomStateSnapshot(version, dataJson));
+      next.add(new CustomStateSnapshot(dataJson));
       return new SimpleBranchView(next, goal);
     }
 

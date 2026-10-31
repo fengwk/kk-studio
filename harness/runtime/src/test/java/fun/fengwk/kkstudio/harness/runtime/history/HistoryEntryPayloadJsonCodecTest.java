@@ -90,7 +90,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CustomMessagePayload.CORE_RENDERER_KEY,
             user("system"),
             CustomMessagePayload.CORE_DETAILS_JSON);
-    EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", 2, "{\"s\":1}");
+    EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", "{\"s\":1}");
     EntryPayload attemptFailure =
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
@@ -451,10 +451,9 @@ class HistoryEntryPayloadJsonCodecTest {
                 user("sys"),
                 CustomMessagePayload.CORE_DETAILS_JSON)));
     assertEquals(
-        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+        "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\","
             + "\"data\":{\"state\":\"open\"}}",
-        CODEC.encode(
-            new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}")));
+        CODEC.encode(new CustomEntryPayload("com.example.goal", "goal", "{\"state\":\"open\"}")));
     assertEquals(
         "{\"turnStartEntryId\":\""
             + UUID_7
@@ -1057,7 +1056,7 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\","
                     + "\"data\":{},\"extra\":1}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -1068,43 +1067,19 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":[]}"));
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"Goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":{}}"));
+                "{\"contributorId\":\"Goal\",\"customType\":\"goal\"," + "\"data\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":0,"
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":-1,"
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":\"1\","
-                    + "\"data\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.CUSTOM,
-                "{\"contributorId\":\"goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
-                    + "\"data\":null}"));
+                "{\"contributorId\":\"goal\",\"customType\":\"goal\"," + "\"data\":null}"));
   }
 
   @Test
@@ -1317,7 +1292,7 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void preservesCustomEntryDataNumberPrecision() {
     String dataJson = "{\"big\":1E+309,\"tiny\":1E-324}";
-    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", 1, dataJson);
+    EntryPayload payload = new CustomEntryPayload("com.example.goal", "goal", dataJson);
 
     String encoded = CODEC.encode(payload);
 

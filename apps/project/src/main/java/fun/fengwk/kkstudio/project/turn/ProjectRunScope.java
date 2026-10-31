@@ -40,9 +40,6 @@ public record ProjectRunScope(
   /** Contributor 内 custom state 的 canonical customType。 */
   public static final String CUSTOM_TYPE = "run";
 
-  /** 当前冻结快照的 schema 版本。 */
-  public static final int SCHEMA_VERSION = 1;
-
   /** 唯一业务写工具名：模型可见名，也是交接协议的稳定引用。 */
   public static final String ISSUE_TRANSITION_TOOL = "issue_transition";
 

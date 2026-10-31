@@ -861,9 +861,7 @@ public final class ToolExecutionGateway implements ToolGateway {
               "tool custom entry targets state without a declared WRITE access: "
                   + entry.customType());
         }
-        payloads.add(
-            new CustomEntryPayload(
-                contributorId, entry.customType(), entry.schemaVersion(), entry.dataJson()));
+        payloads.add(new CustomEntryPayload(contributorId, entry.customType(), entry.dataJson()));
       }
       return new ToolEffectBatch(payloads);
     }

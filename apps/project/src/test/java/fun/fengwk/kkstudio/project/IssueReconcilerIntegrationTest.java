@@ -128,7 +128,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
       Entry entry = mock(Entry.class);
       when(entry.id()).thenReturn(entryId);
       EntryPayload payload =
-          customPayloads.getOrDefault(entryId, new CustomEntryPayload("test", "test", 1, "{}"));
+          customPayloads.getOrDefault(entryId, new CustomEntryPayload("test", "test", "{}"));
       when(entry.payload()).thenReturn(payload);
       entries.add(entry);
     }
@@ -631,10 +631,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
     issueTransitionService.accept(
-        run.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(run.getThreadId()),
-        "REVIEW");
+        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -679,10 +676,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.COMPLETED);
     matchRunJoin(run.getId(), terminal);
     issueTransitionService.accept(
-        run.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(run.getThreadId()),
-        "REVIEW");
+        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
     // Join 冻结之后本 Thread 又有人类对话与在途模型：旧实现会因 busy 无限期延后，永不提交已匹配的收尾。
     appendHistoryEntry(run.getThreadId());
     ModelInvocation activeModel = mock(ModelInvocation.class);
@@ -716,10 +710,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueTransitionService.accept(
-        run.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(run.getThreadId()),
-        "REVIEW");
+        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.FAILED);
     matchRunJoin(run.getId(), terminal);
 
@@ -774,8 +765,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID threadId = first.getThreadId();
     UUID terminal = appendTurnEndEntry(threadId, TurnEndOutcome.COMPLETED);
     matchRunJoin(first.getId(), terminal);
-    issueTransitionService.accept(
-        threadId, ProjectRunScope.SCHEMA_VERSION, frozenRunScopeJson(threadId), "REVIEW");
+    issueTransitionService.accept(threadId, frozenRunScopeJson(threadId), "REVIEW");
     assertEquals(
         IssueReconcileOutcome.RUN_HANDED_OFF, reconciler.reconcile(claimWork(issue.getId())));
     long closeSequence = latestRunScopeSequence(threadId);
@@ -814,10 +804,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId());
 
     issueTransitionService.accept(
-        first.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(first.getThreadId()),
-        "REVIEW");
+        first.getThreadId(), frozenRunScopeJson(first.getThreadId()), "REVIEW");
     UUID terminal = appendTurnEndEntry(first.getThreadId(), TurnEndOutcome.COMPLETED);
     matchRunJoin(first.getId(), terminal);
     assertEquals(
@@ -1479,10 +1466,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     // 模拟 Agent 发起交接请求
     issueTransitionService.accept(
-        run.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(run.getThreadId()),
-        "REVIEW");
+        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
     run = issueRunService.getRun(run.getId());
     assertEquals("REVIEW", run.getNextState());
 
@@ -1570,10 +1554,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueTransitionService.accept(
-        run.getThreadId(),
-        ProjectRunScope.SCHEMA_VERSION,
-        frozenRunScopeJson(run.getThreadId()),
-        "REVIEW");
+        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
 
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
