@@ -103,7 +103,7 @@ class PostgresqlEntryCurrentQueryTest {
     assertEquals(start, state.referencedTurnStartEntry().id());
     assertEquals(applied, state.baseSettings());
     assertEquals(0, fullPathCounter.get(), "冷 current 不得先读取完整路径");
-    assertRecursiveRows(5, "控制尾部读到被引用 TURN_START 后停止，不读 user 或 ROOT");
+    assertRecursiveRows(6, "控制尾部读到被引用 TURN_START 后停止，不读 ROOT");
     UUID missing = UUID.randomUUID();
     assertThrows(
         IllegalArgumentException.class,
@@ -160,7 +160,7 @@ class PostgresqlEntryCurrentQueryTest {
     assertNull(open.referencedTurnStartEntry());
     assertEquals(live, open.baseSettings());
     assertEquals(0, fullPathCounter.get());
-    assertRecursiveRows(4, "open compaction 回溯到最近真实 settings 后停止，不读 ROOT");
+    assertRecursiveRows(5, "open compaction 回溯到最近真实 settings 后停止，不读 ROOT");
   }
 
   /** 测试意图：已缓存完整路径直接派生；另一分支与未知目标不是祖先，head 缺失被拒绝。 */
@@ -202,6 +202,20 @@ class PostgresqlEntryCurrentQueryTest {
               IllegalArgumentException.class, () -> tx.entries().isAncestor(unknown, head));
           return null;
         });
+
+    fullPathCounter.set(0);
+    assertTrue(
+        Boolean.TRUE.equals(
+            store.transaction(tx -> Boolean.valueOf(tx.entries().isAncestor(head, head)))));
+    assertEquals(0, fullPathCounter.get(), "冷祖先查询自身直接命中，不读取完整路径");
+    assertRecursiveRows(1, "命中自身立即停止");
+
+    fullPathCounter.set(0);
+    assertTrue(
+        Boolean.TRUE.equals(
+            store.transaction(tx -> Boolean.valueOf(tx.entries().isAncestor(head, start)))));
+    assertEquals(0, fullPathCounter.get(), "冷祖先查询直接父命中，不读取完整路径");
+    assertRecursiveRows(2, "命中直接父立即停止");
 
     fullPathCounter.set(0);
     boolean coldOtherBranch =
@@ -270,7 +284,7 @@ class PostgresqlEntryCurrentQueryTest {
 
     assertEquals(new EntryPathMetrics(2, 1), metrics);
     assertEquals(0, fullPathCounter.get(), "冷计数不得先读取完整路径");
-    assertRecursiveRows(11, "计数遍历祖先元数据，但不先读取完整路径");
+    assertRecursiveRows(12, "计数遍历祖先元数据，但不先读取完整路径");
     assertThrows(
         IllegalArgumentException.class,
         () -> store.transaction(tx -> tx.entries().loadPathMetrics(UUID.randomUUID())));

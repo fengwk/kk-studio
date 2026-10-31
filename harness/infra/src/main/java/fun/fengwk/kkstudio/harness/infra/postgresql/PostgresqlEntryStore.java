@@ -20,15 +20,12 @@ import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Predicate;
 
 /** Entry 聚合的 PostgreSQL 实现。 */
 final class PostgresqlEntryStore implements EntryStore {
@@ -143,175 +140,154 @@ final class PostgresqlEntryStore implements EntryStore {
    * <p>head、非控制锚点、open 或已关闭 Turn 引用、以及最近真实 settings 齐备后立即停止。COMPACTION 是回合而不是控制 Entry，其 settings
    * 不参与锚点。结果不回填完整路径缓存。
    */
-  private static final String LOAD_CURRENT_ANCHORS =
+  /**
+   * 单语句冷 current 读取：递归只携带定位 id 与 depth，head 也由递归步统一处理。
+   *
+   * <p>head、非控制锚点、open 或已关闭 Turn 引用、以及最近真实 settings 齐备后立即停止。COMPACTION 是回合而不是控制 Entry，其 settings
+   * 不参与真实模型。最终 join 只返回 head 与锚点行的完整列，按 depth 升序（head 在前），结果不回填完整路径缓存。
+   */
+  private static final String LOAD_CURRENT =
       """
       with recursive current_anchor as (
-          select id, parent_entry_id, entry_type, 0 as depth,
-                 entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK') as non_control_seen,
-                 case
-                     when entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK') then id
-                 end as non_control_id,
-                 entry_type in ('TURN_START', 'TURN_END') as turn_seen,
-                 case
-                     when entry_type in ('TURN_START', 'TURN_END') then id
-                 end as turn_id,
-                 entry_type in ('ROOT', 'SETTINGS')
-                     or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION') as settings_seen,
-                 case
-                     when entry_type in ('ROOT', 'SETTINGS')
-                         or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION') then id
-                 end as settings_id,
-                 entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK')
-                     and entry_type <> 'TURN_END' as reference_seen,
-                 case
-                     when entry_type = 'TURN_END' then payload ->> 'turnStartEntryId'
-                 end as needed_ref,
-                 cast(null as uuid) as reference_id
-          from harness_entry
-          where id = ?
+          select
+              cast(null as uuid) as id,
+              cast(? as uuid) as parent_entry_id,
+              -1 as depth,
+              cast(null as uuid) as non_control_id,
+              cast(null as uuid) as turn_id,
+              cast(null as uuid) as settings_id,
+              cast(null as uuid) as needed_ref,
+              cast(null as uuid) as reference_id
           union all
-          select parent.id, parent.parent_entry_id, parent.entry_type, anchor.depth + 1,
-                 anchor.non_control_seen or parent.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK'),
-                 coalesce(
-                     anchor.non_control_id,
-                     case
-                         when parent.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK') then parent.id
-                     end
-                 ),
-                 anchor.turn_seen or parent.entry_type in ('TURN_START', 'TURN_END'),
-                 coalesce(
-                     anchor.turn_id,
-                     case
-                         when parent.entry_type in ('TURN_START', 'TURN_END') then parent.id
-                     end
-                 ),
-                 anchor.settings_seen
-                     or parent.entry_type in ('ROOT', 'SETTINGS')
-                     or (parent.entry_type = 'TURN_START' and parent.payload ->> 'reason' <> 'COMPACTION'),
-                 coalesce(
-                     anchor.settings_id,
-                     case
-                         when parent.entry_type in ('ROOT', 'SETTINGS')
-                             or (parent.entry_type = 'TURN_START'
-                                 and parent.payload ->> 'reason' <> 'COMPACTION') then parent.id
-                     end
-                 ),
-                 anchor.reference_seen
-                     or (
-                         anchor.needed_ref is not null
-                         and parent.entry_type = 'TURN_START'
-                         and parent.id::text = anchor.needed_ref
-                     )
-                     or (
-                         not anchor.non_control_seen
-                         and parent.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK')
-                         and parent.entry_type <> 'TURN_END'
-                     ),
-                 case
-                     when anchor.needed_ref is not null then anchor.needed_ref
-                     when not anchor.non_control_seen and parent.entry_type = 'TURN_END'
-                         then parent.payload ->> 'turnStartEntryId'
-                 end,
-                 coalesce(
-                     anchor.reference_id,
-                     case
-                         when anchor.needed_ref is not null
-                             and parent.entry_type = 'TURN_START'
-                             and parent.id::text = anchor.needed_ref then parent.id
-                     end
-                 )
-          from current_anchor anchor
+          select
+              e.id,
+              e.parent_entry_id,
+              a.depth + 1,
+              coalesce(
+                  a.non_control_id,
+                  case
+                      when e.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK') then e.id
+                  end
+              ),
+              coalesce(
+                  a.turn_id,
+                  case
+                      when e.entry_type in ('TURN_START', 'TURN_END') then e.id
+                  end
+              ),
+              coalesce(
+                  a.settings_id,
+                  case
+                      when e.entry_type in ('ROOT', 'SETTINGS')
+                        or (e.entry_type = 'TURN_START' and e.payload ->> 'reason' <> 'COMPACTION') then e.id
+                  end
+              ),
+              coalesce(
+                  a.needed_ref,
+                  case
+                      when a.non_control_id is null and e.entry_type = 'TURN_END'
+                          then cast(e.payload ->> 'turnStartEntryId' as uuid)
+                  end
+              ),
+              coalesce(
+                  a.reference_id,
+                  case
+                      when a.needed_ref is not null and e.id = a.needed_ref and e.entry_type = 'TURN_START'
+                          then e.id
+                  end
+              )
+          from current_anchor a
           join lateral (
               select id, parent_entry_id, entry_type, payload
               from harness_entry
-              where id = anchor.parent_entry_id
-          ) parent on true
-          where anchor.entry_type <> 'ROOT'
-            and not (
-                anchor.non_control_seen
-                and anchor.turn_seen
-                and anchor.settings_seen
-                and anchor.reference_seen
-            )
+              where id = a.parent_entry_id
+          ) e on true
+          where a.non_control_id is null
+             or a.turn_id is null
+             or a.settings_id is null
+             or (a.needed_ref is not null and a.reference_id is null)
       )
-      select id
-      from current_anchor
-      where depth = 0
-         or id = non_control_id
-         or id = turn_id
-         or id = settings_id
-         or id = reference_id
-      order by depth desc
+      select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state
+      from current_anchor a
+      join harness_entry e on e.id = a.id
+      where a.depth = 0
+         or a.id = a.non_control_id
+         or a.id = a.turn_id
+         or a.id = a.settings_id
+         or a.id = a.reference_id
+      order by a.depth asc
       """;
 
   /**
-   * 祖先计数：递归只投影计数所需标量，在 SQL 中按 {@link EntryPathMetrics#from} 聚合，不把正文返回 Java。
+   * 祖先计数：递归工作表只携带逐行标量，不携带 payload，由种子行统一表达式。
    *
    * <p>INPUT 与 CONTINUATION 计一轮；COMPACTION 与 STOP 不计。工具调用只计 ASSISTANT MESSAGE 中的 {@code tool_call}。
    */
   private static final String LOAD_PATH_METRICS =
       """
       with recursive metric_path as (
-          select id, parent_entry_id, entry_type, payload, 0 as depth
-          from harness_entry
-          where id = ?
+          select
+              cast(null as uuid) as id,
+              cast(? as uuid) as parent_entry_id,
+              -1 as depth,
+              0 as turn_inc,
+              0 as tool_inc
           union all
-          select parent.id, parent.parent_entry_id, parent.entry_type, parent.payload, metric_path.depth + 1
-          from metric_path
+          select
+              e.id,
+              e.parent_entry_id,
+              m.depth + 1,
+              case
+                  when e.entry_type = 'TURN_START'
+                   and e.payload ->> 'reason' in ('INPUT', 'CONTINUATION') then 1
+                  else 0
+              end,
+              case
+                  when e.entry_type = 'MESSAGE' and e.payload #>> '{message,role}' = 'ASSISTANT'
+                      then jsonb_array_length(jsonb_path_query_array(e.payload, '$.message.contents[*] ? (@.type == "tool_call")'))
+                  else 0
+              end
+          from metric_path m
           join lateral (
               select id, parent_entry_id, entry_type, payload
               from harness_entry
-              where id = metric_path.parent_entry_id
-          ) parent on true
-          where metric_path.entry_type <> 'ROOT'
+              where id = m.parent_entry_id
+          ) e on true
       )
       select
-          coalesce(sum(
-              case
-                  when entry_type = 'TURN_START'
-                   and payload ->> 'reason' in ('INPUT', 'CONTINUATION') then 1
-                  else 0
-              end
-          ), 0)::int as turn_count,
-          coalesce(sum(
-              case
-                  when entry_type = 'MESSAGE' and payload #>> '{message,role}' = 'ASSISTANT' then (
-                      select count(*)::int
-                      from jsonb_array_elements(payload #> '{message,contents}') content
-                      where content ->> 'type' = 'tool_call'
-                  )
-                  else 0
-              end
-          ), 0)::int as tool_call_count,
-          count(*)::int as entry_count
+          coalesce(sum(turn_inc), 0)::int as turn_count,
+          coalesce(sum(tool_inc), 0)::int as tool_call_count,
+          count(id)::int as entry_count
       from metric_path
+      where depth >= 0
       """;
 
   /**
    * 祖先判定：只比较 id 与 parent，命中 candidate 或到达 ROOT 即停。
    *
-   * <p>head 自身也是祖先。未知 candidate 与其它分支不产生命中行。
+   * <p>head 自身也是祖先。外层返回包含计数与祖先命中的聚合行，count=0 时按 head 缺失抛出。
    */
   private static final String LOAD_ANCESTOR =
       """
       with recursive ancestor_path as (
-          select id, parent_entry_id, entry_type, 0 as depth
+          select id, parent_entry_id
           from harness_entry
           where id = ?
           union all
-          select parent.id, parent.parent_entry_id, parent.entry_type, ancestor_path.depth + 1
-          from ancestor_path
+          select parent.id, parent.parent_entry_id
+          from ancestor_path a
           join lateral (
               select id, parent_entry_id, entry_type
               from harness_entry
-              where id = ancestor_path.parent_entry_id
+              where id = a.parent_entry_id
           ) parent on true
-          where ancestor_path.id is distinct from ?::uuid
-            and ancestor_path.entry_type <> 'ROOT'
+          where a.id is distinct from ?::uuid
+            and a.parent_entry_id is not null
       )
-      select 1
+      select
+          count(id)::int as entry_count,
+          coalesce(bool_or(id = ?::uuid), false) as is_ancestor
       from ancestor_path
-      where id = ?::uuid
       """;
 
   PostgresqlEntryStore(PostgresqlHarnessTransaction tx) {
@@ -450,58 +426,43 @@ final class PostgresqlEntryStore implements EntryStore {
     if (cached != null) {
       return EntryCurrentState.from(cached);
     }
-    List<CurrentAnchor> anchors = loadCurrentAnchors(headEntryId);
-    if (anchors.isEmpty()) {
+    List<Entry> entries = tx.queryList(LOAD_CURRENT, PostgresqlHarnessRows.ENTRY, headEntryId);
+    if (entries.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    Map<UUID, Entry> loaded = new HashMap<>();
-    for (CurrentAnchor anchor : anchors) {
-      loaded.computeIfAbsent(anchor.id(), id -> requireEntry(id));
-    }
-    Entry head = loaded.get(headEntryId);
-    if (head == null) {
-      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
-    }
-    Entry nonControl = nearest(loaded, anchors, entry -> !isControl(entry));
-    Entry turnAnchor =
-        nearest(
-            loaded,
-            anchors,
-            entry ->
-                entry.payload() instanceof TurnStartPayload
-                    || entry.payload() instanceof TurnEndPayload);
-    Entry settingsAnchor = nearest(loaded, anchors, entry -> settingsOf(entry) != null);
-    if (nonControl == null || settingsAnchor == null) {
-      throw new IllegalArgumentException("entry path for " + headEntryId + " is incomplete");
+    Entry head = entries.get(0);
+    Entry nonControl = null;
+    Entry turnAnchor = null;
+    Entry settingsAnchor = null;
+    UUID neededRef = null;
+    for (Entry entry : entries) {
+      if (nonControl == null && !isControl(entry)) {
+        nonControl = entry;
+        if (entry.payload() instanceof TurnEndPayload end) {
+          neededRef = end.turnStartEntryId();
+        }
+      }
+      if (turnAnchor == null
+          && (entry.payload() instanceof TurnStartPayload
+              || entry.payload() instanceof TurnEndPayload)) {
+        turnAnchor = entry;
+      }
+      if (settingsAnchor == null && settingsOf(entry) != null) {
+        settingsAnchor = entry;
+      }
     }
     Entry referenced = null;
-    if (nonControl.payload() instanceof TurnEndPayload end) {
-      referenced =
-          nearest(
-              loaded,
-              anchors,
-              entry ->
-                  entry.id().equals(end.turnStartEntryId())
-                      && entry.payload() instanceof TurnStartPayload);
-      if (referenced == null) {
-        throw new IllegalArgumentException(
-            "TURN_END " + end.turnStartEntryId() + " does not reference a TURN_START on the path");
+    if (neededRef != null) {
+      for (Entry entry : entries) {
+        if (entry.id().equals(neededRef) && entry.payload() instanceof TurnStartPayload) {
+          referenced = entry;
+          break;
+        }
       }
     }
     Entry open =
         turnAnchor != null && turnAnchor.payload() instanceof TurnStartPayload ? turnAnchor : null;
     return new EntryCurrentState(head, nonControl, open, referenced, settingsOf(settingsAnchor));
-  }
-
-  private static Entry nearest(
-      Map<UUID, Entry> loaded, List<CurrentAnchor> anchors, Predicate<Entry> predicate) {
-    for (int i = anchors.size() - 1; i >= 0; i--) {
-      Entry entry = loaded.get(anchors.get(i).id());
-      if (entry != null && predicate.test(entry)) {
-        return entry;
-      }
-    }
-    return null;
   }
 
   /**
@@ -544,17 +505,18 @@ final class PostgresqlEntryStore implements EntryStore {
       }
       return false;
     }
-    if (find(headEntryId).isEmpty()) {
+    AncestorRow row =
+        tx.queryOne(
+                LOAD_ANCESTOR,
+                PostgresqlEntryStore::ancestorRow,
+                headEntryId,
+                candidateEntryId,
+                candidateEntryId)
+            .orElseThrow();
+    if (row.entryCount() == 0) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    Boolean found =
-        tx.queryForObject(
-            "select exists (" + LOAD_ANCESTOR + ")",
-            Boolean.class,
-            headEntryId,
-            candidateEntryId,
-            candidateEntryId);
-    return Boolean.TRUE.equals(found);
+    return row.isAncestor();
   }
 
   /**
@@ -731,15 +693,6 @@ final class PostgresqlEntryStore implements EntryStore {
     }
   }
 
-  private List<CurrentAnchor> loadCurrentAnchors(UUID headEntryId) {
-    return tx.queryList(LOAD_CURRENT_ANCHORS, PostgresqlEntryStore::currentAnchor, headEntryId);
-  }
-
-  private Entry requireEntry(UUID id) {
-    return find(id)
-        .orElseThrow(() -> new IllegalArgumentException("entry " + id + " does not exist"));
-  }
-
   private static boolean isControl(Entry entry) {
     return entry.payload() instanceof NotificationPayload
         || entry.payload() instanceof SettingsPayload
@@ -760,9 +713,8 @@ final class PostgresqlEntryStore implements EntryStore {
     return null;
   }
 
-  private static CurrentAnchor currentAnchor(ResultSet resultSet, int rowNumber)
-      throws SQLException {
-    return new CurrentAnchor(resultSet.getObject("id", UUID.class));
+  private static AncestorRow ancestorRow(ResultSet resultSet, int rowNumber) throws SQLException {
+    return new AncestorRow(resultSet.getInt("entry_count"), resultSet.getBoolean("is_ancestor"));
   }
 
   private static MetricsRow metricsRow(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -772,7 +724,7 @@ final class PostgresqlEntryStore implements EntryStore {
         resultSet.getInt("entry_count"));
   }
 
-  private record CurrentAnchor(UUID id) {}
+  private record AncestorRow(int entryCount, boolean isAncestor) {}
 
   private record MetricsRow(int turnCount, int toolCallCount, int entryCount) {}
 
