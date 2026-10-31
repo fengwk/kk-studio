@@ -104,7 +104,7 @@ groupExecution?
 
 - 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
 - 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 `infra` 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
-- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 5 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 27 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
+- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 5 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 29 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
 
 ---
 
