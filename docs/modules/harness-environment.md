@@ -419,7 +419,9 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 | `fun.fengwk.kkstudio.harness.environment` | canonical Environment UUID，无 I/O |
 | `fun.fengwk.kkstudio.harness.environment.capability` | 固定目录、schema、执行与传输 SPI、发送确定性与终态契约 |
 | `fun.fengwk.kkstudio.harness.environment.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
+| `fun.fengwk.kkstudio.harness.environment.protocol` | v8 控制协议的 protobuf binary：单一 `control.proto` 生成类型、四字节成帧与应用层校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷。尚未接入运行路径，`AGENT_COMMAND`/`AGENT_RESULT` 只预留字段号 |
 | `fun.fengwk.kkstudio.harness.environment.server` | 会话、调用、transfer、IDE 通道与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
+| `fun.fengwk.kkstudio.harness.environment.tunnel` | 本节点隧道、HTTP 交换与双向字节流端口及值对象；不选择传输引擎、不接入运行路径。测试 fake 使用零缓冲 rendezvous 与 16KiB 分段，通过 environment test-jar 复用 |
 
 ## 源码与测试
 
