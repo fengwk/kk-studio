@@ -47,6 +47,9 @@ import java.util.function.Supplier;
 public final class EnvironmentDaemonServer
     implements DaemonSessions, EnvironmentTunnels, EnvironmentCapabilityTransport {
 
+  public static final int MAX_INVOCATION_TOMBSTONES =
+      DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES;
+
   private record PendingAdmission(UUID leaseToken, String registrationToken, String displayName) {}
 
   private final DaemonLeaseStore leaseStore;

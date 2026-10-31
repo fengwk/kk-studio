@@ -12,6 +12,9 @@ public interface DaemonSession {
    */
   void receive(Envelope envelope);
 
+  /** 主动关闭会话。 */
+  void close();
+
   /** 底层传输已关闭时通知会话清理状态；该方法必须是幂等的。 */
   void closed();
 }

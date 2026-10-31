@@ -375,6 +375,9 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private void handleStarted(Envelope envelope) {
     requireReady();
+    if (envelope.getStarted().hasReplayed() && !envelope.getStarted().getReplayed()) {
+      throw new ControlProtocolException("started.replayed must be true when present");
+    }
     UUID invocationId = UUID.fromString(envelope.getInvocationId());
     invocationTracker.callbackTarget(environmentId, invocationId);
   }
@@ -678,7 +681,8 @@ final class DaemonConnectionSession implements DaemonSession {
     }
   }
 
-  void close() {
+  @Override
+  public void close() {
     closed();
   }
 
@@ -802,6 +806,28 @@ final class DaemonConnectionSession implements DaemonSession {
       case ARM64 -> "arm64";
       default -> null;
     };
+  }
+
+  static RuntimeSnapshot toProtoSnapshot(DaemonRuntimeSnapshot snapshot) {
+    RuntimeBody.Builder body = RuntimeBody.newBuilder();
+    if (snapshot.status().daemonVersion() != null) {
+      body.setDaemonVersion(snapshot.status().daemonVersion());
+    }
+    if (snapshot.status().update() != null) {
+      DaemonUpdateProgress up = snapshot.status().update();
+      UpdateProgress.Builder ub =
+          UpdateProgress.newBuilder()
+              .setTargetVersion(up.targetVersion())
+              .setDownloadedBytes(up.downloadedBytes());
+      if (up.totalBytes() != null) {
+        ub.setTotalBytes(up.totalBytes());
+      }
+      body.setUpdate(ub.build());
+    }
+    return RuntimeSnapshot.newBuilder()
+        .setRevision(snapshot.revision())
+        .setStatus(body.build())
+        .build();
   }
 
   static DaemonRuntimeSnapshot toDomainSnapshot(RuntimeSnapshot proto) {

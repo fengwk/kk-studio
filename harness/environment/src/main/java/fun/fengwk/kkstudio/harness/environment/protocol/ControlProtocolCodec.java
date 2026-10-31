@@ -23,6 +23,7 @@ import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -699,7 +700,26 @@ public final class ControlProtocolCodec {
         "temporaryResourcePolicy.temporaryResourceCleanupIntervalSeconds");
   }
 
-  private static void validateUpdate(Update update) {
+  public static Update toProtoUpdate(DaemonUpdateCommand command) {
+    Objects.requireNonNull(command, "command");
+    return Update.newBuilder()
+        .setOperationId(command.operationId())
+        .setTargetVersion(command.targetVersion())
+        .setArtifactUrl(command.artifactUrl())
+        .setArtifactSha256(command.artifactSha256())
+        .build();
+  }
+
+  public static DaemonUpdateCommand toDomainUpdate(Update proto) {
+    Objects.requireNonNull(proto, "proto");
+    return new DaemonUpdateCommand(
+        proto.getOperationId(),
+        proto.getTargetVersion(),
+        proto.getArtifactUrl(),
+        proto.getArtifactSha256());
+  }
+
+  public static void validateUpdate(Update update) {
     String operationId =
         requireText(
             update.hasOperationId(), update.getOperationId(), "update.operationId", 36, true);

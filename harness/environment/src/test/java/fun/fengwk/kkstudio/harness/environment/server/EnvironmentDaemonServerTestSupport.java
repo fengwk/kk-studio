@@ -13,21 +13,37 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeat;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeatCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
+import fun.fengwk.kkstudio.harness.environment.protocol.Architecture;
+import fun.fengwk.kkstudio.harness.environment.protocol.Cancelled;
+import fun.fengwk.kkstudio.harness.environment.protocol.Completed;
+import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
+import fun.fengwk.kkstudio.harness.environment.protocol.EnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.protocol.Error;
+import fun.fengwk.kkstudio.harness.environment.protocol.ExecutionExited;
+import fun.fengwk.kkstudio.harness.environment.protocol.Failed;
+import fun.fengwk.kkstudio.harness.environment.protocol.Heartbeat;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
+import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
+import fun.fengwk.kkstudio.harness.environment.protocol.OperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.protocol.Progress;
+import fun.fengwk.kkstudio.harness.environment.protocol.Ready;
+import fun.fengwk.kkstudio.harness.environment.protocol.RecoverNotFound;
+import fun.fengwk.kkstudio.harness.environment.protocol.ResourceUploadCommit;
+import fun.fengwk.kkstudio.harness.environment.protocol.ResourceUploadRequest;
+import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeStatus;
+import fun.fengwk.kkstudio.harness.environment.protocol.Started;
+import fun.fengwk.kkstudio.harness.environment.protocol.UpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.protocol.UpdateResult;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -35,17 +51,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * 核心测试的内存基座：可控 fake channel / lease store，以及握手与帧构造辅助。
- *
- * <p>Fake 只表达核心真正依赖的窄端口语义（围栏返回值、递交结果、连接开关），不模拟 SQL 或 WebSocket；任何测试都不需要 Spring、JDBC 或产品 DTO
- * 即可驱动完整状态机。
- */
+/** 核心测试的内存基座：可控 fake control channel / lease store，以及握手与 protobuf 帧构造辅助。 */
 final class EnvironmentDaemonServerTestSupport {
 
   static final EnvironmentId ENVIRONMENT_ID =
@@ -57,23 +69,12 @@ final class EnvironmentDaemonServerTestSupport {
   static final String TOKEN = "registration-token";
   static final String OTHER_TOKEN = "other-token";
 
-  /** 同一 Daemon 进程在多次重连中复用的实例身份。 */
   static final String INSTANCE_ID = "33333333-3333-3333-3333-333333333333";
-
-  /** 另一个 Daemon 进程的实例身份：出现即意味着旧进程已不可能再提供终态。 */
   static final String OTHER_INSTANCE_ID = "44444444-4444-4444-4444-444444444444";
-
-  /** 测试 Daemon 上报的构建版本。 */
   static final String DAEMON_VERSION = "1.0.9";
-
-  private static final DaemonReadyCodec READY_CODEC = new DaemonReadyCodec();
-  private static final DaemonHeartbeatCodec HEARTBEAT_CODEC = new DaemonHeartbeatCodec();
-  private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
-  private static final DaemonCapabilityResultCodec RESULT_CODEC = new DaemonCapabilityResultCodec();
 
   static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           DAEMON_VERSION,
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,
@@ -84,105 +85,378 @@ final class EnvironmentDaemonServerTestSupport {
               "/tmp/kk-studio",
               "amd64"));
 
-  /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
   static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;
 
   private EnvironmentDaemonServerTestSupport() {}
 
-  /** 按原始对象身份抛出测试注入的非受检失败，模拟 Error / RuntimeException。 */
+  @SuppressWarnings("unchecked")
+  private static <T extends Throwable> void sneakyThrow(Throwable t) throws T {
+    throw (T) t;
+  }
+
   static void throwUnchecked(Throwable failure) {
-    if (failure instanceof Error error) {
-      throw error;
+    sneakyThrow(failure);
+  }
+
+  static Envelope readyEnvelope(long revision, DaemonRuntimeStatus status) {
+    return readyEnvelope(ENVIRONMENT_ID, revision, status);
+  }
+
+  static Envelope readyEnvelope(
+      EnvironmentId environmentId, long revision, DaemonRuntimeStatus status) {
+    return readyEnvelope(environmentId, revision, status, OperatingSystem.LINUX);
+  }
+
+  static Envelope readyEnvelope(
+      EnvironmentId environmentId, long revision, DaemonRuntimeStatus status, OperatingSystem os) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.READY)
+        .setEnvironmentId(environmentId.value().toString())
+        .setReady(
+            Ready.newBuilder()
+                .setDaemonVersion(DAEMON_VERSION)
+                .setEnvironment(
+                    EnvironmentInfo.newBuilder()
+                        .setOperatingSystem(os)
+                        .setTimeZone("Asia/Shanghai")
+                        .setUserName("dev")
+                        .setHomeDirectory("/home/dev")
+                        .setNote("note")
+                        .setTempDirectory("/tmp/kk-studio")
+                        .setArchitecture(Architecture.AMD64)
+                        .build())
+                .setRuntimeStatus(
+                    DaemonConnectionSession.toProtoSnapshot(
+                        new DaemonRuntimeSnapshot(revision, status)))
+                .build())
+        .build();
+  }
+
+  static Envelope heartbeatEnvelope() {
+    return heartbeatEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+  }
+
+  static Envelope heartbeatEnvelope(long revision, DaemonRuntimeStatus status) {
+    return heartbeatEnvelope(ENVIRONMENT_ID, revision, status, null);
+  }
+
+  static Envelope heartbeatEnvelope(long revision, DaemonRuntimeStatus status, Long ideLeaseRound) {
+    return heartbeatEnvelope(ENVIRONMENT_ID, revision, status, ideLeaseRound);
+  }
+
+  static Envelope heartbeatEnvelope(
+      EnvironmentId environmentId, long revision, DaemonRuntimeStatus status, Long ideLeaseRound) {
+    Heartbeat.Builder builder =
+        Heartbeat.newBuilder()
+            .setRuntimeStatus(
+                DaemonConnectionSession.toProtoSnapshot(
+                    new DaemonRuntimeSnapshot(revision, status)));
+    if (ideLeaseRound != null) {
+      builder.setIdeLeaseRound(ideLeaseRound);
     }
-    if (failure instanceof RuntimeException runtime) {
-      throw runtime;
-    }
-    throw new IllegalStateException("tests may only inject unchecked failures", failure);
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.HEARTBEAT)
+        .setEnvironmentId(environmentId.value().toString())
+        .setHeartbeat(builder.build())
+        .build();
   }
 
-  static String readyPayload() {
-    return readyPayload(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+  static Envelope runtimeStatusEnvelope(long revision, DaemonRuntimeStatus status) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RUNTIME_STATUS)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setRuntimeStatus(
+            RuntimeStatus.newBuilder()
+                .setRuntimeStatus(
+                    DaemonConnectionSession.toProtoSnapshot(
+                        new DaemonRuntimeSnapshot(revision, status)))
+                .build())
+        .build();
   }
 
-  static String readyPayload(long revision, DaemonRuntimeStatus status) {
-    return READY_CODEC.encode(
-        new DaemonReady(CAPABILITIES, new DaemonRuntimeSnapshot(revision, status)));
+  static Envelope runtimeStatusEnvelope(
+      long revision, String daemonVersion, String targetVersion, Long downloadedBytes) {
+    DaemonUpdateProgress progress =
+        targetVersion == null
+            ? null
+            : new DaemonUpdateProgress(targetVersion, downloadedBytes, null);
+    return runtimeStatusEnvelope(revision, new DaemonRuntimeStatus(daemonVersion, progress));
   }
 
-  static String heartbeatPayload() {
-    return heartbeatPayload(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
-  }
-
-  static String heartbeatPayload(long revision, DaemonRuntimeStatus status) {
-    return heartbeatPayload(revision, status, null);
-  }
-
-  static String heartbeatPayload(long revision, DaemonRuntimeStatus status, Long ideLeaseRound) {
-    return HEARTBEAT_CODEC.encode(
-        new DaemonHeartbeat(new DaemonRuntimeSnapshot(revision, status), ideLeaseRound));
-  }
-
-  /** 心跳监听观察到的轮次；用于验证核心只在有效 READY/租约心跳后投递回调。 */
   record HeartbeatNotification(
       EnvironmentId environmentId, DaemonConnectionIdentity identity, Long ideLeaseRound) {}
 
-  static String completedPayload(UUID invocationId, String text) {
-    return RESULT_CODEC.encodeCompleted(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text), MAX_RESOURCE_BYTES, null);
+  static Envelope startedEnvelope(UUID invocationId) {
+    return startedEnvelope(invocationId, false);
   }
 
-  static String partialPayload(UUID invocationId, String text) {
-    return RESULT_CODEC.encodeProgress(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text));
+  static Envelope startedEnvelope(String invocationId) {
+    return startedEnvelope(UUID.fromString(invocationId), false);
   }
 
-  /** 终态 COMPLETED payload：携带一个已就绪的 resource 上传引用（由 FakeTicketService 预先发放）。 */
-  static String completedResourcePayload(UUID invocationId, ResourceRef uploaded, String preview) {
-    return completedResourcePayloads(invocationId, List.of(uploaded));
+  static Envelope startedEnvelope(String invocationId, boolean replayed) {
+    return startedEnvelope(UUID.fromString(invocationId), replayed);
   }
 
-  /** 终态 COMPLETED payload：携带多个 resource 引用，用于重复/聚合校验。 */
-  static String completedResourcePayloads(UUID invocationId, List<ResourceRef> uploads) {
-    List<ResultContent> contents = new ArrayList<>();
-    for (ResourceRef upload : uploads) {
-      contents.add(new ResourceResultContent(upload));
+  static Envelope startedEnvelope(UUID invocationId, boolean replayed) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.STARTED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setStarted(Started.newBuilder().setReplayed(replayed).build())
+        .build();
+  }
+
+  static Envelope progressEnvelope(UUID invocationId, String text) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.PROGRESS)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setProgress(
+            Progress.newBuilder()
+                .setResult(
+                    DaemonConnectionSession.toProtoResult(
+                        EnvironmentCapabilityResult.text(invocationId.toString(), text)))
+                .build())
+        .build();
+  }
+
+  static Envelope progressEnvelope(String invocationId, String text) {
+    return progressEnvelope(UUID.fromString(invocationId), text);
+  }
+
+  static Envelope completedEnvelope(UUID invocationId, String text) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.COMPLETED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setCompleted(
+            Completed.newBuilder()
+                .setResult(
+                    DaemonConnectionSession.toProtoResult(
+                        EnvironmentCapabilityResult.text(invocationId.toString(), text)))
+                .build())
+        .build();
+  }
+
+  static Envelope completedEnvelope(String invocationId, String text) {
+    return completedEnvelope(UUID.fromString(invocationId), text);
+  }
+
+  static Envelope completedResourceEnvelope(
+      UUID invocationId, ResourceRef uploaded, String preview) {
+    List<ResultContent> contents = List.of(new ResourceResultContent(uploaded, preview));
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.COMPLETED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setCompleted(
+            Completed.newBuilder()
+                .setResult(
+                    DaemonConnectionSession.toProtoResult(
+                        new EnvironmentCapabilityResult(
+                            invocationId.toString(), contents, false, "{}")))
+                .build())
+        .build();
+  }
+
+  static Envelope completedResourceEnvelope(
+      String invocationId, ResourceRef uploaded, String preview) {
+    return completedResourceEnvelope(UUID.fromString(invocationId), uploaded, preview);
+  }
+
+  static Envelope completedResourceEnvelope(UUID invocationId, List<ResourceRef> uploadedList) {
+    List<ResultContent> contents =
+        uploadedList.stream()
+            .map(ref -> (ResultContent) new ResourceResultContent(ref, null))
+            .toList();
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.COMPLETED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setCompleted(
+            Completed.newBuilder()
+                .setResult(
+                    DaemonConnectionSession.toProtoResult(
+                        new EnvironmentCapabilityResult(
+                            invocationId.toString(), contents, false, "{}")))
+                .build())
+        .build();
+  }
+
+  static Envelope completedResourceEnvelope(String invocationId, List<ResourceRef> uploadedList) {
+    return completedResourceEnvelope(UUID.fromString(invocationId), uploadedList);
+  }
+
+  static Envelope failedEnvelope(UUID invocationId, String message) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.FAILED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setFailed(Failed.newBuilder().setMessage(message).build())
+        .build();
+  }
+
+  static Envelope failedEnvelope(String invocationId, String message) {
+    return failedEnvelope(UUID.fromString(invocationId), message);
+  }
+
+  static Envelope cancelledEnvelope(UUID invocationId) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.CANCELLED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setCancelled(Cancelled.getDefaultInstance())
+        .build();
+  }
+
+  static Envelope cancelledEnvelope(String invocationId) {
+    return cancelledEnvelope(UUID.fromString(invocationId));
+  }
+
+  static Envelope executionExitedEnvelope(UUID invocationId) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.EXECUTION_EXITED)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setExecutionExited(ExecutionExited.getDefaultInstance())
+        .build();
+  }
+
+  static Envelope executionExitedEnvelope(String invocationId) {
+    return executionExitedEnvelope(UUID.fromString(invocationId));
+  }
+
+  static Envelope recoverNotFoundEnvelope(UUID invocationId) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RECOVER_NOT_FOUND)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setRecoverNotFound(RecoverNotFound.getDefaultInstance())
+        .build();
+  }
+
+  static Envelope recoverNotFoundEnvelope(String invocationId) {
+    return recoverNotFoundEnvelope(UUID.fromString(invocationId));
+  }
+
+  static Envelope resourceUploadRequestEnvelope(
+      UUID invocationId, UUID uploadId, String name, long size) {
+    return resourceUploadRequestEnvelope(
+        invocationId,
+        uploadId,
+        "application/octet-stream",
+        name,
+        size,
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+  }
+
+  static Envelope resourceUploadRequestEnvelope(
+      String invocationId, UUID uploadId, String name, long size) {
+    return resourceUploadRequestEnvelope(UUID.fromString(invocationId), uploadId, name, size);
+  }
+
+  static Envelope resourceUploadRequestEnvelope(
+      UUID invocationId, UUID uploadId, String mediaType, String name, long size, String sha256) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RESOURCE_UPLOAD_REQUEST)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setResourceUploadRequest(
+            ResourceUploadRequest.newBuilder()
+                .setTransferId(uploadId.toString())
+                .setName(name)
+                .setSize(size)
+                .setSha256(sha256)
+                .setMediaType(mediaType)
+                .build())
+        .build();
+  }
+
+  static Envelope resourceUploadRequestEnvelope(
+      String invocationId, UUID uploadId, String mediaType, String name, long size, String sha256) {
+    return resourceUploadRequestEnvelope(
+        UUID.fromString(invocationId), uploadId, mediaType, name, size, sha256);
+  }
+
+  static Envelope resourceUploadCommitEnvelope(
+      UUID invocationId, UUID uploadId, ResourceRef uploaded) {
+    return resourceUploadCommitEnvelope(
+        invocationId,
+        uploadId,
+        uploaded.blobUploadId() != null ? uploaded.blobUploadId() : uploadId);
+  }
+
+  static Envelope resourceUploadCommitEnvelope(
+      String invocationId, UUID uploadId, ResourceRef uploaded) {
+    return resourceUploadCommitEnvelope(UUID.fromString(invocationId), uploadId, uploaded);
+  }
+
+  static Envelope resourceUploadCommitEnvelope(UUID invocationId, UUID transferId, UUID uploadId) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.RESOURCE_UPLOAD_COMMIT)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setResourceUploadCommit(
+            ResourceUploadCommit.newBuilder()
+                .setTransferId(transferId.toString())
+                .setUploadId(uploadId.toString())
+                .build())
+        .build();
+  }
+
+  static Envelope resourceUploadCommitEnvelope(
+      String invocationId, UUID transferId, UUID uploadId) {
+    return resourceUploadCommitEnvelope(UUID.fromString(invocationId), transferId, uploadId);
+  }
+
+  static Envelope errorEnvelope(String message) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.ERROR)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setError(Error.newBuilder().setMessage(message).build())
+        .build();
+  }
+
+  static IdeCommand ideCommand(String viewId) {
+    return IdeCommand.newBuilder().setAction(IdeAction.OPEN_VIEW).setViewId(viewId).build();
+  }
+
+  static IdeResult ideResult(String viewId, long epoch, String dir, String workspace) {
+    return IdeResult.newBuilder()
+        .setOk(true)
+        .setViewId(viewId)
+        .setBindingEpoch(epoch)
+        .setDirectory(dir)
+        .setWorkspacePath(workspace)
+        .build();
+  }
+
+  static Envelope ideResultEnvelope(
+      UUID invocationId, boolean ok, String viewId, long epoch, String dir, String workspace) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.IDE_RESULT)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setIdeResult(ideResult(viewId, epoch, dir, workspace))
+        .build();
+  }
+
+  static Envelope updateResultEnvelope(UUID operationId, boolean ok, String message) {
+    UpdateResult.Builder builder =
+        UpdateResult.newBuilder()
+            .setOperationId(operationId.toString())
+            .setPhase(ok ? UpdatePhase.UPDATE_PREPARED : UpdatePhase.UPDATE_FAILED);
+    if (message != null) {
+      builder.setMessage(message);
     }
-    return RESULT_CODEC.encodeCompleted(
-        new EnvironmentCapabilityResult(invocationId.toString(), contents, false, "{}"),
-        MAX_RESOURCE_BYTES,
-        null);
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.UPDATE_RESULT)
+        .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+        .setUpdateResult(builder.build())
+        .build();
   }
 
-  static String helloPayload(String token) {
-    return helloPayload(token, INSTANCE_ID);
-  }
-
-  static String helloPayload(String token, String daemonInstanceId) {
-    return helloPayload(token, daemonInstanceId, EnvironmentCapabilityCatalog.version());
-  }
-
-  static String helloPayload(
-      String token, String daemonInstanceId, String capabilityCatalogVersion) {
-    return "{\"protocolVersion\":"
-        + DaemonProtocol.VERSION
-        + ",\"registrationToken\":\""
-        + token
-        + "\",\"capabilityCatalogVersion\":\""
-        + capabilityCatalogVersion
-        + "\",\"daemonVersion\":\""
-        + DAEMON_VERSION
-        + "\",\"daemonInstanceId\":\""
-        + daemonInstanceId
-        + "\"}";
-  }
-
-  static String encode(
-      EnvironmentId scope, DaemonMessageType type, String invocationId, String payload) {
-    return ENVELOPE_CODEC.encode(
-        new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payload));
-  }
-
-  /** 一个通过 READY OS（LINUX）发送前校验的 fs.read 请求：携带绝对 path。 */
   static EnvironmentCapabilityExecutionRequest capabilityRequest(UUID callId) {
     EnvironmentCapabilityDescriptor descriptor =
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
@@ -192,7 +466,6 @@ final class EnvironmentDaemonServerTestSupport {
         Duration.ofSeconds(5));
   }
 
-  /** 测试夹具：一个核心实例 + 可控租约存储 + 会话监听记录。 */
   static final class Fixture {
 
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
@@ -207,13 +480,10 @@ final class EnvironmentDaemonServerTestSupport {
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
-    /** 注入的宿主 READY 通知失败；用于验证通知失败去敏可观察且不改变会话状态。 */
+    final Map<FakeControlChannel, DaemonSession> sessions = new ConcurrentHashMap<>();
+
     Throwable readyNotificationFailure;
-
-    /** 注入的宿主更新回执通知失败；用于验证同职责通知失败去敏可观察。 */
     Throwable updateNotificationFailure;
-
-    /** 注入的实例接管通知失败；用于验证通知失败去敏可观察且不阻断新实例的握手。 */
     Throwable replacedNotificationFailure;
 
     Fixture() {
@@ -269,7 +539,6 @@ final class EnvironmentDaemonServerTestSupport {
               settings::get);
     }
 
-    /** 热更当前运行期设置；用于验证策略热更经同一控制通道推送到已 READY 连接。 */
     void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
       settings.set(
           new EnvironmentServerSettings(
@@ -285,68 +554,92 @@ final class EnvironmentDaemonServerTestSupport {
       registrationDirectoryFails = true;
     }
 
-    FakeChannel connectReady(String connectionId) {
+    FakeControlChannel openSession(String connectionId) {
+      return openSession(connectionId, INSTANCE_ID, TOKEN);
+    }
+
+    FakeControlChannel openSession(String connectionId, String daemonInstanceId) {
+      return openSession(connectionId, daemonInstanceId, TOKEN);
+    }
+
+    FakeControlChannel openSession(String connectionId, String daemonInstanceId, String token) {
+      DaemonAdmission admission = server.admit(new DaemonHandshake(token, daemonInstanceId));
+      if (!(admission instanceof DaemonAdmission.Admitted admitted)) {
+        throw new IllegalStateException("admission failed: " + admission);
+      }
+      FakeControlChannel channel = new FakeControlChannel(connectionId);
+      DaemonSession session = server.open(admitted, channel, null);
+      sessions.put(channel, session);
+      return channel;
+    }
+
+    FakeControlChannel connectReady(String connectionId) {
       return connectReady(connectionId, INSTANCE_ID);
     }
 
-    FakeChannel connectReady(String connectionId, String daemonInstanceId) {
-      FakeChannel channel = new FakeChannel(connectionId);
-      server.open(channel);
-      receiveHello(channel, TOKEN, ENVIRONMENT_ID, daemonInstanceId);
-      receiveReady(channel);
+    FakeControlChannel connectReady(String connectionId, String daemonInstanceId) {
+      return connectReady(ENVIRONMENT_ID, connectionId, daemonInstanceId, TOKEN);
+    }
+
+    FakeControlChannel connectReady(
+        EnvironmentId environmentId, String connectionId, String daemonInstanceId, String token) {
+      DaemonAdmission admission = server.admit(new DaemonHandshake(token, daemonInstanceId));
+      if (!(admission instanceof DaemonAdmission.Admitted admitted)) {
+        throw new IllegalStateException("admission failed: " + admission);
+      }
+      FakeControlChannel channel = new FakeControlChannel(connectionId);
+      DaemonSession session = server.open(admitted, channel, null);
+      sessions.put(channel, session);
+      session.receive(
+          readyEnvelope(environmentId, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
       return channel;
     }
 
-    /** 用声明的 capability catalog 版本完成握手：用于验证目录不匹配仍可承载版本查询与受管更新。 */
-    FakeChannel connectReadyWithCatalog(String connectionId, String capabilityCatalogVersion) {
-      FakeChannel channel = new FakeChannel(connectionId);
-      server.open(channel);
-      server.receive(
-          channel.connectionId(),
-          encode(
-              null,
-              DaemonMessageType.HELLO,
-              null,
-              helloPayload(TOKEN, INSTANCE_ID, capabilityCatalogVersion)));
-      channel.boundEnvironmentId = ENVIRONMENT_ID;
-      receiveReady(channel);
-      return channel;
-    }
-
-    /** 旧持有者为失效代际（例如租约过期）后，用新代际重新完成握手；同一实例身份表示同一 Daemon 进程重连。 */
-    FakeChannel reconnectReady(String connectionId) {
+    FakeControlChannel reconnectReady(String connectionId) {
       leaseStore.activeLeaseToken = false;
       return connectReady(connectionId);
     }
 
-    void receiveHello(FakeChannel channel) {
-      receiveHello(channel, TOKEN, ENVIRONMENT_ID);
+    void receive(FakeControlChannel channel, Envelope envelope) {
+      DaemonSession session = sessions.get(channel);
+      if (session != null) {
+        session.receive(envelope);
+      }
     }
 
-    void receiveHello(FakeChannel channel, String token, EnvironmentId environmentId) {
-      receiveHello(channel, token, environmentId, INSTANCE_ID);
+    void receiveReady(FakeControlChannel channel) {
+      receiveReady(channel, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
     }
 
-    void receiveHello(
-        FakeChannel channel, String token, EnvironmentId environmentId, String daemonInstanceId) {
-      server.receive(
-          channel.connectionId(),
-          encode(null, DaemonMessageType.HELLO, null, helloPayload(token, daemonInstanceId)));
-      channel.boundEnvironmentId = environmentId;
+    void receiveReady(FakeControlChannel channel, long revision, DaemonRuntimeStatus status) {
+      receive(channel, readyEnvelope(ENVIRONMENT_ID, revision, status));
     }
 
-    void receiveReady(FakeChannel channel) {
-      receive(channel, DaemonMessageType.READY, null, readyPayload());
+    DaemonSession sessionOf(FakeControlChannel channel) {
+      return sessions.get(channel);
     }
 
-    void receive(FakeChannel channel, DaemonMessageType type, String invocationId, String payload) {
-      EnvironmentId scope =
-          channel.boundEnvironmentId != null ? channel.boundEnvironmentId : ENVIRONMENT_ID;
-      server.receive(channel.connectionId(), encode(scope, type, invocationId, payload));
+    void close(String connectionId) {
+      DaemonSession session = null;
+      for (Map.Entry<FakeControlChannel, DaemonSession> entry : sessions.entrySet()) {
+        if (entry.getKey().connectionId().equals(connectionId)) {
+          session = entry.getValue();
+          break;
+        }
+      }
+      if (session != null) {
+        session.closed();
+      }
+    }
+
+    void close(FakeControlChannel channel) {
+      DaemonSession session = sessions.get(channel);
+      if (session != null) {
+        session.closed();
+      }
     }
   }
 
-  /** 可控租约存储：租约状态可随时整体切换，用于验证围栏语义；只表达核心依赖的围栏返回值。 */
   static final class FakeLeaseStore implements DaemonLeaseStore {
 
     boolean holdsReadyLease = true;
@@ -360,7 +653,6 @@ final class EnvironmentDaemonServerTestSupport {
     boolean retryLater;
     DaemonCapabilities readyCapabilities;
 
-    /** 注入的租约解除失败；用于验证连接收尾的独立释放与 Error 语义。 */
     Throwable disconnectFailure;
 
     @Override
@@ -430,7 +722,6 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
-  /** 记录终态事件的监听器；用于断言 exactly-once 语义。 */
   static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
 
     final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
@@ -469,11 +760,6 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
-  /**
-   * 记录回调到达顺序的线程安全监听器：partial / complete / error 追加到同一序列，供并发 receive 的顺序断言使用。
-   *
-   * <p>非 final，便于测试叠加阻塞或异常行为而保留顺序记录能力。
-   */
   static class SerialListener implements EnvironmentCapabilityExecutionListener {
 
     private final List<String> events = new CopyOnWriteArrayList<>();
@@ -503,50 +789,39 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
-  /** 内存连接：记录出站帧，并可按需模拟队列容量拒绝或传输失败。 */
-  static final class FakeChannel implements DaemonChannel {
+  static final class FakeControlChannel implements DaemonControlChannel {
 
     private final String connectionId;
-    private final List<DaemonEnvelope> envelopes = new ArrayList<>();
-    private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
-    private boolean open = true;
-    private boolean closed;
-    private int closeCount;
-    private int closeAfterFlushCount;
+    private final List<Envelope> envelopes = new CopyOnWriteArrayList<>();
+    private volatile boolean open = true;
+    private volatile boolean closed = false;
+    private volatile int closeCount = 0;
 
-    /** 下一次递交返回 BUSY：模拟本地出站队列容量/字节预算拒绝。 */
-    boolean busyNextOffer;
-
-    /** 下一次递交抛出异常：模拟传输自身发送失败。 */
-    boolean failNextOffer;
-
-    /** 下一次递交停在入口，直到 {@link #releaseOffer()}；用于制造代际替换窗口。 */
+    volatile boolean busyNextOffer;
+    volatile boolean failNextOffer;
     volatile boolean holdNextOffer;
-
-    /** 注入的传输关闭失败；关闭动作本身仍被记录，用于验证独立释放与 Error 语义。 */
     Throwable closeFailure;
+
+    private volatile int closeAfterFlushCount = 0;
 
     private final CountDownLatch offerEntered = new CountDownLatch(1);
     private final CountDownLatch offerReleased = new CountDownLatch(1);
 
-    EnvironmentId boundEnvironmentId;
-
-    FakeChannel(String connectionId) {
+    FakeControlChannel(String connectionId) {
       this.connectionId = connectionId;
     }
 
-    @Override
     public String connectionId() {
       return connectionId;
     }
 
     @Override
     public boolean isOpen() {
-      return open;
+      return open && !closed;
     }
 
     @Override
-    public DaemonOfferResult offerText(String text) {
+    public DaemonOfferResult offer(Envelope envelope) {
       if (holdNextOffer) {
         holdNextOffer = false;
         offerEntered.countDown();
@@ -559,10 +834,10 @@ final class EnvironmentDaemonServerTestSupport {
           throw new IllegalStateException("offer hold interrupted", error);
         }
       }
-      if (!open) {
+      if (!isOpen()) {
         return DaemonOfferResult.CLOSED;
       }
-      DaemonEnvelope envelope = codec.decode(text);
+      ControlProtocolCodec.encodeFrame(envelope);
       if (busyNextOffer) {
         busyNextOffer = false;
         return DaemonOfferResult.BUSY;
@@ -572,42 +847,43 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("transport send failed");
       }
       envelopes.add(envelope);
-      if (envelope.environmentId() != null) {
-        boundEnvironmentId = envelope.environmentId();
-      }
       return DaemonOfferResult.ACCEPTED;
     }
 
     @Override
     public void closeAfterFlush() {
-      closeAfterFlushCount += 1;
+      closeAfterFlushCount++;
       close();
+    }
+
+    int closeAfterFlushCount() {
+      return closeAfterFlushCount;
     }
 
     @Override
     public void close() {
       open = false;
       closed = true;
-      closeCount += 1;
+      closeCount++;
       if (closeFailure != null) {
         throwUnchecked(closeFailure);
       }
     }
 
-    List<DaemonEnvelope> envelopes() {
+    List<Envelope> envelopes() {
       return envelopes;
     }
 
-    List<DaemonMessageType> messageTypes() {
-      return envelopes.stream().map(DaemonEnvelope::messageType).toList();
+    List<MessageType> messageTypes() {
+      return envelopes.stream().map(Envelope::getMessageType).toList();
     }
 
-    long countOf(DaemonMessageType type) {
-      return envelopes.stream().filter(envelope -> envelope.messageType() == type).count();
+    long countOf(MessageType type) {
+      return envelopes.stream().filter(envelope -> envelope.getMessageType() == type).count();
     }
 
-    DaemonEnvelope lastEnvelope() {
-      return envelopes.get(envelopes.size() - 1);
+    Envelope lastEnvelope() {
+      return envelopes.isEmpty() ? null : envelopes.get(envelopes.size() - 1);
     }
 
     boolean closed() {
@@ -616,10 +892,6 @@ final class EnvironmentDaemonServerTestSupport {
 
     int closeCount() {
       return closeCount;
-    }
-
-    int closeAfterFlushCount() {
-      return closeAfterFlushCount;
     }
 
     boolean awaitOfferEntered() {
@@ -636,11 +908,6 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
-  /**
-   * 可编程票据服务：默认「申请即 READY」（去重命中），因此测试无需字节上传即可让终态引用合法上传。
-   *
-   * <p>记录每次 reserve/commit/release 的调用事实，供幂等、竞态与清理断言使用。
-   */
   static final class FakeTicketService implements DaemonResourceTicketService {
 
     final List<TransferRequest> reserves = new ArrayList<>();

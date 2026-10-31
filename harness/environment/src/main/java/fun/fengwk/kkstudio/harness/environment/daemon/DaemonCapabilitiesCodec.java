@@ -32,6 +32,7 @@ public final class DaemonCapabilitiesCodec {
   public ObjectNode encodeObject(DaemonCapabilities capabilities) {
     Objects.requireNonNull(capabilities, "capabilities");
     ObjectNode root = MAPPER.createObjectNode();
+    root.put("version", capabilities.version());
     root.put("daemonVersion", capabilities.daemonVersion());
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", capabilities.environment().operatingSystem().wireValue());
@@ -63,6 +64,14 @@ public final class DaemonCapabilitiesCodec {
 
   public DaemonCapabilities decodeObject(ObjectNode root) {
     Objects.requireNonNull(root, "root");
+    JsonNode versionNode = root.get("version");
+    int version =
+        versionNode != null && versionNode.isIntegralNumber()
+            ? versionNode.intValue()
+            : DaemonCapabilities.VERSION;
+    if (version != DaemonCapabilities.VERSION) {
+      throw new ControlProtocolException("unsupported capabilities version: " + version);
+    }
     String daemonVersion = requiredText(root, "daemonVersion");
     JsonNode envNode = root.get("environment");
     if (envNode == null || !envNode.isObject()) {

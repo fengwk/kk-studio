@@ -1,8 +1,8 @@
 /**
  * Environment 会话服务端核心：纯 Java 的 {@link
- * fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer} 独占
- * READY/HEARTBEAT/INVOKE 等 daemon 协议会话状态、租约围栏（{@link
- * fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore}）以及按 invocation 维度的在途调用生命周期。
+ * fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer} 独占 READY/HEARTBEAT/INVOKE
+ * 等 daemon 协议会话状态、租约围栏（{@link fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore}）以及按
+ * invocation 维度的在途调用生命周期。
  *
  * <p>并发模型：同一 Environment 允许任意数量的 invocation 并发在途，仅以 invocationId 区分；不存在按 Environment
  * 的容量、信号量或排队。同一连接上的并发 {@code receive} 由 {@code gate} 串行化状态推进，listener 回调按该顺序由单一 drainer

@@ -4,12 +4,16 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Daemon READY 上报的宿主 metadata。
+ * Daemon READY 上报的版本化宿主 metadata。
  *
- * <p>Daemon 自身构建版本与一份 {@link DaemonEnvironmentInfo}。READY 只描述宿主本身，不携带任何产品目录事实； {@code
- * daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
+ * <p>这是 READY 的宿主 metadata：capabilities 协议版本、Daemon 自身构建版本与一份 {@link DaemonEnvironmentInfo}。READY
+ * 只描述宿主本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
  */
-public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo environment) {
+public record DaemonCapabilities(
+    int version, String daemonVersion, DaemonEnvironmentInfo environment) {
+
+  /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
+  public static final int VERSION = 6;
 
   /** daemon 构建版本上界；manifest 版本与 {@code development} 标记都远小于该值。 */
   public static final int MAX_DAEMON_VERSION_CHARS = 64;
@@ -19,8 +23,15 @@ public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo env
       Pattern.compile("[0-9A-Za-z._+-]{1," + MAX_DAEMON_VERSION_CHARS + "}");
 
   public DaemonCapabilities {
+    if (version != VERSION) {
+      throw new IllegalArgumentException("unsupported capabilities version: " + version);
+    }
     daemonVersion = validateDaemonVersion(daemonVersion);
     environment = Objects.requireNonNull(environment, "environment");
+  }
+
+  public DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo environment) {
+    this(VERSION, daemonVersion, environment);
   }
 
   /**
@@ -34,10 +45,11 @@ public record DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo env
     }
     if (value.length() > MAX_DAEMON_VERSION_CHARS) {
       throw new IllegalArgumentException(
-          "daemonVersion exceeds " + MAX_DAEMON_VERSION_CHARS + " characters");
+          "daemonVersion must not exceed " + MAX_DAEMON_VERSION_CHARS + " characters");
     }
     if (!DAEMON_VERSION_PATTERN.matcher(value).matches()) {
-      throw new IllegalArgumentException("daemonVersion must match [0-9A-Za-z._+-]+");
+      throw new IllegalArgumentException(
+          "daemonVersion must only contain alphanumeric characters, '.', '_', '+', or '-'");
     }
     return value;
   }

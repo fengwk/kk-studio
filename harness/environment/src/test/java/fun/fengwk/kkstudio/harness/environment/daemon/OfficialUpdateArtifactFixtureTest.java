@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
-import fun.fengwk.kkstudio.harness.environment.protocol.UpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.Update;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -50,9 +50,9 @@ class OfficialUpdateArtifactFixtureTest {
     for (JsonNode entry : fixture.get("accepted")) {
       DaemonUpdateCommand command = acceptedCommand(fixture, entry);
       names.add(entry.get("name").stringValue());
-      UpdateCommand proto = ControlProtocolCodec.toProtoUpdateCommand(command);
-      ControlProtocolCodec.validateUpdateCommand(proto);
-      DaemonUpdateCommand roundTrip = ControlProtocolCodec.toDomainUpdateCommand(proto);
+      Update proto = ControlProtocolCodec.toProtoUpdate(command);
+      ControlProtocolCodec.validateUpdate(proto);
+      DaemonUpdateCommand roundTrip = ControlProtocolCodec.toDomainUpdate(proto);
       assertEquals(command, roundTrip);
     }
 
@@ -77,8 +77,8 @@ class OfficialUpdateArtifactFixtureTest {
                     fixture.get("targetVersion").stringValue(),
                     entry.get("artifactUrl").stringValue(),
                     fixture.get("artifactSha256").stringValue());
-            UpdateCommand proto = ControlProtocolCodec.toProtoUpdateCommand(command);
-            ControlProtocolCodec.validateUpdateCommand(proto);
+            Update proto = ControlProtocolCodec.toProtoUpdate(command);
+            ControlProtocolCodec.validateUpdate(proto);
           },
           "the production codec must refuse the rejected artifact: " + entry.get("name"));
       names.add(entry.get("name").stringValue());
@@ -103,14 +103,13 @@ class OfficialUpdateArtifactFixtureTest {
           Envelope.newBuilder()
               .setMessageType(MessageType.UPDATE)
               .setEnvironmentId(PLACEHOLDER_ENVIRONMENT_ID)
-              .setUpdateCommand(ControlProtocolCodec.toProtoUpdateCommand(command))
+              .setUpdate(ControlProtocolCodec.toProtoUpdate(command))
               .build();
       byte[] frame = ControlProtocolCodec.encodeFrame(envelope);
       Envelope decoded = ControlProtocolCodec.decodeFrame(frame);
       assertEquals(MessageType.UPDATE, decoded.getMessageType());
       assertEquals(PLACEHOLDER_ENVIRONMENT_ID, decoded.getEnvironmentId());
-      DaemonUpdateCommand decodedCommand =
-          ControlProtocolCodec.toDomainUpdateCommand(decoded.getUpdateCommand());
+      DaemonUpdateCommand decodedCommand = ControlProtocolCodec.toDomainUpdate(decoded.getUpdate());
       assertEquals(command, decodedCommand);
 
       ObjectNode record = accepted.addObject();
