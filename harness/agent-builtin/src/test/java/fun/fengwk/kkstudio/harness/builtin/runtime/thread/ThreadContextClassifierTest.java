@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -161,13 +162,21 @@ class ThreadContextClassifierTest {
     assertEquals(
         ThreadContext.IdleOrHistorical.class,
         classifier
-            .classify(thread(TURN_END_ID), foreignPath, NO_DRIVER_STATE, List.of())
+            .classify(
+                thread(TURN_END_ID),
+                EntryCurrentState.from(foreignPath),
+                NO_DRIVER_STATE,
+                List.of())
             .getClass());
     // owner 精确匹配时才承担该 CONTINUATION obligation（对照组）。
     assertEquals(
         ThreadContext.ContinuationDue.class,
         classifier
-            .classify(thread(TURN_END_ID), closedTurnPath(true), NO_DRIVER_STATE, List.of())
+            .classify(
+                thread(TURN_END_ID),
+                EntryCurrentState.from(closedTurnPath(true)),
+                NO_DRIVER_STATE,
+                List.of())
             .getClass());
   }
 
@@ -729,7 +738,7 @@ class ThreadContextClassifierTest {
     if (driverState instanceof TestLockedState state) {
       state.requireLockedFor(thread.id(), path.openTurnStart().map(Entry::id).orElse(null));
     }
-    return classifier.classify(thread, path, driverState, toolSiblings);
+    return classifier.classify(thread, EntryCurrentState.from(path), driverState, toolSiblings);
   }
 
   private static ThreadState thread(UUID headEntryId) {

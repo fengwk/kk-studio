@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -90,13 +91,13 @@ public final class FakeAgentDriver implements AgentDriver {
 
   @Override
   public LockedDriverState readState(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState current) {
     return state;
   }
 
   @Override
   public LockedDriverState lockState(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState current) {
     return state;
   }
 

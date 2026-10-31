@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -66,8 +66,8 @@ class HarnessRuntimeSnapshotTest {
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(baseline.threadId(), snapshot.thread().id());
     assertEquals(baseline.rootEntryId(), snapshot.thread().headEntryId());
-    assertEquals(1, snapshot.entryPath().entries().size());
-    assertEquals(baseline.rootEntryId(), snapshot.entryPath().head().id());
+    assertEquals(1, snapshot.requireFullPath().entries().size());
+    assertEquals(baseline.rootEntryId(), snapshot.entryState().head().id());
     assertTrue(snapshot.queuedCommands().isEmpty());
     assertNull(snapshot.generation());
     assertTrue(snapshot.toolSiblings().isEmpty());
@@ -101,10 +101,8 @@ class HarnessRuntimeSnapshotTest {
     assertEquals(baseline.toolId(), snapshot.toolSiblings().get(0).id());
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL, snapshot.toolSiblings().get(0).status());
     // 树快照使用只读探针，也必须保留公共工具状态而不解引用缺失的 Driver 状态。
-    ThreadSnapshot treeSnapshot = runtime.getThreadTree(baseline.threadId()).getFirst();
-    assertNull(treeSnapshot.generation());
-    assertEquals(ThreadLiveState.TOOL_ACTIVE, treeSnapshot.liveState());
-    assertEquals(snapshot.toolSiblings(), treeSnapshot.toolSiblings());
+    var treeSnapshot = runtime.getThreadTree(baseline.threadId()).getFirst();
+    assertEquals(ThreadRuntimeStatus.RUNNING, treeSnapshot.status());
   }
 
   @Test
@@ -115,10 +113,8 @@ class HarnessRuntimeSnapshotTest {
     assertNull(snapshot.generation());
     assertEquals(1, snapshot.toolSiblings().size());
     assertTrue(snapshot.toolSiblings().get(0).status().isTerminal());
-    ThreadSnapshot treeSnapshot = runtime.getThreadTree(baseline.threadId()).getFirst();
-    assertNull(treeSnapshot.generation());
-    assertEquals(ThreadLiveState.TOOL_TERMINAL_PENDING, treeSnapshot.liveState());
-    assertEquals(snapshot.toolSiblings(), treeSnapshot.toolSiblings());
+    var treeSnapshot = runtime.getThreadTree(baseline.threadId()).getFirst();
+    assertEquals(ThreadRuntimeStatus.RUNNING, treeSnapshot.status());
   }
 
   @Test
@@ -258,6 +254,36 @@ class HarnessRuntimeSnapshotTest {
             IllegalStateException.class,
             () -> sabotagedRuntime.getThreadSnapshot(baseline.threadId()));
     assertTrue(error.getMessage().contains("could not be locked"));
+  }
+
+  @Test
+  void incrementalSnapshotReturnsDeltaSliceAndHandlesBase() {
+    HarnessRuntimeTestSupport.ContinuationBaseline baseline = seedContinuationChain(store, true);
+    // 1. afterEntryId == null 返回完整切片
+    ThreadSnapshot full = runtime.getThreadSnapshot(baseline.threadId(), null);
+    assertNull(full.entrySlice().baseEntryId());
+    assertEquals(baseline.turnEndEntryId(), full.requireFullPath().head().id());
+    assertTrue(full.entrySlice().entries().size() > 1);
+
+    // 2. afterEntryId == rootEntryId 返回游标之后的切片，baseEntryId 即游标
+    ThreadSnapshot delta = runtime.getThreadSnapshot(baseline.threadId(), baseline.rootEntryId());
+    assertEquals(baseline.rootEntryId(), delta.entrySlice().baseEntryId());
+    assertThrows(IllegalStateException.class, delta::requireFullPath);
+    assertEquals(full.entrySlice().entries().size() - 1, delta.entrySlice().entries().size());
+    assertEquals(baseline.turnEndEntryId(), delta.entrySlice().entries().getLast().id());
+
+    // 3. afterEntryId == headEntryId 返回空切片，baseEntryId 为 head
+    ThreadSnapshot emptyDelta =
+        runtime.getThreadSnapshot(baseline.threadId(), baseline.turnEndEntryId());
+    assertEquals(baseline.turnEndEntryId(), emptyDelta.entrySlice().baseEntryId());
+    assertTrue(emptyDelta.entrySlice().entries().isEmpty());
+    assertThrows(IllegalStateException.class, emptyDelta::requireFullPath);
+
+    // 4. afterEntryId 为未知 UUID 返回完整历史且 baseEntryId 为 null
+    UUID unknownId = UUID.randomUUID();
+    ThreadSnapshot fallback = runtime.getThreadSnapshot(baseline.threadId(), unknownId);
+    assertNull(fallback.entrySlice().baseEntryId());
+    assertEquals(full.entrySlice().entries().size(), fallback.entrySlice().entries().size());
   }
 
   /** 仅测试用的委托 store：其事务拒绝锁定任何 Model 行。 */

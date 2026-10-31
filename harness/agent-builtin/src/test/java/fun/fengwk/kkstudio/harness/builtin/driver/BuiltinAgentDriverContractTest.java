@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -167,7 +166,8 @@ class BuiltinAgentDriverContractTest {
         () ->
             new ThreadSnapshot(
                 otherSnapshot.thread(),
-                otherSnapshot.entryPath(),
+                otherSnapshot.entryState(),
+                otherSnapshot.entrySlice(),
                 List.of(),
                 foreign,
                 List.of(),
@@ -187,8 +187,7 @@ class BuiltinAgentDriverContractTest {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.threads().lock(threadId).orElseThrow();
-          EntryPath path = tx.entries().loadPath(headEntryId);
-          return driver.lockState(tx, thread, path);
+          return driver.lockState(tx, thread, tx.entries().loadCurrent(headEntryId));
         });
   }
 

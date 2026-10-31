@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -226,13 +227,14 @@ public final class ThreadProcessor {
       return;
     }
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
-    ThreadContext context = threadContextProbe.probe(tx, thread, path);
+    EntryCurrentState currentState = EntryCurrentState.from(path);
+    ThreadContext context = threadContextProbe.probe(tx, thread, currentState);
     switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Driver：判断 pre-existing queued message 必须在 lock Driver 前加载。
         boolean hasQueuedMessage =
             ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
-        LockedDriverState driverState = driver.lockState(tx, thread, path);
+        LockedDriverState driverState = driver.lockState(tx, thread, currentState);
         GenerationProjection projection = driverState.projection();
         if (openTurn.isEmpty()
             || !(openTurn.get().payload() instanceof TurnStartPayload start)
@@ -250,7 +252,7 @@ public final class ThreadProcessor {
       case ThreadContext.ModelActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
         // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Model；Driver 只在存在时参与附加校验。
-        LockedDriverState driverState = driver.lockState(tx, thread, path);
+        LockedDriverState driverState = driver.lockState(tx, thread, currentState);
         List<ToolInvocation> lockedSiblings =
             tx.tools().lockByAssistantEntry(pending.assistant().id());
         applyToolBatch(
