@@ -430,6 +430,9 @@ class EnvironmentDaemonWebSocketIntegrationTest {
         public void receive(Envelope envelope) {}
 
         @Override
+        public void close() {}
+
+        @Override
         public void closed() {}
       };
     }

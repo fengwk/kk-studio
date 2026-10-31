@@ -456,6 +456,9 @@ class DaemonHttp2SessionLoopbackTest {
         public void receive(Envelope envelope) {}
 
         @Override
+        public void close() {}
+
+        @Override
         public void closed() {}
       };
     }

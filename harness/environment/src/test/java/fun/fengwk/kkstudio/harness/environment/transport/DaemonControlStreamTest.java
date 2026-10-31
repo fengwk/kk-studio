@@ -267,6 +267,11 @@ class DaemonControlStreamTest {
     }
 
     @Override
+    public void close() {
+      this.closed = true;
+    }
+
+    @Override
     public void closed() {
       this.closed = true;
     }

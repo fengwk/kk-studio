@@ -135,6 +135,9 @@ class DaemonHttp2ClientSessionTest {
         public void receive(Envelope envelope) {}
 
         @Override
+        public void close() {}
+
+        @Override
         public void closed() {}
       };
     }
