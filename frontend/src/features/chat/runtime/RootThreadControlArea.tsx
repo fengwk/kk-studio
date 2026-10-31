@@ -55,6 +55,7 @@ export function RootThreadControlArea({
     onSubmitGoal,
     onCommand,
     commands,
+    onCommandPaletteVisibilityChange,
     focusOnEscape,
     suspended,
     settings,
@@ -93,6 +94,7 @@ export function RootThreadControlArea({
         onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
         commands={commands}
+        onCommandPaletteVisibilityChange={onCommandPaletteVisibilityChange}
         focusOnEscape={focusOnEscape && !interactionOpen && !hidden && !suspended}
         active={!interactionOpen && !suspended && !hidden}
         restoreOnActivate={focusOnEscape !== false && !suspended}

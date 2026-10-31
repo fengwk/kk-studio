@@ -152,7 +152,6 @@ export function CustomMessageQueueHarness() {
     bodyRef: { current: null },
     queuedCommands,
     queuedCustomMessages,
-    manualCompaction: { available: false, disabledReason: null },
     stopReceipts: [],
     unconfirmedExecutions: [],
     activeAssistantOutput: null,

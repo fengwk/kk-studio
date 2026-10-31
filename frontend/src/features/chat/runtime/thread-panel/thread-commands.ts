@@ -125,12 +125,23 @@ const COMPACTION_DISABLED_REASON_KEYS: Record<string, TranslationKey> = {
 }
 
 function manualCompactionDisabledReason(reason: string | null): string {
-  const key = reason == null ? undefined : COMPACTION_DISABLED_REASON_KEYS[reason]
-  return translate(key ?? 'ai.runtime.action.compactUnavailable')
+  if (reason == null) {
+    return translate('ai.runtime.action.compactUnavailable')
+  }
+  const key = COMPACTION_DISABLED_REASON_KEYS[reason]
+  if (key) {
+    return translate(key)
+  }
+  return translate('ai.runtime.action.compactUnavailable')
 }
 
+export type CommandCompactionState =
+  | { status: 'checking' }
+  | { status: 'failed' }
+  | { status: 'ready'; availability: ManualCompactionAvailability }
+
 export interface ThreadCommandOptions {
-  manualCompaction?: ManualCompactionAvailability | null
+  compaction?: CommandCompactionState | null
   allowNewSession?: boolean
   readOnly?: boolean
   canBranchFromRoot?: boolean
@@ -138,34 +149,32 @@ export interface ThreadCommandOptions {
   allowBranching?: boolean
 }
 
-function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
-  return (
-    value != null
-    && typeof value === 'object'
-    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value
-      || 'allowSwitchAgent' in value || 'allowBranching' in value)
-  )
-}
-
 export function threadCommandsForTarget(
   target: PaneTarget,
-  manualCompactionOrOptions?: ManualCompactionAvailability | ThreadCommandOptions | null,
+  options: ThreadCommandOptions = {},
 ): ThreadCommand[] {
-  const options: ThreadCommandOptions = isThreadCommandOptions(manualCompactionOrOptions)
-    ? manualCompactionOrOptions
-    : { manualCompaction: manualCompactionOrOptions }
-  const manualCompaction = options.manualCompaction
+  const compaction = options.compaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
   // 命令可用性只由目标 kind 与显式能力决定；owner 不参与既有 Thread 的能力裁剪。
   const commandList = THREAD_COMMANDS
 
   return commandList.map((item) => {
     const targetEnabled = enabled.has(item.id)
-    const compactDisabled =
-      item.id === 'compact'
-      && target.kind === 'BOUND_THREAD'
-      && manualCompaction != null
-      && !manualCompaction.available
+    let compactDisabled = false
+    let compactDisabledReason: string | undefined
+
+    if (item.id === 'compact' && target.kind === 'BOUND_THREAD' && compaction != null) {
+      if (compaction.status === 'checking') {
+        compactDisabled = true
+        compactDisabledReason = translate('ai.runtime.command.disabled.compaction.checking')
+      } else if (compaction.status === 'failed') {
+        compactDisabled = true
+        compactDisabledReason = translate('ai.runtime.command.disabled.compaction.checkFailed')
+      } else if (compaction.status === 'ready' && !compaction.availability.available) {
+        compactDisabled = true
+        compactDisabledReason = manualCompactionDisabledReason(compaction.availability.disabledReason)
+      }
+    }
 
     const readOnlyDisabled =
       Boolean(options.readOnly)
@@ -192,7 +201,7 @@ export function threadCommandsForTarget(
     if (readOnlyDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.readOnly')
     } else if (compactDisabled) {
-      disabledReason = manualCompactionDisabledReason(manualCompaction?.disabledReason ?? null)
+      disabledReason = compactDisabledReason
     } else if (newDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.singleSession')
     } else if (agentDisabled) {

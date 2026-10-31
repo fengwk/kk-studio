@@ -44,8 +44,13 @@ describe('AgentPane command registry', () => {
     ]
     for (const reason of reasons) {
       const compact = threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: reason,
+        compaction: {
+          status: 'ready',
+          availability: {
+            available: false,
+            disabledReason: reason,
+          },
+        },
       }).find((command) => command.id === 'compact')
       expect(compact?.disabled).toBe(true)
       expect(compact?.disabledReason).toBeTruthy()
@@ -53,20 +58,44 @@ describe('AgentPane command registry', () => {
     }
     expect(
       threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: 'THREAD_STOPPED',
+        compaction: {
+          status: 'ready',
+          availability: {
+            available: false,
+            disabledReason: 'THREAD_STOPPED',
+          },
+        },
       }).find((command) => command.id === 'compact')?.disabledReason,
     ).toBe('Thread 已停止，恢复后才能压缩')
     expect(
       threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: 'FUTURE_REASON',
+        compaction: {
+          status: 'ready',
+          availability: {
+            available: false,
+            disabledReason: 'FUTURE_REASON',
+          },
+        },
       }).find((command) => command.id === 'compact')?.disabledReason,
     ).toBe('当前无法手动压缩')
     expect(
-      threadCommandsForTarget(target, { available: true, disabledReason: null })
-        .find((command) => command.id === 'compact')?.disabled,
+      threadCommandsForTarget(target, {
+        compaction: {
+          status: 'ready',
+          availability: { available: true, disabledReason: null },
+        },
+      }).find((command) => command.id === 'compact')?.disabled,
     ).toBe(false)
+    expect(
+      threadCommandsForTarget(target, {
+        compaction: { status: 'checking' },
+      }).find((command) => command.id === 'compact')?.disabledReason,
+    ).toBe('正在检查压缩可用性...')
+    expect(
+      threadCommandsForTarget(target, {
+        compaction: { status: 'failed' },
+      }).find((command) => command.id === 'compact')?.disabledReason,
+    ).toBe('检查压缩可用性失败')
   })
 
   it('filters command names, keywords, descriptions, and strips a slash prefix', () => {

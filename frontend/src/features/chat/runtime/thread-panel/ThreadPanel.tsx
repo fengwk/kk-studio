@@ -62,6 +62,8 @@ export interface ThreadPanelComposerInput {
   onSubmitGoal?: (goalText: string, localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
+  /** 命令面板可见性变化轻量通知。 */
+  onCommandPaletteVisibilityChange?: (visible: boolean) => void
   /** 当前交互作用域是否允许 Escape 把焦点恢复到此 Composer。 */
   focusOnEscape?: boolean
   /**
