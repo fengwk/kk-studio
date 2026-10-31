@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
@@ -24,6 +23,7 @@ import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -77,11 +77,10 @@ public final class ControlProtocolCodec {
   public static final int MAX_PREVIEW_UTF8_BYTES = ResourceRef.MAX_PREVIEW_UTF8_BYTES;
 
   /** 单条控制元数据消息的字符上限。 */
-  public static final int MAX_CONTROL_PAYLOAD_CHARS = DaemonResourceTransferCodec.MAX_PAYLOAD_CHARS;
+  public static final int MAX_CONTROL_PAYLOAD_CHARS = 16 * 1024;
 
   /** 上传票据失败说明的字符上限。 */
-  public static final int MAX_FAILURE_MESSAGE_CHARS =
-      DaemonResourceTransferCodec.MAX_FAILURE_MESSAGE_CHARS;
+  public static final int MAX_FAILURE_MESSAGE_CHARS = 512;
 
   /** 展示名的字符上限。 */
   public static final int MAX_DISPLAY_NAME_CHARS = 256;
@@ -701,7 +700,26 @@ public final class ControlProtocolCodec {
         "temporaryResourcePolicy.temporaryResourceCleanupIntervalSeconds");
   }
 
-  private static void validateUpdate(Update update) {
+  public static Update toProtoUpdate(DaemonUpdateCommand command) {
+    Objects.requireNonNull(command, "command");
+    return Update.newBuilder()
+        .setOperationId(command.operationId())
+        .setTargetVersion(command.targetVersion())
+        .setArtifactUrl(command.artifactUrl())
+        .setArtifactSha256(command.artifactSha256())
+        .build();
+  }
+
+  public static DaemonUpdateCommand toDomainUpdate(Update proto) {
+    Objects.requireNonNull(proto, "proto");
+    return new DaemonUpdateCommand(
+        proto.getOperationId(),
+        proto.getTargetVersion(),
+        proto.getArtifactUrl(),
+        proto.getArtifactSha256());
+  }
+
+  public static void validateUpdate(Update update) {
     String operationId =
         requireText(
             update.hasOperationId(), update.getOperationId(), "update.operationId", 36, true);

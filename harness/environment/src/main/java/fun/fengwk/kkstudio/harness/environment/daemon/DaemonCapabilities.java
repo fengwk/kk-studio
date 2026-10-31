@@ -6,9 +6,8 @@ import java.util.regex.Pattern;
 /**
  * Daemon READY 上报的版本化宿主 metadata。
  *
- * <p>这是 READY 的唯一 wire 形状：capabilities 协议版本、Daemon 自身构建版本（JAR manifest {@code
- * Implementation-Version}，未打包时为固定标记 {@code development}）与一份 {@link DaemonEnvironmentInfo}。READY
- * 只描述宿主 本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
+ * <p>这是 READY 的宿主 metadata：capabilities 协议版本、Daemon 自身构建版本与一份 {@link DaemonEnvironmentInfo}。READY
+ * 只描述宿主本身，不携带任何产品目录事实；{@code daemonVersion} 是构建事实，与 Card 上的 CAS {@code version} 无关。
  */
 public record DaemonCapabilities(
     int version, String daemonVersion, DaemonEnvironmentInfo environment) {
@@ -31,6 +30,10 @@ public record DaemonCapabilities(
     environment = Objects.requireNonNull(environment, "environment");
   }
 
+  public DaemonCapabilities(String daemonVersion, DaemonEnvironmentInfo environment) {
+    this(VERSION, daemonVersion, environment);
+  }
+
   /**
    * 校验 daemon 自报的构建版本：非空白且只含版本字符。
    *
@@ -42,10 +45,11 @@ public record DaemonCapabilities(
     }
     if (value.length() > MAX_DAEMON_VERSION_CHARS) {
       throw new IllegalArgumentException(
-          "daemonVersion exceeds " + MAX_DAEMON_VERSION_CHARS + " characters");
+          "daemonVersion must not exceed " + MAX_DAEMON_VERSION_CHARS + " characters");
     }
     if (!DAEMON_VERSION_PATTERN.matcher(value).matches()) {
-      throw new IllegalArgumentException("daemonVersion must match [0-9A-Za-z._+-]+");
+      throw new IllegalArgumentException(
+          "daemonVersion must only contain alphanumeric characters, '.', '_', '+', or '-'");
     }
     return value;
   }

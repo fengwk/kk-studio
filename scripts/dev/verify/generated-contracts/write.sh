@@ -29,7 +29,7 @@ cd "$REPO_ROOT"
 node "$SCRIPT_DIR/capabilities.mjs"
 node "$REPO_ROOT/harness/environment/src/main/protocol/ts/generate.mjs"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
-  -Dtest=TsContractArtifactTest,DaemonContractArtifactTest \
+  -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dkkstudio.contract.generation.update=true \
   test

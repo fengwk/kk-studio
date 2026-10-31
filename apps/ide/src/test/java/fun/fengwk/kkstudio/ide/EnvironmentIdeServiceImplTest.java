@@ -10,13 +10,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeViewState;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.protocol.DaemonIdeCodec;
-import fun.fengwk.kkstudio.ide.protocol.IdeAction;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeReply;
-import fun.fengwk.kkstudio.ide.protocol.IdeViewState;
-import fun.fengwk.kkstudio.ide.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -103,8 +102,8 @@ class EnvironmentIdeServiceImplTest {
 
     assertEquals(1, transport.commands.size());
     IdeCommand command = transport.commands.get(0);
-    assertEquals(IdeAction.OPEN_VIEW, command.action());
-    assertEquals("/client/dir", command.directory());
+    assertEquals(IdeAction.OPEN_VIEW, command.getAction());
+    assertEquals("/client/dir", command.getDirectory());
     assertEquals(1, browserUse.queries.size());
     assertEquals(
         new IntentQuery(EVENT_NODE, CONNECTION, DOCUMENT, VIEW, CLAIM), browserUse.queries.get(0));
@@ -163,7 +162,7 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
-    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
 
   @Test
@@ -194,16 +193,16 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(success(VIEW));
     service.focusTerminal(ENV, VIEW.toString(), binding);
     IdeCommand focus = transport.commands.getLast();
-    assertEquals(IdeAction.FOCUS_TERMINAL, focus.action());
-    assertEquals(DOCUMENT.toString(), focus.documentId());
-    assertEquals(7L, focus.bindingEpoch());
+    assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
+    assertEquals(DOCUMENT.toString(), focus.getDocumentId());
+    assertEquals(7L, focus.getBindingEpoch());
 
     transport.replies.add(success(VIEW));
     service.detachView(ENV, VIEW.toString(), binding);
     IdeCommand detach = transport.commands.getLast();
-    assertEquals(IdeAction.DETACH_VIEW, detach.action());
-    assertEquals(DOCUMENT.toString(), detach.documentId());
-    assertEquals(7L, detach.bindingEpoch());
+    assertEquals(IdeAction.DETACH_VIEW, detach.getAction());
+    assertEquals(DOCUMENT.toString(), detach.getDocumentId());
+    assertEquals(7L, detach.getBindingEpoch());
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
 
     int before = transport.commands.size();
@@ -212,7 +211,7 @@ class EnvironmentIdeServiceImplTest {
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding));
     assertEquals(before + 1, transport.commands.size());
-    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
   }
 
   @Test
@@ -225,23 +224,16 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
     assertTrue(
-        transport.commands.stream().noneMatch(command -> command.action() == IdeAction.CLOSE_VIEW));
+        transport.commands.stream()
+            .noneMatch(command -> command.getAction() == IdeAction.CLOSE_VIEW));
 
     request.setDiscard(false);
     transport.replies.add(
-        new IdeReply(
-            false,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            "VIEW_GONE",
-            "view is gone"));
+        IdeResult.newBuilder()
+            .setOk(false)
+            .setCode("VIEW_GONE")
+            .setMessage("view is gone")
+            .build());
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.closeView(ENV, VIEW.toString(), request));
@@ -268,13 +260,17 @@ class EnvironmentIdeServiceImplTest {
     request.setDocumentId(DOCUMENT.toString());
     request.setBindingEpoch("7");
     request.setDirectory("/client/link/.");
-    transport.wireReplies.add(
-        "{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":\"/daemon/next\"}");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(true)
+            .setViewId(VIEW.toString())
+            .setDirectory("/daemon/next")
+            .build());
 
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals("/daemon/next", bindings.find(ENV, VIEW).orElseThrow().directory());
-    assertEquals("/client/link/.", transport.commands.getLast().directory());
+    assertEquals("/client/link/.", transport.commands.getLast().getDirectory());
 
     transport.replies.add(
         viewsReply(
@@ -306,12 +302,13 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
-    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
     assertTrue(
         transport.commands.stream()
             .noneMatch(
                 command ->
-                    command.action() == IdeAction.FOCUS_TERMINAL && command.bindingEpoch() == 7L));
+                    command.getAction() == IdeAction.FOCUS_TERMINAL
+                        && command.getBindingEpoch() == 7L));
   }
 
   @Test
@@ -322,25 +319,20 @@ class EnvironmentIdeServiceImplTest {
     request.setBindingEpoch("7");
     request.setDirectory("/client/link/.");
     // Missing and blank directory are not confirmation, and neither is another view's reply.
-    for (IdeReply reply :
+    for (IdeResult reply :
         List.of(
             success(VIEW),
-            new IdeReply(true, VIEW, null, null, null, null, null, "   ", null, null, null, null),
-            new IdeReply(
-                true, null, null, null, null, null, null, "/daemon/next", null, null, null, null),
-            new IdeReply(
-                true,
-                UUID.fromString("99999999-2222-3333-4444-555555555555"),
-                null,
-                null,
-                null,
-                null,
-                null,
-                "/daemon/next",
-                null,
-                null,
-                null,
-                null))) {
+            IdeResult.newBuilder()
+                .setOk(true)
+                .setViewId(VIEW.toString())
+                .setDirectory("   ")
+                .build(),
+            IdeResult.newBuilder().setOk(true).setDirectory("/daemon/next").build(),
+            IdeResult.newBuilder()
+                .setOk(true)
+                .setViewId("99999999-2222-3333-4444-555555555555")
+                .setDirectory("/daemon/next")
+                .build())) {
       transport.replies.add(reply);
       int before = transport.commands.size();
       AiEnvironmentIdeUnavailableException error =
@@ -351,8 +343,8 @@ class EnvironmentIdeServiceImplTest {
       assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
       assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
     }
-    // The production transport decodes the wire reply in the completion stage.
-    transport.wireReplies.add("{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":42}");
+    // No directory in reply fails validation.
+    transport.replies.add(IdeResult.newBuilder().setOk(true).setViewId(VIEW.toString()).build());
     int before = transport.commands.size();
     AiEnvironmentIdeUnavailableException error =
         assertThrows(
@@ -397,10 +389,10 @@ class EnvironmentIdeServiceImplTest {
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
 
-    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
     assertTrue(
         transport.commands.stream()
-            .noneMatch(command -> command.action() == IdeAction.FOCUS_TERMINAL));
+            .noneMatch(command -> command.getAction() == IdeAction.FOCUS_TERMINAL));
   }
 
   @Test
@@ -475,7 +467,7 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
-    assertEquals(IdeAction.FOCUS_TERMINAL, transport.commands.getLast().action());
+    assertEquals(IdeAction.FOCUS_TERMINAL, transport.commands.getLast().getAction());
     assertEquals(2, transport.commands.size());
 
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
@@ -486,13 +478,13 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.changeDirectory(ENV, VIEW.toString(), request));
-    assertEquals(IdeAction.CHANGE_DIRECTORY, transport.commands.getLast().action());
+    assertEquals(IdeAction.CHANGE_DIRECTORY, transport.commands.getLast().getAction());
     assertEquals(3, transport.commands.size());
-    assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().action());
+    assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().getAction());
   }
 
   private List<IdeAction> actions() {
-    return transport.commands.stream().map(IdeCommand::action).toList();
+    return transport.commands.stream().map(IdeCommand::getAction).toList();
   }
 
   private void open() {
@@ -520,7 +512,7 @@ class EnvironmentIdeServiceImplTest {
     return binding;
   }
 
-  private static IdeReply openReply(
+  private static IdeResult openReply(
       UUID viewId,
       UUID documentId,
       UUID eventNodeId,
@@ -529,27 +521,45 @@ class EnvironmentIdeServiceImplTest {
       long epoch,
       String directory,
       String workspacePath) {
-    return new IdeReply(
-        true,
-        viewId,
-        documentId,
-        eventNodeId,
-        connectionId,
-        claimId,
-        epoch,
-        directory,
-        workspacePath,
-        null,
-        null,
-        null);
+    IdeResult.Builder builder = IdeResult.newBuilder().setOk(true).setBindingEpoch(epoch);
+    if (viewId != null) {
+      builder.setViewId(viewId.toString());
+    }
+    if (documentId != null) {
+      builder.setDocumentId(documentId.toString());
+    }
+    if (eventNodeId != null) {
+      builder.setEventNodeId(eventNodeId.toString());
+    }
+    if (connectionId != null) {
+      builder.setConnectionId(connectionId.toString());
+    }
+    if (claimId != null) {
+      builder.setClaimId(claimId.toString());
+    }
+    if (directory != null) {
+      builder.setDirectory(directory);
+    }
+    if (workspacePath != null) {
+      builder.setWorkspacePath(workspacePath);
+    }
+    return builder.build();
   }
 
-  private static IdeReply success(UUID viewId) {
-    return new IdeReply(true, viewId, null, null, null, null, null, null, null, null, null, null);
+  private static IdeResult success(UUID viewId) {
+    IdeResult.Builder builder = IdeResult.newBuilder().setOk(true);
+    if (viewId != null) {
+      builder.setViewId(viewId.toString());
+    }
+    return builder.build();
   }
 
-  private static IdeReply viewsReply(List<IdeViewSummary> views) {
-    return new IdeReply(true, null, null, null, null, null, null, null, null, views, null, null);
+  private static IdeResult viewsReply(List<IdeViewSummary> views) {
+    IdeResult.Builder builder = IdeResult.newBuilder().setOk(true);
+    if (views != null) {
+      builder.addAllViews(views);
+    }
+    return builder.build();
   }
 
   private static IdeViewSummary summary(
@@ -562,16 +572,30 @@ class EnvironmentIdeServiceImplTest {
       String directory,
       String workspacePath,
       IdeViewState state) {
-    return new IdeViewSummary(
-        viewId,
-        documentId,
-        eventNodeId,
-        connectionId,
-        claimId,
-        epoch,
-        directory,
-        workspacePath,
-        state);
+    IdeViewSummary.Builder builder =
+        IdeViewSummary.newBuilder().setBindingEpoch(epoch).setState(state);
+    if (viewId != null) {
+      builder.setViewId(viewId.toString());
+    }
+    if (documentId != null) {
+      builder.setDocumentId(documentId.toString());
+    }
+    if (eventNodeId != null) {
+      builder.setEventNodeId(eventNodeId.toString());
+    }
+    if (connectionId != null) {
+      builder.setConnectionId(connectionId.toString());
+    }
+    if (claimId != null) {
+      builder.setClaimId(claimId.toString());
+    }
+    if (directory != null) {
+      builder.setDirectory(directory);
+    }
+    if (workspacePath != null) {
+      builder.setWorkspacePath(workspacePath);
+    }
+    return builder.build();
   }
 
   private record IntentQuery(
@@ -584,8 +608,7 @@ class EnvironmentIdeServiceImplTest {
   private static final class FakeTransport implements IdeCommandTransport {
 
     private final List<IdeCommand> commands = new ArrayList<>();
-    private final Deque<IdeReply> replies = new ArrayDeque<>();
-    private final Deque<String> wireReplies = new ArrayDeque<>();
+    private final Deque<IdeResult> replies = new ArrayDeque<>();
     private final AtomicBoolean neverCompletes = new AtomicBoolean();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
     private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
@@ -594,18 +617,12 @@ class EnvironmentIdeServiceImplTest {
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
-      CompletableFuture<IdeReply> future = new CompletableFuture<>();
+      CompletableFuture<IdeResult> future = new CompletableFuture<>();
       IdeAction failAction = failNext.get();
-      if (failAction == command.action() && failNext.compareAndSet(failAction, null)) {
+      if (failAction == command.getAction() && failNext.compareAndSet(failAction, null)) {
         // 只让指定命令一次结果不确定；后续对账命令使用脚本化回执。
       } else if (!neverCompletes.get()) {
-        if (wireReplies.isEmpty()) {
-          future.complete(replies.removeFirst());
-        } else {
-          future =
-              CompletableFuture.completedFuture(wireReplies.removeFirst())
-                  .thenApply(new DaemonIdeCodec()::decodeReply);
-        }
+        future.complete(replies.removeFirst());
       }
       return new IdeRequest(identity, UUID.randomUUID(), future);
     }

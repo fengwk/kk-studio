@@ -14,6 +14,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
@@ -22,9 +25,6 @@ import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
-import fun.fengwk.kkstudio.ide.protocol.IdeAction;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
@@ -139,7 +139,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
     assertTrue(localTransportA.commands.isEmpty());
-    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getFirst().action());
+    assertEquals(IdeAction.OPEN_VIEW, transportB.commands.getFirst().getAction());
   }
 
   @Test
@@ -152,9 +152,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertEquals(2, received.get());
     assertEquals(2, transportB.commands.size());
     IdeCommand focus = transportB.commands.getLast();
-    assertEquals(IdeAction.FOCUS_TERMINAL, focus.action());
-    assertEquals(DOCUMENT, focus.documentId());
-    assertEquals(7L, focus.bindingEpoch());
+    assertEquals(IdeAction.FOCUS_TERMINAL, focus.getAction());
+    assertEquals(DOCUMENT.toString(), focus.getDocumentId());
+    assertEquals(7L, focus.getBindingEpoch());
     assertTrue(localTransportA.commands.isEmpty());
   }
 
@@ -430,34 +430,40 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
-      CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+      CompletableFuture<IdeResult> reply = new CompletableFuture<>();
       reply.complete(replyFor(command));
       return new IdeRequest(
           new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
     }
 
-    private static IdeReply replyFor(IdeCommand command) {
-      if (command.action() == IdeAction.LIST_VIEWS) {
-        return new IdeReply(
-            true, null, null, null, null, null, null, null, null, List.of(), null, null);
+    private static IdeResult replyFor(IdeCommand command) {
+      if (command.getAction() == IdeAction.LIST_VIEWS) {
+        return IdeResult.newBuilder().setOk(true).build();
       }
       String directory =
-          command.action() == IdeAction.CHANGE_DIRECTORY
-              ? command.directory()
+          command.getAction() == IdeAction.CHANGE_DIRECTORY
+              ? command.getDirectory()
               : "/home/dev/project";
-      return new IdeReply(
-          true,
-          UUID.fromString(command.viewId()),
-          command.documentId() == null ? null : UUID.fromString(command.documentId()),
-          command.eventNodeId() == null ? null : UUID.fromString(command.eventNodeId()),
-          command.connectionId() == null ? null : UUID.fromString(command.connectionId()),
-          command.claimId() == null ? null : UUID.fromString(command.claimId()),
-          7L,
-          directory,
-          "/daemon/workspaces/" + command.viewId(),
-          null,
-          null,
-          null);
+      IdeResult.Builder builder =
+          IdeResult.newBuilder()
+              .setOk(true)
+              .setViewId(command.getViewId())
+              .setBindingEpoch(7L)
+              .setDirectory(directory)
+              .setWorkspacePath("/daemon/workspaces/" + command.getViewId());
+      if (command.hasDocumentId()) {
+        builder.setDocumentId(command.getDocumentId());
+      }
+      if (command.hasEventNodeId()) {
+        builder.setEventNodeId(command.getEventNodeId());
+      }
+      if (command.hasConnectionId()) {
+        builder.setConnectionId(command.getConnectionId());
+      }
+      if (command.hasClaimId()) {
+        builder.setClaimId(command.getClaimId());
+      }
+      return builder.build();
     }
 
     @Override

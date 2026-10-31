@@ -4,7 +4,7 @@ package fun.fengwk.kkstudio.harness.environment.server;
  * 一次本地出站递交的确定性结果：只描述传输是否接受该帧，不描述对端是否已收到。
  *
  * <p>传输接受后帧进入自身的串行发送通道，其后真正的发送失败只体现为连接失效（{@link
- * fun.fengwk.kkstudio.harness.environment.server.DaemonChannel#isOpen()} 变为 false
+ * fun.fengwk.kkstudio.harness.environment.server.DaemonControlChannel#isOpen()} 变为 false
  * 并由核心断开连接），不会回传给递交方。
  */
 public enum DaemonOfferResult {

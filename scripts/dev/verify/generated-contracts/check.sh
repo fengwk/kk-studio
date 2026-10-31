@@ -29,6 +29,6 @@ cd "$REPO_ROOT"
 node "$SCRIPT_DIR/capabilities.mjs" --check
 node "$REPO_ROOT/harness/environment/src/main/protocol/ts/generate.mjs" --check
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
-  -Dtest=TsContractArtifactTest,DaemonContractArtifactTest \
+  -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test

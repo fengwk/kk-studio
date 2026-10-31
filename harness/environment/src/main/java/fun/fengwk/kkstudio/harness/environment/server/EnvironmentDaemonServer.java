@@ -1,165 +1,78 @@
 package fun.fengwk.kkstudio.harness.environment.server;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonDataBind;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonDataBindCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeat;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeatCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLeaseCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatusCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
+import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
+import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
+import fun.fengwk.kkstudio.harness.environment.protocol.ExpectedFile;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.Invoke;
+import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
+import fun.fengwk.kkstudio.harness.environment.protocol.ResourceBudgets;
+import fun.fengwk.kkstudio.harness.environment.protocol.Settings;
+import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-/**
- * Environment daemon 的服务端会话核心：唯一拥有连接代际的握手、租约围栏、在途 invocation 与终态状态。
- *
- * <p>协议为当前 daemon wire：HELLO scope 为 null 且 payload 携带 {@code registrationToken} 与规范随机 {@code
- * daemonInstanceId}；核心通过 {@link DaemonRegistrationDirectory} 解析环境身份，通过 {@link DaemonLeaseStore} 以
- * {@code (environment_id, owner_node_id, lease_token)} 围栏原子抢占路由（已有活跃路由返回 RETRY_LATER），成功后下发
- * WELCOME。READY、HEARTBEAT 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
- *
- * <p><b>实例身份与重连恢复：</b>调用只按 {@code (environmentId, invocationId)} 关联，物理连接失效不终结在途调用。同一 {@code
- * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 恢复每个在途调用：未取消的发送 RECOVER，调用方已取消的发送 CANCEL，绝不重发
- * INVOKE；Daemon 从 journal 重放既有事实，仍在运行的调用继续运行。身份不同的新 daemon 进程接管该 Environment
- * 时，旧的在途调用被判定为结果不确定（exactly-once 通知），宿主同时收到旧实例代际结束的通知。
- *
- * <p><b>终态唯一与回调顺序：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation
- * 的迟到 STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。并发 {@code receive} 下 listener 回调 仍严格按该连接
- * {@code gate} 的处理顺序透传（{@code PARTIAL* -> exactly one terminal}），见下方锁边界。
- *
- * <p><b>资源上传控制面：</b>调用作用域的 {@code RESOURCE_UPLOAD_REQUEST}/{@code COMMIT} 只做协议校验与状态回执，真正的上传绑定与 对象存储
- * I/O 由窄端口 {@link DaemonResourceTicketService} 承担并在核心锁之外执行。同一 transfer 的重复申请/提交是幂等的；
- * FAILED/CANCELLED、实例接管与超时会幂等释放全部传输；COMPLETED 只释放未被结果引用的上传，被引用上传交给 history 物化事务转移 owner。
- *
- * <p><b>锁边界与回调顺序：</b>每个连接一代的 {@code gate} 串行化该连接的入站协议处理，并保护该连接「待执行回调批次」的排队；{@code state}
- * 只保护该连接的协议字段；{@code inventory} 保护环境与 invocation 目录。锁顺序固定为 {@code gate > state > inventory}。 回调批次只在
- * {@code gate} 内按处理顺序入队，执行始终由单一 drainer 在全部核心锁之外同步完成，因此并发 {@code receive} 不会打乱该连接上 listener
- * 的观察顺序。租约存储访问、票据服务 I/O、上传释放、会话监听器回调与连接关闭都在这些锁之外执行。等待执行的回调批次以 {@link #MAX_PENDING_CALLBACK_BATCHES}
- * 为每连接固定上界：达到上界即 fail-closed 关闭该连接，并把该 Environment 仍在途的调用一次性回收为结果不确定，绝不无界累积。
- *
- * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
- */
+/** Environment daemon 的服务端会话核心：组合准入与会话注册、单连接会话、调用跟踪、上传协调、IDE 命令与更新控制。 */
 public final class EnvironmentDaemonServer
-    implements EnvironmentCapabilityTransport, DaemonEndpoint {
+    implements DaemonSessions, EnvironmentTunnels, EnvironmentCapabilityTransport {
 
-  /**
-   * 每个 Environment 保留的已终结 invocation 上界。超限时优先淘汰退出确认已交付的最旧条目；只有全部条目都仍在等待退出确认时才淘汰最旧条目，
-   * 淘汰后其迟到退出确认不再交付。
-   */
-  static final int MAX_INVOCATION_TOMBSTONES = 1024;
-
-  /** 单次调用允许的并发资源传输数上限，防止恶意/失控 Daemon 无界创建上传行。 */
-  private static final int MAX_TRANSFERS_PER_INVOCATION = 16;
-
-  /**
-   * 每连接「已按 {@code gate} 顺序入队、等待锁外 drain」的回调批次上界。
-   *
-   * <p>入站排队由传输适配器拥有，核心不感知其容量，因此这里只阻止等待执行的回调批次随调用方并发度无界增长；达到上界即 fail-closed
-   * 关闭连接并回收在途调用，而不是继续累积或改用异步执行破坏背压。
-   */
-  private static final int MAX_PENDING_CALLBACK_BATCHES = 64;
-
-  /** 票据服务异常时的固定失败说明：绝不复述异常原文，避免把存储内部事实泄漏到控制面。 */
-  private static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
-
-  /** 收尾与宿主通知的诊断日志：只输出固定阶段与异常类名。 */
   private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
+
+  public static final int MAX_INVOCATION_TOMBSTONES =
+      DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES;
+
+  private record PendingAdmission(UUID leaseToken, String registrationToken, String displayName) {}
 
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
   private final EnvironmentSessionListener sessionListener;
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
-  private final Supplier<EnvironmentServerSettings> settings;
-  private final DaemonReadyCodec readyCodec = new DaemonReadyCodec();
-  private final DaemonHeartbeatCodec heartbeatCodec = new DaemonHeartbeatCodec();
-  private final DaemonRuntimeStatusCodec runtimeStatusCodec = new DaemonRuntimeStatusCodec();
-  private final DaemonDataBindCodec dataBindCodec = new DaemonDataBindCodec();
-  private final DaemonIdeLeaseCodec ideLeaseCodec = new DaemonIdeLeaseCodec();
-  private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
-      new DaemonCapabilityInvokeCodec();
-  private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
-  private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
-  private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
-  private final DaemonUpdateCommandCodec updateCommandCodec = new DaemonUpdateCommandCodec();
-  private final DaemonUpdateResultCodec updateResultCodec = new DaemonUpdateResultCodec();
+  private final Supplier<EnvironmentServerSettings> settingsSupplier;
 
-  /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
+  private final DaemonInvocationTracker invocationTracker = new DaemonInvocationTracker();
+  private final DaemonTransferCoordinator transferCoordinator = new DaemonTransferCoordinator();
+  private final DaemonIdeCoordinator ideCoordinator = new DaemonIdeCoordinator();
+  private final DaemonUpdateCoordinator updateCoordinator = new DaemonUpdateCoordinator();
+
   private final Object inventory = new Object();
-
-  private final Map<String, ConnectionState> connections = new HashMap<>();
-  private final Map<EnvironmentId, EnvironmentState> environments = new HashMap<>();
-  private final Map<EnvironmentId, LinkedHashMap<UUID, ActiveInvocation>> invocationsByEnvironment =
-      new HashMap<>();
-  private final Map<EnvironmentId, LinkedHashMap<UUID, ExitConfirmation>> invocationTombstones =
-      new HashMap<>();
-
-  /**
-   * 在途 IDE 元数据命令：{@code invocationId -> pending}，守护于 {@code inventory}。
-   *
-   * <p>IDE 命令与 Agent capability 调用是两套独立通道：这里不使用 invocation journal，也不做重放——每个 pending 只接受 一条匹配的
-   * {@code IDE_RESULT}，断线/超时一律按结果不确定终结。
-   */
-  private final Map<UUID, PendingIdeCall> pendingIdeCalls = new HashMap<>();
-
+  private final Map<EnvironmentId, DaemonConnectionSession> sessions = new HashMap<>();
+  private final Map<EnvironmentId, String> daemonInstances = new HashMap<>();
+  private final Map<DaemonAdmission.Admitted, PendingAdmission> pendingAdmissions =
+      new ConcurrentHashMap<>();
   private final AtomicLong connectionGenerations = new AtomicLong();
 
   public EnvironmentDaemonServer(
@@ -175,563 +88,162 @@ public final class EnvironmentDaemonServer
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
     this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
-    this.settings = Objects.requireNonNull(settings, "settings");
+    this.settingsSupplier = Objects.requireNonNull(settings, "settings");
   }
 
-  /** 建立一条新的连接代际；同 connectionId 的旧代际被幂等清理后由新代际取代。 */
+  private static void logFailure(String stage, Throwable failure) {
+    LOG.log(
+        Level.WARNING,
+        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
+  }
+
   @Override
-  public void open(DaemonChannel channel) {
-    Objects.requireNonNull(channel, "channel");
-    String connectionId = requireNonBlank(channel.connectionId(), "connectionId");
-    ConnectionState state = new ConnectionState(channel, connectionGenerations.incrementAndGet());
-    ConnectionState previous;
-    synchronized (inventory) {
-      previous = connections.put(connectionId, state);
-    }
-    if (previous != null) {
-      closeConnectionState(previous);
-    }
-  }
+  public DaemonAdmission admit(DaemonHandshake handshake) {
+    Objects.requireNonNull(handshake, "handshake");
+    String token = requireNonBlank(handshake.registrationToken(), "registrationToken");
+    String instanceId = requireNonBlank(handshake.daemonInstanceId(), "daemonInstanceId");
 
-  /**
-   * 解码并处理一条入站文本帧；协议违规以 ERROR 帧回应后关闭该连接。
-   *
-   * <p>允许调用方并发调用：状态变更在 {@code gate} 内按帧顺序完成，listener 回调批次同样在 {@code gate} 内入队，再由单一 drainer
-   * 在锁外同步执行，因此并发调用不会重排该连接上的回调。回调积压达到 {@link #MAX_PENDING_CALLBACK_BATCHES} 时按 fail-closed
-   * 收敛：丢弃该帧并关闭连接。
-   */
-  @Override
-  public void receive(String connectionId, String rawMessage) {
-    Objects.requireNonNull(connectionId, "connectionId");
-    Objects.requireNonNull(rawMessage, "rawMessage");
-    ConnectionState state;
-    synchronized (inventory) {
-      state = connections.get(connectionId);
+    Optional<DaemonRegistration> registrationOpt =
+        registrationDirectory.findByRegistrationToken(token);
+    if (registrationOpt.isEmpty()) {
+      return new DaemonAdmission.Rejected();
     }
-    if (state == null) {
-      return;
-    }
-    PreparedTransfer prepared = null;
-    List<Runnable> deferred = new ArrayList<>();
-    RuntimeException protocolError = null;
-    EnvironmentId receivedEnvironmentId = null;
-    boolean backlogFull = false;
-    synchronized (state.gate) {
-      if (state.callbackBacklogFull()) {
-        backlogFull = true;
-      } else {
-        try {
-          DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
-          receivedEnvironmentId = envelope.environmentId();
-          // 资源上传控制面只在此处完成协议与绑定校验；对象存储/数据库 I/O 在 gate 之外执行。
-          switch (envelope.messageType()) {
-            case RESOURCE_UPLOAD_REQUEST -> prepared = prepareUploadReserve(state, envelope);
-            case RESOURCE_UPLOAD_COMMIT -> prepared = prepareUploadCommit(state, envelope);
-            default -> handleInbound(state, envelope, deferred);
-          }
-        } catch (RuntimeException error) {
-          protocolError = error;
-        }
-        if (protocolError == null) {
-          state.enqueueCallbacks(deferred);
-        }
-      }
-    }
-    if (backlogFull) {
-      failCallbackBacklog(state);
-      return;
-    }
-    if (protocolError != null) {
-      protocolFailure(state, protocolError, receivedEnvironmentId);
-      return;
-    }
-    state.drainCallbacks();
-    if (prepared != null) {
-      executeTransfer(state, prepared);
-    }
-  }
+    DaemonRegistration registration = registrationOpt.get();
+    EnvironmentId environmentId = registration.environmentId();
 
-  /** 幂等关闭连接代际：解绑路由、释放租约围栏并关闭传输；在途调用保留等待同实例重连。 */
-  @Override
-  public void close(String connectionId) {
-    Objects.requireNonNull(connectionId, "connectionId");
-    ConnectionState state;
-    synchronized (inventory) {
-      state = connections.remove(connectionId);
-    }
-    if (state != null) {
-      closeConnectionState(state);
-    }
-  }
-
-  /**
-   * 回调积压达到每连接上界时的 fail-closed 收敛：关闭连接，并把该 Environment 仍在途的调用一次性回收为结果不确定。
-   *
-   * <p>已入队的批次仍由当前 drainer 按顺序执行，回收回调追加在同一队列尾部，因此不会出现迟到 partial 晚于 terminal；被回收的 invocation 同时登记
-   * tombstone，接管或重连后迟到的帧不再触发第二次终态。本地结果收敛不证明旧进程或其执行范围已经退出。
-   */
-  private void failCallbackBacklog(ConnectionState state) {
-    EnvironmentId environmentId = state.environmentId;
-    List<ActiveInvocation> abandoned =
-        environmentId == null ? List.of() : takeAbandonedInvocations(environmentId);
-    if (!abandoned.isEmpty()) {
-      List<Runnable> reclaim = new ArrayList<>();
-      for (ActiveInvocation active : abandoned) {
-        reclaim.add(
-            () ->
-                active.listener.onError(
-                    new EnvironmentCapabilitySendUncertainException(
-                        "daemon callback backlog for "
-                            + environmentId
-                            + " exceeded the per-connection bound; capability invocation outcome"
-                            + " is uncertain.")));
-        reclaim.add(() -> releaseAllTransfers(active));
-      }
-      synchronized (state.gate) {
-        state.enqueueCallbacks(reclaim);
-      }
-    }
-    close(state.connection.connectionId());
-    state.drainCallbacks();
-  }
-
-  /** 证明只能发给发起轮次时的同一 Daemon 实例；接管后旧轮次不得落入新代际。 */
-  private static void requireExpectedIdentity(
-      EnvironmentId environmentId,
-      EnvironmentState environment,
-      ConnectionState state,
-      DaemonConnectionIdentity expectedIdentity) {
-    if (expectedIdentity == null) {
-      return;
-    }
-    String daemonInstanceId = environment == null ? null : environment.daemonInstanceId;
-    if (daemonInstanceId == null) {
-      daemonInstanceId = state == null ? null : state.daemonInstanceId;
-    }
-    if (!expectedIdentity.equals(new DaemonConnectionIdentity(environmentId, daemonInstanceId))) {
-      throw new EnvironmentCapabilityUnavailableException(
-          environmentId + " daemon generation changed before IDE lease delivery");
-    }
-  }
-
-  /** 当前节点该 Environment 是否已有 READY 的活跃连接代际。 */
-  public boolean isReady(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    ConnectionState state;
-    synchronized (inventory) {
-      state = connectionOf(environmentId);
-    }
-    return state != null && state.isReady();
-  }
-
-  /**
-   * 本节点该 Environment 的活跃连接是否仍持有有效的围栏租约。
-   *
-   * <p>用于适配层判断本次请求能否由本节点承接：无本地连接、连接尚未取得租约或租约存储不可用时返回 false（fail-closed），其余情况透传 {@link
-   * DaemonLeaseStore#holdsReadyLease} 的判定（生产实现同时要求数据库侧状态为 READY）。本方法只表达租约归属，不改变本地会话状态； 真正的发送准入仍由
-   * {@link #invoke} 复核。
-   */
-  public boolean holdsReadyLease(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    ConnectionState state;
-    synchronized (inventory) {
-      state = connectionOf(environmentId);
-    }
-    if (state == null) {
-      return false;
-    }
-    UUID leaseToken = state.leaseToken;
-    if (leaseToken == null) {
-      return false;
-    }
-    try {
-      return leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      return false;
-    }
-  }
-
-  /**
-   * 返回当前 READY 连接代际缓存的完整 runtimeStatus。
-   *
-   * <p>只有本地连接仍 READY、数据库侧 READY 租约仍归本节点且缓存存在时才返回；断线、换代或租约丢失后立即 unavailable，绝不回放旧内存
-   * 任务或持久进度。读取本身不写数据库。
-   */
-  public Optional<DaemonRuntimeSnapshot> runtimeStatus(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    ConnectionState state;
-    synchronized (inventory) {
-      state = connectionOf(environmentId);
-    }
-    if (state == null) {
-      return Optional.empty();
-    }
-    UUID leaseToken;
-    synchronized (state) {
-      if (!state.isReady()) {
-        return Optional.empty();
-      }
-      leaseToken = state.leaseToken;
-    }
-    try {
-      if (leaseToken == null || !leaseStore.holdsReadyLease(environmentId, leaseToken)) {
-        return Optional.empty();
-      }
-    } catch (RuntimeException error) {
-      return Optional.empty();
-    }
-    synchronized (state) {
-      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
-        return Optional.empty();
-      }
-      return Optional.ofNullable(state.runtimeStatus);
-    }
-  }
-
-  /** 当前节点全部 READY 的 Environment 快照。 */
-  public Set<EnvironmentId> readyEnvironments() {
-    Set<EnvironmentId> ready = new HashSet<>();
-    synchronized (inventory) {
-      for (Map.Entry<EnvironmentId, EnvironmentState> entry : environments.entrySet()) {
-        ConnectionState state = entry.getValue().connection;
-        if (state != null && state.isReady()) {
-          ready.add(entry.getKey());
-        }
-      }
-    }
-    return Set.copyOf(ready);
-  }
-
-  /**
-   * 开始一次受管更新的准入：要求目标 Environment 在当前节点 READY，且没有在途普通调用。
-   *
-   * <p>成功后在目录锁内登记 {@code operationId}，此后新的普通调用在起点即被拒绝。该登记只覆盖命令下发的瞬时窗口， 由调用方在 {@code finally}
-   * 中释放；最终「同一 Environment 同一时刻至多一次更新」由 Daemon 的本机互斥保证。 同一 operationId 的重复准入是幂等的；已有其它 operation
-   * 或存在在途调用时拒绝。
-   *
-   * @throws EnvironmentCapabilityUnavailableException 目标当前不在本节点 READY
-   * @throws EnvironmentCapabilityBusyException 已有其它更新在途或存在在途普通调用
-   */
-  public void beginUpdate(EnvironmentId environmentId, String operationId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(operationId, "operationId");
-    if (operationId.isBlank()) {
-      throw new IllegalArgumentException("operationId must not be blank");
-    }
-    synchronized (inventory) {
-      ConnectionState state = connectionOf(environmentId);
-      if (state == null || !state.isReady()) {
-        throw new EnvironmentCapabilityUnavailableException(
-            environmentId + " is not ready for update");
-      }
-      String current = updatingOperationIdOf(environmentId);
-      if (current != null) {
-        if (current.equals(operationId)) {
-          return;
-        }
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " already has an update in progress");
-      }
-      int inFlight = activeInvocationCountLocked(environmentId);
-      if (inFlight > 0) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " has " + inFlight + " in-flight invocations");
-      }
-      environmentOf(environmentId).updatingOperationId = operationId;
-    }
-  }
-
-  /** 结束一次受管更新的准入；只有与当前登记一致的 operationId 才清除，保证旧 operation 不能释放新 operation 的准入。 */
-  public void endUpdate(EnvironmentId environmentId, String operationId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(operationId, "operationId");
-    synchronized (inventory) {
-      EnvironmentState state = environments.get(environmentId);
-      if (state != null && operationId.equals(state.updatingOperationId)) {
-        state.updatingOperationId = null;
-      }
-    }
-  }
-
-  /** 该 Environment 当前是否有受管更新在途。 */
-  public boolean isUpdating(EnvironmentId environmentId) {
-    synchronized (inventory) {
-      return updatingOperationIdOf(environmentId) != null;
-    }
-  }
-
-  /** 该 Environment 在当前节点的在途普通调用数量（含 Skill 同步调用）。 */
-  public int activeInvocationCount(EnvironmentId environmentId) {
-    synchronized (inventory) {
-      return activeInvocationCountLocked(environmentId);
-    }
-  }
-
-  /** 当前全部在途 IDE 元数据命令数量（诊断/测试；与 Agent 调用计数相互独立）。 */
-  public int activeIdeCount() {
-    synchronized (inventory) {
-      return pendingIdeCalls.size();
-    }
-  }
-
-  /**
-   * 返回该 Environment 当前 READY 连接背后的 Daemon 实例身份。
-   *
-   * <p>供 IDE 入口/反向流在建立凭据前冻结代际；无本地连接、未 READY 或身份未知时返回 empty。读取只持目录锁，不做外部 I/O。
-   */
-  public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    synchronized (inventory) {
-      EnvironmentState environment = environments.get(environmentId);
-      ConnectionState state = environment == null ? null : environment.connection;
-      if (state == null || !state.isReady() || environment.daemonInstanceId == null) {
-        return Optional.empty();
-      }
-      return Optional.of(new DaemonConnectionIdentity(environmentId, environment.daemonInstanceId));
-    }
-  }
-
-  /**
-   * 在专用管理通道上向目标 Environment 下发一次受管更新命令。
-   *
-   * <p>只允许在该 Environment 正进行同一 operationId 的更新时发送；命令未进入传输时按 BUSY/UNAVAILABLE 收敛，绝不在断言未发送后重试。
-   */
-  public void sendUpdate(EnvironmentId environmentId, DaemonUpdateCommand command) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(command, "command");
-    ConnectionState state;
-    synchronized (inventory) {
-      EnvironmentState environment = environments.get(environmentId);
-      if (environment == null || !command.operationId().equals(environment.updatingOperationId)) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " is not in update " + command.operationId());
-      }
-      state = environment.connection;
-    }
-    if (state == null || !state.isReady()) {
-      throw new EnvironmentCapabilityUnavailableException(
-          environmentId + " is not ready for update");
-    }
-    String payload = updateCommandCodec.encode(command);
-    DaemonOfferResult outcome;
-    synchronized (state) {
-      if (!state.isReady()) {
-        throw new EnvironmentCapabilityUnavailableException(
-            environmentId + " is not ready for update");
-      }
-      outcome = state.offer(DaemonMessageType.UPDATE, null, payload);
-    }
-    if (outcome == DaemonOfferResult.ACCEPTED) {
-      return;
-    }
-    if (outcome == DaemonOfferResult.BUSY) {
-      throw new EnvironmentCapabilityBusyException(
-          "daemon outbound queue is full for environment " + environmentId);
-    }
-    throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for update");
-  }
-
-  /**
-   * 向已 READY 的当前连接下发数据连接绑定。
-   *
-   * <p>这是下一批数据面业务的发送扩展点：本轮只做严格 codec 与代际/租约准入，不生成票据，也不会在未配置数据面时伪造成功。
-   */
-  public void sendDataBind(EnvironmentId environmentId, DaemonDataBind dataBind) {
-    Objects.requireNonNull(dataBind, "dataBind");
-    sendBoundControl(environmentId, DaemonMessageType.DATA_BIND, dataBindCodec.encode(dataBind));
-  }
-
-  /**
-   * 向已 READY 的当前连接批量下发 IDE 使用证明。
-   *
-   * <p>证明只由业务层查询后传入；本层不创建视图、不续租快照查询，也不在没有绑定处理器时返回伪成功。
-   */
-  public void sendIdeLease(
-      EnvironmentId environmentId,
-      DaemonConnectionIdentity expectedIdentity,
-      DaemonIdeLease ideLease) {
-    Objects.requireNonNull(expectedIdentity, "expectedIdentity");
-    Objects.requireNonNull(ideLease, "ideLease");
-    sendBoundControl(
-        environmentId,
-        DaemonMessageType.IDE_LEASE,
-        ideLeaseCodec.encode(ideLease),
-        expectedIdentity);
-  }
-
-  private void sendBoundControl(
-      EnvironmentId environmentId, DaemonMessageType messageType, String payloadJson) {
-    sendBoundControl(environmentId, messageType, payloadJson, null);
-  }
-
-  private void sendBoundControl(
-      EnvironmentId environmentId,
-      DaemonMessageType messageType,
-      String payloadJson,
-      DaemonConnectionIdentity expectedIdentity) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    ConnectionState state;
-    UUID leaseToken;
-    synchronized (inventory) {
-      EnvironmentState environment = environments.get(environmentId);
-      if (environment != null && environment.updatingOperationId != null) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " is being updated");
-      }
-      state = environment == null ? null : environment.connection;
-      leaseToken = state == null ? null : state.leaseToken;
-      requireExpectedIdentity(environmentId, environment, state, expectedIdentity);
-    }
-    if (state == null || leaseToken == null || !state.isReady()) {
-      throw new EnvironmentCapabilityUnavailableException(
-          environmentId + " is not ready for " + messageType);
-    }
-    boolean holdsReady;
-    try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      throw new EnvironmentCapabilityUnavailableException(
-          "database unavailable: " + error.getMessage(), error);
-    }
-    if (!holdsReady) {
-      throw new EnvironmentCapabilityUnavailableException(
-          environmentId + " is not ready for " + messageType);
-    }
-    DaemonOfferResult outcome;
-    synchronized (state) {
-      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
-        throw new EnvironmentCapabilityUnavailableException(
-            environmentId + " is not ready for " + messageType);
-      }
-      synchronized (inventory) {
-        EnvironmentState environment = environments.get(environmentId);
-        if (environment != null && environment.updatingOperationId != null) {
-          throw new EnvironmentCapabilityBusyException(
-              "environment " + environmentId + " is being updated");
-        }
-        requireExpectedIdentity(environmentId, environment, state, expectedIdentity);
-      }
-      outcome = state.offer(messageType, null, payloadJson);
-    }
-    if (outcome == DaemonOfferResult.ACCEPTED) {
-      return;
-    }
-    if (outcome == DaemonOfferResult.BUSY) {
-      throw new EnvironmentCapabilityBusyException(
-          "daemon outbound queue is full for environment " + environmentId);
-    }
-    throw new EnvironmentCapabilityUnavailableException(
-        environmentId + " is not ready for " + messageType);
-  }
-
-  /**
-   * 在 IDE 元数据通道上向目标 Environment 下发一条 IDE 控制命令，并返回等待 {@code IDE_RESULT} 的句柄。
-   *
-   * <p>准入与 {@link #invoke} / {@link #sendUpdate} 一致：本地 READY 连接存在、无更新在途、锁内二次复核并复核数据库侧 READY
-   * 租约围栏；命令未进入传输时按 BUSY/UNAVAILABLE 收敛，绝不重放。IDE 请求不进入 Agent journal：{@code invocationId} 由 Server
-   * 现生成，每个在途命令只接受一条匹配回执，断线或超时（调用方 {@link #abandonIde(UUID)} 后）一律按结果不确定终结。
-   *
-   * @throws EnvironmentCapabilityUnavailableException 目标当前不在本节点 READY，或租约不可用
-   * @throws EnvironmentCapabilityBusyException 目标正在更新或出站队列已满
-   * @throws EnvironmentCapabilitySendUncertainException 命令递交过程中传输失败，帧状态不确定
-   */
-  public DaemonIdeCall requestIde(EnvironmentId environmentId, String commandJson) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(commandJson, "commandJson");
-    ConnectionState state;
-    UUID leaseToken;
-    String daemonInstanceId;
-    synchronized (inventory) {
-      EnvironmentState environment = environments.get(environmentId);
-      state = environment == null ? null : environment.connection;
-      leaseToken = state == null ? null : state.leaseToken;
-      daemonInstanceId = environment == null ? null : environment.daemonInstanceId;
-      if (state != null && environment.updatingOperationId != null) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " is being updated");
-      }
-    }
-    if (state == null || leaseToken == null || daemonInstanceId == null || !state.isReady()) {
-      throw unavailable(environmentId, "ide");
-    }
-    boolean holdsReady;
-    try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      throw new EnvironmentCapabilityUnavailableException(
-          "database unavailable: " + error.getMessage(), error);
-    }
-    if (!holdsReady) {
-      throw unavailable(environmentId, "ide");
-    }
-    UUID invocationId = UUID.randomUUID();
-    PendingIdeCall pending = new PendingIdeCall(state, environmentId, invocationId);
-    DaemonOfferResult outcome = null;
-    RuntimeException sendFailure = null;
-    synchronized (state) {
-      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
-        throw unavailable(environmentId, "ide");
-      }
-      synchronized (inventory) {
-        if (updatingOperationIdOf(environmentId) != null) {
-          throw new EnvironmentCapabilityBusyException(
-              "environment " + environmentId + " is being updated");
-        }
-        pendingIdeCalls.put(invocationId, pending);
-      }
+    DaemonConnectionSession existing = sessionOf(environmentId);
+    if (existing != null && existing.leaseToken() != null && existing.isReady()) {
+      boolean activeToken;
       try {
-        outcome = state.offer(DaemonMessageType.IDE_COMMAND, invocationId.toString(), commandJson);
+        activeToken = leaseStore.hasActiveLeaseToken(environmentId, existing.leaseToken());
       } catch (RuntimeException error) {
-        sendFailure = error;
+        throw new ControlProtocolException("database unavailable: " + error.getMessage(), error);
+      }
+      if (activeToken) {
+        return new DaemonAdmission.RetryLater(Duration.ofSeconds(5));
       }
     }
-    if (sendFailure != null) {
-      // 递交过程中传输失败：帧状态不确定，按不确定终结且不重放；关闭连接由既有重连恢复。
-      abandonIdeCall(invocationId);
-      close(state.connection.connectionId());
-      throw new EnvironmentCapabilitySendUncertainException(
-          "IDE command delivery outcome is uncertain for environment " + environmentId);
-    }
-    if (outcome == DaemonOfferResult.ACCEPTED) {
-      return new DaemonIdeCall(
-          new DaemonConnectionIdentity(environmentId, daemonInstanceId),
-          invocationId,
-          pending.reply);
-    }
-    abandonIdeCall(invocationId);
-    if (outcome == DaemonOfferResult.BUSY) {
-      throw new EnvironmentCapabilityBusyException(
-          "daemon outbound queue is full for environment " + environmentId);
-    }
-    throw unavailable(environmentId, "ide");
+
+    LeaseBindResult bind =
+        leaseStore.tryAcquire(environmentId, token, settings().heartbeatTimeout());
+    return switch (bind) {
+      case LeaseBindResult.Rejected rejected -> new DaemonAdmission.Rejected();
+      case LeaseBindResult.RetryLater retryLater -> new DaemonAdmission.RetryLater(
+          Duration.ofSeconds(5));
+      case LeaseBindResult.Acquired acquired -> {
+        DaemonConnectionSession previous = sessionOf(environmentId);
+        if (previous != null) {
+          previous.close();
+        }
+        String replacedInstanceId = replaceDaemonInstance(environmentId, instanceId);
+        if (replacedInstanceId != null) {
+          List<ActiveInvocation> abandoned =
+              invocationTracker.takeAbandonedInvocations(environmentId);
+          for (ActiveInvocation active : abandoned) {
+            try {
+              active.listener.onError(
+                  new EnvironmentCapabilitySendUncertainException(
+                      "Environment daemon instance changed for "
+                          + environmentId
+                          + "; capability invocation outcome is uncertain."));
+            } catch (Throwable ignored) {
+            }
+            transferCoordinator.releaseAllTransfers(active, ticketService);
+          }
+          try {
+            sessionListener.onDaemonInstanceReplaced(
+                new DaemonConnectionIdentity(environmentId, replacedInstanceId));
+          } catch (RuntimeException error) {
+            logFailure("daemon instance replaced notification", error);
+          }
+        }
+        DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
+        pendingAdmissions.put(
+            admitted,
+            new PendingAdmission(acquired.leaseToken(), token, registration.displayName()));
+        yield admitted;
+      }
+    };
   }
 
-  /**
-   * 放弃一条在途 IDE 命令（调用方超时/取消时调用）：移除在途登记，此后迟到的 {@code IDE_RESULT} 被安静忽略。
-   *
-   * <p>本方法不改变连接状态，也不重放；副作用是否已在 Daemon 生效由 Daemon 侧负责，Server 不再等待回执。
-   */
-  public void abandonIde(UUID invocationId) {
-    Objects.requireNonNull(invocationId, "invocationId");
-    abandonIdeCall(invocationId);
+  @Override
+  public void abandon(DaemonAdmission.Admitted admitted) {
+    Objects.requireNonNull(admitted, "admitted");
+    PendingAdmission pending = pendingAdmissions.remove(admitted);
+    if (pending != null) {
+      try {
+        leaseStore.disconnect(admitted.environmentId(), pending.leaseToken, Duration.ZERO);
+      } catch (RuntimeException ignored) {
+      }
+    }
   }
 
-  private void abandonIdeCall(UUID invocationId) {
+  @Override
+  public DaemonSession open(
+      DaemonAdmission.Admitted admitted, DaemonControlChannel control, EnvironmentTunnel tunnel) {
+    Objects.requireNonNull(admitted, "admitted");
+    Objects.requireNonNull(control, "control");
+    PendingAdmission pending = pendingAdmissions.remove(admitted);
+    if (pending == null) {
+      throw new IllegalStateException("no active admission found for " + admitted);
+    }
+    long gen = connectionGenerations.incrementAndGet();
+    DaemonConnectionSession session =
+        new DaemonConnectionSession(
+            gen,
+            admitted.environmentId(),
+            admitted.daemonInstanceId(),
+            pending.leaseToken,
+            control,
+            tunnel,
+            leaseStore,
+            sessionListener,
+            updateListener,
+            ticketService,
+            settingsSupplier,
+            invocationTracker,
+            transferCoordinator,
+            ideCoordinator,
+            updateCoordinator,
+            this::removeSession);
+    EnvironmentServerSettings currentSettings = settings();
+    session.initializeSettings(currentSettings);
+
+    Settings settingsMessage =
+        Settings.newBuilder()
+            .setDisplayName(pending.displayName)
+            .setResourceBudgets(
+                ResourceBudgets.newBuilder()
+                    .setMaxResourceBytes(currentSettings.maxResourceBytes())
+                    .setTemporaryResourceTtlSeconds(currentSettings.temporaryResourceTtlSeconds())
+                    .setTemporaryResourceCleanupIntervalSeconds(
+                        currentSettings.temporaryResourceCleanupIntervalSeconds())
+                    .build())
+            .build();
+    Envelope settingsEnvelope =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SETTINGS)
+            .setEnvironmentId(admitted.environmentId().value().toString())
+            .setSettings(settingsMessage)
+            .build();
+
     synchronized (inventory) {
-      pendingIdeCalls.remove(invocationId);
+      sessions.put(admitted.environmentId(), session);
     }
+    if (!session.offer(settingsEnvelope)) {
+      session.close();
+    }
+    return session;
   }
 
-  /** 调用方必须持有 {@code inventory}。 */
-  private String updatingOperationIdOf(EnvironmentId environmentId) {
-    EnvironmentState state = environments.get(environmentId);
-    return state == null ? null : state.updatingOperationId;
-  }
-
-  /** 调用方必须持有 {@code inventory}。 */
-  private int activeInvocationCountLocked(EnvironmentId environmentId) {
-    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
-    return invocations == null ? 0 : invocations.size();
+  @Override
+  public Optional<EnvironmentTunnel> local(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session != null && session.isReady() && session.tunnel() != null) {
+      return Optional.of(session.tunnel());
+    }
+    return Optional.empty();
   }
 
   @Override
@@ -742,6 +254,7 @@ public final class EnvironmentDaemonServer
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
+
     EnvironmentCapabilityDescriptor descriptor = request.descriptor();
     EnvironmentCapabilityDescriptor catalogDescriptor =
         EnvironmentCapabilityCatalog.require(descriptor.id());
@@ -749,30 +262,19 @@ public final class EnvironmentDaemonServer
       throw new IllegalArgumentException(
           "capability descriptor does not match EnvironmentCapabilityCatalog: " + descriptor.id());
     }
-    UUID invocationId = parseUuid(request.call().id(), "call.id");
+    UUID invocationId = UUID.fromString(request.call().id());
 
-    ConnectionState state;
-    UUID leaseToken;
-    synchronized (inventory) {
-      state = connectionOf(environmentId);
-      leaseToken = state == null ? null : state.leaseToken;
-      if (state != null && updatingOperationIdOf(environmentId) != null) {
-        throw new EnvironmentCapabilityBusyException(
-            "environment " + environmentId + " is being updated");
-      }
+    if (updateCoordinator.isUpdating(environmentId)) {
+      throw new EnvironmentCapabilityBusyException(
+          "environment " + environmentId + " is being updated");
     }
-    if (state == null || leaseToken == null || !state.isReady()) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null || !session.isReady()) {
       throw unavailable(environmentId, descriptor.id().value());
     }
-    if (!state.catalogMatches()) {
-      throw new EnvironmentCapabilityUnavailableException(
-          environmentId
-              + " daemon capability catalog does not match the server catalog;"
-              + " ordinary capability calls are not allowed");
-    }
-    validateRequiredWorkdirShape(state, descriptor, request.call());
+    validateRequiredWorkdirShape(session.daemonOperatingSystem(), descriptor, request.call());
 
-    // 租约存储访问（可能跨进程/网络）绝不在核心状态锁内执行。
+    UUID leaseToken = session.leaseToken();
     boolean holdsReady;
     try {
       holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
@@ -784,67 +286,74 @@ public final class EnvironmentDaemonServer
       throw unavailable(environmentId, descriptor.id().value());
     }
 
-    String invokePayload =
-        capabilityInvokeCodec.encode(
-            new DaemonCapabilityInvokeCodec.InvokeRequest(
-                descriptor.id(),
-                descriptor.version(),
-                request.call().argumentsJson(),
-                request.timeout(),
-                request.expectedFile()));
     ActiveInvocation active =
         new ActiveInvocation(
             environmentId,
             invocationId,
             listener,
             settings().heartbeatTimeout(),
-            state.daemonInstanceId());
-    DaemonOfferResult outcome = null;
+            session.daemonInstanceId(),
+            this::expire,
+            () -> sessionOf(environmentId));
+
+    DaemonOfferResult outcome;
     RuntimeException sendFailure = null;
-    synchronized (state) {
-      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
+    synchronized (session.stateLock()) {
+      if (!session.isReady() || !leaseToken.equals(session.leaseToken())) {
         throw unavailable(environmentId, descriptor.id().value());
       }
-      synchronized (inventory) {
-        if (updatingOperationIdOf(environmentId) != null) {
-          throw new EnvironmentCapabilityBusyException(
-              "environment " + environmentId + " is being updated");
-        }
+      if (updateCoordinator.isUpdating(environmentId)) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " is being updated");
       }
-      register(active);
+      invocationTracker.register(active);
+
+      Invoke.Builder invokeBuilder =
+          Invoke.newBuilder()
+              .setCapabilityId(descriptor.id().value())
+              .setCapabilityVersion(descriptor.version())
+              .setArgumentsJson(request.call().argumentsJson())
+              .setTimeoutMillis(request.timeout().toMillis());
+      if (request.expectedFile() != null) {
+        invokeBuilder.setExpectedFile(
+            ExpectedFile.newBuilder()
+                .setPath(request.expectedFile().path())
+                .setSha256(request.expectedFile().sha256())
+                .build());
+      }
+      Envelope invokeEnvelope =
+          Envelope.newBuilder()
+              .setMessageType(MessageType.INVOKE)
+              .setEnvironmentId(environmentId.value().toString())
+              .setInvocationId(invocationId.toString())
+              .setInvoke(invokeBuilder.build())
+              .build();
       try {
-        outcome = state.offer(DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
+        outcome = session.offerResult(invokeEnvelope);
         if (outcome == DaemonOfferResult.ACCEPTED) {
-          active.deliveredGeneration = state.generation;
+          active.deliveredGeneration = session.generation();
         }
       } catch (RuntimeException error) {
+        outcome = DaemonOfferResult.CLOSED;
         sendFailure = error;
       }
     }
     if (sendFailure != null) {
-      // 传输在递交过程中失败：连接失效，调用保持活动；同实例重连只发送取消意图，不重发 INVOKE。
-      close(state.connection.connectionId());
+      session.close();
       return active;
     }
     if (outcome == DaemonOfferResult.ACCEPTED) {
       return active;
     }
-    unregister(active);
+    invocationTracker.unregister(active);
     active.markTerminal();
     if (outcome == DaemonOfferResult.BUSY) {
-      // 本地队列容量/字节预算拒绝：帧肯定未发送，连接仍然可用，调用方可以安全重试。
       throw new EnvironmentCapabilityBusyException(
           "daemon outbound queue is full for environment " + environmentId);
     }
-    // 连接已关闭：帧肯定未发送，调用肯定未执行。
     throw unavailable(environmentId, descriptor.id().value());
   }
 
-  /**
-   * 终结一次由调用方判定超时或放弃的调用：移出活动目录、登记 tombstone 并至多发送一次 CANCEL。
-   *
-   * <p>该方法不向 listener 发送终态；超时判定由调用方在自身 deadline 上完成。调用被放弃后不再恢复为在途执行，因此即使 CANCEL 未能送达也不会重复执行。
-   */
   public void expire(EnvironmentCapabilityExecutionHandle handle) {
     Objects.requireNonNull(handle, "handle");
     if (!(handle instanceof ActiveInvocation active)) {
@@ -853,1182 +362,160 @@ public final class EnvironmentDaemonServer
     synchronized (active) {
       active.cancelled = true;
     }
-    ConnectionState state;
-    synchronized (inventory) {
-      if (!unregister(active)) {
-        return;
-      }
-      active.markTerminal();
-      addTombstoneLocked(active);
-      state = connectionOf(active.environmentId);
-    }
-    // 已移出在途目录，不再恢复为在途执行；仍尝试把一次 CANCEL 交给当前连接。
-    if (state != null) {
-      active.deliverCancel(state);
-    }
-    releaseAllTransfers(active);
-  }
-
-  private void register(ActiveInvocation active) {
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.computeIfAbsent(
-              active.environmentId, ignored -> new LinkedHashMap<>());
-      if (invocations.containsKey(active.invocationId)) {
-        throw new IllegalArgumentException(
-            "invocationId is already active for environment "
-                + active.environmentId
-                + ": "
-                + active.invocationId);
-      }
-      invocations.put(active.invocationId, active);
-    }
-  }
-
-  private boolean unregister(ActiveInvocation active) {
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.get(active.environmentId);
-      if (invocations == null || invocations.remove(active.invocationId) == null) {
-        return false;
-      }
-      if (invocations.isEmpty()) {
-        invocationsByEnvironment.remove(active.environmentId);
-      }
-      return true;
-    }
-  }
-
-  private ActiveInvocation registeredInvocation(EnvironmentId environmentId, UUID invocationId) {
-    synchronized (inventory) {
-      return registeredInvocationLocked(environmentId, invocationId);
-    }
-  }
-
-  /** 调用方必须持有 {@code inventory}。 */
-  private ActiveInvocation registeredInvocationLocked(
-      EnvironmentId environmentId, UUID invocationId) {
-    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
-    return invocations == null ? null : invocations.get(invocationId);
-  }
-
-  private List<ActiveInvocation> activeInvocations(EnvironmentId environmentId) {
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.get(environmentId);
-      return invocations == null ? List.of() : List.copyOf(invocations.values());
-    }
-  }
-
-  private boolean hasTombstone(EnvironmentId environmentId, UUID invocationId) {
-    synchronized (inventory) {
-      return hasTombstoneLocked(environmentId, invocationId);
-    }
-  }
-
-  /** 调用方必须持有 {@code inventory}。 */
-  private boolean hasTombstoneLocked(EnvironmentId environmentId, UUID invocationId) {
-    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
-    return tombstones != null && tombstones.containsKey(invocationId);
-  }
-
-  /**
-   * 登记有界 tombstone，并保留原 listener 与发起调用时的 daemon 身份。
-   *
-   * <p>terminate/expire 立即结束本地等待，但不得丢掉随后真正到来的退出确认。超限时先淘汰退出确认已交付的最旧条目：它们只剩忽略迟到帧的作用，
-   * 而仍在等待确认的条目一旦被淘汰，对应的远端执行就再也无法确认退出。不引入无界 registry。调用方必须持有 {@code inventory}，保证活动条目移除与 tombstone
-   * 登记在同一原子边界。
-   */
-  private void addTombstoneLocked(ActiveInvocation active) {
-    LinkedHashMap<UUID, ExitConfirmation> tombstones =
-        invocationTombstones.computeIfAbsent(
-            active.environmentId, ignored -> new LinkedHashMap<>());
-    ExitConfirmation retained = new ExitConfirmation(active.listener, active.daemonInstanceId);
-    if (active.exitConfirmed.get()) {
-      retained.delivered.set(true);
-    }
-    tombstones.put(active.invocationId, retained);
-    while (tombstones.size() > MAX_INVOCATION_TOMBSTONES) {
-      evictOneTombstoneLocked(tombstones);
-    }
-  }
-
-  /** 淘汰一个 tombstone：优先最旧的已交付条目，没有时才淘汰最旧条目。 */
-  private static void evictOneTombstoneLocked(LinkedHashMap<UUID, ExitConfirmation> tombstones) {
-    Iterator<ExitConfirmation> retained = tombstones.values().iterator();
-    while (retained.hasNext()) {
-      if (retained.next().delivered.get()) {
-        retained.remove();
-        return;
-      }
-    }
-    tombstones.pollFirstEntry();
-  }
-
-  /** 取出仍可交付的退出确认；身份不符或已交付返回 empty。调用方必须持有 {@code inventory}。 */
-  private Optional<ExitConfirmation> claimExitConfirmationLocked(
-      EnvironmentId environmentId, UUID invocationId, String daemonInstanceId) {
-    ActiveInvocation active = registeredInvocationLocked(environmentId, invocationId);
-    if (active != null) {
-      if (!active.daemonInstanceId.equals(daemonInstanceId) || !active.claimExit()) {
-        return Optional.empty();
-      }
-      return Optional.of(new ExitConfirmation(active.listener, active.daemonInstanceId, true));
-    }
-    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
-    ExitConfirmation retained = tombstones == null ? null : tombstones.get(invocationId);
-    if (retained == null
-        || !retained.daemonInstanceId.equals(daemonInstanceId)
-        || !retained.claim()) {
-      return Optional.empty();
-    }
-    return Optional.of(retained);
-  }
-
-  /**
-   * 同实例重连后重发未交付退出确认对应的 CANCEL。
-   *
-   * <p>终态或 terminate 已把调用移出活动目录，Daemon 的 journal 仍可能保存着终态与退出确认；重发 CANCEL 让 Daemon 按同一 invocationId
-   * 重放既有事实，或停止仍可能运行的 scope。绝不重发 INVOKE，不重新执行。未知 CANCEL 在 Daemon 端被忽略， 不会产生 ACK；每个 READY 代际至多发送一次。
-   */
-  private void resendPendingExitConfirmations(ConnectionState state, EnvironmentId environmentId) {
-    String daemonInstanceId = state.daemonInstanceId;
-    if (daemonInstanceId == null) {
+    if (!invocationTracker.unregister(active)) {
       return;
     }
-    List<UUID> pending = new ArrayList<>();
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
-      if (tombstones == null) {
-        return;
-      }
-      for (Map.Entry<UUID, ExitConfirmation> entry : tombstones.entrySet()) {
-        ExitConfirmation confirmation = entry.getValue();
-        if (!confirmation.delivered.get()
-            && confirmation.daemonInstanceId.equals(daemonInstanceId)) {
-          pending.add(entry.getKey());
-        }
-      }
+    active.markTerminal();
+    invocationTracker.addTombstone(active);
+    DaemonConnectionSession session = sessionOf(active.environmentId);
+    if (session != null) {
+      active.deliverCancel(session);
     }
-    for (UUID invocationId : pending) {
-      DaemonOfferResult outcome;
-      synchronized (state) {
-        if (!state.isReady()) {
-          return;
-        }
-        try {
-          outcome = state.offer(DaemonMessageType.CANCEL, invocationId.toString(), "{}");
-        } catch (RuntimeException transportFailure) {
-          outcome = null;
-        }
-      }
-      if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
-        close(state.connection.connectionId());
-        return;
-      }
-      if (outcome == DaemonOfferResult.BUSY) {
-        // 帧肯定未发送；关闭当前代际，由既有重连在新的 READY 上再试一次。
-        close(state.connection.connectionId());
-        return;
-      }
-    }
+    transferCoordinator.releaseAllTransfers(active, ticketService);
   }
 
-  /** 校验入站信封协议版本与连接合法性，并按消息类型分派处理。 */
-  private void handleInbound(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    if (envelope.protocolVersion() != DaemonProtocol.VERSION) {
-      throw new DaemonProtocolException(
-          "daemon envelope protocolVersion must be " + DaemonProtocol.VERSION);
-    }
-    if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
-      throw new DaemonProtocolException("HELLO must be the first daemon message");
-    }
-    if (state.environmentId != null && !state.environmentId.equals(envelope.environmentId())) {
-      throw new DaemonProtocolException(
-          "envelope environmentId does not match bound connection: " + envelope.environmentId());
-    }
-    switch (envelope.messageType()) {
-      case HELLO -> handleHello(state, envelope, deferred);
-      case READY -> handleReady(state, envelope, deferred);
-      case HEARTBEAT -> handleHeartbeat(state, envelope, deferred);
-      case RUNTIME_STATUS -> handleRuntimeStatus(state, envelope);
-      case STARTED -> handleStarted(state, envelope);
-      case PROGRESS -> handleProgress(state, envelope, deferred);
-      case COMPLETED -> handleCompleted(state, envelope, deferred);
-      case FAILED -> handleFailed(state, envelope, deferred);
-      case CANCELLED -> handleCancelled(state, envelope, deferred);
-      case EXECUTION_EXITED -> handleExecutionExited(state, envelope, deferred);
-      case ERROR -> handleError(state, envelope);
-      case UPDATE_RESULT -> handleUpdateResult(state, envelope, deferred);
-      case IDE_RESULT -> handleIdeResult(state, envelope, deferred);
-      case RESOURCE_UPLOAD_REQUEST, RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
-          "resource upload control is handled by the connection gate");
-      case WELCOME,
-          INVOKE,
-          CANCEL,
-          RECOVER,
-          RESOURCE_UPLOAD_TICKET,
-          UPDATE,
-          IDE_COMMAND,
-          DATA_BIND,
-          IDE_LEASE -> throw new DaemonProtocolException(
-          "daemon must not send " + envelope.messageType() + " to server");
-    }
+  public boolean isReady(EnvironmentId environmentId) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    return session != null && session.isReady();
   }
 
-  /**
-   * 处理 Daemon 的 IDE 命令回执：只做协议校验后把匹配的在途命令收敛为终态。
-   *
-   * <p>迟到的/未知 {@code invocationId}（命令已 abandon、连接已被替代）被安静忽略，不视为协议错误：命令由 Server 单方面超时或取消是正常路径，Daemon
-   * 无法预知。
-   */
-  private void handleIdeResult(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    UUID invocationId = parseUuid(envelope.invocationId(), "IDE_RESULT invocationId");
-    String reply = envelope.payloadJson();
-    PendingIdeCall pending;
-    synchronized (inventory) {
-      PendingIdeCall candidate = pendingIdeCalls.get(invocationId);
-      if (candidate != null && candidate.connection == state) {
-        pendingIdeCalls.remove(invocationId);
-        pending = candidate;
-      } else {
-        pending = null;
-      }
+  public boolean holdsReadyLease(EnvironmentId environmentId) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null) {
+      return false;
     }
-    if (pending != null) {
-      PendingIdeCall settled = pending;
-      deferred.add(() -> settled.reply.complete(reply));
+    UUID leaseToken = session.leaseToken();
+    if (leaseToken == null) {
+      return false;
     }
-  }
-
-  /** 连接代际关闭时，把该连接仍在途的 IDE 命令一次性收敛为结果不确定；不重放、不留待重连。 */
-  private void failPendingIdeCalls(ConnectionState state) {
-    List<PendingIdeCall> abandoned = new ArrayList<>();
-    synchronized (inventory) {
-      Iterator<Map.Entry<UUID, PendingIdeCall>> iterator = pendingIdeCalls.entrySet().iterator();
-      while (iterator.hasNext()) {
-        PendingIdeCall pending = iterator.next().getValue();
-        if (pending.connection == state) {
-          iterator.remove();
-          abandoned.add(pending);
-        }
-      }
-    }
-    for (PendingIdeCall pending : abandoned) {
-      pending.reply.completeExceptionally(
-          new EnvironmentCapabilitySendUncertainException(
-              "environment connection closed before IDE reply; outcome is uncertain and will not be"
-                  + " replayed"));
-    }
-  }
-
-  /** 处理 Daemon 的受管更新阶段回执：只做协议校验后转交宿主，不在此判定最终成功。 */
-  private void handleUpdateResult(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    DaemonUpdateResult result = updateResultCodec.decode(envelope.payloadJson());
-    EnvironmentId environmentId = state.environmentId;
-    deferred.add(() -> notifyUpdateResult(environmentId, result));
-  }
-
-  /** 处理 daemon 首帧 HELLO：解析实例身份与注册凭据、抢占路由租约并完成 WELCOME 回包。 */
-  private void handleHello(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    if (state.helloReceived) {
-      throw new DaemonProtocolException("HELLO may only be sent once per connection");
-    }
-    requireNoInvocationId(envelope);
-    if (envelope.environmentId() != null) {
-      throw new DaemonProtocolException("HELLO must not declare environmentId");
-    }
-    ObjectNode payload = envelopeCodec.readPayload(envelope);
-    rejectUnexpectedFields(
-        payload,
-        Set.of(
-            "protocolVersion",
-            "registrationToken",
-            "capabilityCatalogVersion",
-            "daemonVersion",
-            "daemonInstanceId"),
-        "HELLO payload");
-    if (envelope.protocolVersion() != DaemonProtocol.VERSION
-        || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
-      throw new DaemonProtocolException("HELLO protocolVersion must be " + DaemonProtocol.VERSION);
-    }
-    // 目录版本不匹配不再中断认证：连接仍可承载版本查询与受管更新，但普通 capability 调用被拒绝。
-    String capabilityCatalogVersion =
-        requiredText(payload, "capabilityCatalogVersion", "HELLO payload");
     try {
-      DaemonCapabilities.validateDaemonVersion(
-          requiredText(payload, "daemonVersion", "HELLO payload"));
-    } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException("HELLO daemonVersion is invalid: " + error.getMessage());
-    }
-    String daemonInstanceId =
-        parseUuid(requiredText(payload, "daemonInstanceId", "HELLO payload"), "daemonInstanceId")
-            .toString();
-    String registrationToken = requiredText(payload, "registrationToken", "HELLO payload");
-
-    DaemonRegistration registration =
-        registrationDirectory
-            .findByRegistrationToken(registrationToken)
-            .orElseThrow(
-                () -> new DaemonRegistrationRejectedException("invalid registration token"));
-    EnvironmentId environmentId = registration.environmentId();
-
-    ConnectionState holder = otherConnectionOf(state, environmentId);
-    UUID holderToken = holder == null ? null : holder.leaseToken;
-    if (holder != null && holderToken != null && holder.connection.isOpen()) {
-      boolean activeToken;
-      try {
-        activeToken = leaseStore.hasActiveLeaseToken(environmentId, holderToken);
-      } catch (RuntimeException error) {
-        throw new DaemonProtocolException("database unavailable: " + error.getMessage(), error);
-      }
-      if (activeToken) {
-        throw new DaemonRetryLaterException(
-            "environment "
-                + environmentId
-                + " is actively held by another connection on this node");
-      }
-    }
-
-    LeaseBindResult bind =
-        leaseStore.tryAcquire(environmentId, registrationToken, settings().heartbeatTimeout());
-    if (bind instanceof LeaseBindResult.Rejected rejected) {
-      throw new DaemonRegistrationRejectedException(rejected.message());
-    }
-    if (bind instanceof LeaseBindResult.RetryLater retryLater) {
-      throw new DaemonRetryLaterException(retryLater.message());
-    }
-    if (bind instanceof LeaseBindResult.Acquired acquired) {
-      ConnectionState previous = otherConnectionOf(state, environmentId);
-      if (previous != null) {
-        closeConnectionState(previous);
-      }
-      // 身份不同的新进程接管：旧进程已不可能再给出该 Environment 的终态，其全部在途调用按结果不确定终结恰好一次。
-      String replacedInstanceId = replaceDaemonInstance(environmentId, daemonInstanceId);
-      List<ActiveInvocation> abandoned =
-          replacedInstanceId == null ? List.of() : takeAbandonedInvocations(environmentId);
-      state.rememberDaemonInstance(daemonInstanceId);
-      state.bind(environmentId, acquired.leaseToken());
-      state.capabilityCatalogVersion = capabilityCatalogVersion;
-      synchronized (inventory) {
-        environmentOf(environmentId).connection = state;
-      }
-      for (ActiveInvocation active : abandoned) {
-        deferred.add(
-            () ->
-                active.listener.onError(
-                    new EnvironmentCapabilitySendUncertainException(
-                        "Environment daemon instance changed for "
-                            + environmentId
-                            + "; capability invocation outcome is uncertain.")));
-        // 换进程接管后旧进程不可能再给出这些调用的终态：其名下上传按已绑定 uploadId 清理，绝不留给新进程消费。
-        deferred.add(() -> releaseAllTransfers(active));
-      }
-      if (replacedInstanceId != null) {
-        // 旧实例的 IDE 代际随之结束：宿主关闭绑定它的入口凭据与反向流。
-        DaemonConnectionIdentity replaced =
-            new DaemonConnectionIdentity(environmentId, replacedInstanceId);
-        deferred.add(() -> notifyDaemonInstanceReplaced(replaced));
-      }
-      ObjectNode welcomePayload = envelopeCodec.createPayload();
-      welcomePayload.put("environmentId", environmentId.toString());
-      welcomePayload.put("name", registration.displayName());
-      EnvironmentServerSettings current = settings();
-      welcomePayload.put("maxResourceBytes", current.maxResourceBytes());
-      welcomePayload.put("temporaryResourceTtlSeconds", current.temporaryResourceTtlSeconds());
-      welcomePayload.put(
-          "temporaryResourceCleanupIntervalSeconds",
-          current.temporaryResourceCleanupIntervalSeconds());
-      if (!offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString())) {
-        // WELCOME 未进入传输：连接不得停在已绑定但未完成握手的状态，关闭后由既有重连恢复。
-        close(state.connection.connectionId());
-      } else {
-        // 记录 WELCOME 已通告的策略，作为后续心跳按需推送热更新的基线。
-        state.temporaryResourceTtlSeconds = current.temporaryResourceTtlSeconds();
-        state.temporaryResourceCleanupIntervalSeconds =
-            current.temporaryResourceCleanupIntervalSeconds();
-      }
+      return leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      return false;
     }
   }
 
-  /**
-   * 记录新的 daemon 实例身份。
-   *
-   * @return 该 Environment 此前在本节点的不同实例身份（新进程接管）；首次连接或同一实例重连时返回 {@code null}
-   */
+  public Optional<DaemonRuntimeSnapshot> runtimeStatus(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null || !session.isReady()) {
+      return Optional.empty();
+    }
+    UUID leaseToken = session.leaseToken();
+    if (leaseToken == null) {
+      return Optional.empty();
+    }
+    try {
+      if (!leaseStore.holdsReadyLease(environmentId, leaseToken)) {
+        return Optional.empty();
+      }
+    } catch (RuntimeException error) {
+      return Optional.empty();
+    }
+    return session.runtimeStatus();
+  }
+
+  public Set<EnvironmentId> readyEnvironments() {
+    Set<EnvironmentId> ready = new HashSet<>();
+    synchronized (inventory) {
+      for (Map.Entry<EnvironmentId, DaemonConnectionSession> entry : sessions.entrySet()) {
+        if (entry.getValue().isReady()) {
+          ready.add(entry.getKey());
+        }
+      }
+    }
+    return ready;
+  }
+
+  public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    return session != null && session.isReady()
+        ? Optional.of(session.identity())
+        : Optional.empty();
+  }
+
+  public void beginUpdate(EnvironmentId environmentId, String operationId) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    int inFlight = invocationTracker.activeInvocationCount(environmentId);
+    updateCoordinator.beginUpdate(environmentId, operationId, session, inFlight);
+  }
+
+  public void endUpdate(EnvironmentId environmentId, String operationId) {
+    updateCoordinator.endUpdate(environmentId, operationId);
+  }
+
+  public boolean isUpdating(EnvironmentId environmentId) {
+    return updateCoordinator.isUpdating(environmentId);
+  }
+
+  public int activeInvocationCount(EnvironmentId environmentId) {
+    return invocationTracker.activeInvocationCount(environmentId);
+  }
+
+  public void sendUpdate(EnvironmentId environmentId, DaemonUpdateCommand command) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    updateCoordinator.sendUpdate(environmentId, session, command);
+  }
+
+  public DaemonIdeCall requestIde(EnvironmentId environmentId, IdeCommand command) {
+    if (updateCoordinator.isUpdating(environmentId)) {
+      throw new EnvironmentCapabilityBusyException(
+          "environment " + environmentId + " is being updated");
+    }
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null) {
+      throw unavailable(environmentId, "ide");
+    }
+    return ideCoordinator.requestIde(environmentId, session, command, leaseStore);
+  }
+
+  public void abandonIde(UUID invocationId) {
+    ideCoordinator.abandonIde(invocationId);
+  }
+
+  public void sendIdeLease(
+      EnvironmentId environmentId, DaemonConnectionIdentity expectedIdentity, IdeLease ideLease) {
+    if (updateCoordinator.isUpdating(environmentId)) {
+      throw new EnvironmentCapabilityBusyException(
+          "environment " + environmentId + " is being updated");
+    }
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId + " is not ready for IDE_LEASE");
+    }
+    ideCoordinator.sendIdeLease(environmentId, session, expectedIdentity, ideLease, leaseStore);
+  }
+
+  public int activeIdeCount() {
+    return ideCoordinator.activeIdeCount();
+  }
+
+  private DaemonConnectionSession sessionOf(EnvironmentId environmentId) {
+    synchronized (inventory) {
+      return sessions.get(environmentId);
+    }
+  }
+
+  private void removeSession(DaemonConnectionSession session) {
+    synchronized (inventory) {
+      sessions.remove(session.environmentId(), session);
+    }
+  }
+
   private String replaceDaemonInstance(EnvironmentId environmentId, String daemonInstanceId) {
     synchronized (inventory) {
-      EnvironmentState environment = environmentOf(environmentId);
-      String previous = environment.daemonInstanceId;
-      environment.daemonInstanceId = daemonInstanceId;
+      String previous = daemonInstances.put(environmentId, daemonInstanceId);
       return previous == null || previous.equals(daemonInstanceId) ? null : previous;
     }
   }
 
-  /**
-   * 取走该 Environment 的全部在途调用并登记 tombstone：新进程无法再提供它们的终态，其迟到帧一律忽略。
-   *
-   * <p>移除与标记终态在同一次目录锁内完成，因此与终态帧、expire 的原子取出至多一个赢家。
-   */
-  private List<ActiveInvocation> takeAbandonedInvocations(EnvironmentId environmentId) {
-    List<ActiveInvocation> abandoned = new ArrayList<>();
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.remove(environmentId);
-      if (invocations != null) {
-        for (ActiveInvocation active : invocations.values()) {
-          active.markTerminal();
-          addTombstoneLocked(active);
-          abandoned.add(active);
-        }
-      }
-    }
-    return abandoned;
+  private EnvironmentServerSettings settings() {
+    return Objects.requireNonNull(settingsSupplier.get(), "settings");
   }
 
-  /** 幂等释放该调用名下的全部传输绑定：未消费的上传按已绑定 uploadId 请求全局清理。 */
-  private void releaseAllTransfers(ActiveInvocation active) {
-    List<TransferBinding> bindings;
-    synchronized (active) {
-      if (active.transfers.isEmpty()) {
-        return;
-      }
-      bindings = List.copyOf(active.transfers.values());
-      active.transfers.clear();
-    }
-    for (TransferBinding binding : bindings) {
-      releaseBinding(active, binding);
-    }
-  }
-
-  /**
-   * 幂等释放单个绑定：只释放已绑定到该传输的 uploadId（从未申请到 upload 的传输无需释放）。
-   *
-   * <p>释放前先把绑定标记为已释放，使并发在途的票据 I/O 结果不再回执，也不重复释放同一个 uploadId。
-   */
-  private void releaseBinding(ActiveInvocation active, TransferBinding binding) {
-    UUID uploadId;
-    synchronized (binding) {
-      if (binding.released) {
-        return;
-      }
-      binding.released = true;
-      uploadId = binding.currentUploadId;
-    }
-    if (uploadId == null) {
-      return;
-    }
-    try {
-      ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
-    } catch (RuntimeException ignored) {
-      // 释放失败不影响会话核心状态；上传行本身仍受全局过期回收保护。
-    }
-  }
-
-  /** 在 I/O 完成后发现调用已终结/被接管时，立即释放本次产生的 uploadId 并标记绑定已释放。 */
-  private void markReleasedAndRelease(
-      ActiveInvocation active, TransferBinding binding, UUID uploadId) {
-    synchronized (binding) {
-      if (binding.released) {
-        return;
-      }
-      binding.released = true;
-    }
-    try {
-      ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
-    } catch (RuntimeException ignored) {
-      // 释放失败不影响会话核心状态；上传行本身仍受全局过期回收保护。
-    }
-  }
-
-  private ConnectionState otherConnectionOf(ConnectionState self, EnvironmentId environmentId) {
-    synchronized (inventory) {
-      ConnectionState existing = connectionOf(environmentId);
-      return existing == self ? null : existing;
-    }
-  }
-
-  /** 处理 daemon READY 声明：围栏式登记 READY 能力、唤醒会话监听器并恢复同实例的在途调用。 */
-  private void handleReady(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireHello(state);
-    requireNoInvocationId(envelope);
-    EnvironmentId environmentId;
-    UUID leaseToken;
-    synchronized (state) {
-      if (state.ready) {
-        throw new DaemonProtocolException("READY may only be sent once per connection");
-      }
-      environmentId = state.environmentId;
-      leaseToken = state.leaseToken;
-    }
-    if (leaseToken == null) {
-      throw new DaemonProtocolException("leaseToken missing on READY");
-    }
-    DaemonReady ready = readyCodec.decode(envelope.payloadJson());
-    DaemonCapabilities capabilities = ready.capabilities();
-    boolean ok = leaseStore.markReady(environmentId, leaseToken, capabilities, timeout());
-    if (!ok) {
-      throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-    }
-    synchronized (state) {
-      if (state.cleaned || !leaseToken.equals(state.leaseToken)) {
-        throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-      }
-      state.ready = true;
-      state.daemonVersion = capabilities.daemonVersion();
-      state.daemonOperatingSystem = capabilities.environment().operatingSystem();
-      state.runtimeStatus = ready.runtimeStatus();
-    }
-    deferred.add(() -> notifyEnvironmentReady(environmentId));
-    recoverActiveInvocations(state, environmentId);
-    resendPendingExitConfirmations(state, environmentId);
-  }
-
-  /**
-   * 同实例重连后恢复未终结的在途调用：未取消的调用发送不终止执行的 {@code RECOVER}，已有取消意图的调用重放 {@code CANCEL}；绝不重发 INVOKE。
-   *
-   * <p>排除判断集中在连接状态锁内：已终结、已在当前代际递交且尚未取消、或 CANCEL 已在本代送达的调用不再恢复。控制连接的一次抖动因此不会停止仍在运行的 命令：Daemon 回放
-   * STARTED 后继续执行，结果在新连接上交付。Daemon journal 只保留有界终态，不能为恢复提供永久去重，所以恢复只取回或停止，绝不再次执行。
-   * 本地队列拒绝不改变在途调用的存在；BUSY/CLOSED/传输失败关闭当前连接，由既有重连在新代际再试，不新增轮询。
-   */
-  private void recoverActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
-    for (ActiveInvocation active : activeInvocations(environmentId)) {
-      DaemonOfferResult outcome;
-      synchronized (state) {
-        if (!state.isReady()) {
-          return;
-        }
-        if (active.isTerminal()
-            || (!active.isCancelled() && active.deliveredGeneration == state.generation)
-            || active.cancelDeliveredGeneration == state.generation) {
-          continue;
-        }
-        // 只有 Studio 已表达取消意图的调用才在新代际重放 CANCEL；其余调用发送不终止执行的 RECOVER：Daemon 对运行中的调用回放 STARTED
-        // 并继续执行，对已终结的调用重放终态与独立退出确认，对从未收到的调用保持静默。INVOKE 绝不重发，因为 journal 终态有上界。
-        boolean recover = !active.isCancelled();
-        try {
-          outcome =
-              state.offer(
-                  recover ? DaemonMessageType.RECOVER : DaemonMessageType.CANCEL,
-                  active.invocationId.toString(),
-                  "{}");
-        } catch (RuntimeException transportFailure) {
-          outcome = null;
-        }
-        if (outcome == DaemonOfferResult.ACCEPTED) {
-          if (recover) {
-            active.deliveredGeneration = state.generation;
-          } else {
-            active.noteCancelDelivered(state.generation);
-          }
-        }
-      }
-      if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
-        // 传输失败或连接已关：关闭包含租约存储访问，必须在连接状态锁之外执行。
-        close(state.connection.connectionId());
-        return;
-      }
-      if (outcome == DaemonOfferResult.BUSY) {
-        // 帧肯定未发送，连接仍可用；关掉它以触发既有重连，而不是在本代际空转。
-        close(state.connection.connectionId());
-        return;
-      }
-    }
-  }
-
-  private void handleHeartbeat(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    DaemonHeartbeat heartbeat = heartbeatCodec.decode(envelope.payloadJson());
-    EnvironmentId environmentId = state.environmentId;
-    UUID leaseToken = state.leaseToken;
-    if (leaseToken == null) {
-      throw new DaemonProtocolException("leaseToken missing on HEARTBEAT");
-    }
-    boolean ok = leaseStore.heartbeat(environmentId, leaseToken, timeout());
-    if (!ok) {
-      throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-    }
-    applyRuntimeStatus(state, heartbeat.runtimeStatus());
-    reconcileTemporaryResourcePolicy(state);
-    String daemonInstanceId = state.daemonInstanceId;
-    if (daemonInstanceId != null) {
-      DaemonConnectionIdentity identity =
-          new DaemonConnectionIdentity(environmentId, daemonInstanceId);
-      Long ideLeaseRound = heartbeat.ideLeaseRound();
-      // 回调在 gate 之外执行：LIST_VIEWS/跨节点使用证明查询不得阻塞心跳与连接处理。
-      deferred.add(() -> sessionListener.onHeartbeat(environmentId, identity, ideLeaseRound));
-    }
-  }
-
-  /** 处理关键变化时立即上报的 runtimeStatus；必须属于当前 READY 代际且租约仍归本节点。 */
-  private void handleRuntimeStatus(ConnectionState state, DaemonEnvelope envelope) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    DaemonRuntimeSnapshot snapshot = runtimeStatusCodec.decode(envelope.payloadJson());
-    EnvironmentId environmentId = state.environmentId;
-    UUID leaseToken = state.leaseToken;
-    if (leaseToken == null) {
-      throw new DaemonProtocolException("leaseToken missing on RUNTIME_STATUS");
-    }
-    boolean holdsReady;
-    try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      throw new DaemonProtocolException("database unavailable: " + error.getMessage(), error);
-    }
-    if (!holdsReady) {
-      throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-    }
-    synchronized (state) {
-      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
-        throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-      }
-    }
-    applyRuntimeStatus(state, snapshot);
-  }
-
-  /**
-   * 只接受当前连接代际的 runtimeStatus：更高 revision 替换，同 revision 内容不同为协议错误，更低 revision 视为迟到快照忽略。
-   *
-   * <p>状态只保存在连接内存中；断线或换代后不可读取，也不写 {@code runtime_info} 或任何数据库进度列。
-   */
-  private void applyRuntimeStatus(ConnectionState state, DaemonRuntimeSnapshot snapshot) {
-    synchronized (state) {
-      if (!state.isReady()) {
-        throw new DaemonProtocolException("runtimeStatus arrived after connection left READY");
-      }
-      if (!snapshot.status().daemonVersion().equals(state.daemonVersion)) {
-        throw new DaemonProtocolException(
-            "runtimeStatus.daemonVersion does not match the READY daemonVersion");
-      }
-      DaemonRuntimeSnapshot current = state.runtimeStatus;
-      if (current == null || snapshot.revision() > current.revision()) {
-        state.runtimeStatus = snapshot;
-        return;
-      }
-      if (snapshot.revision() == current.revision() && !snapshot.equals(current)) {
-        throw new DaemonProtocolException(
-            "runtimeStatus revision " + snapshot.revision() + " changed without advancing");
-      }
-    }
-  }
-
-  /**
-   * 心跳时按需把当前设置里的临时资源策略推送给已 READY 的连接。
-   *
-   * <p>WELCOME 只在建连时通告策略；已 READY 的连接不会再次收到 WELCOME，因此策略热更必须经同一控制通道在后续帧上送达。只在 ttl
-   * 或扫描间隔相对该连接最近一次已送达值发生变化时推送，避免每次心跳都产生冗余帧。
-   */
-  private void reconcileTemporaryResourcePolicy(ConnectionState state) {
-    EnvironmentServerSettings current = settings();
-    long ttlSeconds = current.temporaryResourceTtlSeconds();
-    long cleanupIntervalSeconds = current.temporaryResourceCleanupIntervalSeconds();
-    if (state.temporaryResourceTtlSeconds == ttlSeconds
-        && state.temporaryResourceCleanupIntervalSeconds == cleanupIntervalSeconds) {
-      return;
-    }
-    ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("temporaryResourceTtlSeconds", ttlSeconds);
-    payload.put("temporaryResourceCleanupIntervalSeconds", cleanupIntervalSeconds);
-    if (state.offer(DaemonMessageType.TEMPORARY_RESOURCE_POLICY, null, payload.toString())
-        == DaemonOfferResult.ACCEPTED) {
-      state.temporaryResourceTtlSeconds = ttlSeconds;
-      state.temporaryResourceCleanupIntervalSeconds = cleanupIntervalSeconds;
-    }
-  }
-
-  private void handleError(ConnectionState state, DaemonEnvelope envelope) {
-    requireHello(state);
-    requireNoInvocationId(envelope);
-    requiredSingleText(envelopeCodec.readPayload(envelope), "message", "ERROR payload");
-  }
-
-  /**
-   * 在 {@code gate} 内完成资源上传申请的协议与绑定校验。
-   *
-   * <p>只做无副作用判定：调用必须仍属于本连接、transfer 数量未超上限、同一 transfer 的重复申请必须完全一致。任何不满足都以协议错误 关闭连接（恶意/失控 Daemon
-   * 不能靠乱发控制帧影响其它调用）。
-   */
-  private PreparedTransfer prepareUploadReserve(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = transferTarget(state, envelope);
-    DaemonResourceTransferCodec.UploadRequest request =
-        transferCodec.decodeRequest(envelope.payloadJson());
-    UUID transferId = request.transferId();
-    if (request.size() > settings().maxResourceBytes()) {
-      // 超出本节点资源预算的申请在任何存储副作用之前被拒绝；恶意/失控 Daemon 不能靠超大声明创建上传行。
-      throw new DaemonProtocolException(
-          "resource transfer size exceeds the environment limit: " + transferId);
-    }
-    DaemonResourceTicketService.TransferRequest serviceRequest =
-        new DaemonResourceTicketService.TransferRequest(
-            transferId, request.mediaType(), request.name(), request.size(), request.sha256());
-    synchronized (active) {
-      TransferBinding existing = active.transfers.get(transferId);
-      if (existing != null) {
-        if (!existing.request.equals(serviceRequest)) {
-          throw new DaemonProtocolException(
-              "resource transfer is already bound to a different request: " + transferId);
-        }
-        // 同一 transfer 的重复申请（含同实例重连后的重发）沿用既有绑定，绝不重复创建传输或上传行。
-        return new PreparedTransfer(state, active, transferId, existing.request, null);
-      }
-      if (active.transfers.size() >= MAX_TRANSFERS_PER_INVOCATION) {
-        throw new DaemonProtocolException(
-            "invocation "
-                + active.invocationId
-                + " exceeds "
-                + MAX_TRANSFERS_PER_INVOCATION
-                + " concurrent resource transfers");
-      }
-      active.transfers.put(transferId, new TransferBinding(serviceRequest));
-    }
-    return new PreparedTransfer(state, active, transferId, serviceRequest, null);
-  }
-
-  /** 在 {@code gate} 内完成资源上传提交的协议与绑定校验；提交必须指向本调用已申请且 uploadId 一致的 transfer。 */
-  private PreparedTransfer prepareUploadCommit(ConnectionState state, DaemonEnvelope envelope) {
-    ActiveInvocation active = transferTarget(state, envelope);
-    DaemonResourceTransferCodec.UploadCommit commit =
-        transferCodec.decodeCommit(envelope.payloadJson());
-    UUID transferId = commit.transferId();
-    synchronized (active) {
-      TransferBinding existing = active.transfers.get(transferId);
-      if (existing == null) {
-        throw new DaemonProtocolException(
-            "resource upload commit references an unrequested transfer: " + transferId);
-      }
-      synchronized (existing) {
-        if (existing.released) {
-          throw new DaemonProtocolException(
-              "resource upload commit references a released transfer: " + transferId);
-        }
-        UUID owned = existing.currentUploadId;
-        // 提交只能指向本 transfer 已由服务端签发的上传：从未签发（伪造/抢先提交）或指向其它上传都是协议违规。
-        if (owned == null || !owned.equals(commit.uploadId())) {
-          throw new DaemonProtocolException(
-              "resource upload commit uploadId does not match the issued ticket: " + transferId);
-        }
-      }
-    }
-    return new PreparedTransfer(state, active, transferId, null, commit.uploadId());
-  }
-
-  /** 上传控制面只允许指向本连接的、仍然活动的 invocation。 */
-  private ActiveInvocation transferTarget(ConnectionState state, DaemonEnvelope envelope) {
-    requireReady(state);
-    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
-    if (active == null) {
-      throw new DaemonProtocolException(
-          "resource upload control does not own invocationId: " + envelope.invocationId());
-    }
-    return active;
-  }
-
-  /**
-   * 在核心锁之外执行票据服务 I/O，并按票据状态回执。
-   *
-   * <p>同一 transfer 的 I/O 由该绑定自身的锁串行化：同一申请/提交（含瞬时 FAILED 后的重试、同实例重连后的重发）永不产生第二个上传行，竞态下 也不会出现重复
-   * reserve。I/O 完成后重新判定调用是否仍然活动；若已完成终态或已被接管，则把本次得到的 uploadId 立即释放，绝不泄漏上传行。
-   */
-  private void executeTransfer(ConnectionState state, PreparedTransfer prepared) {
-    ActiveInvocation active = prepared.active();
-    if (!isActive(active)) {
-      return;
-    }
-    UUID transferId = prepared.transferId();
-    TransferBinding binding;
-    synchronized (active) {
-      binding = active.transfers.get(transferId);
-      if (binding == null) {
-        return;
-      }
-    }
-    boolean commit = prepared.commitUploadId() != null;
-    DaemonResourceTicketService.Ticket ticket;
-    UUID producedUploadId = null;
-    boolean replay;
-    synchronized (binding) {
-      if (binding.released) {
-        return;
-      }
-      ticket = commit ? binding.commitTicket() : binding.reserveTicket();
-      replay = ticket != null;
-      if (!replay) {
-        try {
-          ticket =
-              commit
-                  ? ticketService.commit(
-                      active.environmentId,
-                      active.invocationId.toString(),
-                      prepared.commitUploadId())
-                  : ticketService.reserve(
-                      active.environmentId, active.invocationId.toString(), binding.request);
-        } catch (RuntimeException error) {
-          // 绝不把异常原文回执给 Daemon：票据服务的异常可能携带存储细节，控制面只报告固定的有界说明。
-          ticket = new DaemonResourceTicketService.Ticket.Failed(TRANSFER_FAILURE_MESSAGE);
-        }
-        producedUploadId = ticket.uploadId();
-        if (producedUploadId != null) {
-          binding.currentUploadId = producedUploadId;
-        }
-        // FAILED 多为可重试的瞬时故障，因此不缓存：同一 transfer 的下一次重试必须再次触达票据服务。
-        if (ticket instanceof DaemonResourceTicketService.Ticket.Failed) {
-          binding.recordFailure(commit);
-        } else if (commit) {
-          binding.commitTicket = ticket;
-        } else {
-          binding.reserveTicket = ticket;
-        }
-      }
-    }
-    if (producedUploadId != null && !isActive(active)) {
-      // 调用在 I/O 期间终结或被接管：本次上传没有任何消费者，立即释放以免泄漏上传行。
-      markReleasedAndRelease(active, binding, producedUploadId);
-      return;
-    }
-    DaemonResourceTransferCodec.UploadTicket wire = toWireTicket(transferId, ticket);
-    // 票据只在调用仍然活动时回执；终态之后到达的票据不再发送。
-    if (isActive(active)) {
-      pushUploadTicket(state, active, wire);
-    }
-  }
-
-  private static DaemonResourceTransferCodec.UploadTicket toWireTicket(
-      UUID transferId, DaemonResourceTicketService.Ticket ticket) {
-    return switch (ticket) {
-      case DaemonResourceTicketService.Ticket.Pending pending -> DaemonResourceTransferCodec
-          .UploadTicket.pending(transferId, pending.uploadId(), pending.presignedPut());
-      case DaemonResourceTicketService.Ticket.Ready ready -> DaemonResourceTransferCodec
-          .UploadTicket.ready(transferId, ready.uploadId());
-      case DaemonResourceTicketService.Ticket.Failed failed -> DaemonResourceTransferCodec
-          .UploadTicket.failed(transferId, failed.message());
-    };
-  }
-
-  /** 递交一条票据帧：envelope 的 invocationId 是被调用的活动调用，transferId 只存在于 payload 中。 */
-  private void pushUploadTicket(
-      ConnectionState state,
-      ActiveInvocation active,
-      DaemonResourceTransferCodec.UploadTicket ticket) {
-    offer(
-        state,
-        DaemonMessageType.RESOURCE_UPLOAD_TICKET,
-        active.invocationId.toString(),
-        transferCodec.encodeTicket(ticket));
-  }
-
-  private void handleStarted(ConnectionState state, DaemonEnvelope envelope) {
-    callbackTarget(state, envelope);
-    ObjectNode payload = envelopeCodec.readPayload(envelope);
-    if (payload.isEmpty()) {
-      return;
-    }
-    rejectUnexpectedFields(payload, Set.of("replayed"), "STARTED payload");
-    JsonNode replayed = payload.get("replayed");
-    if (replayed == null || !replayed.isBoolean() || !replayed.booleanValue()) {
-      throw new DaemonProtocolException("STARTED payload.replayed must be true when present");
-    }
-  }
-
-  private void handleProgress(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    ActiveInvocation active = callbackTarget(state, envelope);
-    EnvironmentCapabilityResult result =
-        resultCodec.decodeProgressForInvocation(
-            envelope.payloadJson(), envelope.invocationId(), settings().maxResourceBytes());
-    if (active != null) {
-      deferred.add(() -> deliverPartial(active, result));
-    }
-  }
-
-  /**
-   * 投递一个 partial 前复核 invocation 是否仍属于本连接的活动目录。
-   *
-   * <p>复核放在 drain 时刻而不是 gate 内，使接管或终态已经回收的 invocation 不可能被同一连接上更早入队、更晚执行的 partial 反超终态。 终态之后的
-   * partial 属于契约要求静默丢弃的迟到事件。
-   */
-  private void deliverPartial(ActiveInvocation active, EnvironmentCapabilityResult partial) {
-    if (isActive(active)) {
-      active.listener.onPartial(partial);
-    }
-  }
-
-  private void handleCompleted(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    callbackTarget(state, envelope);
-    EnvironmentCapabilityResult result =
-        resultCodec.decodeCompletedForInvocation(
-            envelope.payloadJson(), envelope.invocationId(), settings().maxResourceBytes());
-    // 终态前先完成上传事实核对：未就绪、伪造、重复或与申请不符的上传一律是协议违规，绝不进入消费方。
-    Set<UUID> referenced = requireCompletedUploads(state, envelope, result);
-    ActiveInvocation active = takeTerminalTarget(state, envelope);
-    if (active != null) {
-      deferred.add(() -> active.listener.onComplete(result));
-      // 结果引用的上传必须保留给消费方；其余未引用传输在终态后不再有消费者。
-      deferred.add(() -> releaseUnreferencedTransfers(active, referenced));
-    }
-  }
-
-  /**
-   * 核对终态结果声明的每一个上传：必须属于本调用、已就绪、且与申请事实逐字段一致。
-   *
-   * <p>任何不满足都是协议违规（关闭连接）：否则消费方会拿到无法转移的引用，或把别的调用的内容当成本次结果。
-   *
-   * @return 结果实际引用的全局上传 id 集合
-   */
-  private Set<UUID> requireCompletedUploads(
-      ConnectionState state, DaemonEnvelope envelope, EnvironmentCapabilityResult result) {
-    Set<UUID> referenced = new HashSet<>();
-    List<UUID> declared = new ArrayList<>();
-    for (ResultContent content : result.contents()) {
-      if (content instanceof ResourceResultContent resource) {
-        UUID uploadId = resource.resource().blobUploadId();
-        if (uploadId == null) {
-          throw new DaemonProtocolException(
-              "resource content must reference a global upload in a terminal result");
-        }
-        if (!referenced.add(uploadId)) {
-          throw new DaemonProtocolException(
-              "terminal result declares the same upload twice: " + uploadId);
-        }
-        declared.add(uploadId);
-      }
-    }
-    if (declared.isEmpty()) {
-      return referenced;
-    }
-    ActiveInvocation active =
-        registeredInvocation(
-            state.environmentId, parseUuid(envelope.invocationId(), "invocationId"));
-    if (active == null) {
-      // 已终结调用的终态重放：上传早已转移或释放，重放不再触发任何消费。
-      return referenced;
-    }
-    List<TransferBinding> bindings;
-    synchronized (active) {
-      bindings = List.copyOf(active.transfers.values());
-    }
-    Map<UUID, TransferBinding> byUploadId = new HashMap<>();
-    for (TransferBinding binding : bindings) {
-      synchronized (binding) {
-        if (binding.currentUploadId != null && !binding.released) {
-          byUploadId.put(binding.currentUploadId, binding);
-        }
-      }
-    }
-    Set<UUID> consumed = new HashSet<>();
-    for (ResultContent content : result.contents()) {
-      if (!(content instanceof ResourceResultContent resource)) {
-        continue;
-      }
-      ResourceRef ref = resource.resource();
-      UUID uploadId = ref.blobUploadId();
-      if (!consumed.add(uploadId)) {
-        continue;
-      }
-      TransferBinding binding = byUploadId.get(uploadId);
-      if (binding == null) {
-        throw new DaemonProtocolException(
-            "terminal result references an upload this invocation does not own: " + uploadId);
-      }
-      binding.requireReadyAndMatching(ref);
-    }
-    return referenced;
-  }
-
-  /** 释放终态结果未引用的传输绑定：被引用的上传由消费方（history 物化）负责原子转移。 */
-  private void releaseUnreferencedTransfers(ActiveInvocation active, Set<UUID> referenced) {
-    List<TransferBinding> abandoned = new ArrayList<>();
-    synchronized (active) {
-      for (TransferBinding binding : active.transfers.values()) {
-        if (binding.currentUploadId == null || !referenced.contains(binding.currentUploadId)) {
-          abandoned.add(binding);
-        }
-      }
-      abandoned.forEach(binding -> active.transfers.values().remove(binding));
-    }
-    for (TransferBinding binding : abandoned) {
-      releaseBinding(active, binding);
-    }
-  }
-
-  private void handleFailed(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    callbackTarget(state, envelope);
-    String message =
-        requiredSingleText(envelopeCodec.readPayload(envelope), "message", "FAILED payload");
-    ActiveInvocation active = takeTerminalTarget(state, envelope);
-    if (active != null) {
-      deferred.add(
-          () -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
-      // 失败终态不携带任何上传引用，未消费的传输在此之前已无消费者。
-      deferred.add(() -> releaseAllTransfers(active));
-    }
-  }
-
-  private void handleCancelled(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    callbackTarget(state, envelope);
-    String reason =
-        requiredSingleText(envelopeCodec.readPayload(envelope), "reason", "CANCELLED payload");
-    ActiveInvocation active = takeTerminalTarget(state, envelope);
-    if (active != null) {
-      deferred.add(
-          () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
-      deferred.add(() -> releaseAllTransfers(active));
-    }
-  }
-
-  /**
-   * 投递独立退出确认：只接受发起该调用的 daemon 身份，且至多一次。
-   *
-   * <p>结果终态、超时和断连都不产生该回调。terminate 后条目仍留在有界 tombstone 中，因此取消之后真正到来的确认仍能交付。
-   */
-  private void handleExecutionExited(
-      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
-    requireReady(state);
-    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    String daemonInstanceId = state.daemonInstanceId;
-    if (daemonInstanceId == null) {
-      throw new DaemonProtocolException("EXECUTION_EXITED requires a known daemon instance");
-    }
-    Optional<ExitConfirmation> confirmation;
-    boolean known;
-    synchronized (inventory) {
-      confirmation =
-          claimExitConfirmationLocked(state.environmentId, invocationId, daemonInstanceId);
-      known =
-          confirmation.isPresent()
-              || hasTombstoneLocked(state.environmentId, invocationId)
-              || registeredInvocationLocked(state.environmentId, invocationId) != null;
-    }
-    if (confirmation.isPresent()) {
-      EnvironmentCapabilityExecutionListener listener = confirmation.get().listener;
-      deferred.add(
-          () -> {
-            try {
-              listener.onExitConfirmed();
-            } catch (RuntimeException | Error failure) {
-              // 回调隔离层会继续 drain；账本写入失败必须先留下安全诊断，不补 ACK、不重试。
-              logFailure("execution exit confirmation", failure);
-              throw failure;
-            }
-          });
-      return;
-    }
-    if (!known) {
-      throw new DaemonProtocolException(
-          "daemon exit confirmation does not own invocationId: " + envelope.invocationId());
-    }
-  }
-
-  private ActiveInvocation callbackTarget(ConnectionState state, DaemonEnvelope envelope) {
-    requireReady(state);
-    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
-    if (active != null) {
-      return active;
-    }
-    if (hasTombstone(state.environmentId, invocationId)) {
-      return null;
-    }
-    throw new DaemonProtocolException(
-        "daemon callback does not own invocationId: " + envelope.invocationId());
-  }
-
-  private boolean isActive(ActiveInvocation active) {
-    if (active.isTerminal()) {
-      return false;
-    }
-    return registeredInvocation(active.environmentId, active.invocationId) == active;
-  }
-
-  /**
-   * 在活动目录内原子取出并标记终态，再登记 tombstone。
-   *
-   * <p>取出与标记必须是同一次目录操作的结果：unregister 失败说明调用已被 abandon/expire 取走，不得把仍登记的活动调用当成第二次终态返回。 tombstone 让同一
-   * invocation 的迟到/重放终态被静默忽略：Daemon journal 会在重连后重放终态，重放不是越权回调，也不得触发协议错误。
-   */
-  private ActiveInvocation takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
-    requireReady(state);
-    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    synchronized (inventory) {
-      ActiveInvocation active = takeRegisteredLocked(state.environmentId, invocationId);
-      if (active != null) {
-        addTombstoneLocked(active);
-        return active;
-      }
-      if (hasTombstoneLocked(state.environmentId, invocationId)) {
-        return null;
-      }
-    }
-    throw new DaemonProtocolException(
-        "daemon terminal callback does not own invocationId: " + envelope.invocationId());
-  }
-
-  /** 从活动目录移除并标记终态；移除失败返回 null。调用方必须持有 {@code inventory}。 */
-  private ActiveInvocation takeRegisteredLocked(EnvironmentId environmentId, UUID invocationId) {
-    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
-    if (invocations == null) {
-      return null;
-    }
-    ActiveInvocation active = invocations.remove(invocationId);
-    if (active == null) {
-      return null;
-    }
-    if (invocations.isEmpty()) {
-      invocationsByEnvironment.remove(environmentId);
-    }
-    active.markTerminal();
-    return active;
-  }
-
-  /** 递交一帧；传输同步失败意味着连接已失效：断开该连接并返回 false。 */
-  private boolean offer(
-      ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
-    return offerResult(state, type, invocationId, payloadJson) == DaemonOfferResult.ACCEPTED;
-  }
-
-  /**
-   * 递交一帧并返回确定性结果。
-   *
-   * <p>BUSY/CLOSED 表示帧肯定未发送。传输同步抛错时关闭连接并视为 CLOSED，避免调用方把未送达记成已送达。
-   */
-  private DaemonOfferResult offerResult(
-      ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
-    try {
-      DaemonOfferResult outcome = state.offer(type, invocationId, payloadJson);
-      if (type == DaemonMessageType.CANCEL
-          && (outcome == DaemonOfferResult.BUSY || outcome == DaemonOfferResult.CLOSED)) {
-        // 取消帧肯定未发送：关掉当前连接，由既有重连在新代际再发 CANCEL，不在本代际空转。
-        close(state.connection.connectionId());
-      }
-      return outcome;
-    } catch (RuntimeException error) {
-      close(state.connection.connectionId());
-      return DaemonOfferResult.CLOSED;
-    }
-  }
-
-  /**
-   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验必填 workdir（当前只有 {@code process.exec}）的形状。
-   *
-   * <p>文件工具的本地 {@code path} 必须是绝对路径，但其绝对性由目标 Daemon 用自身 {@code Path} 判定（host-specific），这里不做跨 OS
-   * 词法校验。本方法只做纯文本校验：不使用 Backend 本机 {@code Path} 解析远端路径，也不做 home/环境变量展开。
-   */
   private static void validateRequiredWorkdirShape(
-      ConnectionState state,
+      DaemonOperatingSystem operatingSystem,
       EnvironmentCapabilityDescriptor descriptor,
       EnvironmentCapabilityCall call) {
     if (!descriptor.inputSchema().required().contains("workdir")) {
@@ -2036,7 +523,6 @@ public final class EnvironmentDaemonServer
     }
     JsonNode arguments = JsonValues.readTree(call.argumentsJson());
     JsonNode workdir = arguments.get("workdir");
-    DaemonOperatingSystem operatingSystem = state.readyDaemonOperatingSystem();
     if (operatingSystem == null) {
       throw new EnvironmentCapabilityUnavailableException(
           "target daemon operating system is not known; cannot validate workdir for "
@@ -2052,256 +538,10 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  private void protocolFailure(
-      ConnectionState state, RuntimeException error, EnvironmentId receivedEnvironmentId) {
-    String message = errorMessage(error, "invalid daemon protocol message");
-    ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("message", message);
-    if (error instanceof DaemonRegistrationRejectedException) {
-      payload.put("code", DaemonProtocol.ERROR_CODE_REGISTRATION_REJECTED);
-    } else if (error instanceof DaemonRetryLaterException) {
-      payload.put("code", DaemonProtocol.ERROR_CODE_RETRY_LATER);
-    }
-    state.enqueueError(receivedEnvironmentId, envelopeCodec.writeJson(payload));
-    close(state.connection.connectionId());
-  }
-
-  /**
-   * 幂等清理连接代际：解绑路由租约并关闭传输；在途调用保留等待同实例重连重放。
-   *
-   * <p>两项独立释放互不跳过；诊断延后到两项实际释放之后，因此日志后端自身失败也不会跳过 transport close 或遮蔽业务 Error。 Error
-   * 不吞：收尾完成后按原对象身份抛出首个 Error；诊断失败作为 suppressed 保留，没有业务 Error 时直接传播，绝不静默吞掉。
-   */
-  private void closeConnectionState(ConnectionState state) {
-    EnvironmentId environmentId;
-    UUID leaseToken;
-    boolean closeAfterFlush;
-    synchronized (state) {
-      if (state.cleaned) {
-        return;
-      }
-      state.cleaned = true;
-      environmentId = state.environmentId;
-      leaseToken = state.leaseToken;
-      closeAfterFlush = state.closeAfterFlush;
-    }
-    synchronized (inventory) {
-      if (environmentId != null) {
-        EnvironmentState environment = environments.get(environmentId);
-        if (environment != null && environment.connection == state) {
-          environment.connection = null;
-        }
-      }
-      connections.remove(state.connection.connectionId(), state);
-    }
-    Throwable leaseFailure = null;
-    if (environmentId != null && leaseToken != null) {
-      try {
-        leaseStore.disconnect(environmentId, leaseToken, timeout());
-      } catch (Throwable error) {
-        leaseFailure = error;
-      }
-    }
-    Throwable closeFailure = null;
-    try {
-      if (closeAfterFlush) {
-        state.connection.closeAfterFlush();
-      } else {
-        state.connection.close();
-      }
-    } catch (Throwable error) {
-      closeFailure = error;
-    }
-    // IDE 命令不重放；租约或传输释放失败也必须使该代命令收敛。
-    failPendingIdeCalls(state);
-    Error cleanupError = recordCleanupFailure(null, leaseFailure);
-    cleanupError = recordCleanupFailure(cleanupError, closeFailure);
-    Throwable diagnosticFailure = null;
-    if (leaseFailure != null) {
-      diagnosticFailure =
-          logCleanupFailure("connection cleanup lease disconnect", leaseFailure, diagnosticFailure);
-    }
-    if (closeFailure != null) {
-      diagnosticFailure =
-          logCleanupFailure("connection cleanup transport close", closeFailure, diagnosticFailure);
-    }
-    if (cleanupError != null) {
-      if (diagnosticFailure != null && cleanupError != diagnosticFailure) {
-        cleanupError.addSuppressed(diagnosticFailure);
-      }
-      throw cleanupError;
-    }
-    if (diagnosticFailure != null) {
-      rethrowUnchecked(diagnosticFailure);
-    }
-  }
-
-  /**
-   * 保留首个 Error 的对象身份用于收尾后抛出：首个 Error 成为主因，其后失败作为 suppressed 保留，绝不遮蔽首个。
-   *
-   * <p>没有 Error 时返回 {@code null}：普通异常只通过日志观察，不改变会话语义。
-   */
-  private static Error recordCleanupFailure(Error first, Throwable failure) {
-    if (failure == null) {
-      return first;
-    }
-    if (first == null) {
-      return failure instanceof Error error ? error : null;
-    }
-    if (first != failure) {
-      first.addSuppressed(failure);
-    }
-    return first;
-  }
-
-  /**
-   * 记录一次收尾失败并返回诊断后端自身的首个失败；诊断失败只保留、不在日志路径内再次记录，避免无限递归。
-   *
-   * <p>普通 cleanup 异常且日志成功时保持只记录不抛。
-   */
-  private static Throwable logCleanupFailure(
-      String stage, Throwable failure, Throwable firstDiagnosticFailure) {
-    try {
-      logFailure(stage, failure);
-      return firstDiagnosticFailure;
-    } catch (Throwable diagnosticFailure) {
-      if (firstDiagnosticFailure == null) {
-        return diagnosticFailure;
-      }
-      if (firstDiagnosticFailure != diagnosticFailure) {
-        firstDiagnosticFailure.addSuppressed(diagnosticFailure);
-      }
-      return firstDiagnosticFailure;
-    }
-  }
-
-  /** 在全部释放完成后传播诊断后端失败；保持原对象身份，不写入日志以避免递归。 */
-  private static void rethrowUnchecked(Throwable failure) {
-    if (failure instanceof Error error) {
-      throw error;
-    }
-    if (failure instanceof RuntimeException runtime) {
-      throw runtime;
-    }
-    throw new IllegalStateException("cleanup diagnostic failure is not unchecked", failure);
-  }
-
-  /** 记录一次收尾/通知失败的固定阶段与异常类名；绝不附加原始异常、message、路径或凭据。 */
-  private static void logFailure(String stage, Throwable failure) {
-    LOG.log(
-        Level.WARNING,
-        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
-  }
-
-  private void notifyEnvironmentReady(EnvironmentId environmentId) {
-    try {
-      sessionListener.onEnvironmentReady(environmentId);
-    } catch (RuntimeException error) {
-      logFailure("environment ready notification", error);
-    }
-  }
-
-  private void notifyDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
-    try {
-      sessionListener.onDaemonInstanceReplaced(previous);
-    } catch (RuntimeException error) {
-      logFailure("daemon instance replaced notification", error);
-    }
-  }
-
-  private void notifyUpdateResult(EnvironmentId environmentId, DaemonUpdateResult result) {
-    try {
-      updateListener.onUpdateResult(environmentId, result);
-    } catch (RuntimeException error) {
-      logFailure("update result notification", error);
-    }
-  }
-
-  private Duration timeout() {
-    return settings().heartbeatTimeout();
-  }
-
-  private EnvironmentServerSettings settings() {
-    return Objects.requireNonNull(settings.get(), "settings");
-  }
-
-  /** 调用方必须持有 {@code inventory}；不存在时创建空状态。 */
-  private EnvironmentState environmentOf(EnvironmentId environmentId) {
-    return environments.computeIfAbsent(environmentId, ignored -> new EnvironmentState());
-  }
-
-  /** 调用方必须持有 {@code inventory}。 */
-  private ConnectionState connectionOf(EnvironmentId environmentId) {
-    EnvironmentState environment = environments.get(environmentId);
-    return environment == null ? null : environment.connection;
-  }
-
   private static EnvironmentCapabilityUnavailableException unavailable(
       EnvironmentId environmentId, String capabilityId) {
     return new EnvironmentCapabilityUnavailableException(
         environmentId + " is unavailable; " + capabilityId + " cannot be executed");
-  }
-
-  private static void requireHello(ConnectionState state) {
-    if (!state.helloReceived) {
-      throw new DaemonProtocolException("HELLO must precede this daemon message");
-    }
-  }
-
-  private static void requireReady(ConnectionState state) {
-    requireHello(state);
-    if (!state.ready) {
-      throw new DaemonProtocolException("READY must precede invocation callbacks");
-    }
-  }
-
-  private static void requireNoInvocationId(DaemonEnvelope envelope) {
-    if (envelope.invocationId() != null) {
-      throw new DaemonProtocolException(envelope.messageType() + " must not declare invocationId");
-    }
-  }
-
-  private static String requiredSingleText(ObjectNode payload, String name, String context) {
-    rejectUnexpectedFields(payload, Set.of(name), context);
-    return requiredText(payload, name, context);
-  }
-
-  private static String requiredText(ObjectNode payload, String name, String context) {
-    JsonNode value = payload.get(name);
-    if (value == null || !value.isString() || value.stringValue().isBlank()) {
-      throw new DaemonProtocolException(context + "." + name + " must be a non-blank string");
-    }
-    return value.stringValue();
-  }
-
-  private static long requiredLong(ObjectNode payload, String name, String context) {
-    JsonNode value = payload.get(name);
-    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new DaemonProtocolException(context + "." + name + " must be a long integer");
-    }
-    return value.longValue();
-  }
-
-  private static void rejectUnexpectedFields(
-      ObjectNode payload, Set<String> expected, String context) {
-    List<String> unexpected = new ArrayList<>();
-    payload
-        .propertyNames()
-        .forEach(
-            field -> {
-              if (!expected.contains(field)) {
-                unexpected.add(field);
-              }
-            });
-    if (!unexpected.isEmpty() || payload.size() != expected.size()) {
-      throw new DaemonProtocolException(context + " has unexpected or missing fields");
-    }
-  }
-
-  /** 协议错误说明：只描述 Daemon 自身的协议违规，绝不触及存储或票据服务内部事实。 */
-  private static String errorMessage(Throwable error, String fallback) {
-    String message = error.getMessage();
-    return message == null || message.isBlank() ? fallback : message;
   }
 
   private static String requireNonBlank(String value, String name) {
@@ -2309,474 +549,5 @@ public final class EnvironmentDaemonServer
       throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
-  }
-
-  private static UUID parseUuid(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new DaemonProtocolException(field + " must not be blank: " + value);
-    }
-    try {
-      UUID parsed = UUID.fromString(value);
-      if (!parsed.toString().equals(value)) {
-        throw new DaemonProtocolException(field + " must be a canonical UUID string: " + value);
-      }
-      return parsed;
-    } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException(
-          field + " must be a canonical UUID string: " + value, error);
-    }
-  }
-
-  /**
-   * 一次能力调用的所有权记录：终态唯一、取消意图与已送达代际分离，cancel/expire/连接清理竞争只产生一个赢家。
-   *
-   * <p>{@link #cancel()} 只记录取消意图，不终结本地所有权；只有当代连接接受 CANCEL 才记下送达代际。终态仍由 daemon 回调、实例接管或调用方 deadline
-   * 给出。旧代际的接受不能抹掉更新代际上尚未送达的意图。
-   */
-  private final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
-
-    private final EnvironmentId environmentId;
-    private final UUID invocationId;
-    private final EnvironmentCapabilityExecutionListener listener;
-    private final Duration terminalDeliveryGrace;
-    private final AtomicBoolean terminal = new AtomicBoolean();
-    private final AtomicBoolean exitConfirmed = new AtomicBoolean();
-    private final String daemonInstanceId;
-    private volatile boolean cancelled;
-
-    /**
-     * 最近一次把调用成功递交给 Daemon（初次 INVOKE 或重连后的 RECOVER）的连接代际；0 表示尚未确认递交。恢复据此排除已在当前代际递交的调用；INVOKE 绝不重发。
-     */
-    private volatile long deliveredGeneration;
-
-    /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
-    private volatile long cancelDeliveredGeneration;
-
-    /** 最近一次发起递交 CANCEL 的连接代际；0 表示尚未发起。由 {@code this} 保护，用于在锁内原子判定并推进，保证对同一代际至多发送一次。 */
-    private long cancelSentGeneration;
-
-    /**
-     * 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。
-     *
-     * <p>绑定只存在于进程内存：对象存储的权威事实始终是全局上传行，因此进程崩溃只会留下受全局过期回收保护的上传行，不会产生悬空引用。
-     */
-    private final Map<UUID, TransferBinding> transfers = new LinkedHashMap<>();
-
-    private ActiveInvocation(
-        EnvironmentId environmentId,
-        UUID invocationId,
-        EnvironmentCapabilityExecutionListener listener,
-        Duration terminalDeliveryGrace,
-        String daemonInstanceId) {
-      this.environmentId = environmentId;
-      this.invocationId = invocationId;
-      this.listener = listener;
-      this.terminalDeliveryGrace =
-          Objects.requireNonNull(terminalDeliveryGrace, "terminalDeliveryGrace");
-      this.daemonInstanceId = Objects.requireNonNull(daemonInstanceId, "daemonInstanceId");
-    }
-
-    @Override
-    public Duration terminalDeliveryGrace() {
-      return terminalDeliveryGrace;
-    }
-
-    @Override
-    public void terminate(EnvironmentCapabilityTerminationCause cause) {
-      Objects.requireNonNull(cause, "cause");
-      expire(this);
-    }
-
-    @Override
-    public void cancel() {
-      synchronized (this) {
-        cancelled = true;
-        if (terminal.get() || cancelDeliveredGeneration > 0) {
-          return;
-        }
-      }
-      ConnectionState state;
-      synchronized (inventory) {
-        state = connectionOf(environmentId);
-      }
-      if (state == null) {
-        return;
-      }
-      deliverCancel(state);
-    }
-
-    @Override
-    public boolean isCancelled() {
-      return cancelled;
-    }
-
-    private boolean isTerminal() {
-      return terminal.get();
-    }
-
-    private void markTerminal() {
-      terminal.set(true);
-    }
-
-    /** 活动调用的退出确认至多抢占一次；与结果终态无关。 */
-    private boolean claimExit() {
-      return exitConfirmed.compareAndSet(false, true);
-    }
-
-    /**
-     * 向指定连接代际递交一次 CANCEL，只有该代际仍然是当前连接且接受帧时才记下送达。
-     *
-     * <p>旧代际在递交期间被替换时，即使它接受了帧，也不能抹掉新代际上尚未送达的取消意图。
-     */
-    private void deliverCancel(ConnectionState offered) {
-      long offeredGeneration = offered.generation;
-      synchronized (this) {
-        if (cancelDeliveredGeneration >= offeredGeneration
-            || cancelSentGeneration >= offeredGeneration) {
-          return;
-        }
-        cancelSentGeneration = offeredGeneration;
-      }
-      DaemonOfferResult outcome =
-          offerResult(offered, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
-      if (outcome != DaemonOfferResult.ACCEPTED) {
-        return;
-      }
-      ConnectionState current;
-      synchronized (inventory) {
-        current = connectionOf(environmentId);
-      }
-      if (current != null && current.generation == offeredGeneration) {
-        noteCancelDelivered(offeredGeneration);
-      }
-    }
-
-    private void noteCancelDelivered(long generation) {
-      synchronized (this) {
-        if (generation > cancelDeliveredGeneration) {
-          cancelDeliveredGeneration = generation;
-        }
-        if (generation > cancelSentGeneration) {
-          cancelSentGeneration = generation;
-        }
-      }
-    }
-  }
-
-  /**
-   * 在途 IDE 元数据命令：等待一条匹配的 {@code IDE_RESULT}。
-   *
-   * <p>与 Agent capability 调用不同，这里没有 journal/重放：{@code reply} 至多完成一次，连接代际关闭后由 {@link
-   * #failPendingIdeCalls} 以结果不确定终结。守护于 {@code inventory}。
-   */
-  private final class PendingIdeCall {
-
-    private final ConnectionState connection;
-    private final EnvironmentId environmentId;
-    private final UUID invocationId;
-    private final CompletableFuture<String> reply = new CompletableFuture<>();
-
-    private PendingIdeCall(
-        ConnectionState connection, EnvironmentId environmentId, UUID invocationId) {
-      this.connection = connection;
-      this.environmentId = environmentId;
-      this.invocationId = invocationId;
-    }
-  }
-
-  /** 单个连接代际的协议状态；{@code generation} 用于识别需要恢复取消意图或退出确认的新连接。 */
-  private final class ConnectionState {
-
-    /** 串行化该连接的入站协议处理与回调批次排队；不与其它锁嵌套反向获取，回调执行一律在持锁之外。 */
-    private final Object gate = new Object();
-
-    private final DaemonChannel connection;
-    private final long generation;
-    private volatile UUID leaseToken;
-    private volatile EnvironmentId environmentId;
-    private volatile boolean helloReceived;
-    private volatile String capabilityCatalogVersion;
-    private volatile String daemonInstanceId;
-    private volatile String daemonVersion;
-    private volatile DaemonOperatingSystem daemonOperatingSystem;
-    private volatile DaemonRuntimeSnapshot runtimeStatus;
-    private volatile boolean ready;
-    private volatile boolean cleaned;
-
-    /** 最近一次已成功通告/推送的临时资源策略；心跳按需把设置热更新到已 READY 的连接。 */
-    private volatile long temporaryResourceTtlSeconds;
-
-    private volatile long temporaryResourceCleanupIntervalSeconds;
-
-    private boolean closeAfterFlush;
-
-    /**
-     * 已按 {@code gate} 处理顺序入队、等待锁外 drain 的回调批次；由 {@code gate} 保护。
-     *
-     * <p>入站排队由传输适配器拥有，核心只知道「已经排好序但尚未执行」的批次，因此上界取固定值 {@link
-     * EnvironmentDaemonServer#MAX_PENDING_CALLBACK_BATCHES}，而不随调用方并发度增长；空批次不占位，纯控制帧不消耗上界。
-     */
-    private final ArrayDeque<List<Runnable>> pendingCallbacks = new ArrayDeque<>();
-
-    /** 当前持有 drain 所有权的线程标志；由 {@code gate} 保护，保证同一连接同一时刻至多一个 drainer。 */
-    private boolean drainingCallbacks;
-
-    private ConnectionState(DaemonChannel connection, long generation) {
-      this.connection = Objects.requireNonNull(connection, "connection");
-      this.generation = generation;
-    }
-
-    /** 待执行回调批次是否已达每连接上界；达到后该连接按 fail-closed 收敛，不再接受新帧。 */
-    private boolean callbackBacklogFull() {
-      return pendingCallbacks.size() >= MAX_PENDING_CALLBACK_BATCHES;
-    }
-
-    /** 在 {@code gate} 内把一帧产生的回调按序追加到队尾。 */
-    private void enqueueCallbacks(List<Runnable> callbacks) {
-      if (!callbacks.isEmpty()) {
-        pendingCallbacks.addLast(callbacks);
-      }
-    }
-
-    /**
-     * 在锁外同步 drain 待执行回调：至多一个线程持有 drain 所有权，其余线程把批次留在队列里交给它，因此回调观察顺序恒等于 {@code gate} 处理顺序。
-     *
-     * <p>「取空批次」与「释放 drain 所有权」在同一次临界区内完成：并发追加的批次要么被本次 poll 取到，要么由追加线程自己成为 drainer，
-     * 不存在丢失唤醒。用户回调异常被逐个吸收，既不阻断该批次剩余回调，也不会把所有权留在退出的线程上。
-     */
-    private void drainCallbacks() {
-      synchronized (gate) {
-        if (drainingCallbacks) {
-          return;
-        }
-        drainingCallbacks = true;
-      }
-      while (true) {
-        List<Runnable> batch;
-        synchronized (gate) {
-          batch = pendingCallbacks.pollFirst();
-          if (batch == null) {
-            drainingCallbacks = false;
-            return;
-          }
-        }
-        runCallbacks(batch);
-      }
-    }
-
-    private void runCallbacks(List<Runnable> batch) {
-      for (Runnable callback : batch) {
-        try {
-          callback.run();
-        } catch (Throwable ignored) {
-          // 用户回调异常不改变会话状态，也不得让该连接其余回调与终态停止投递。
-        }
-      }
-    }
-
-    /** 完成 HELLO 绑定；重复绑定属于协议违规。 */
-    private synchronized void bind(EnvironmentId boundEnvironmentId, UUID token) {
-      if (helloReceived) {
-        throw new DaemonProtocolException("HELLO may only be sent once per connection");
-      }
-      environmentId = boundEnvironmentId;
-      leaseToken = token;
-      helloReceived = true;
-    }
-
-    /** 冻结本连接 HELLO 声明的 daemon 进程身份；重复 HELLO 已在进入前拒绝。 */
-    private void rememberDaemonInstance(String instanceId) {
-      daemonInstanceId = Objects.requireNonNull(instanceId, "daemonInstanceId");
-    }
-
-    /**
-     * 本连接 HELLO 声明的 daemon 进程身份。
-     *
-     * <p>退出确认只认发起调用时冻结的这个身份，不读取 Environment 当前接管者。
-     */
-    private String daemonInstanceId() {
-      if (daemonInstanceId == null) {
-        throw new IllegalStateException("daemon instance identity is not bound");
-      }
-      return daemonInstanceId;
-    }
-
-    /** READY 中冻结的目标 Daemon OS；READY 之前为 null。 */
-    private DaemonOperatingSystem readyDaemonOperatingSystem() {
-      return isReady() ? daemonOperatingSystem : null;
-    }
-
-    private boolean isReady() {
-      return !cleaned
-          && ready
-          && connection.isOpen()
-          && environmentId != null
-          && leaseToken != null;
-    }
-
-    /** 该连接在 HELLO 中声明的 capability catalog 版本是否与本地目录一致；不一致时不得执行普通能力调用。 */
-    private boolean catalogMatches() {
-      return EnvironmentCapabilityCatalog.version().equals(capabilityCatalogVersion);
-    }
-
-    private synchronized DaemonOfferResult offer(
-        DaemonMessageType type, String invocationId, String payloadJson) {
-      if (cleaned || environmentId == null || leaseToken == null) {
-        return DaemonOfferResult.CLOSED;
-      }
-      String text = encode(type, environmentId, invocationId, payloadJson);
-      return connection.offerText(text);
-    }
-
-    /** 协议错误帧：未绑定环境时回退到入站声明的 environmentId，入队成功后要求 flush 后关闭。 */
-    private synchronized void enqueueError(
-        EnvironmentId receivedEnvironmentId, String payloadJson) {
-      if (cleaned || !connection.isOpen()) {
-        return;
-      }
-      EnvironmentId scope = environmentId != null ? environmentId : receivedEnvironmentId;
-      String text = encode(DaemonMessageType.ERROR, scope, null, payloadJson);
-      try {
-        if (connection.offerText(text) == DaemonOfferResult.ACCEPTED) {
-          closeAfterFlush = true;
-        }
-      } catch (RuntimeException ignored) {
-        // 传输不可用；连接关闭由 closeConnectionState 完成。
-      }
-    }
-
-    private String encode(
-        DaemonMessageType type, EnvironmentId scope, String invocationId, String payloadJson) {
-      return envelopeCodec.encode(
-          new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payloadJson));
-    }
-  }
-
-  /**
-   * 有界 tombstone 中保留的退出确认。
-   *
-   * <p>本地等待可以先结束，但 listener 与原 daemon 身份必须留下，直到确认交付或条目被容量淘汰。
-   */
-  private static final class ExitConfirmation {
-    private final EnvironmentCapabilityExecutionListener listener;
-    private final String daemonInstanceId;
-    private final AtomicBoolean delivered = new AtomicBoolean();
-
-    private ExitConfirmation(
-        EnvironmentCapabilityExecutionListener listener, String daemonInstanceId) {
-      this(listener, daemonInstanceId, false);
-    }
-
-    private ExitConfirmation(
-        EnvironmentCapabilityExecutionListener listener,
-        String daemonInstanceId,
-        boolean delivered) {
-      this.listener = listener;
-      this.daemonInstanceId = daemonInstanceId;
-      this.delivered.set(delivered);
-    }
-
-    private boolean claim() {
-      return delivered.compareAndSet(false, true);
-    }
-  }
-
-  /** Environment 级事实：当前 READY 连接与最近一次 accepted 的 daemon 进程身份；字段由 {@code inventory} 保护。 */
-  private static final class EnvironmentState {
-    private String daemonInstanceId;
-    private ConnectionState connection;
-
-    /** 当前登记的受管更新 operationId；null 表示没有更新在途。由 {@code inventory} 保护。 */
-    private String updatingOperationId;
-  }
-
-  /**
-   * 一次资源传输的进程内绑定：申请事实恒定；申请票据、提交票据与已消耗的 uploadId 在首次成功后固化。
-   *
-   * <p>字段由该绑定自身的监视器保护，因此同一 transfer 的票据 I/O 串行进行：重复申请/提交（含瞬时 FAILED 后的重试与同进程重连重发）永不产生第二个上传行。
-   * 绑定只在进程内存中存在，权威内容事实始终是全局上传行。
-   */
-  private static final class TransferBinding {
-
-    private final DaemonResourceTicketService.TransferRequest request;
-
-    /** 本次传输当前拥有的全局上传 id；申请或提交成功后固化，释放后不再回执。 */
-    private UUID currentUploadId;
-
-    /** 申请票据；只在非 FAILED 时缓存，FAILED 必须允许后续重试再次触达票据服务。 */
-    private DaemonResourceTicketService.Ticket reserveTicket;
-
-    /** 提交票据；只在非 FAILED 时缓存。 */
-    private DaemonResourceTicketService.Ticket commitTicket;
-
-    /** 已释放标记：置位后不再回执、不再重复释放。 */
-    private boolean released;
-
-    private TransferBinding(DaemonResourceTicketService.TransferRequest request) {
-      this.request = Objects.requireNonNull(request, "request");
-    }
-
-    private synchronized DaemonResourceTicketService.Ticket reserveTicket() {
-      return reserveTicket;
-    }
-
-    private synchronized DaemonResourceTicketService.Ticket commitTicket() {
-      return commitTicket;
-    }
-
-    /** 瞬时失败不缓存：同一 transfer 的下一次重试必须再次触达票据服务，而不是重放失败结论。 */
-    private synchronized void recordFailure(boolean commit) {
-      if (commit) {
-        this.commitTicket = null;
-      } else {
-        this.reserveTicket = null;
-      }
-    }
-
-    /**
-     * 核对终态结果对该上传的引用与申请事实逐字段一致，且内容已就绪。
-     *
-     * <p>「已就绪」= 申请去重命中或提交已成功；PENDING/FAILED 说明内容根本不可消费，属于终态早于就绪的协议违规。
-     */
-    private synchronized void requireReadyAndMatching(ResourceRef ref) {
-      if (released) {
-        throw new DaemonProtocolException(
-            "terminal result references an upload this invocation already released");
-      }
-      boolean ready =
-          (reserveTicket instanceof DaemonResourceTicketService.Ticket.Ready)
-              || (commitTicket instanceof DaemonResourceTicketService.Ticket.Ready);
-      if (!ready) {
-        throw new DaemonProtocolException(
-            "terminal result references an upload that is not ready: " + currentUploadId);
-      }
-      if (!Objects.equals(request.mediaType(), ref.mediaType())
-          || !Objects.equals(request.name(), ref.name())
-          || ref.size() == null
-          || ref.size() != request.size()
-          || !Objects.equals(request.sha256(), ref.sha256())) {
-        throw new DaemonProtocolException(
-            "terminal result upload metadata does not match its request: " + currentUploadId);
-      }
-    }
-  }
-
-  /**
-   * 已在 {@code gate} 内完成协议与绑定校验、待执行的服务端票据动作。
-   *
-   * <p>{@code commitUploadId} 非空表示提交；为空表示申请。绑定已存在时沿用其既有事实，因此同一 transfer 的重复帧不会再次创建传输。
-   */
-  private record PreparedTransfer(
-      ConnectionState state,
-      ActiveInvocation active,
-      UUID transferId,
-      DaemonResourceTicketService.TransferRequest request,
-      UUID commitUploadId) {
-
-    private PreparedTransfer {
-      if ((request == null) == (commitUploadId == null)) {
-        throw new IllegalArgumentException("exactly one of request or commitUploadId must be set");
-      }
-    }
   }
 }

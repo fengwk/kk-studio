@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
@@ -124,7 +124,7 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
 
   private static String parseViewId(String viewId) {
     try {
-      return IdeCommand.validateViewId(viewId);
+      return Uuids.parseCanonical(viewId, "viewId").toString();
     } catch (IllegalArgumentException | NullPointerException error) {
       throw new AiValidationException("environment", "viewId must be a canonical UUID");
     }

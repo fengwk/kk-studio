@@ -21,7 +21,7 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
   private boolean draining;
   private boolean disconnected;
 
-  FakeEnvironmentTunnel(DaemonConnectionIdentity identity) {
+  public FakeEnvironmentTunnel(DaemonConnectionIdentity identity) {
     if (identity == null) {
       throw new IllegalArgumentException("identity must not be null");
     }

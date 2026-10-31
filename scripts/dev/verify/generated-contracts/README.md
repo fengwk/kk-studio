@@ -19,11 +19,6 @@ HTTP Jackson 3 mapper 生成，漂移在 CI 中失败。生成器与产物测试
 Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传）时，前端在 `shared/api/contracts/*` 以同名判别联合
 细化；其余代码直接从生成物导入，不手改生成物。
 
-Daemon 的 [protocol-contract.ts](../../../../daemon/src/generated/protocol-contract.ts) 由
-[harness/environment](../../../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/)
-测试源码的 `DaemonContractGenerator` 从当前 v7 Java 协议常量生成：协议与 catalog 版本、payload 上限、错误码，以及消息类型、
-操作系统、架构、上传票据状态与更新阶段的 wire 值。它服务尚未切换的 v7 运行解码器。
-
 控制协议的单一事实源是
 [control.proto](../../../../harness/environment/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
 TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
@@ -31,7 +26,7 @@ TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
 
 Capability JSON Schema 以 Java classpath 资源为唯一来源，
 [capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon/resources/capabilities`。`check.sh` 发现内容或多余副本即失败，
-`write.sh` 覆写副本。v7 常量生成器仍保留，直到运行路径切换后再删除。
+`write.sh` 覆写副本。
 
 ## 校验（默认）
 
@@ -40,7 +35,7 @@ scripts/dev/verify/generated-contracts/check.sh
 ```
 
 只读：重新生成并与提交的产物逐字符比对，缺文件、类型变化或产物被手改都会失败，绝不修改源码。
-`mvn verify` 会执行同样的 `TsContractArtifactTest` 与 `DaemonContractArtifactTest`，因此正常 CI 已覆盖这条门禁。
+`mvn verify` 会执行同样的 `TsContractArtifactTest`，因此正常 CI 已覆盖这条门禁。
 
 ## 更新
 
