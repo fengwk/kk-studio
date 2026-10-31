@@ -6,7 +6,6 @@ import { getOutboundNetwork } from '../network.js'
 import {
   EnvelopeSchema,
   MessageType,
-  PresignedPutSchema,
   ResourceUploadCommitSchema,
   ResourceUploadRequestSchema,
   TicketState,
@@ -18,8 +17,8 @@ import {
 /**
  * Daemon 侧 invocation 作用域资源上传客户端：把内存字节经控制面直传全局对象存储。
  *
- * <p>交互固定为 RESOURCE_UPLOAD_REQUEST → 票据 → 预签名 PUT → RESOURCE_UPLOAD_COMMIT →
- * 票据，直至 READY。传输以 (invocationId, transferId) 关联：同一 upload 调用内 transferId 恒定，重试与同
+ * <p>交互固定为 {@code RESOURCE_UPLOAD_REQUEST} → 票据 → 预签名 PUT → {@code RESOURCE_UPLOAD_COMMIT} →
+ * 票据，直至 READY。传输以 {@code (invocationId, transferId)} 关联：同一 upload 调用内 transferId 恒定，重试与同
  * 实例重连只重放同一传输，绝不产生第二个上传行。
  *
  * <p>重试没有人为次数上限：唯一边界是被调用 invocation 的 AbortSignal（超时/取消/停机）与连接可用性。等待被中断时立即
@@ -43,7 +42,7 @@ export interface ResourceTransferClientOptions {
 }
 
 export interface ResourceTransferClient extends ResourceUploader {
-  /** 接收一条服务端票据；(invocationId, transferId) 匹配时唤醒等待方，否则丢弃。 */
+  /** 接收一条服务端票据帧；(invocationId, transferId) 匹配时唤醒等待方，否则丢弃。 */
   onTicket(invocationId: string, ticket: ResourceUploadTicket): void
   /** 连接失效：唤醒等待方进入重连等待。 */
   onConnectionLost(): void
@@ -74,9 +73,6 @@ interface UploadRequest {
 /** 生产预签名 PUT：只发送票据声明的已签名方法/headers，失败只报告状态码，绝不回显 URL 或签名。 */
 export function createHttpPutObject(): PresignedPutSender {
   return async (presigned, bytes, signal) => {
-    if (!presigned.url) {
-      throw new Error(`${REJECTED_PREFIX}: missing url`)
-    }
     // 预签名 PUT 绝不跟随重定向：跨目标复用已签名 headers/body 会泄漏签名与对象内容。
     await getOutboundNetwork().withResponse(
       presigned.url,
@@ -158,6 +154,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
       sha256: sha256Hex(bytes),
     }
     const key = transferKey(invocationId, request.transferId)
+    // uploaded 表示「本 transfer 的字节可能已经在对象存储中」：只有提交给出的权威失败结论才把它复位。
     let uploaded = false
     let uploadId: string | null = null
     try {
@@ -217,13 +214,15 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           }
         }
         if (ticket.state === TicketState.TICKET_FAILED) {
+          // 提交失败说明对象确实不在存储中，回到上传阶段；申请失败则本来就没有上传过。
           uploaded = false
           uploadId = null
           await this.backoff(signal)
           continue
         }
-        // TICKET_PENDING
+        // PENDING
         if (uploaded) {
+          // 服务端回放了尚未提交的申请票据：只重新提交，绝不重复上传字节。
           await this.backoff(signal)
         } else {
           uploadId = ticket.uploadId ?? null
@@ -231,6 +230,7 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
           try {
             await this.putObject(ticket.presignedPut as PresignedPut, bytes, signal)
           } catch {
+            // 对象存储拒绝或不确定字节是否落盘：下一次提交做权威判定，失败时再回到上传阶段。
             await this.backoff(signal)
           }
         }
@@ -272,31 +272,55 @@ class DefaultResourceTransferClient implements ResourceTransferClient {
   }
 
   private async awaitConnection(signal: AbortSignal): Promise<void> {
-    while (!this.connectionAvailable) {
-      this.throwIfAborted(signal)
-      await sleep(this.connectionPollMillis, signal)
+    while (!this.connectionAvailable && !signal.aborted) {
+      await sleep(this.connectionPollMillis)
     }
+    this.throwIfAborted(signal)
   }
 
   private async backoff(signal: AbortSignal): Promise<void> {
-    await sleep(this.retryBackoffMillis, signal)
+    this.throwIfAborted(signal)
+    await sleep(this.retryBackoffMillis)
+    this.throwIfAborted(signal)
   }
 
   private throwIfAborted(signal: AbortSignal): void {
     if (signal.aborted) {
-      const error = new Error(FAILURE_MESSAGE)
-      error.name = 'AbortError'
-      throw error
+      throw new Error(FAILURE_MESSAGE)
     }
   }
 }
 
 function transferKey(invocationId: string, transferId: string): string {
-  return `${invocationId}:${transferId}`
+  return `${invocationId}\u0000${transferId}`
 }
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+function withTimeout<T>(promise: Promise<T>, millis: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message))
+    }, Math.max(1, Math.min(millis, 2_147_483_647)))
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+function sleep(millis: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(1, millis))
+  })
 }
 
 function requirePositive(value: number, name: string): number {
@@ -304,39 +328,4 @@ function requirePositive(value: number, name: string): number {
     throw new Error(`${name} must be a positive integer`)
   }
   return value
-}
-
-async function sleep(millis: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    const error = new Error(FAILURE_MESSAGE)
-    error.name = 'AbortError'
-    throw error
-  }
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, millis)
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      const error = new Error(FAILURE_MESSAGE)
-      error.name = 'AbortError'
-      reject(error)
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMillis: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), timeoutMillis)
-  })
-  try {
-    return await Promise.race([promise, timeoutPromise])
-  } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer)
-    }
-  }
 }
