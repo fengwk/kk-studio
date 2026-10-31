@@ -181,6 +181,29 @@ describe('useRootThreadControl advisory query lifecycle', () => {
     })
   })
 
+  it('maps server disabledReason code to localized text when advisory returns unavailable', async () => {
+    const threadId = 'thread-1'
+    const target: PaneTarget = { kind: 'BOUND_THREAD', threadId }
+    const projection = makeMockProjection(threadId)
+
+    vi.spyOn(harnessService, 'getCompactionAvailability').mockResolvedValueOnce({
+      available: false,
+      disabledReason: 'THREAD_STOPPED',
+    })
+
+    const { result } = renderControl(target, projection)
+
+    act(() => {
+      result.current.composer.onCommandPaletteVisibilityChange?.(true)
+    })
+
+    await waitFor(() => {
+      const compact = result.current.composer.commands!.find((c) => c.id === 'compact')
+      expect(compact?.disabled).toBe(true)
+      expect(compact?.disabledReason).toBe('Thread 已停止，恢复后才能压缩')
+    })
+  })
+
   it('shows localized failure state if advisory query fails', async () => {
     const threadId = 'thread-1'
     const target: PaneTarget = { kind: 'BOUND_THREAD', threadId }
