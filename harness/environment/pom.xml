@@ -23,6 +23,10 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -30,7 +34,47 @@
     </dependencies>
 
     <build>
+        <extensions>
+            <!-- Official protoc native artifact for the build host. -->
+            <extension>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <version>1.7.1</version>
+            </extension>
+        </extensions>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <executions>
+                    <!-- 隧道测试 fake 供 X4 复用；消费者接入前不改 apps/ide POM。 -->
+                    <execution>
+                        <id>tunnel-test-support</id>
+                        <phase>process-test-classes</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.xolstice.maven.plugins</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <configuration>
+                    <protoSourceRoot>${project.basedir}/src/main/protocol</protoSourceRoot>
+                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <!-- 协议源不是下游可复用资源；避免把同目录的生成脚本/fixture 打进 jar。 -->
+                    <attachProtoSources>false</attachProtoSources>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -49,6 +93,7 @@
                                         <include>fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.tunnel.*</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -71,19 +70,17 @@ public class HarnessEnvironmentConfiguration {
   }
 
   /**
-   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，并触发该 Environment 的 Skill 全量同步； Daemon 实例接管时关闭旧代际的
-   * IDE 数据面。
+   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，并触发该 Environment 的 Skill 全量同步。
    *
    * <p>每个动作都立刻返回且各自隔离异常：会话状态推进会先完成，任何宿主回调失败都不得向调用方泄露。
    *
-   * <p>协作者都用延迟解析：dispatcher、Skill 同步编排器与 IDE 换代监听器都经由 capability 传输间接依赖本监听器（daemon server →
-   * listener → 协作者），启动期直接注入会形成环。
+   * <p>协作者都用延迟解析：dispatcher 与 Skill 同步编排器都经由 capability 传输间接依赖本监听器（daemon server → listener →
+   * 协作者），启动期直接注入会形成环。
    */
   @Bean
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
-      ObjectProvider<IdeGenerationCloseListener> ideGenerationCloseProvider,
       ObjectProvider<IdeLeaseCoordinator> ideLeaseCoordinatorProvider) {
     return new EnvironmentSessionListener() {
       @Override
@@ -111,13 +108,7 @@ public class HarnessEnvironmentConfiguration {
       }
 
       @Override
-      public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
-        // 换进程接管：关闭旧代际的 IDE 反向流并撤销入口凭据，而不是只撤销票据。
-        try {
-          ideGenerationCloseProvider.ifAvailable(listener -> listener.onGenerationClosed(previous));
-        } catch (RuntimeException ignored) {
-        }
-      }
+      public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {}
     };
   }
 }

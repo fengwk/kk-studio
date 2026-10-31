@@ -156,27 +156,17 @@ Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
-## 同源 IDE 网关与数据面
+## 同源 IDE 网关
 
-[`IdeGatewayFilter`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayFilter.java)
-在 Studio 同源下固定 `/environment-ide/{environmentId}/{viewId}/` 路由：
-按路径严格解析 canonical UUID 的 `environmentId` 与 `viewId`，剥除 view 基址后把原始 path/query 交给数据面。
-缺少 viewId 的旧环境根路径只做规范跳转；非 IDE 路径原样放行。
+同源 IDE 网关在 Studio 同源下固定 `/environment-ide/{environmentId}/{viewId}/` 路由：
+按路径严格解析 canonical UUID 的 `environmentId` 与 `viewId`。跨节点控制命令经由
+[`ClusterEnvironmentIdeInternalController`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/cluster/ClusterEnvironmentIdeInternalController.java)
+进行 HMAC 认证与 owner 转发。
 
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
   `Path` 限定在 `/environment-ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
   Studio 与受管环境属于同一可信浏览器边界（非沙箱隔离），不需要独立 IDE 域名或主机模板。
 - **会话探测**：`__ide/session` 只读、不触达 Daemon，返回 204（会话有效）、401（无会话）、409（代际已被另一个 Daemon 实例接管）或 503（暂无 READY 连接，同一实例重连后原 cookie 继续有效）。前端据此决定等待还是重新打开视图。
-- **HTTP 与 WebSocket 数据面**：普通 HTTP 请求由 [`IdeGatewayDataPlane`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayDataPlane.java)
-  映射为同一条 mux 逻辑流；WebSocket upgrade 请求由 [`IdeBrowserWebSocketGateway`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeBrowserWebSocketGateway.java)
-  处理并保持 TEXT/BINARY/FIN 边界。每条流 OPEN 都带 `viewId` 与 `bindingEpoch`，路径保留浏览器 view 基址之后的原始
-  path/query；内部挂载 `/__kk/ide/view/{viewId}/{bindingEpoch}/...` 由 Daemon 构造。上游 `Location` 中的内部挂载由 Web
-  适配层映射回浏览器 view 基址。跨节点场景通过内部端点
-  `/internal/environment-ide/{env}/data-http` 与 `/data-ws` 单跳转发至 owner，不使用粘性会话。
-- **复用数据连接**：owner 首次需要逻辑流时经控制通道下发 `DATA_BIND`，Daemon 连接
-  `/api/harness/environment-data/v2/{environmentId}?ticket=...`。票据一次性、30 秒有效并绑定 READY 控制身份与 generation；
-  同一 Environment 只保留一条物理 WebSocket。非 owner 收到该物理连接时只做整条单跳桥接，owner 才是唯一票据消费者。
-  物理写失败立即 fail-stop，不自动重连或重放请求。
 - **开发代理**：本地开发时 Vite 代理 `/environment-ide` 配置 `changeOrigin: false, ws: true`，保留浏览器原始 Host 与 Origin 以对齐同源校验。
 
 ## JSON、错误与信任边界
@@ -258,12 +248,8 @@ Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical 
 端点只接受 canonical UUID，认证先于读取；payload 缺失、过期或被驱逐时返回 404。回拉总超时约 2 秒，
 接收方校验 Thread 后本地投递一次，失败只触发 RESYNC，不影响 durable 执行。
 
-## Daemon WebSocket
+## Daemon 端点
 
-`/api/harness/environment-daemon/v1` 的 handler 适配 Spring/native session，
-委托 DaemonEndpoint 管理会话。DaemonOutboundSender 每连接一个发送线程，
-非阻塞递交返回 ACCEPTED/BUSY/CLOSED，限制 frame、bytes 和 send timeout。
-必须协商 permessage-deflate，缺失以 1010 关闭。
 协议与会话裁决见 [Harness Environment](harness-environment.md)。
 
 ## 启动与静态分发
@@ -282,15 +268,8 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 ## 测试入口
 
 [`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
-HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
-通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
-同源 IDE 的测试按边界选择：[`IdeDataPlaneIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeDataPlaneIntegrationTest.java)
-用真实 Tomcat HTTP/WS 与 mux peer 覆盖本地与非 owner 单跳；
-[`MuxCrossLanguageIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/MuxCrossLanguageIntegrationTest.java)
-让 Java mux 引擎与 Node 24 Daemon 传输跨进程互通；
-[`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)
-在显式提供 code-server 发行目录时启动真实 Spring/Tomcat、临时 PostgreSQL 和生产 Daemon，覆盖浏览器协议入口、目录规范化、恢复换代与崩溃失效；
-另提供 Playwright 包目录时运行真实 Chromium 工作台、worker 注册、终端、dirty 拒绝与单视图 shell 退出验证。
+HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、
+通知重连与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
 Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 

@@ -42,6 +42,8 @@
         <testcontainers.version>2.0.5</testcontainers.version>
         <jgit.version>7.7.1.202607240634-r</jgit.version>
         <okhttp.version>4.12.0</okhttp.version>
+        <!-- Boot 4.0.8 does not manage protobuf-java; pin the locally verified stable line and protoc together. -->
+        <protobuf.version>4.36.2</protobuf.version>
     </properties>
 
     <dependencyManagement>
@@ -282,6 +284,11 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -315,6 +322,11 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>0.8.11</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.xolstice.maven.plugins</groupId>
+                    <artifactId>protobuf-maven-plugin</artifactId>
+                    <version>0.6.1</version>
                 </plugin>
                 <plugin>
                     <groupId>com.diffplug.spotless</groupId>

@@ -21,9 +21,17 @@ Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传�
 
 Daemon 的 [protocol-contract.ts](../../../../daemon/src/generated/protocol-contract.ts) 由
 [harness/environment](../../../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/)
-测试源码的 `DaemonContractGenerator` 从 Java 协议常量生成：协议与 catalog 版本、payload 上限、错误码，以及消息类型、
-操作系统、架构、上传票据状态与更新阶段的 wire 值。Daemon 的严格解码器只引用这些常量；字段形状仍由两端解码器各自实现，
-并由共享 fixture 对拍。
+测试源码的 `DaemonContractGenerator` 从当前 v7 Java 协议常量生成：协议与 catalog 版本、payload 上限、错误码，以及消息类型、
+操作系统、架构、上传票据状态与更新阶段的 wire 值。它服务尚未切换的 v7 运行解码器。
+
+控制协议的单一事实源是
+[control.proto](../../../../harness/environment/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
+TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
+[control_pb.ts](../../../../daemon/src/generated/control_pb.ts)。`check.sh` / `write.sh` 会检查或重写这份生成物。
+
+Capability JSON Schema 以 Java classpath 资源为唯一来源，
+[capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon/resources/capabilities`。`check.sh` 发现内容或多余副本即失败，
+`write.sh` 覆写副本。v7 常量生成器仍保留，直到运行路径切换后再删除。
 
 ## 校验（默认）
 
