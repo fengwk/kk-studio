@@ -1,6 +1,8 @@
 import {
   MessageType,
-  type Envelope,
+  type Cancelled,
+  type Completed,
+  type Failed,
 } from './generated/control_pb.js'
 
 /**
@@ -24,10 +26,15 @@ export type TerminalMessageType =
   | MessageType.FAILED
   | MessageType.CANCELLED
 
-/** 可随已有 journal 条目重放的终态 wire 消息。 */
+export type TerminalPayload =
+  | { case: 'completed'; value: Completed }
+  | { case: 'failed'; value: Failed }
+  | { case: 'cancelled'; value: Cancelled }
+
+/** 可随已有 journal 条目重放的终态 wire 消息载荷。 */
 export interface TerminalMessage {
   messageType: TerminalMessageType
-  envelope: Envelope
+  payload: TerminalPayload
 }
 
 export interface JournalEntry {

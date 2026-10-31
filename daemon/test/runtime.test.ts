@@ -707,6 +707,104 @@ describe('runtime invocation lifecycle', () => {
     }
   })
 
+  it('replays terminal state completed during disconnection with new connection environmentId on RECOVER and passes outbound validation', async () => {
+    const NEW_ENV = '22222222-3333-4444-8555-666666666666'
+    const completeGate = Promise.withResolvers<void>()
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          await completeGate.promise
+          context.confirmExecutionExit()
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(
+        serverMessage('INVOKE', {
+          environmentId: ENV,
+          invocationId: 'inv-disconnect-recover',
+          payload: invokePayload(),
+        }),
+      )
+      await waitFor(() =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.invocationId === 'inv-disconnect-recover' &&
+            envelope.messageType === 'STARTED',
+        ),
+      )
+
+      // 1. 断开连接：断开期间 boundEnvironmentId 清空为 null
+      setup.transport.disconnect()
+      await waitFor(() => setup.runtime.getState() === 'DISCONNECTED')
+
+      // 2. 在断开期间完成调用
+      completeGate.resolve()
+      await tick(10)
+
+      // 确保断开期间没有发带空/非法 environmentId 的 COMPLETED 报文
+      expect(
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.invocationId === 'inv-disconnect-recover' &&
+            envelope.messageType === 'COMPLETED',
+        ),
+      ).toBe(false)
+
+      // 3. 重连握手并绑定全新的 NEW_ENV
+      await waitFor(() => setup.transport.connection !== null && setup.transport.connection.open)
+      setup.transport.receive(
+        serverMessage('SETTINGS', {
+          environmentId: NEW_ENV,
+          payload: {
+            resourceBudgets: {
+              maxResourceBytes: 1024 * 1024,
+              temporaryResourceTtlSeconds: 60,
+              temporaryResourceCleanupIntervalSeconds: 30,
+            },
+          },
+        }),
+      )
+      await waitFor(() => setup.runtime.getState() === 'READY')
+
+      // 4. 发送 RECOVER 取回 invocation
+      setup.transport.receive(
+        serverMessage('RECOVER', {
+          environmentId: NEW_ENV,
+          invocationId: 'inv-disconnect-recover',
+          payload: {},
+        }),
+      )
+      await waitFor(() =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.invocationId === 'inv-disconnect-recover' &&
+            envelope.messageType === 'COMPLETED',
+        ),
+      )
+
+      const completedEnvelope = sent(setup.transport).find(
+        (envelope) =>
+          envelope.invocationId === 'inv-disconnect-recover' &&
+          envelope.messageType === 'COMPLETED',
+      )
+      expect(completedEnvelope).toBeDefined()
+      // 必须带新连接的 environmentId，绝不能是旧 ENV 或 null/undefined
+      expect(completedEnvelope?.environmentId).toBe(NEW_ENV)
+
+      // 确保没有因 validation 失败而产生 ERROR 报文
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(false)
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
+  })
+
   // 验证超时机制：Runtime在timer到期仅发abort信号，cleanup期间维持RUNNING不发终态，release后才完成终态。
   it('times out a long-running invocation with cooperative cleanup and deferred terminal', async () => {
     let observedSignal: AbortSignal | null = null

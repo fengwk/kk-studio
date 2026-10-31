@@ -3,14 +3,21 @@ import { create } from '@bufbuild/protobuf'
 
 import { InMemoryInvocationJournal, isTerminalState } from '../src/journal.js'
 import {
-  EnvelopeSchema,
+  CancelledSchema,
+  CompletedSchema,
+  FailedSchema,
   MessageType,
 } from '../src/generated/control_pb.js'
 
-const terminal = (messageType: MessageType.COMPLETED | MessageType.FAILED | MessageType.CANCELLED) => ({
-  messageType,
-  envelope: create(EnvelopeSchema, { messageType }),
-})
+const terminal = (messageType: MessageType.COMPLETED | MessageType.FAILED | MessageType.CANCELLED) => {
+  if (messageType === MessageType.COMPLETED) {
+    return { messageType, payload: { case: 'completed' as const, value: create(CompletedSchema, {}) } }
+  }
+  if (messageType === MessageType.FAILED) {
+    return { messageType, payload: { case: 'failed' as const, value: create(FailedSchema, { message: 'err' }) } }
+  }
+  return { messageType, payload: { case: 'cancelled' as const, value: create(CancelledSchema, { reason: 'cancel' }) } }
+}
 
 describe('InMemoryInvocationJournal', () => {
   it('creates RUNNING entries atomically and dedups repeated starts', () => {

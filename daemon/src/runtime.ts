@@ -70,6 +70,7 @@ import {
   type InvocationJournal,
   type JournalEntry,
   type TerminalMessage,
+  type TerminalPayload,
 } from './journal.js'
 import { validate } from './protocol/control/codec.js'
 import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate, type UpdateByteProgress } from './runtime-status.js'
@@ -754,18 +755,21 @@ export class Runtime {
       this.terminal(
         invocationId,
         MessageType.FAILED,
-        this.buildFailedEnvelope(invocationId, safeMessage(error)),
+        this.buildFailedPayload(safeMessage(error)),
         null,
       )
     }
   }
 
   private sendStarted(connection: ActiveConnection, invocationId: string): void {
+    if (this.boundEnvironmentId === null) {
+      return
+    }
     this.sendOn(
       connection,
       create(EnvelopeSchema, {
         messageType: MessageType.STARTED,
-        environmentId: this.boundEnvironmentId ?? undefined,
+        environmentId: this.boundEnvironmentId,
         invocationId,
         payload: { case: 'started', value: create(StartedSchema, {}) },
       }),
@@ -780,10 +784,13 @@ export class Runtime {
   }
 
   private sendExecutionExited(invocationId: string): void {
+    if (this.boundEnvironmentId === null) {
+      return
+    }
     this.send(
       create(EnvelopeSchema, {
         messageType: MessageType.EXECUTION_EXITED,
-        environmentId: this.boundEnvironmentId ?? undefined,
+        environmentId: this.boundEnvironmentId,
         invocationId,
         payload: { case: 'executionExited', value: create(ExecutionExitedSchema, {}) },
       }),
@@ -807,7 +814,7 @@ export class Runtime {
         this.terminal(
           invocation.invocationId,
           MessageType.FAILED,
-          this.buildFailedEnvelope(invocation.invocationId, 'capability result callId does not match invocationId'),
+          this.buildFailedPayload('capability result callId does not match invocationId'),
           null,
         )
         invocation.finishOwnedCleanup()
@@ -820,13 +827,12 @@ export class Runtime {
         }
         return resources.upload(invocation.invocationId, content, invocation.controller.signal)
       })
-      const envelope = create(EnvelopeSchema, {
-        messageType: MessageType.COMPLETED,
-        environmentId: this.boundEnvironmentId ?? undefined,
-        invocationId: invocation.invocationId,
-        payload: { case: 'completed', value: completed },
-      })
-      this.terminal(invocation.invocationId, MessageType.COMPLETED, envelope, null)
+      this.terminal(
+        invocation.invocationId,
+        MessageType.COMPLETED,
+        { case: 'completed', value: completed },
+        null,
+      )
       invocation.finishOwnedCleanup()
     } catch (error) {
       const executorFailed = !invocation.executorReturned
@@ -839,16 +845,15 @@ export class Runtime {
       const reason = invocation.controller.signal.reason
       if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
         const cancelledReason = reason === 'SHUTDOWN' ? 'daemon shutdown' : 'cancelled'
-        const envelope = create(EnvelopeSchema, {
-          messageType: MessageType.CANCELLED,
-          environmentId: this.boundEnvironmentId ?? undefined,
-          invocationId: invocation.invocationId,
-          payload: {
+        this.terminal(
+          invocation.invocationId,
+          MessageType.CANCELLED,
+          {
             case: 'cancelled',
             value: create(CancelledSchema, { reason: cancelledReason }),
           },
-        })
-        this.terminal(invocation.invocationId, MessageType.CANCELLED, envelope, reason)
+          reason,
+        )
         if (executorFailed) {
           invocation.finishOwnedCleanup()
         }
@@ -858,7 +863,7 @@ export class Runtime {
         this.terminal(
           invocation.invocationId,
           MessageType.FAILED,
-          this.buildFailedEnvelope(invocation.invocationId, `capability execution timed out after ${call.timeoutMillis}ms`),
+          this.buildFailedPayload(`capability execution timed out after ${call.timeoutMillis}ms`),
           'TIMED_OUT',
         )
         if (executorFailed) {
@@ -869,7 +874,7 @@ export class Runtime {
       this.terminal(
         invocation.invocationId,
         MessageType.FAILED,
-        this.buildFailedEnvelope(invocation.invocationId, safeMessage(error)),
+        this.buildFailedPayload(safeMessage(error)),
         null,
       )
       // executor 抛错仍可能已有正向范围证据；后续上传/收尾抛错则不能确认清理完成。
@@ -922,7 +927,7 @@ export class Runtime {
   }
 
   private progress(invocation: RunningInvocation, result: CapabilityResult): void {
-    if (invocation.terminalClaimed || !this.isRunning(invocation.invocationId)) {
+    if (invocation.terminalClaimed || !this.isRunning(invocation.invocationId) || this.boundEnvironmentId === null) {
       return
     }
     try {
@@ -930,7 +935,7 @@ export class Runtime {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.PROGRESS,
-          environmentId: this.boundEnvironmentId ?? undefined,
+          environmentId: this.boundEnvironmentId,
           invocationId: invocation.invocationId,
           payload: { case: 'progress', value: progress },
         }),
@@ -940,7 +945,7 @@ export class Runtime {
       this.terminal(
         invocation.invocationId,
         MessageType.FAILED,
-        this.buildFailedEnvelope(invocation.invocationId, `cannot encode partial capability result: ${safeMessage(error)}`),
+        this.buildFailedPayload(`cannot encode partial capability result: ${safeMessage(error)}`),
         'CANCELLED',
       )
     }
@@ -972,31 +977,35 @@ export class Runtime {
     if (entry !== undefined) {
       this.replay(entry)
     } else {
-      this.send(
-        create(EnvelopeSchema, {
-          messageType: MessageType.RECOVER_NOT_FOUND,
-          environmentId: this.boundEnvironmentId ?? undefined,
-          invocationId,
-          payload: { case: 'recoverNotFound', value: create(RecoverNotFoundSchema, {}) },
-        }),
-      )
+      if (this.boundEnvironmentId !== null) {
+        this.send(
+          create(EnvelopeSchema, {
+            messageType: MessageType.RECOVER_NOT_FOUND,
+            environmentId: this.boundEnvironmentId,
+            invocationId,
+            payload: { case: 'recoverNotFound', value: create(RecoverNotFoundSchema, {}) },
+          }),
+        )
+      }
     }
   }
 
   private replay(entry: JournalEntry): void {
     if (entry.state === 'RUNNING') {
-      this.send(
-        create(EnvelopeSchema, {
-          messageType: MessageType.STARTED,
-          environmentId: this.boundEnvironmentId ?? undefined,
-          invocationId: entry.invocationId,
-          payload: { case: 'started', value: create(StartedSchema, { replayed: true }) },
-        }),
-      )
+      if (this.boundEnvironmentId !== null) {
+        this.send(
+          create(EnvelopeSchema, {
+            messageType: MessageType.STARTED,
+            environmentId: this.boundEnvironmentId,
+            invocationId: entry.invocationId,
+            payload: { case: 'started', value: create(StartedSchema, { replayed: true }) },
+          }),
+        )
+      }
     } else {
       const terminal = entry.terminalMessage
       if (terminal !== null) {
-        this.send(terminal.envelope)
+        this.sendTerminal(entry.invocationId, terminal)
       }
     }
     if (entry.exitConfirmed) {
@@ -1010,7 +1019,7 @@ export class Runtime {
   private terminal(
     invocationId: string,
     messageType: TerminalMessage['messageType'],
-    envelope: Envelope,
+    payload: TerminalPayload,
     cause: InvocationTerminationCause | null,
   ): void {
     const invocation = this.running.get(invocationId)
@@ -1023,14 +1032,28 @@ export class Runtime {
         invocation.controller.abort(cause)
       }
     }
-    const terminal: TerminalMessage = { messageType, envelope }
+    const terminal: TerminalMessage = { messageType, payload }
     if (!this.journal.complete(invocationId, terminal)) {
       return
     }
     if (invocation !== undefined) {
       this.running.delete(invocationId)
     }
-    this.send(envelope)
+    this.sendTerminal(invocationId, terminal)
+  }
+
+  private sendTerminal(invocationId: string, terminal: TerminalMessage): boolean {
+    if (this.boundEnvironmentId === null) {
+      return false
+    }
+    return this.send(
+      create(EnvelopeSchema, {
+        messageType: terminal.messageType,
+        environmentId: this.boundEnvironmentId,
+        invocationId,
+        payload: terminal.payload,
+      }),
+    )
   }
 
   private scheduleTimeout(invocation: RunningInvocation, timeoutMillis: number): void {
@@ -1244,11 +1267,11 @@ export class Runtime {
   }
 
   private sendUpdateResult(result: UpdateResult): void {
-    if (this.state === 'READY') {
+    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.UPDATE_RESULT,
-          environmentId: this.boundEnvironmentId ?? undefined,
+          environmentId: this.boundEnvironmentId,
           payload: { case: 'updateResult', value: result },
         }),
       )
@@ -1301,11 +1324,11 @@ export class Runtime {
   }
 
   private sendExtensionError(phase: string, error: unknown): void {
-    if (this.state === 'READY') {
+    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.ERROR,
-          environmentId: this.boundEnvironmentId ?? undefined,
+          environmentId: this.boundEnvironmentId,
           payload: {
             case: 'error',
             value: create(ErrorSchema, { message: `${phase} handler failed: ${safeMessage(error)}` }),
@@ -1375,10 +1398,13 @@ export class Runtime {
   }
 
   private sendIdeResult(invocationId: string, reply: IdeResult): void {
+    if (this.boundEnvironmentId === null) {
+      return
+    }
     this.send(
       create(EnvelopeSchema, {
         messageType: MessageType.IDE_RESULT,
-        environmentId: this.boundEnvironmentId ?? undefined,
+        environmentId: this.boundEnvironmentId,
         invocationId,
         payload: { case: 'ideResult', value: reply },
       }),
@@ -1428,15 +1454,10 @@ export class Runtime {
       this.release('invocation journal complete', () => {
         this.journal.complete(invocation.invocationId, {
           messageType: MessageType.CANCELLED,
-          envelope: create(EnvelopeSchema, {
-            messageType: MessageType.CANCELLED,
-            environmentId: this.boundEnvironmentId ?? undefined,
-            invocationId: invocation.invocationId,
-            payload: {
-              case: 'cancelled',
-              value: create(CancelledSchema, { reason: 'daemon shutdown' }),
-            },
-          }),
+          payload: {
+            case: 'cancelled',
+            value: create(CancelledSchema, { reason: 'daemon shutdown' }),
+          },
         })
       })
     }
@@ -1502,16 +1523,11 @@ export class Runtime {
     return this.shutdownFailures
   }
 
-  private buildFailedEnvelope(invocationId: string, message: string): Envelope {
-    return create(EnvelopeSchema, {
-      messageType: MessageType.FAILED,
-      environmentId: this.boundEnvironmentId ?? undefined,
-      invocationId,
-      payload: {
-        case: 'failed',
-        value: create(FailedSchema, { message }),
-      },
-    })
+  private buildFailedPayload(message: string): { case: 'failed'; value: Failed } {
+    return {
+      case: 'failed',
+      value: create(FailedSchema, { message }),
+    }
   }
 }
 
