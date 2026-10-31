@@ -25,14 +25,13 @@ async function transport(page: Page) {
     snapshotReads: 0, writes: [] as Record<string, unknown>[],
     socket: null as WebSocketRoute | null,
   }
-  await page.routeWebSocket('**/api/events/v2', (socket) => {
+  await page.routeWebSocket('**/api/events', (socket) => {
     state.socket = socket
     let connected = false
     socket.onMessage((raw) => {
       if (!connected) {
         connected = true
         socket.send(JSON.stringify({
-          version: 2,
           type: 'connected',
           eventNodeId: 'b0000000-0000-4000-8000-000000000001',
           connectionId: 'b0000000-0000-4000-8000-000000000002',
@@ -40,7 +39,7 @@ async function transport(page: Page) {
       }
       const message = JSON.parse(String(raw))
       if (message.type === 'subscribe') socket.send(JSON.stringify({
-        version: 2, type: 'subscribed', resource: message.resource, cursor: '0',
+        type: 'subscribed', resource: message.resource, cursor: '0',
       }))
     })
   })
@@ -126,7 +125,7 @@ test('single WS push updates constraints, not draft or frozen CAS; list entry re
   state.project = { ...state.project, version: '9', title: 'Remote Project' }
   state.references = ['OLD', 'REVIEW']
   state.socket!.send(JSON.stringify({
-    version: 2, type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: ID },
+    type: 'event', resource: { kind: 'projects' }, name: 'changed', data: { projectId: ID },
   }))
   await expect(dialog.getByRole('button', { name: '删除 评审' })).toBeDisabled()
   await expect(dialog.getByLabel('显示名称')).toHaveValue('Local Init')

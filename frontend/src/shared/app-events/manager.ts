@@ -124,7 +124,7 @@ export class ApplicationEventManager {
     entry.refs.set(listener, previous + 1)
     if (previous === 0 && entry.refs.size === 1) {
       // 首 ref：listener 已登记，此时才发首 subscribe（wire 响应可同步到达）。
-      this.connection.send({ version: 2, type: 'subscribe', resource })
+      this.connection.send({ type: 'subscribe', resource })
     }
     return () => {
       const current = this.subscriptions.get(key)
@@ -142,7 +142,7 @@ export class ApplicationEventManager {
       current.refs.delete(listener)
       if (current.refs.size === 0) {
         this.subscriptions.delete(key)
-        this.connection.send({ version: 2, type: 'unsubscribe', resource })
+        this.connection.send({ type: 'unsubscribe', resource })
       }
     }
   }
@@ -209,7 +209,6 @@ export class ApplicationEventManager {
 
   private sendUsage(usage: ApplicationEventIdeUse): boolean {
     return this.connection.send({
-      version: 2,
       type: 'ide-use',
       documentId: usage.documentId,
       revision: usage.revision,
@@ -232,7 +231,7 @@ export class ApplicationEventManager {
 
   private resubscribeAll(): void {
     for (const entry of this.subscriptions.values()) {
-      this.connection.send({ version: 2, type: 'subscribe', resource: entry.resource })
+      this.connection.send({ type: 'subscribe', resource: entry.resource })
     }
   }
 

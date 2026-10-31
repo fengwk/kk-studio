@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
-const URL = 'ws://test/api/events/v2'
+const URL = 'ws://test/api/events'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const
@@ -57,8 +57,8 @@ describe('ApplicationEventManager', () => {
     const releaseB = manager.subscribe(THREAD_B, {})
 
     expect(socket.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: THREAD_A },
-      { version: 2, type: 'subscribe', resource: THREAD_B },
+      {  type: 'subscribe', resource: THREAD_A },
+      {  type: 'subscribe', resource: THREAD_B },
     ])
 
     // 同资源第二消费者不产生新 wire 消息；释放一个仍保持订阅。
@@ -66,9 +66,9 @@ describe('ApplicationEventManager', () => {
     expect(socket.sentMessages()).toHaveLength(2)
     releaseA1()
     expect(socket.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: THREAD_A },
-      { version: 2, type: 'subscribe', resource: THREAD_B },
-      { version: 2, type: 'unsubscribe', resource: THREAD_A },
+      {  type: 'subscribe', resource: THREAD_A },
+      {  type: 'subscribe', resource: THREAD_B },
+      {  type: 'unsubscribe', resource: THREAD_A },
     ])
     // 幂等释放。
     releaseA1()
@@ -76,7 +76,7 @@ describe('ApplicationEventManager', () => {
 
     releaseB()
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 2,
+      
       type: 'unsubscribe',
       resource: THREAD_B,
     })
@@ -89,7 +89,7 @@ describe('ApplicationEventManager', () => {
     const listener = { onEvent: vi.fn() }
     const release1 = manager.subscribe(THREAD_A, listener)
     const release2 = manager.subscribe(THREAD_A, listener)
-    expect(socket.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: THREAD_A }])
+    expect(socket.sentMessages()).toEqual([{  type: 'subscribe', resource: THREAD_A }])
 
     // 第一个 unsubscribe 不能错误拆 wire：同一 listener 仍有真实 refcount。
     release1()
@@ -100,7 +100,7 @@ describe('ApplicationEventManager', () => {
     // 末 ref 才 unsubscribe，之后不再派发。
     release2()
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 2,
+      
       type: 'unsubscribe',
       resource: THREAD_A,
     })
@@ -130,8 +130,8 @@ describe('ApplicationEventManager', () => {
     // 首次 open：重发全部 active subscriptions。
     harness.openLatest()
     expect(harness.latest?.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: THREAD_A },
-      { version: 2, type: 'subscribe', resource: CANVAS_A },
+      {  type: 'subscribe', resource: THREAD_A },
+      {  type: 'subscribe', resource: CANVAS_A },
     ])
 
     // 断线重连：新 socket open 后再次重发。
@@ -140,8 +140,8 @@ describe('ApplicationEventManager', () => {
     expect(harness.sockets).toHaveLength(2)
     harness.openLatest()
     expect(harness.latest?.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: THREAD_A },
-      { version: 2, type: 'subscribe', resource: CANVAS_A },
+      {  type: 'subscribe', resource: THREAD_A },
+      {  type: 'subscribe', resource: CANVAS_A },
     ])
   })
 
@@ -188,14 +188,14 @@ describe('ApplicationEventManager', () => {
     expect(duplicate).toBe(first)
     expect(socket.sentMessages()).toEqual([
       {
-        version: 2,
+        
         type: 'ide-use',
         documentId: DOCUMENT_A,
         revision: '1',
         views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId: CLAIM_A }],
       },
       {
-        version: 2,
+        
         type: 'ide-use',
         documentId: DOCUMENT_A,
         revision: '1',
@@ -288,7 +288,7 @@ describe('ApplicationEventManager', () => {
     manager.subscribe(PROJECTS, { onEvent: projectChanged })
 
     expect(socket.sentMessages()).toEqual([
-      { version: 2, type: 'subscribe', resource: PROJECTS },
+      {  type: 'subscribe', resource: PROJECTS },
     ])
 
     socket.emitServer({
@@ -376,7 +376,7 @@ describe('ApplicationEventManager', () => {
     expect(onEvent2).toHaveBeenCalledTimes(1)
     // 最后一个 listener 释放后 wire 上出现 unsubscribe。
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 2,
+      
       type: 'unsubscribe',
       resource: THREAD_A,
     })

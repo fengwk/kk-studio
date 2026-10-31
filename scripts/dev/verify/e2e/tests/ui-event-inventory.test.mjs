@@ -5,7 +5,7 @@ import test from 'node:test'
 import { expectStorage } from '../ui/composer-matrix.mjs'
 import { waitForThreadSubscription } from '../ui/workspace-contracts.mjs'
 
-test('workspace observer requires a v2 thread ack, ignoring connected and other resources', async () => {
+test('workspace observer requires a thread ack, ignoring connected and other resources', async () => {
   const page = new EventEmitter()
   const threadId = '11111111-1111-4111-8111-111111111111'
   const socket = (path) => Object.assign(new EventEmitter(), {
@@ -14,16 +14,15 @@ test('workspace observer requires a v2 thread ack, ignoring connected and other 
   const pending = waitForThreadSubscription(page, threadId)
   let resolved = false
   pending.then(() => { resolved = true })
-  const old = socket('/api/events/v1')
-  const current = socket('/api/events/v2')
-  page.emit('websocket', old)
+  const other = socket('/api/other')
+  const current = socket('/api/events')
+  page.emit('websocket', other)
   page.emit('websocket', current)
-  const ack = { version: 2, type: 'subscribed', resource: { kind: 'thread', id: threadId }, cursor: '0' }
+  const ack = { type: 'subscribed', resource: { kind: 'thread', id: threadId }, cursor: '0' }
   const emit = (target, frame) => target.emit('framereceived', { payload: JSON.stringify(frame) })
-  emit(old, ack)
-  emit(current, { version: 2, type: 'connected', eventNodeId: threadId,
+  emit(other, ack)
+  emit(current, { type: 'connected', eventNodeId: threadId,
     connectionId: '22222222-2222-4222-8222-222222222222' })
-  emit(current, { ...ack, version: 1 })
   emit(current, { ...ack, resource: { kind: 'canvas', id: threadId } })
   await Promise.resolve()
   assert.equal(resolved, false)

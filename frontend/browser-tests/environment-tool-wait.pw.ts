@@ -120,7 +120,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
       await expect(page.locator('.thread-composer')).toHaveCount(0)
     }
     const changed = (rootThreadId: string) => socket!.send(JSON.stringify({
-      version: 2, type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
+      type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
     }))
     // 错根提示不触发 snapshot GET；让浏览器完成事件调度而非任意 sleep。
     changed(OTHER)

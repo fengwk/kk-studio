@@ -6,12 +6,12 @@ import '../cases/distributed.mjs'
 import { getCase } from '../lib/registry.mjs'
 
 const identity = {
-  version: 2, type: 'connected',
+  type: 'connected',
   eventNodeId: '11111111-1111-4111-8111-111111111111',
   connectionId: '22222222-2222-4222-8222-222222222222',
 }
 
-// 执行真实 case，仅替换物理 WS；首帧与 heartbeat 使用生产 v2 形状。
+// 执行真实 case，仅替换物理 WS；首帧与 heartbeat 使用生产形状。
 async function heartbeat(t, frames) {
   const original = globalThis.WebSocket
   globalThis.WebSocket = class extends EventTarget {
@@ -19,7 +19,7 @@ async function heartbeat(t, frames) {
     readyState = 1
     constructor(url) {
       super()
-      assert.equal(new URL(url).pathname, '/api/events/v2')
+      assert.equal(new URL(url).pathname, '/api/events')
       queueMicrotask(() => {
         for (const frame of frames) {
           this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(frame) }))
@@ -37,17 +37,17 @@ async function heartbeat(t, frames) {
   }
 }
 
-test('heartbeat case accepts production connected identity followed by v2 heartbeat', async (t) => {
-  await heartbeat(t, [identity, { version: 2, type: 'heartbeat' }])
+test('heartbeat case accepts production connected identity followed by heartbeat', async (t) => {
+  await heartbeat(t, [identity, { type: 'heartbeat' }])
 })
 
-test('heartbeat case rejects old version and malformed connected identity', async (t) => {
-  await assert.rejects(heartbeat(t, [{ ...identity, version: 1 }]), /invalid connected/)
+test('heartbeat case rejects unexpected fields and malformed connected identity', async (t) => {
+  await assert.rejects(heartbeat(t, [{ ...identity, version: 2 }]), /connected fields must be/)
   await assert.rejects(heartbeat(t, [{ ...identity, connectionId: 'invalid' }]), /invalid connected/)
 })
 
-test('heartbeat case rejects old heartbeat after a valid identity', async (t) => {
-  await assert.rejects(heartbeat(t, [identity, { version: 1, type: 'heartbeat' }]), /invalid heartbeat/)
+test('heartbeat case rejects heartbeat with unexpected fields after a valid identity', async (t) => {
+  await assert.rejects(heartbeat(t, [identity, { version: 2, type: 'heartbeat' }]), /invalid heartbeat/)
 })
 
 const ids = [

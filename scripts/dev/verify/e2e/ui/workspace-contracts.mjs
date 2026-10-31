@@ -2028,8 +2028,7 @@ export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
         return
       }
       if (
-        message?.version === 2
-        && message.type === 'subscribed'
+        message?.type === 'subscribed'
         && message.resource?.kind === 'thread'
         && message.resource?.id === threadId
       ) {
@@ -2037,7 +2036,7 @@ export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
       }
     }
     const onWebSocket = (socket) => {
-      if (new URL(socket.url()).pathname !== '/api/events/v2') return
+      if (new URL(socket.url()).pathname !== '/api/events') return
       sockets.add(socket)
       socket.on('framereceived', onFrame)
     }

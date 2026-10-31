@@ -17,7 +17,7 @@ vi.mock('@/shared/app-events', async (importOriginal) => {
   return {
     ...actual,
     ApplicationEventProvider: ({ children }: { children: ReactNode }) => (
-      <actual.ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
+      <actual.ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
         {children}
       </actual.ApplicationEventProvider>
     ),
