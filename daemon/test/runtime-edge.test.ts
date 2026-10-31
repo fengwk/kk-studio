@@ -365,7 +365,7 @@ describe('runtime journal capacity recovery evidence', () => {
       await waitFor(
         () =>
           typesFor(invocationB).filter((type) => type === MessageType.COMPLETED).length === 2 &&
-          typesFor(invocationB).filter((type) => type === MessageType.EXECUTION_EXITED).length === 1,
+          typesFor(invocationB).filter((type) => type === MessageType.EXECUTION_EXITED).length === 2,
       )
       expect(aExecutions).toBe(1)
       expect(bExecutions).toBe(1)
@@ -381,7 +381,7 @@ describe('runtime journal capacity recovery evidence', () => {
           typesFor(invocationA).filter((type) => type === MessageType.COMPLETED).length === 2,
       )
       expect(aExecutions).toBe(2)
-      expect(typesFor(invocationA).filter((type) => type === MessageType.EXECUTION_EXITED)).toHaveLength(0)
+      expect(typesFor(invocationA).filter((type) => type === MessageType.EXECUTION_EXITED)).toHaveLength(1)
       expect(journal.find(invocationA)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
     } finally {
       aGate.resolve()

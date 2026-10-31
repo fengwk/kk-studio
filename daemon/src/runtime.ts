@@ -755,11 +755,29 @@ export class Runtime {
         this.sendEnvelope(this.activeConnection, envelope)
       },
       confirmExecutionExit: () => {
-        if (this.journal.confirmExit(invocation.invocationId)) {
-          invocation.exitConfirmed = true
-        }
+        invocation.noteExitEvidence((current) => this.publishExecutionExit(current))
       },
     }
+  }
+
+  private publishExecutionExit(invocation: RunningInvocation): void {
+    if (!invocation.executorReturned || !invocation.exitConfirmed || invocation.exitPublished) {
+      return
+    }
+    invocation.exitPublished = true
+    if (!this.journal.confirmExit(invocation.invocationId)) {
+      return
+    }
+    const exited = create(EnvelopeSchema, {
+      messageType: MessageType.EXECUTION_EXITED,
+      environmentId: this.boundEnvironmentId ?? undefined,
+      invocationId: invocation.invocationId,
+      payload: {
+        case: 'executionExited',
+        value: create(ExecutionExitedSchema, {}),
+      },
+    })
+    this.sendEnvelope(this.activeConnection, exited)
   }
 
   private handleCancel(envelope: Envelope): void {
@@ -1190,7 +1208,9 @@ class ActiveConnection {
 class RunningInvocation {
   terminalClaimed = false
   exitConfirmed = false
+  exitPublished = false
   executorReturned = false
+  private exitPublisher: ((invocation: RunningInvocation) => void) | null = null
   private cleanupResolve: () => void = () => {}
   readonly ownedCleanup: Promise<void>
 
@@ -1206,6 +1226,15 @@ class RunningInvocation {
 
   finishOwnedCleanup(): void {
     this.cleanupResolve()
+    this.exitPublisher?.(this)
+  }
+
+  noteExitEvidence(publisher: (invocation: RunningInvocation) => void): void {
+    this.exitConfirmed = true
+    this.exitPublisher = publisher
+    if (this.executorReturned) {
+      publisher(this)
+    }
   }
 }
 
