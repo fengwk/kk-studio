@@ -9,10 +9,10 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-/** v8 三条首批控制消息的 binary golden 与应用层边界测试。 */
+/** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
 
-  /** 其余消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
+  /** 各类消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
   @Test
   void validatesRemainingMessages() {
     Envelope settings =

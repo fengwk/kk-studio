@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Java 侧构造与 TypeScript 共享的 v8 三条消息 fixture。 */
+/** Java 与 TypeScript 共享的控制消息 fixture。 */
 final class ControlProtocolFixtures {
 
   static final String ENVIRONMENT_ID = "3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f";
