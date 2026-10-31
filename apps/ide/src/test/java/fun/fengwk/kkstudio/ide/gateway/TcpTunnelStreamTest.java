@@ -122,11 +122,33 @@ class TcpTunnelStreamTest {
   void validationChecks() throws IOException {
     try (AsynchronousSocketChannel channel = AsynchronousSocketChannel.open()) {
       TcpTunnelStream stream = new TcpTunnelStream(channel, null);
-      assertThrows(NullPointerException.class, () -> stream.write(null));
+      assertThrows(IllegalArgumentException.class, () -> stream.write(null));
       assertThrows(IllegalArgumentException.class, () -> stream.write(ByteBuffer.allocate(0)));
       stream.close();
       stream.close(); // idempotent close
     }
+  }
+
+  @Test
+  void endOutputPropagatesPriorWriteFailure() throws Exception {
+    AsynchronousSocketChannel mockChannel = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream = new TcpTunnelStream(mockChannel, null);
+    doAnswer(
+            inv -> {
+              CompletionHandler<Integer, Void> handler = inv.getArgument(2);
+              handler.failed(new IOException("write failed earlier"), null);
+              return null;
+            })
+        .when(mockChannel)
+        .write(any(ByteBuffer.class), any(), any());
+
+    CompletableFuture<Void> writeFuture =
+        stream.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture();
+    assertTrue(writeFuture.isCompletedExceptionally());
+
+    // Calling endOutput after prior write failure must complete exceptionally
+    CompletableFuture<Void> endFuture = stream.endOutput().toCompletableFuture();
+    assertTrue(endFuture.isCompletedExceptionally());
   }
 
   @Test

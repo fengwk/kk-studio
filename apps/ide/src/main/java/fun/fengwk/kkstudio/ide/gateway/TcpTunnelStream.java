@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 
 import java.io.IOException;
@@ -17,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>读取初始响应头时溢出的预读字节优先消费；每个方向至多一个 pending 操作；写方向支持正常半关闭；使用 NIO CompletionHandler，不占用阻塞工作线程。
  */
+@Slf4j
 public final class TcpTunnelStream implements TunnelStream {
 
   private static final int BUFFER_SIZE = 16 * 1024;
@@ -29,6 +32,7 @@ public final class TcpTunnelStream implements TunnelStream {
   private CompletableFuture<ByteBuffer> pendingRead;
   private CompletableFuture<Void> pendingWrite;
   private CompletableFuture<Void> pendingEndOutput;
+  private Throwable lastWriteError;
   private byte[] initialBytes;
 
   public TcpTunnelStream(AsynchronousSocketChannel channel, byte[] initialBytes) {
@@ -92,7 +96,9 @@ public final class TcpTunnelStream implements TunnelStream {
 
   @Override
   public CompletionStage<Void> write(ByteBuffer source) {
-    Objects.requireNonNull(source, "source");
+    if (source == null) {
+      throw new IllegalArgumentException("source must not be null");
+    }
     if (!source.hasRemaining()) {
       throw new IllegalArgumentException("source must have remaining bytes");
     }
@@ -135,6 +141,7 @@ public final class TcpTunnelStream implements TunnelStream {
             @Override
             public void failed(Throwable exc, Void attachment) {
               synchronized (lock) {
+                lastWriteError = exc;
                 pendingWrite = null;
               }
               future.completeExceptionally(exc);
@@ -142,6 +149,7 @@ public final class TcpTunnelStream implements TunnelStream {
           });
     } catch (Throwable t) {
       synchronized (lock) {
+        lastWriteError = t;
         pendingWrite = null;
       }
       future.completeExceptionally(t);
@@ -157,8 +165,12 @@ public final class TcpTunnelStream implements TunnelStream {
       if (outputEnded.compareAndSet(false, true)) {
         CompletableFuture<Void> endFuture = new CompletableFuture<>();
         pendingEndOutput = endFuture;
+        if (lastWriteError != null) {
+          endFuture.completeExceptionally(lastWriteError);
+          return endFuture;
+        }
         CompletableFuture<Void> currentWrite = pendingWrite;
-        if (currentWrite != null && !currentWrite.isDone()) {
+        if (currentWrite != null) {
           currentWrite.whenComplete(
               (v, err) -> {
                 if (err != null) {
@@ -211,7 +223,8 @@ public final class TcpTunnelStream implements TunnelStream {
       }
       try {
         channel.close();
-      } catch (IOException ignored) {
+      } catch (IOException error) {
+        log.debug("failed to close tcp channel", error);
       }
     }
   }
