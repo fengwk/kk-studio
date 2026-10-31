@@ -156,7 +156,6 @@ export const FIXTURE_CANDIDATES: ModelDefaultCandidateDTO[] = [
 ]
 
 export const FIXTURE_DEFAULTS_PAGE: ModelCatalogPageDTO = {
-  source: 'models_dev_v2',
   generation: 'fixture-generation-1',
   fetchedAt: 1792454400,
   loading: false,

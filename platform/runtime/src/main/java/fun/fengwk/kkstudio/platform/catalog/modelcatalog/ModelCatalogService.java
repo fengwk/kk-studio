@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
@@ -36,20 +35,20 @@ public class ModelCatalogService {
   static final int MAX_CURSOR_LENGTH = 512;
 
   private final ModelCatalogTransport transport;
-  private final ModelsDevV2Adapter adapter;
+  private final ModelsDevCatalogParser parser;
   private final Clock clock;
   private final SourceState state = new SourceState();
   private final Object lock = new Object();
   private final AtomicLong generation = new AtomicLong();
 
   @Autowired
-  public ModelCatalogService(ModelCatalogTransport transport, ModelsDevV2Adapter v2Adapter) {
-    this(transport, v2Adapter, Clock.systemUTC());
+  public ModelCatalogService(ModelCatalogTransport transport, ModelsDevCatalogParser parser) {
+    this(transport, parser, Clock.systemUTC());
   }
 
-  ModelCatalogService(ModelCatalogTransport transport, ModelsDevV2Adapter v2Adapter, Clock clock) {
+  ModelCatalogService(ModelCatalogTransport transport, ModelsDevCatalogParser parser, Clock clock) {
     this.transport = Objects.requireNonNull(transport, "transport");
-    this.adapter = Objects.requireNonNull(v2Adapter, "v2Adapter");
+    this.parser = Objects.requireNonNull(parser, "parser");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -96,8 +95,8 @@ public class ModelCatalogService {
         CompletableFuture.runAsync(
             () -> {
               try {
-                String json = transport.fetch(ModelCatalogSource.MODELS_DEV_V2);
-                List<ModelDefaultCandidateDTO> candidates = adapter.adapt(json);
+                String json = transport.fetch();
+                List<ModelDefaultCandidateDTO> candidates = parser.parse(json);
                 synchronized (lock) {
                   if (loadGeneration == generation.get()) {
                     state.snapshot = List.copyOf(candidates);
@@ -129,7 +128,6 @@ public class ModelCatalogService {
     int from = Math.min(offset, filtered.size());
     int to = Math.min(from + size, filtered.size());
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
-    page.setSource(ModelCatalogSource.MODELS_DEV_V2);
     page.setGeneration(generationText);
     page.setFetchedAt(state.fetchedAt);
     page.setLoading(state.loading);

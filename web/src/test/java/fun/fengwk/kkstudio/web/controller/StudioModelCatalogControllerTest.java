@@ -18,7 +18,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.catalog.modelcatalog.ModelCatalogService;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
@@ -52,7 +51,6 @@ class StudioModelCatalogControllerTest {
                 .param("cursor", "cursor-1")
                 .param("pageSize", "5"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.source").value("models_dev_v2"))
         .andExpect(jsonPath("$.data.generation").value("7"))
         .andExpect(jsonPath("$.data.loading").value(false))
         .andExpect(jsonPath("$.data.items[0].id").value("models_dev_v2:vendor:model"))
@@ -91,7 +89,6 @@ class StudioModelCatalogControllerTest {
     candidate.setSupportIssues(List.of());
 
     ModelCatalogPageDTO page = new ModelCatalogPageDTO();
-    page.setSource(ModelCatalogSource.MODELS_DEV_V2);
     page.setGeneration("7");
     page.setFetchedAt(Instant.parse("2026-01-01T00:00:00Z"));
     page.setLoading(loading);

@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
@@ -35,7 +34,7 @@ class ModelCatalogServiceTest {
   private static final String V2_JSON = resource("service-v2.json");
   private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
 
-  private final ModelsDevV2Adapter v2Adapter = new ModelsDevV2Adapter();
+  private final ModelsDevCatalogParser parser = new ModelsDevCatalogParser();
   private final MutableClock clock = new MutableClock(START);
 
   @Test
@@ -43,13 +42,12 @@ class ModelCatalogServiceTest {
     AtomicInteger calls = new AtomicInteger();
     ModelCatalogService service =
         service(
-            source -> {
+            () -> {
               calls.incrementAndGet();
               return V2_JSON;
             });
 
     ModelCatalogPageDTO first = service.page(null, null, 20);
-    assertEquals(ModelCatalogSource.MODELS_DEV_V2, first.getSource());
     assertEquals(List.of("d1", "d2", "d3", "g1", "g2"), modelIds(first));
     assertEquals(START, first.getFetchedAt());
     assertFalse(first.isLoading());
@@ -72,7 +70,7 @@ class ModelCatalogServiceTest {
     CountDownLatch release = new CountDownLatch(1);
     ModelCatalogService service =
         service(
-            source -> {
+            () -> {
               calls.incrementAndGet();
               entered.countDown();
               await(release);
@@ -102,7 +100,7 @@ class ModelCatalogServiceTest {
     AtomicInteger calls = new AtomicInteger();
     ModelCatalogService service =
         service(
-            source -> {
+            () -> {
               if (calls.incrementAndGet() == 2) {
                 throw new ModelCatalogFetchException("upstream boom");
               }
@@ -128,7 +126,7 @@ class ModelCatalogServiceTest {
     AtomicInteger calls = new AtomicInteger();
     ModelCatalogService service =
         service(
-            source -> {
+            () -> {
               calls.incrementAndGet();
               return V2_JSON;
             });
@@ -164,20 +162,19 @@ class ModelCatalogServiceTest {
     AtomicInteger calls = new AtomicInteger();
     ModelCatalogService service =
         service(
-            source -> {
+            () -> {
               calls.incrementAndGet();
               throw new ModelCatalogFetchException("v2 unavailable");
             });
 
     ModelCatalogPageDTO page = service.page(null, null, 20);
-    assertEquals(ModelCatalogSource.MODELS_DEV_V2, page.getSource());
     assertEquals(List.of(), modelIds(page));
     assertTrue(page.getError().contains("v2 unavailable"));
     assertEquals(1, calls.get());
   }
 
   private ModelCatalogService service(ModelCatalogTransport transport) {
-    return new ModelCatalogService(transport, v2Adapter, clock);
+    return new ModelCatalogService(transport, parser, clock);
   }
 
   private static List<String> modelIds(ModelCatalogPageDTO page) {

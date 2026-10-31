@@ -1614,7 +1614,6 @@ export interface McpServerUpdateDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO */
 export interface ModelCatalogPageDTO {
-  source: ModelCatalogSource
   generation: string
   fetchedAt?: number | null
   loading: boolean
@@ -1622,13 +1621,6 @@ export interface ModelCatalogPageDTO {
   items: ModelDefaultCandidateDTO[]
   nextCursor?: string | null
 }
-
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource */
-export type ModelCatalogSource = 'models_dev_v2'
-
-export const MODEL_CATALOG_SOURCE_VALUES: readonly ModelCatalogSource[] = [
-  'models_dev_v2',
-]
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultAbilitiesDTO */
 export interface ModelDefaultAbilitiesDTO {
