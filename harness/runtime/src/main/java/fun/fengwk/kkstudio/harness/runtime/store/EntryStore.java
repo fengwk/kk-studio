@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.store;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 
 import java.util.List;
@@ -27,6 +29,28 @@ public interface EntryStore {
 
   /** 从 head Entry 向上回溯并返回 root-to-head 的不可变路径；head 不存在抛 {@link IllegalArgumentException}。 */
   EntryPath loadPath(UUID headEntryId);
+
+  /**
+   * 读取分类所需的当前 Entry 状态。
+   *
+   * <p>只回溯到 head、非控制锚点、open 或已关闭 Turn 引用、以及 settings 所需锚点后停止，不先调用 {@link #loadPath(UUID)}。head 缺失沿
+   * {@link #loadPath(UUID)} 拒绝。
+   */
+  EntryCurrentState loadCurrent(UUID headEntryId);
+
+  /**
+   * 读取 root-to-head 的精确轮次与工具调用计数。
+   *
+   * <p>可以遍历祖先，但不得构造 {@link EntryPath}。head 缺失沿 {@link #loadPath(UUID)} 拒绝。
+   */
+  EntryPathMetrics loadPathMetrics(UUID headEntryId);
+
+  /**
+   * 判断 candidate 是否位于 head 的祖先链上（含 head 自身）。
+   *
+   * <p>找到目标后停止。未知 candidate 或其它分支返回 false；head 缺失沿 {@link #loadPath(UUID)} 拒绝。
+   */
+  boolean isAncestor(UUID headEntryId, UUID candidateEntryId);
 
   /**
    * 读取 head 相对游标的增量链。

@@ -1,11 +1,20 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -100,6 +109,115 @@ final class InMemoryEntryStore implements EntryStore {
     }
     Collections.reverse(path);
     return new EntryPath(path);
+  }
+
+  /**
+   * 只回溯到当前状态所需锚点：head、非控制 head、open 或被 TURN_END 引用的 TURN_START，以及最近 settings。 不调用 {@link
+   * #loadPath(UUID)}。
+   */
+  @Override
+  public EntryCurrentState loadCurrent(UUID headEntryId) {
+    tx.checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    Entry head = tx.requireExistingEntry(headEntryId);
+    Entry nonControl = null;
+    Entry openTurn = null;
+    boolean turnResolved = false;
+    BranchSettings settings = null;
+    Entry referenced = null;
+    boolean referencedResolved = false;
+    UUID cursor = headEntryId;
+    while (cursor != null) {
+      Entry entry = tx.requireExistingEntry(cursor);
+      if (nonControl == null && !isControl(entry)) {
+        nonControl = entry;
+        referencedResolved = !(entry.payload() instanceof TurnEndPayload);
+      }
+      if (!turnResolved) {
+        if (entry.payload() instanceof TurnStartPayload) {
+          openTurn = entry;
+          turnResolved = true;
+        } else if (entry.payload() instanceof TurnEndPayload) {
+          turnResolved = true;
+        }
+      }
+      if (settings == null) {
+        settings = settingsOf(entry);
+      }
+      if (nonControl != null
+          && !referencedResolved
+          && nonControl.payload() instanceof TurnEndPayload end
+          && entry.id().equals(end.turnStartEntryId())
+          && entry.payload() instanceof TurnStartPayload) {
+        referenced = entry;
+        referencedResolved = true;
+      }
+      if (nonControl != null && turnResolved && settings != null && referencedResolved) {
+        break;
+      }
+      cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+    }
+    if (nonControl == null || settings == null || !referencedResolved) {
+      throw new IllegalArgumentException("entry path for " + headEntryId + " is incomplete");
+    }
+    return new EntryCurrentState(head, nonControl, openTurn, referenced, settings);
+  }
+
+  /** 收集祖先 Entry 引用后交给参考算法，不构造 {@link EntryPath}，也不复制计数规则。 */
+  @Override
+  public EntryPathMetrics loadPathMetrics(UUID headEntryId) {
+    tx.checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    List<Entry> ancestors = new ArrayList<>();
+    UUID cursor = headEntryId;
+    while (cursor != null) {
+      Entry entry = tx.requireExistingEntry(cursor);
+      ancestors.add(entry);
+      cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+    }
+    Collections.reverse(ancestors);
+    return EntryPathMetrics.from(ancestors);
+  }
+
+  /** 命中 candidate 即停止；未知或其它分支为 false，缺失 head 沿完整路径读取拒绝。 */
+  @Override
+  public boolean isAncestor(UUID headEntryId, UUID candidateEntryId) {
+    tx.checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    Objects.requireNonNull(candidateEntryId, "candidateEntryId");
+    tx.requireExistingEntry(headEntryId);
+    if (state.entries.get(candidateEntryId) == null) {
+      return false;
+    }
+    UUID cursor = headEntryId;
+    while (cursor != null) {
+      Entry entry = tx.requireExistingEntry(cursor);
+      if (entry.id().equals(candidateEntryId)) {
+        return true;
+      }
+      cursor = entry.payload().type().isRoot() ? null : entry.parentEntryId();
+    }
+    return false;
+  }
+
+  private static boolean isControl(Entry entry) {
+    return entry.payload() instanceof NotificationPayload
+        || entry.payload() instanceof SettingsPayload
+        || entry.payload() instanceof ForkPayload;
+  }
+
+  private static BranchSettings settingsOf(Entry entry) {
+    if (entry.payload() instanceof TurnStartPayload start
+        && start.reason() != TurnStartReason.COMPACTION) {
+      return start.settings();
+    }
+    if (entry.payload() instanceof SettingsPayload applied) {
+      return applied.settings();
+    }
+    if (entry.payload() instanceof RootPayload root) {
+      return root.settings();
+    }
+    return null;
   }
 
   /** 内存增量读取与 PostgreSQL 同语义：从 head 回溯，命中祖先即停且不含游标；非祖先、另一 Session 或未知游标回到完整链。 */
