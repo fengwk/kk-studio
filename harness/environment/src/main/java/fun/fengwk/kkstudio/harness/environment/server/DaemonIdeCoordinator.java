@@ -49,11 +49,8 @@ final class DaemonIdeCoordinator {
     Objects.requireNonNull(session, "session");
     Objects.requireNonNull(command, "command");
 
-    if (!session.isReady()) {
-      throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for ide");
-    }
     UUID leaseToken = session.leaseToken();
-    if (leaseToken == null) {
+    if (!session.isReady() || leaseToken == null) {
       throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for ide");
     }
     boolean holdsReady;
@@ -159,26 +156,6 @@ final class DaemonIdeCoordinator {
     }
   }
 
-  void failPendingIdeCalls(EnvironmentId environmentId) {
-    List<PendingIdeCall> abandoned = new ArrayList<>();
-    synchronized (lock) {
-      Iterator<Map.Entry<UUID, PendingIdeCall>> iterator = pendingCalls.entrySet().iterator();
-      while (iterator.hasNext()) {
-        PendingIdeCall pending = iterator.next().getValue();
-        if (pending.environmentId.equals(environmentId)) {
-          iterator.remove();
-          abandoned.add(pending);
-        }
-      }
-    }
-    for (PendingIdeCall pending : abandoned) {
-      pending.reply.completeExceptionally(
-          new EnvironmentCapabilitySendUncertainException(
-              "environment connection closed before IDE reply; outcome is uncertain and will not be"
-                  + " replayed"));
-    }
-  }
-
   void sendIdeLease(
       EnvironmentId environmentId,
       DaemonConnectionSession session,
@@ -212,12 +189,6 @@ final class DaemonIdeCoordinator {
     }
     DaemonOfferResult outcome;
     synchronized (session.stateLock()) {
-      if (!session.isReady()
-          || !leaseToken.equals(session.leaseToken())
-          || !expectedIdentity.equals(session.identity())) {
-        throw new EnvironmentCapabilityUnavailableException(
-            environmentId + " is not ready for IDE_LEASE");
-      }
       Envelope envelope =
           Envelope.newBuilder()
               .setMessageType(MessageType.IDE_LEASE)

@@ -398,6 +398,11 @@ class ControlProtocolCodecTest {
     Envelope error =
         ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("error.bin"));
     assertEquals("retry", error.getError().getMessage());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                error.toBuilder().setError(error.getError().toBuilder().setMessage("")).build()));
 
     assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.validate(null));
     assertThrows(

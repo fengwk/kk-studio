@@ -126,46 +126,44 @@ public final class EnvironmentDaemonServer
 
     LeaseBindResult bind =
         leaseStore.tryAcquire(environmentId, token, settings().heartbeatTimeout());
-    if (bind instanceof LeaseBindResult.Rejected) {
-      return new DaemonAdmission.Rejected();
-    }
-    if (bind instanceof LeaseBindResult.RetryLater) {
-      return new DaemonAdmission.RetryLater(Duration.ofSeconds(5));
-    }
-    if (bind instanceof LeaseBindResult.Acquired acquired) {
-      DaemonConnectionSession previous = sessionOf(environmentId);
-      if (previous != null) {
-        previous.close();
-      }
-      String replacedInstanceId = replaceDaemonInstance(environmentId, instanceId);
-      if (replacedInstanceId != null) {
-        List<ActiveInvocation> abandoned =
-            invocationTracker.takeAbandonedInvocations(environmentId);
-        for (ActiveInvocation active : abandoned) {
-          try {
-            active.listener.onError(
-                new EnvironmentCapabilitySendUncertainException(
-                    "Environment daemon instance changed for "
-                        + environmentId
-                        + "; capability invocation outcome is uncertain."));
-          } catch (Throwable ignored) {
+    return switch (bind) {
+      case LeaseBindResult.Rejected rejected -> new DaemonAdmission.Rejected();
+      case LeaseBindResult.RetryLater retryLater -> new DaemonAdmission.RetryLater(
+          Duration.ofSeconds(5));
+      case LeaseBindResult.Acquired acquired -> {
+        DaemonConnectionSession previous = sessionOf(environmentId);
+        if (previous != null) {
+          previous.close();
+        }
+        String replacedInstanceId = replaceDaemonInstance(environmentId, instanceId);
+        if (replacedInstanceId != null) {
+          List<ActiveInvocation> abandoned =
+              invocationTracker.takeAbandonedInvocations(environmentId);
+          for (ActiveInvocation active : abandoned) {
+            try {
+              active.listener.onError(
+                  new EnvironmentCapabilitySendUncertainException(
+                      "Environment daemon instance changed for "
+                          + environmentId
+                          + "; capability invocation outcome is uncertain."));
+            } catch (Throwable ignored) {
+            }
+            transferCoordinator.releaseAllTransfers(active, ticketService);
           }
-          transferCoordinator.releaseAllTransfers(active, ticketService);
+          try {
+            sessionListener.onDaemonInstanceReplaced(
+                new DaemonConnectionIdentity(environmentId, replacedInstanceId));
+          } catch (RuntimeException error) {
+            logFailure("daemon instance replaced notification", error);
+          }
         }
-        try {
-          sessionListener.onDaemonInstanceReplaced(
-              new DaemonConnectionIdentity(environmentId, replacedInstanceId));
-        } catch (RuntimeException error) {
-          logFailure("daemon instance replaced notification", error);
-        }
-        ideCoordinator.failPendingIdeCalls(environmentId);
+        DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
+        pendingAdmissions.put(
+            admitted,
+            new PendingAdmission(acquired.leaseToken(), token, registration.displayName()));
+        yield admitted;
       }
-      DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
-      pendingAdmissions.put(
-          admitted, new PendingAdmission(acquired.leaseToken(), token, registration.displayName()));
-      return admitted;
-    }
-    return new DaemonAdmission.Rejected();
+    };
   }
 
   @Override

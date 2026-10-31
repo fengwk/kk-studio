@@ -8,7 +8,9 @@ public interface DaemonSession {
   /**
    * 按控制流到达顺序接收并处理对端发送的信封。
    *
-   * @param envelope 到达的信封
+   * <p>入站信封已由传输层经 ControlProtocolCodec 解码校验，本方法只处理会话层语义校验与状态机流转。
+   *
+   * @param envelope 到达的信封（已由传输层经 ControlProtocolCodec 解码校验）
    */
   void receive(Envelope envelope);
 

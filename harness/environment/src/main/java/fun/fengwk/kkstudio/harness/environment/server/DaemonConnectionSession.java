@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.environment.protocol.Architecture;
 import fun.fengwk.kkstudio.harness.environment.protocol.Cancel;
 import fun.fengwk.kkstudio.harness.environment.protocol.CapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.protocol.Content;
-import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.EnvironmentInfo;
@@ -213,7 +212,6 @@ final class DaemonConnectionSession implements DaemonSession {
         backlogFull = true;
       } else {
         try {
-          ControlProtocolCodec.validate(envelope);
           if (envelope.hasEnvironmentId()
               && !environmentId.value().toString().equals(envelope.getEnvironmentId())) {
             throw new ControlProtocolException(

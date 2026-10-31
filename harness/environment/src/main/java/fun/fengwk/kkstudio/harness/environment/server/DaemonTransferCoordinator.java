@@ -152,7 +152,7 @@ final class DaemonTransferCoordinator {
       }
     }
     if (producedUploadId != null && !tracker.isActive(active)) {
-      markReleasedAndRelease(active, binding, producedUploadId, ticketService);
+      releaseBinding(active, binding, ticketService);
       return;
     }
     ResourceUploadTicket wire = toWireTicket(transferId, ticket);
@@ -219,9 +219,6 @@ final class DaemonTransferCoordinator {
     if (declared.isEmpty()) {
       return referenced;
     }
-    if (active == null) {
-      return referenced;
-    }
     List<TransferBinding> bindings;
     synchronized (active) {
       bindings = List.copyOf(active.transfers.values());
@@ -234,16 +231,12 @@ final class DaemonTransferCoordinator {
         }
       }
     }
-    Set<UUID> consumed = new HashSet<>();
     for (ResultContent content : result.contents()) {
       if (!(content instanceof ResourceResultContent resource)) {
         continue;
       }
       ResourceRef ref = resource.resource();
       UUID uploadId = ref.blobUploadId();
-      if (!consumed.add(uploadId)) {
-        continue;
-      }
       TransferBinding binding = byUploadId.get(uploadId);
       if (binding == null) {
         throw new ControlProtocolException(
@@ -296,23 +289,6 @@ final class DaemonTransferCoordinator {
     }
     if (uploadId == null) {
       return;
-    }
-    try {
-      ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
-    } catch (RuntimeException ignored) {
-    }
-  }
-
-  private void markReleasedAndRelease(
-      ActiveInvocation active,
-      TransferBinding binding,
-      UUID uploadId,
-      DaemonResourceTicketService ticketService) {
-    synchronized (binding) {
-      if (binding.released) {
-        return;
-      }
-      binding.released = true;
     }
     try {
       ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);

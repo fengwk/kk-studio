@@ -70,12 +70,6 @@ final class DaemonUpdateCoordinator {
     }
   }
 
-  String updatingOperationId(EnvironmentId environmentId) {
-    synchronized (lock) {
-      return updatingByEnvironment.get(environmentId);
-    }
-  }
-
   void sendUpdate(
       EnvironmentId environmentId, DaemonConnectionSession session, DaemonUpdateCommand command) {
     Objects.requireNonNull(environmentId, "environmentId");

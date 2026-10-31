@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeLeaseBinding;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
@@ -108,6 +110,11 @@ class EnvironmentDaemonServerIdeTest {
   void requestIdeFailsClosedWhenNoReadyConnection() {
     EnvironmentDaemonServerTestSupport.Fixture fixture =
         new EnvironmentDaemonServerTestSupport.Fixture();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.requestIde(ENVIRONMENT_ID, openCommand()));
+
+    fixture.openSession("c1");
     assertThrows(
         EnvironmentCapabilityUnavailableException.class,
         () -> fixture.server.requestIde(ENVIRONMENT_ID, openCommand()));
@@ -306,15 +313,89 @@ class EnvironmentDaemonServerIdeTest {
     EnvironmentDaemonServerTestSupport.Fixture fixture =
         new EnvironmentDaemonServerTestSupport.Fixture();
     EnvironmentDaemonServerTestSupport.FakeControlChannel first = fixture.connectReady("c1");
-    DaemonConnectionIdentity before =
-        fixture.server.requestIde(ENVIRONMENT_ID, openCommand()).identity();
+    DaemonIdeCall before = fixture.server.requestIde(ENVIRONMENT_ID, openCommand());
+    DaemonConnectionIdentity identityBefore = before.identity();
 
     fixture.close(first);
     fixture.connectReady("c2", OTHER_INSTANCE_ID);
 
-    assertEquals(List.of(before), fixture.replacedInstances);
+    assertTrue(before.reply().isCompletedExceptionally());
+    assertInstanceOf(
+        EnvironmentCapabilitySendUncertainException.class, before.reply().exceptionNow());
+    assertEquals(List.of(identityBefore), fixture.replacedInstances);
     assertEquals(
         Optional.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, OTHER_INSTANCE_ID)),
         fixture.server.connectionIdentity(ENVIRONMENT_ID));
+  }
+
+  @Test
+  void sendIdeLeaseDeliversLeaseEnvelope() {
+    EnvironmentDaemonServerTestSupport.Fixture fixture =
+        new EnvironmentDaemonServerTestSupport.Fixture();
+    EnvironmentDaemonServerTestSupport.FakeControlChannel channel = fixture.connectReady("c1");
+    DaemonConnectionIdentity identity =
+        fixture.server.connectionIdentity(ENVIRONMENT_ID).orElseThrow();
+
+    IdeLease lease =
+        IdeLease.newBuilder()
+            .setRound(1L)
+            .addBindings(
+                IdeLeaseBinding.newBuilder()
+                    .setViewId(VIEW_ID)
+                    .setDocumentId("66666666-7777-8888-9999-aaaaaaaaaaaa")
+                    .setBindingEpoch(1L)
+                    .build())
+            .build();
+
+    fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease);
+
+    assertEquals(MessageType.IDE_LEASE, channel.lastEnvelope().getMessageType());
+    assertEquals(lease, channel.lastEnvelope().getIdeLease());
+  }
+
+  @Test
+  void sendIdeLeaseFailsClosedWhenIdentityMismatchOrUpdatingOrLeaseLost() {
+    EnvironmentDaemonServerTestSupport.Fixture fixture =
+        new EnvironmentDaemonServerTestSupport.Fixture();
+    EnvironmentDaemonServerTestSupport.FakeControlChannel channel = fixture.connectReady("c1");
+    DaemonConnectionIdentity identity =
+        fixture.server.connectionIdentity(ENVIRONMENT_ID).orElseThrow();
+    IdeLease lease = IdeLease.newBuilder().setRound(1L).build();
+
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.sendIdeLease(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(ENVIRONMENT_ID, "other-instance"),
+                lease));
+
+    fixture.server.beginUpdate(ENVIRONMENT_ID, "11111111-1111-1111-1111-111111111111");
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease));
+    fixture.server.endUpdate(ENVIRONMENT_ID, "11111111-1111-1111-1111-111111111111");
+
+    fixture.leaseStore.databaseUnavailable = true;
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease));
+    fixture.leaseStore.databaseUnavailable = false;
+
+    fixture.leaseStore.holdsReadyLease = false;
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease));
+    fixture.leaseStore.holdsReadyLease = true;
+
+    channel.busyNextOffer = true;
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease));
+
+    fixture.close(channel);
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, identity, lease));
   }
 }

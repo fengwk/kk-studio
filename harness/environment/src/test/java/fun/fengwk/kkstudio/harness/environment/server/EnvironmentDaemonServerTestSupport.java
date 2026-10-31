@@ -44,6 +44,8 @@ import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeStatus;
 import fun.fengwk.kkstudio.harness.environment.protocol.Started;
 import fun.fengwk.kkstudio.harness.environment.protocol.UpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.protocol.UpdateResult;
+import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.harness.environment.tunnel.testing.FakeEnvironmentTunnel;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -459,10 +461,13 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static Envelope updateResultEnvelope(UUID operationId, boolean ok, String message) {
+    return updateResultEnvelope(
+        operationId, ok ? UpdatePhase.UPDATE_PREPARED : UpdatePhase.UPDATE_FAILED, message);
+  }
+
+  static Envelope updateResultEnvelope(UUID operationId, UpdatePhase phase, String message) {
     UpdateResult.Builder builder =
-        UpdateResult.newBuilder()
-            .setOperationId(operationId.toString())
-            .setPhase(ok ? UpdatePhase.UPDATE_PREPARED : UpdatePhase.UPDATE_FAILED);
+        UpdateResult.newBuilder().setOperationId(operationId.toString()).setPhase(phase);
     if (message != null) {
       builder.setMessage(message);
     }
@@ -584,7 +589,7 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("admission failed: " + admission);
       }
       FakeControlChannel channel = new FakeControlChannel(connectionId);
-      DaemonSession session = server.open(admitted, channel, null);
+      DaemonSession session = server.open(admitted, channel, channel.tunnel);
       sessions.put(channel, session);
       return channel;
     }
@@ -609,7 +614,7 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("admission failed: " + admission);
       }
       FakeControlChannel channel = new FakeControlChannel(connectionId);
-      DaemonSession session = server.open(admitted, channel, null);
+      DaemonSession session = server.open(admitted, channel, channel.tunnel);
       sessions.put(channel, session);
       session.receive(
           readyEnvelope(environmentId, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
@@ -812,6 +817,8 @@ final class EnvironmentDaemonServerTestSupport {
 
   static final class FakeControlChannel implements DaemonControlChannel {
 
+    final EnvironmentTunnel tunnel =
+        new FakeEnvironmentTunnel(new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID));
     private final String connectionId;
     private final List<Envelope> envelopes = new CopyOnWriteArrayList<>();
     private volatile boolean open = true;

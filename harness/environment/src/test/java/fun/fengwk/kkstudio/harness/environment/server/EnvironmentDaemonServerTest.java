@@ -13,7 +13,6 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.capabilityRequest;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.completedEnvelope;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.completedResourceEnvelope;
-import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.errorEnvelope;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.executionExitedEnvelope;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.failedEnvelope;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.heartbeatEnvelope;
@@ -53,6 +52,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
@@ -69,8 +69,10 @@ import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeLeaseBinding;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
+import fun.fengwk.kkstudio.harness.environment.protocol.ResourceUploadRequest;
 import fun.fengwk.kkstudio.harness.environment.protocol.Started;
 import fun.fengwk.kkstudio.harness.environment.protocol.TicketState;
+import fun.fengwk.kkstudio.harness.environment.protocol.UpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeControlChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
@@ -2043,9 +2045,9 @@ class EnvironmentDaemonServerTest {
     assertTrue(directionChannel.closed());
   }
 
-  /** 测试意图：READY/HEARTBEAT payload 必须严格匹配，包含意外字段即协议违规。 */
+  /** 测试意图：HEARTBEAT 作用域不匹配或重复 READY 属于会话协议违规，立即关闭连接。 */
   @Test
-  void readyAndHeartbeatPayloadsAreStrict() {
+  void heartbeatMismatchAndDuplicateReadyAreRejected() {
     Fixture heartbeatExtra = new Fixture();
     FakeControlChannel extraChannel = heartbeatExtra.connectReady("channel-heartbeat-extra");
     heartbeatExtra.receive(
@@ -2054,27 +2056,11 @@ class EnvironmentDaemonServerTest {
             OTHER_ENVIRONMENT_ID, 1L, DaemonRuntimeStatus.running(DAEMON_VERSION), null));
     assertTrue(extraChannel.closed());
 
-    Fixture readyWithInvocation = new Fixture();
-    FakeControlChannel invocationChannel =
-        readyWithInvocation.openSession("channel-ready-invocation");
-    readyWithInvocation.receive(
-        invocationChannel,
-        readyEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION)).toBuilder()
-            .setInvocationId(CALL_ONE.toString())
-            .build());
+    Fixture duplicateReady = new Fixture();
+    FakeControlChannel invocationChannel = duplicateReady.connectReady("channel-ready-duplicate");
+    duplicateReady.receive(
+        invocationChannel, readyEnvelope(1L, DaemonRuntimeStatus.running(DAEMON_VERSION)));
     assertTrue(invocationChannel.closed());
-  }
-
-  /** 测试意图：ERROR 帧 payload 只接受精确的 message 字段。 */
-  @Test
-  void errorPayloadsAreStrict() {
-    Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.connectReady("channel-error");
-    fixture.receive(channel, errorEnvelope("daemon oops"));
-    assertFalse(channel.closed());
-
-    fixture.receive(channel, errorEnvelope(""));
-    assertTrue(channel.closed());
   }
 
   /**
@@ -2141,6 +2127,16 @@ class EnvironmentDaemonServerTest {
     fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
     fixture.server.sendUpdate(ENVIRONMENT_ID, command);
     assertEquals(List.of(MessageType.SETTINGS, MessageType.UPDATE), channel.messageTypes());
+
+    channel.busyNextOffer = true;
+    assertThrows(
+        EnvironmentCapabilityBusyException.class,
+        () -> fixture.server.sendUpdate(ENVIRONMENT_ID, command));
+
+    fixture.close(channel);
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendUpdate(ENVIRONMENT_ID, command));
   }
 
   /** 测试意图：daemon 上报的受管更新阶段回执只做协议校验后转交宿主；daemon 不得反向发送 UPDATE 命令。 */
@@ -2151,10 +2147,20 @@ class EnvironmentDaemonServerTest {
     String operationId = UUID.randomUUID().toString();
 
     fixture.receive(channel, updateResultEnvelope(UUID.fromString(operationId), true, null));
+    fixture.receive(
+        channel,
+        updateResultEnvelope(UUID.fromString(operationId), UpdatePhase.UPDATE_ACCEPTED, null));
+    fixture.receive(
+        channel,
+        updateResultEnvelope(UUID.fromString(operationId), UpdatePhase.UPDATE_FAILED, "failed"));
 
     assertFalse(channel.closed());
-    assertEquals(List.of(ENVIRONMENT_ID), fixture.updateResultEnvironments);
+    assertEquals(
+        List.of(ENVIRONMENT_ID, ENVIRONMENT_ID, ENVIRONMENT_ID), fixture.updateResultEnvironments);
     assertEquals(DaemonUpdatePhase.PREPARED, fixture.updateResults.get(0).phase());
+    assertEquals(DaemonUpdatePhase.ACCEPTED, fixture.updateResults.get(1).phase());
+    assertEquals(DaemonUpdatePhase.FAILED, fixture.updateResults.get(2).phase());
+    assertEquals("failed", fixture.updateResults.get(2).message());
 
     fixture.receive(
         channel,
@@ -3304,6 +3310,71 @@ class EnvironmentDaemonServerTest {
     assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, listener.error);
     assertEquals(List.of(uploadId), fixture.ticketService.releases);
     assertFalse(channel.closed());
+  }
+
+  @Test
+  void abandonAdmissionReleasesLease() {
+    Fixture fixture = new Fixture();
+    DaemonAdmission.Admitted admitted =
+        (DaemonAdmission.Admitted) fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+    fixture.server.abandon(admitted);
+    FakeControlChannel channel = new FakeControlChannel("c1");
+    assertThrows(IllegalStateException.class, () -> fixture.server.open(admitted, channel, null));
+  }
+
+  @Test
+  void localReturnsTunnelWhenSessionReady() {
+    Fixture fixture = new Fixture();
+    assertTrue(fixture.server.local(ENVIRONMENT_ID).isEmpty());
+    FakeControlChannel channel = fixture.connectReady("c-tunnel");
+    assertTrue(fixture.server.local(ENVIRONMENT_ID).isPresent());
+    fixture.close(channel);
+    assertTrue(fixture.server.local(ENVIRONMENT_ID).isEmpty());
+  }
+
+  @Test
+  void invokeWithExpectedFileIncludesExpectedFileInEnvelope() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-expected-file");
+    EnvironmentCapabilityDescriptor descriptor =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT);
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            descriptor,
+            new EnvironmentCapabilityCall(
+                CALL_ONE.toString(),
+                "{\"path\":\"/srv/repo/README.md\",\"old_string\":\"a\",\"new_string\":\"b\"}"),
+            Duration.ofSeconds(5),
+            new ExpectedFile("/srv/repo/README.md", "a".repeat(64)));
+    fixture.server.invoke(ENVIRONMENT_ID, request, new RecordingListener());
+    assertEquals(1, channel.countOf(MessageType.INVOKE));
+    assertTrue(channel.lastEnvelope().getInvoke().hasExpectedFile());
+    assertEquals(
+        "/srv/repo/README.md", channel.lastEnvelope().getInvoke().getExpectedFile().getPath());
+    assertEquals("a".repeat(64), channel.lastEnvelope().getInvoke().getExpectedFile().getSha256());
+  }
+
+  @Test
+  void resourceTransferExceedingLimitIsRejected() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-transfer-limit");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    Envelope request =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.RESOURCE_UPLOAD_REQUEST)
+            .setEnvironmentId(ENVIRONMENT_ID.value().toString())
+            .setInvocationId(CALL_ONE.toString())
+            .setResourceUploadRequest(
+                ResourceUploadRequest.newBuilder()
+                    .setTransferId(UUID.randomUUID().toString())
+                    .setMediaType("text/plain")
+                    .setName("big.txt")
+                    .setSize(fixture.settings.get().maxResourceBytes() + 1)
+                    .setSha256("a".repeat(64))
+                    .build())
+            .build();
+    fixture.receive(channel, request);
+    assertTrue(channel.closed());
   }
 
   private static final class ThrowingLogHandler implements AutoCloseable {
