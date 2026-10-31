@@ -264,7 +264,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await dialog.getByRole('button', { name: '获取默认模型参数', exact: true }).click()
       const candidates = page.locator('.catalog-candidate')
       await expect(candidates).toHaveCount(2)
-      await expect(dialog.getByText('models.dev v2')).toBeVisible()
+      await expect(dialog.getByText('models.dev', { exact: true })).toBeVisible()
       const contextWindow = dialog.getByLabel('Context Window', { exact: true })
       await expect(contextWindow).toHaveValue('128000')
 
