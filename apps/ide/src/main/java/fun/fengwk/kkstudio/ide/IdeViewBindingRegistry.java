@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeViewState;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.protocol.IdeViewState;
 
 import java.util.List;
 import java.util.Map;

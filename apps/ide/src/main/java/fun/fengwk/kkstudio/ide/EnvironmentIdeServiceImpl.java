@@ -6,12 +6,13 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeOpenMode;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeViewState;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeOpenMode;
-import fun.fengwk.kkstudio.ide.protocol.IdeReply;
-import fun.fengwk.kkstudio.ide.protocol.IdeViewState;
-import fun.fengwk.kkstudio.ide.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -33,7 +34,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
 
 /**
  * IDE 视图控制服务实现：owner 在发任何命令前经事件节点核对 exact intent，然后通过既有 lease/READY 围栏下发一条 {@code IDE_COMMAND}。
@@ -89,35 +89,36 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     String directory = parseDirectory(request.getDirectory());
     requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
     ensureCapacity(environmentId);
-    IdeCommand command =
-        command(
-            () ->
-                IdeCommand.openView(
-                    viewId.toString(),
-                    documentId.toString(),
-                    eventNodeId.toString(),
-                    connectionId.toString(),
-                    claimId.toString(),
-                    mode,
-                    directory));
+    IdeCommand.Builder commandBuilder =
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.OPEN_VIEW)
+            .setViewId(viewId.toString())
+            .setDocumentId(documentId.toString())
+            .setEventNodeId(eventNodeId.toString())
+            .setConnectionId(connectionId.toString())
+            .setClaimId(claimId.toString())
+            .setMode(mode);
+    if (directory != null) {
+      commandBuilder.setDirectory(directory);
+    }
     IdeCall result;
     try {
-      result = call(environmentId, command);
+      result = call(environmentId, commandBuilder.build());
     } catch (IdeOutcomeUnknownException error) {
       // 结果不确定时只按原 claimId 读权威快照对账；绝不重发 OPEN_VIEW 或任何终端/目录副作用。
       return reconcileOpen(
           environmentId, viewId, documentId, eventNodeId, connectionId, claimId, error);
     }
-    if (!result.reply().ok()) {
+    if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
     requireMatchingIdentity(result.reply(), viewId, documentId, eventNodeId, connectionId, claimId);
-    Long bindingEpoch = result.reply().bindingEpoch();
-    if (bindingEpoch == null || bindingEpoch <= 0) {
+    if (!result.reply().hasBindingEpoch() || result.reply().getBindingEpoch() <= 0) {
       throw protocolFailure("daemon did not return a binding epoch");
     }
-    String confirmedDirectory = requirePath(result.reply().directory(), "directory");
-    String workspacePath = requirePath(result.reply().workspacePath(), "workspacePath");
+    long bindingEpoch = result.reply().getBindingEpoch();
+    String confirmedDirectory = requirePath(result.reply().getDirectory(), "directory");
+    String workspacePath = requirePath(result.reply().getWorkspacePath(), "workspacePath");
     IdeViewBindingRegistry.Binding binding =
         new IdeViewBindingRegistry.Binding(
             result.identity(),
@@ -231,16 +232,19 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     IdeViewBindingRegistry.Binding binding =
         requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
     IdeCommand command =
-        command(
-            () ->
-                IdeCommand.changeDirectory(
-                    parsedViewId.toString(), documentId.toString(), bindingEpoch, directory));
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.CHANGE_DIRECTORY)
+            .setViewId(parsedViewId.toString())
+            .setDocumentId(documentId.toString())
+            .setBindingEpoch(bindingEpoch)
+            .setDirectory(directory)
+            .build();
     IdeCall result = call(environmentId, command);
-    if (!result.reply().ok()) {
+    if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
     requireReplyView(result.reply(), parsedViewId);
-    String confirmed = requirePath(result.reply().directory(), "directory");
+    String confirmed = requirePath(result.reply().getDirectory(), "directory");
     if (!bindings.updateDirectory(
         environmentId, parsedViewId, documentId, bindingEpoch, confirmed)) {
       throw viewGone();
@@ -262,14 +266,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     UUID documentId = parseUuid(request.getDocumentId(), "documentId");
     long bindingEpoch = parseEpoch(request.getBindingEpoch());
     requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
-    IdeCall result =
-        call(
-            environmentId,
-            command(
-                () ->
-                    IdeCommand.focusTerminal(
-                        parsedViewId.toString(), documentId.toString(), bindingEpoch)));
-    if (!result.reply().ok()) {
+    IdeCommand command =
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.FOCUS_TERMINAL)
+            .setViewId(parsedViewId.toString())
+            .setDocumentId(documentId.toString())
+            .setBindingEpoch(bindingEpoch)
+            .build();
+    IdeCall result = call(environmentId, command);
+    if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
     requireReplyView(result.reply(), parsedViewId);
@@ -286,14 +291,16 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     boolean discard = requireDiscard(request.getDiscard());
     IdeViewBindingRegistry.Binding binding =
         requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
-    IdeCall result =
-        call(
-            environmentId,
-            command(
-                () ->
-                    IdeCommand.closeView(
-                        parsedViewId.toString(), documentId.toString(), bindingEpoch, discard)));
-    if (!result.reply().ok()) {
+    IdeCommand command =
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.CLOSE_VIEW)
+            .setViewId(parsedViewId.toString())
+            .setDocumentId(documentId.toString())
+            .setBindingEpoch(bindingEpoch)
+            .setDiscard(discard)
+            .build();
+    IdeCall result = call(environmentId, command);
+    if (!result.reply().getOk()) {
       if (isViewGone(result.reply())) {
         revokeLocal(binding);
       }
@@ -313,14 +320,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     long bindingEpoch = parseEpoch(request.getBindingEpoch());
     IdeViewBindingRegistry.Binding binding =
         requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
-    IdeCall result =
-        call(
-            environmentId,
-            command(
-                () ->
-                    IdeCommand.detachView(
-                        parsedViewId.toString(), documentId.toString(), bindingEpoch)));
-    if (!result.reply().ok()) {
+    IdeCommand command =
+        IdeCommand.newBuilder()
+            .setAction(IdeAction.DETACH_VIEW)
+            .setViewId(parsedViewId.toString())
+            .setDocumentId(documentId.toString())
+            .setBindingEpoch(bindingEpoch)
+            .build();
+    IdeCall result = call(environmentId, command);
+    if (!result.reply().getOk()) {
       if (isViewGone(result.reply())) {
         revokeLocal(binding);
       }
@@ -341,28 +349,26 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private List<IdeViewBindingRegistry.Binding> loadViews(EnvironmentId environmentId) {
-    IdeCall result = call(environmentId, IdeCommand.listViews());
-    if (!result.reply().ok()) {
+    IdeCommand command = IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS).build();
+    IdeCall result = call(environmentId, command);
+    if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
-    List<IdeViewSummary> views = result.reply().views();
-    if (views == null) {
-      throw protocolFailure("daemon did not return a view list");
-    }
+    List<IdeViewSummary> views = result.reply().getViewsList();
     List<IdeViewBindingRegistry.Binding> authorized = new ArrayList<>(views.size());
     for (IdeViewSummary view : views) {
       IdeViewBindingRegistry.Binding binding =
           new IdeViewBindingRegistry.Binding(
               result.identity(),
-              view.viewId(),
-              view.documentId(),
-              view.eventNodeId(),
-              view.connectionId(),
-              view.claimId(),
-              view.bindingEpoch(),
-              view.directory(),
-              view.workspacePath(),
-              view.state());
+              UUID.fromString(view.getViewId()),
+              UUID.fromString(view.getDocumentId()),
+              UUID.fromString(view.getEventNodeId()),
+              UUID.fromString(view.getConnectionId()),
+              UUID.fromString(view.getClaimId()),
+              view.getBindingEpoch(),
+              view.getDirectory(),
+              view.getWorkspacePath(),
+              view.getState());
       // 权威快照同样必须先取得本地授权才能进入路由缓存；容量失败时该视图不参与任何后续命令。
       if (authorizeForRouting(binding)) {
         authorized.add(binding);
@@ -499,7 +505,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw new AiEnvironmentIdeUnavailableException(
           "environment IDE channel is unavailable", error);
     }
-    IdeReply reply;
+    IdeResult reply;
     try {
       reply = request.reply().get(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException error) {
@@ -517,23 +523,28 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private static void requireMatchingIdentity(
-      IdeReply reply,
+      IdeResult reply,
       UUID viewId,
       UUID documentId,
       UUID eventNodeId,
       UUID connectionId,
       UUID claimId) {
-    if (!viewId.equals(reply.viewId())
-        || !documentId.equals(reply.documentId())
-        || !eventNodeId.equals(reply.eventNodeId())
-        || !connectionId.equals(reply.connectionId())
-        || !claimId.equals(reply.claimId())) {
+    if (!reply.hasViewId()
+        || !viewId.toString().equals(reply.getViewId())
+        || !reply.hasDocumentId()
+        || !documentId.toString().equals(reply.getDocumentId())
+        || !reply.hasEventNodeId()
+        || !eventNodeId.toString().equals(reply.getEventNodeId())
+        || !reply.hasConnectionId()
+        || !connectionId.toString().equals(reply.getConnectionId())
+        || !reply.hasClaimId()
+        || !claimId.toString().equals(reply.getClaimId())) {
       throw protocolFailure("daemon returned a different IDE view binding");
     }
   }
 
-  private static void requireReplyView(IdeReply reply, UUID viewId) {
-    if (!viewId.equals(reply.viewId())) {
+  private static void requireReplyView(IdeResult reply, UUID viewId) {
+    if (!reply.hasViewId() || !viewId.toString().equals(reply.getViewId())) {
       throw protocolFailure("daemon returned a different IDE view");
     }
   }
@@ -545,23 +556,24 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return value;
   }
 
-  private static boolean isViewGone(IdeReply reply) {
-    return "VIEW_GONE".equals(reply.code());
+  private static boolean isViewGone(IdeResult reply) {
+    return reply.hasCode() && "VIEW_GONE".equals(reply.getCode());
   }
 
-  private static AiDomainException rejection(IdeReply reply) {
+  private static AiDomainException rejection(IdeResult reply) {
     String message =
-        reply.message() == null || reply.message().isBlank()
+        !reply.hasMessage() || reply.getMessage().isBlank()
             ? "IDE command was rejected"
-            : reply.message();
+            : reply.getMessage();
     if (isViewGone(reply)) {
       return viewGone();
     }
-    if ("VIEW_IN_USE".equals(reply.code())
-        || "BUSY".equals(reply.code())
-        || "CLAIM_CONFLICT".equals(reply.code())
-        || "UNAVAILABLE".equals(reply.code())
-        || "CLEANUP_FAILED".equals(reply.code())) {
+    String code = reply.hasCode() ? reply.getCode() : "";
+    if ("VIEW_IN_USE".equals(code)
+        || "BUSY".equals(code)
+        || "CLAIM_CONFLICT".equals(code)
+        || "UNAVAILABLE".equals(code)
+        || "CLEANUP_FAILED".equals(code)) {
       return new AiEnvironmentIdeUnavailableException(message);
     }
     return new AiValidationException("environment", message);
@@ -592,14 +604,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return dto;
   }
 
-  private static IdeCommand command(Supplier<IdeCommand> supplier) {
-    try {
-      return supplier.get();
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environment", error.getMessage());
-    }
-  }
-
   private static UUID parseUuid(String value, String field) {
     try {
       return Uuids.parseCanonical(value, field);
@@ -622,19 +626,37 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private static IdeOpenMode parseMode(String value) {
-    try {
-      return IdeOpenMode.fromWire(value);
-    } catch (IllegalArgumentException | NullPointerException error) {
-      throw new AiValidationException("environment", "mode must be create or resume");
+    if (value != null) {
+      if (value.equalsIgnoreCase("create")) {
+        return IdeOpenMode.CREATE;
+      }
+      if (value.equalsIgnoreCase("resume")) {
+        return IdeOpenMode.RESUME;
+      }
     }
+    throw new AiValidationException("environment", "mode must be create or resume");
   }
 
   private static String parseDirectory(String value) {
-    try {
-      return IdeCommand.validateOptionalDirectory(value);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("environment", error.getMessage());
+    if (value == null) {
+      return null;
     }
+    String trimmed = value.trim();
+    if (trimmed.isEmpty()) {
+      return null;
+    }
+    if (trimmed.length() > 512) {
+      throw new AiValidationException(
+          "environment", "directory length must not exceed 512 characters");
+    }
+    for (int i = 0; i < trimmed.length(); i++) {
+      char c = trimmed.charAt(i);
+      if (Character.isISOControl(c)) {
+        throw new AiValidationException(
+            "environment", "directory must not contain control characters");
+      }
+    }
+    return trimmed;
   }
 
   private static boolean requireDiscard(Boolean value) {
@@ -644,7 +666,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return value;
   }
 
-  private record IdeCall(IdeReply reply, DaemonConnectionIdentity identity) {}
+  private record IdeCall(IdeResult reply, DaemonConnectionIdentity identity) {}
 
   /** 命令可能已到达 Daemon 但未收到确定回执；只允许 claim 按原身份对账，其它副作用不得重放。 */
   private static final class IdeOutcomeUnknownException
