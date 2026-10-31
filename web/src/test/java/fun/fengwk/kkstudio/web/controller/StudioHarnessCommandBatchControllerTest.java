@@ -27,7 +27,9 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -668,9 +670,11 @@ class StudioHarnessCommandBatchControllerTest {
             3,
             HarnessRuntimeTestFixtures.NOW,
             HarnessRuntimeTestFixtures.NOW);
+    EntryPath path = new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry()));
     return new ThreadSnapshot(
         thread,
-        new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
+        EntryCurrentState.from(path),
+        new EntrySlice(null, path.entries()),
         List.of(),
         null,
         List.of(),

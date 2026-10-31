@@ -50,7 +50,9 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -1361,7 +1363,18 @@ class ProviderRequestPreviewServiceTest {
   private static ThreadSnapshot snapshot(
       ThreadState thread, EntryPath path, List<ThreadCommand> queued, ThreadLiveState liveState) {
     return new ThreadSnapshot(
-        thread, path, queued, null, List.of(), liveState, List.of(), 0, false, List.of(), false);
+        thread,
+        EntryCurrentState.from(path),
+        new EntrySlice(null, path.entries()),
+        queued,
+        null,
+        List.of(),
+        liveState,
+        List.of(),
+        0,
+        false,
+        List.of(),
+        false);
   }
 
   private static ThreadState thread(UUID headEntryId, long nextCommandSequence) {

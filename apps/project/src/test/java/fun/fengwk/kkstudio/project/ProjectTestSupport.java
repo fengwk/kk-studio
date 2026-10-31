@@ -25,8 +25,10 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -820,7 +822,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       EntryPath path = entryPath(jdbc, headEntryId);
       ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
       when(snapshot.thread()).thenReturn(thread);
-      when(snapshot.entryPath()).thenReturn(path);
+      when(snapshot.requireFullPath()).thenReturn(path);
+      when(snapshot.entryState()).thenReturn(EntryCurrentState.from(path));
+      when(snapshot.entrySlice()).thenReturn(new EntrySlice(null, path.entries()));
       // 受控假件在 Harness 投影边界模拟执行事实：静默投影为三个事实全 false；需要其它事实的用例覆写 executionFacts。
       when(snapshot.executionFacts()).thenReturn(new ThreadExecutionFacts(false, false, false));
       return snapshot;

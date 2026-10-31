@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -119,13 +120,15 @@ class SubagentTaskRunnerTest {
                 NOW));
     when(parent.toolSiblings()).thenReturn(List.of(tool));
     when(tool.id()).thenReturn(invocationId);
-    when(parent.entryPath()).thenReturn(path);
-    when(path.baseSettings()).thenReturn(new BranchSettings("parent-agent", MODEL, "parent-env"));
+    EntryCurrentState parentState = mock(EntryCurrentState.class);
+    when(parent.entryState()).thenReturn(parentState);
+    when(parentState.baseSettings())
+        .thenReturn(new BranchSettings("parent-agent", MODEL, "parent-env"));
     List<SubagentBinding> allowed =
         allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList();
     when(turnStartEntry.payload()).thenReturn(turnStart);
     when(turnStart.capabilities()).thenReturn(new TurnCapabilities(List.of(), allowed));
-    when(path.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
+    when(parentState.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
     when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(parent);
     when(materializer.materializeSubagent(AGENT, "parent-env")).thenReturn(target);
   }
@@ -733,9 +736,10 @@ class SubagentTaskRunnerTest {
                 7L,
                 NOW,
                 NOW));
-    EntryPath path = mock(EntryPath.class);
-    when(path.baseSettings()).thenReturn(new BranchSettings("child-agent", MODEL, "child-env"));
-    when(child.entryPath()).thenReturn(path);
+    EntryCurrentState childState = mock(EntryCurrentState.class);
+    when(childState.baseSettings())
+        .thenReturn(new BranchSettings("child-agent", MODEL, "child-env"));
+    when(child.entryState()).thenReturn(childState);
     return child;
   }
 }

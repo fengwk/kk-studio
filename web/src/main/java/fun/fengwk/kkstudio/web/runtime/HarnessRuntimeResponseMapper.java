@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
@@ -76,33 +77,30 @@ public final class HarnessRuntimeResponseMapper {
    *
    * <p>只取名称、当前模型、运行状态和当前路径计数；不序列化 Entry、Command 或 Tool 载荷。
    */
-  public static List<HarnessThreadTreeNodeDTO> toThreadTreeDtos(List<ThreadSnapshot> snapshots) {
-    Objects.requireNonNull(snapshots, "snapshots");
-    List<HarnessThreadTreeNodeDTO> nodes = new ArrayList<>(snapshots.size());
-    for (ThreadSnapshot snapshot : snapshots) {
-      nodes.add(toThreadTreeNodeDto(snapshot));
+  public static List<HarnessThreadTreeNodeDTO> toThreadTreeDtos(List<ThreadTreeNode> nodes) {
+    Objects.requireNonNull(nodes, "nodes");
+    List<HarnessThreadTreeNodeDTO> dtos = new ArrayList<>(nodes.size());
+    for (ThreadTreeNode node : nodes) {
+      dtos.add(toThreadTreeNodeDto(node));
     }
-    return List.copyOf(nodes);
+    return List.copyOf(dtos);
   }
 
-  private static HarnessThreadTreeNodeDTO toThreadTreeNodeDto(ThreadSnapshot snapshot) {
-    Objects.requireNonNull(snapshot, "snapshot");
+  private static HarnessThreadTreeNodeDTO toThreadTreeNodeDto(ThreadTreeNode node) {
+    Objects.requireNonNull(node, "node");
     HarnessThreadTreeNodeDTO dto = new HarnessThreadTreeNodeDTO();
-    dto.setThreadId(snapshot.thread().id().toString());
+    dto.setThreadId(node.thread().id().toString());
     dto.setParentThreadId(
-        snapshot.thread().parentThreadId() == null
-            ? null
-            : snapshot.thread().parentThreadId().toString());
-    dto.setName(snapshot.thread().name());
-    dto.setAgentName(snapshot.entryPath().baseSettings().agentName());
-    dto.setModel(toModelSelectionDto(snapshot.entryPath().baseSettings().model()));
-    ThreadRuntimeStatus status = snapshot.runtimeStatus();
-    dto.setStatus(status.name());
-    dto.setExecutionControl(snapshot.thread().executionControl().name());
-    dto.setTurnCount(snapshot.turnCount());
-    dto.setToolCallCount(snapshot.toolCallCount());
-    dto.setOutcome(snapshot.outcome() == null ? null : snapshot.outcome().name());
-    dto.setUpdateTime(snapshot.thread().updatedAt());
+        node.thread().parentThreadId() == null ? null : node.thread().parentThreadId().toString());
+    dto.setName(node.thread().name());
+    dto.setAgentName(node.branchSettings().agentName());
+    dto.setModel(toModelSelectionDto(node.branchSettings().model()));
+    dto.setStatus(node.status().name());
+    dto.setExecutionControl(node.thread().executionControl().name());
+    dto.setTurnCount(node.metrics().turnCount());
+    dto.setToolCallCount(node.metrics().toolCallCount());
+    dto.setOutcome(node.outcome() == null ? null : node.outcome().name());
+    dto.setUpdateTime(node.thread().updatedAt());
     return dto;
   }
 
@@ -121,7 +119,7 @@ public final class HarnessRuntimeResponseMapper {
             ? null
             : snapshot.thread().parentThreadId().toString());
     dto.setName(snapshot.thread().name());
-    dto.setSessionId(snapshot.entryPath().root().sessionId().toString());
+    dto.setSessionId(snapshot.thread().sessionId().toString());
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setRootThreadId(snapshot.thread().rootThreadId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
@@ -130,7 +128,7 @@ public final class HarnessRuntimeResponseMapper {
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
     dto.setExecutionControl(snapshot.thread().executionControl().name());
-    dto.setBranchSettings(toBranchSettingsDto(snapshot.entryPath().baseSettings()));
+    dto.setBranchSettings(toBranchSettingsDto(snapshot.entryState().baseSettings()));
     dto.setCreateTime(snapshot.thread().createdAt());
     dto.setUpdateTime(snapshot.thread().updatedAt());
     return dto;
@@ -284,20 +282,21 @@ public final class HarnessRuntimeResponseMapper {
   /**
    * 映射一个一致的 Thread 快照；DTO 列表为不可变副本。
    *
-   * <p>{@code entryPath} 的每个 Entry 都带上读取时费用投影：Thread 历史与 Session Entry tree 走同一份投影，因此前端无需为费用额外请求。
+   * <p>只投影本次返回的 Entry slice，并为这些 Entry 带上读取时费用。完整读取的 {@code baseEntryId} 为 null。
    */
   public static HarnessThreadSnapshotDTO toSnapshotDto(
-      ThreadSnapshot snapshot,
-      ManualCompactionAvailability manualCompaction,
-      Map<UUID, HarnessUsageCostDTO> usageCosts) {
+      ThreadSnapshot snapshot, Map<UUID, HarnessUsageCostDTO> usageCosts) {
     Objects.requireNonNull(snapshot, "snapshot");
-    Objects.requireNonNull(manualCompaction, "manualCompaction");
     Objects.requireNonNull(usageCosts, "usageCosts");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
     dto.setVersion(Long.toString(snapshot.thread().version()));
     dto.setThread(toThreadDto(snapshot));
-    List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entryPath().entries().size());
-    for (Entry entry : snapshot.entryPath().entries()) {
+    dto.setBaseEntryId(
+        snapshot.entrySlice().baseEntryId() == null
+            ? null
+            : snapshot.entrySlice().baseEntryId().toString());
+    List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entrySlice().entries().size());
+    for (Entry entry : snapshot.entrySlice().entries()) {
       entries.add(toEntryDto(entry, usageCosts.get(entry.id())));
     }
     dto.setEntries(List.copyOf(entries));
@@ -336,11 +335,6 @@ public final class HarnessRuntimeResponseMapper {
       failures.add(failureDto);
     }
     dto.setGenerationFailures(List.copyOf(failures));
-    HarnessManualCompactionDTO manualCompactionDto = new HarnessManualCompactionDTO();
-    manualCompactionDto.setAvailable(manualCompaction.available());
-    manualCompactionDto.setDisabledReason(
-        manualCompaction.available() ? null : manualCompaction.disabledReason().name());
-    dto.setManualCompaction(manualCompactionDto);
     dto.setStopReceipts(toStopReceiptDtos(snapshot.stopReceipts()));
     List<HarnessExecutionExitDTO> executions =
         new ArrayList<>(snapshot.unconfirmedExecutions().size());
@@ -354,6 +348,16 @@ public final class HarnessRuntimeResponseMapper {
       executions.add(execution);
     }
     dto.setUnconfirmedExecutions(List.copyOf(executions));
+    return dto;
+  }
+
+  /** 映射独立压缩 advisory；可用时 disabledReason 显式为 null。 */
+  public static HarnessManualCompactionDTO toManualCompactionDto(
+      ManualCompactionAvailability availability) {
+    Objects.requireNonNull(availability, "availability");
+    HarnessManualCompactionDTO dto = new HarnessManualCompactionDTO();
+    dto.setAvailable(availability.available());
+    dto.setDisabledReason(availability.available() ? null : availability.disabledReason().name());
     return dto;
   }
 

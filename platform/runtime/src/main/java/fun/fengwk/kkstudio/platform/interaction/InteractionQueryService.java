@@ -379,7 +379,7 @@ public class InteractionQueryService {
       if (trigger == SpawnTrigger.CONTROLLER || trigger == SpawnTrigger.PLUGIN) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setType("AGENT_TASK");
-        owner.setAgentName(root.entryPath().baseSettings().agentName());
+        owner.setAgentName(root.entryState().baseSettings().agentName());
         owner.setRootThreadName(root.thread().name());
         return Optional.of(owner);
       }

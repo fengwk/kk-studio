@@ -159,7 +159,7 @@ public class HarnessOwnerQueryService {
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
     dto.setExecutionControl(thread.executionControl().name());
-    var selection = snapshot.entryPath().baseSettings().model();
+    var selection = snapshot.entryState().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setModelName(selection.modelName());
     model.setVariant(selection.variant());
@@ -184,7 +184,7 @@ public class HarnessOwnerQueryService {
   }
 
   private static String headMessagePreview(ThreadSnapshot snapshot) {
-    List<Entry> entries = snapshot.entryPath().entries();
+    List<Entry> entries = snapshot.requireFullPath().entries();
     for (int index = entries.size() - 1; index >= 0; index--) {
       String preview = messagePreview(entries.get(index));
       if (preview != null) {

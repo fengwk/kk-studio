@@ -2399,6 +2399,60 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread_snapshot.incremental_read',
+  level: 'L1',
+  title: 'Thread 快照 afterEntryId 增量读取与边界回退',
+  docs: 'GET /api/threads/{id}?afterEntryId：非法 UUID 返回 400；cursor=head 时返回空 delta 且 baseEntryId=head；非祖先游标回退全量快照且 baseEntryId=null；无真实 Provider 调用',
+  async run(ctx) {
+    const target = await resolveAnyCatalogTarget(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-incr-${cid().slice(0, 8)}`,
+      agentName: target.agent.name,
+      yoloEnabled: false,
+    })
+    const threadId = cid()
+    try {
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        rootSettings: branchSettingsOf({ name: `missing-incr-agent-${cid()}` }, target.model),
+        yoloEnabled: false,
+        commands: [userMessageCommand('增量快照验证', cid())],
+      })
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const full = await getThreadSnapshot(ctx, threadId)
+      const headId = full.thread.headEntryId
+      assert(headId, 'quiescent thread must have a head entry')
+
+      // 1. 非 canonical afterEntryId -> 400
+      await expectHttpError(
+        () => ctx.call('GET', `/api/threads/${threadId}?afterEntryId=not-a-valid-uuid`),
+        { status: 400 },
+      )
+
+      // 2. cursor=head -> 空 delta，baseEntryId=head
+      const { json: atHeadJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${headId}`)
+      const atHeadData = envelopeData(atHeadJson)
+      assert.strictEqual(atHeadData.baseEntryId, headId, 'cursor at head must return baseEntryId as head')
+      assert.strictEqual(atHeadData.entries.length, 0, 'cursor at head must return empty entries list')
+
+      // 3. 非祖先游标 -> 回退全量，baseEntryId=null
+      const nonAncestorId = '00000000-0000-0000-0000-000000000999'
+      const { json: nonAncestorJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${nonAncestorId}`)
+      const nonAncestorData = envelopeData(nonAncestorJson)
+      assert.strictEqual(nonAncestorData.baseEntryId, null, 'non-ancestor cursor must fallback to full snapshot with null baseEntryId')
+      assert.strictEqual(nonAncestorData.entries.length, full.entries.length, 'fallback full snapshot must have same entry count')
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
+  },
+})
+
+registerCase({
   id: 'frontend.proxy_model_contract',
   level: 'L1',
   title: 'Frontend 代理 model 契约',

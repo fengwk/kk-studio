@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
@@ -155,22 +156,22 @@ public final class BuiltinAgentDriver implements AgentDriver {
 
   @Override
   public LockedDriverState readState(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
-    Optional<Entry> openTurn = path.openTurnStart();
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state) {
+    Optional<Entry> openTurn = state.openTurnStart();
     if (openTurn.isEmpty()) {
       return NoDriverState.INSTANCE;
     }
     return store
         .in(tx)
         .findModelInvocationByTurn(thread.id(), openTurn.get().id())
-        .map(model -> project(model, path))
+        .map(model -> project(model, state))
         .orElse(NoDriverState.INSTANCE);
   }
 
   @Override
   public LockedDriverState lockState(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
-    Optional<Entry> openTurn = path.openTurnStart();
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state) {
+    Optional<Entry> openTurn = state.openTurnStart();
     if (openTurn.isEmpty()) {
       return NoDriverState.INSTANCE;
     }
@@ -190,12 +191,12 @@ public final class BuiltinAgentDriver implements AgentDriver {
                             + found.get().id()
                             + " could not be locked for thread "
                             + thread.id()));
-    return project(model, path);
+    return project(model, state);
   }
 
-  private LockedDriverState project(ModelInvocation model, EntryPath path) {
+  private LockedDriverState project(ModelInvocation model, EntryCurrentState state) {
     DriverActivity activity = DriverActivity.NONE;
-    if (model.resultEntryId() == null && model.requestHeadEntryId().equals(path.head().id())) {
+    if (model.resultEntryId() == null && model.requestHeadEntryId().equals(state.head().id())) {
       activity =
           model.status().isTerminal() ? DriverActivity.RESPONSE_PENDING : DriverActivity.ACTIVE;
     }

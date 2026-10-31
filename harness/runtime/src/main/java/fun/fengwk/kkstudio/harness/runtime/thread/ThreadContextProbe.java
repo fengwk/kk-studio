@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -14,8 +14,8 @@ import java.util.Objects;
 /**
  * 无锁 Invocation 读取与 {@link ThreadContextClassifier} 组合探测器。
  *
- * <p>Driver 状态完全经 {@link AgentDriver#readState} 获取；Runtime 不读取或强转 Driver 私有类型。Tool siblings 仅在当前
- * head 为 ASSISTANT Message 时查找，归属由公共字段校验。
+ * <p>Driver 状态完全经 {@link AgentDriver#readState} 获取；Runtime 不读取或强转 Driver 私有类型。分类只使用当前 Entry 状态。Tool
+ * siblings 仅在当前 head 为 ASSISTANT Message 时查找，归属由公共字段校验。
  */
 public final class ThreadContextProbe {
 
@@ -26,35 +26,36 @@ public final class ThreadContextProbe {
     this.driver = Objects.requireNonNull(driver, "driver");
   }
 
-  public ThreadContext probe(HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+  public ThreadContext probe(
+      HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(thread, "thread");
-    Objects.requireNonNull(path, "path");
-    LockedDriverState driverState = driver.readState(tx, thread, path);
+    Objects.requireNonNull(state, "state");
+    LockedDriverState driverState = driver.readState(tx, thread, state);
     List<ToolInvocation> siblings = List.of();
-    if (path.openTurnStart().isPresent() && assistantHead(path)) {
+    if (state.openTurnStart().isPresent() && assistantHead(state)) {
       siblings =
-          tx.tools().loadByAssistantEntry(path.head().id()).stream()
+          tx.tools().loadByAssistantEntry(state.head().id()).stream()
               .filter(
                   sibling ->
                       sibling.threadId().equals(thread.id())
                           && sibling
                               .turnStartEntryId()
-                              .equals(path.openTurnStart().orElseThrow().id())
-                          && sibling.assistantEntryId().equals(path.head().id()))
+                              .equals(state.openTurnStart().orElseThrow().id())
+                          && sibling.assistantEntryId().equals(state.head().id()))
               .toList();
     }
-    return classifier.classify(thread, path, driverState, siblings);
+    return classifier.classify(thread, state, driverState, siblings);
   }
 
   public ThreadContext probe(HarnessStore.Transaction tx, ThreadState thread) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(thread, "thread");
-    return probe(tx, thread, tx.entries().loadPath(thread.headEntryId()));
+    return probe(tx, thread, tx.entries().loadCurrent(thread.headEntryId()));
   }
 
-  private static boolean assistantHead(EntryPath path) {
-    return path.head().payload() instanceof MessagePayload message
+  private static boolean assistantHead(EntryCurrentState state) {
+    return state.head().payload() instanceof MessagePayload message
         && message.message().role() == AgentMessageRole.ASSISTANT;
   }
 }

@@ -51,7 +51,7 @@ public class IssueThreadExecution {
         thread.headEntryId(),
         thread.version(),
         thread.nextCommandSequence(),
-        snapshot.entryPath(),
+        snapshot.requireFullPath(),
         snapshot.executionFacts());
   }
 
