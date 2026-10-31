@@ -152,5 +152,71 @@ class IdeBrowserSessionRegistryTest {
     assertThrows(
         NullPointerException.class,
         () -> new IdeBrowserSessionRegistry.Session(IDENTITY, viewId, 1L, null));
+
+    // viewOpened validation
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> registry.viewOpened(IDENTITY, viewId, 0L, "/workspace"));
+  }
+
+  @Test
+  void viewReopenedWithDifferentWorkspaceOrEpochInvalidatesSessions() {
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    String viewId = UUID.randomUUID().toString();
+    registry.viewOpened(IDENTITY, viewId, 1L, "/workspace1");
+    String token1 = registry.open(IDENTITY, viewId, 1L, "/workspace1");
+    assertTrue(registry.lookup(token1, ENV, viewId).isPresent());
+
+    // Reopen same epoch with different workspace -> invalidates all sessions
+    registry.viewOpened(IDENTITY, viewId, 1L, "/workspace2");
+    assertFalse(registry.lookup(token1, ENV, viewId).isPresent());
+
+    // Open new session on workspace2
+    String token2 = registry.open(IDENTITY, viewId, 1L, "/workspace2");
+    assertTrue(registry.lookup(token2, ENV, viewId).isPresent());
+
+    // Advance epoch -> invalidates older epoch sessions
+    registry.viewOpened(IDENTITY, viewId, 2L, "/workspace2");
+    assertFalse(registry.lookup(token2, ENV, viewId).isPresent());
+  }
+
+  @Test
+  void cleanupExpiredSessionsAndEnsureCapacityMultiEnv() {
+    AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-01-01T00:00:00Z"));
+    Clock clock =
+        new Clock() {
+          @Override
+          public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+          }
+
+          @Override
+          public Clock withZone(ZoneId zone) {
+            return this;
+          }
+
+          @Override
+          public Instant instant() {
+            return now.get();
+          }
+        };
+
+    IdeBrowserSessionRegistry registry =
+        new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
+
+    String viewId = UUID.randomUUID().toString();
+    registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
+    registry.open(IDENTITY, viewId, 1L, "/workspace");
+    assertEquals(1, registry.size());
+
+    // Multi-environment capacity check (tests loop continue branch)
+    EnvironmentId otherEnv = EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
+    registry.ensureViewCapacity(otherEnv);
+
+    // Advance past TTL and reopen -> invalidates expired existing token and creates new token
+    now.set(now.get().plus(Duration.ofHours(1)));
+    String token2 = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    assertNotNull(token2);
+    assertEquals(1, registry.size());
   }
 }

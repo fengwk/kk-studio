@@ -180,8 +180,6 @@ public final class TcpTunnelStream implements TunnelStream {
     try {
       channel.shutdownOutput();
       endFuture.complete(null);
-    } catch (IOException e) {
-      endFuture.completeExceptionally(e);
     } catch (Throwable t) {
       endFuture.completeExceptionally(t);
     }

@@ -2,9 +2,16 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,9 +20,11 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousServerSocketChannel;
 import java.nio.channels.AsynchronousSocketChannel;
+import java.nio.channels.CompletionHandler;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 class TcpTunnelStreamTest {
 
@@ -153,5 +162,121 @@ class TcpTunnelStreamTest {
         }
       }
     }
+  }
+
+  @Test
+  void asynchronousWriteCompletionAndFailureHandling() throws Exception {
+    // 1. Write failure callback in CompletionHandler
+    AsynchronousSocketChannel mockChannel = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream = new TcpTunnelStream(mockChannel, null);
+    doAnswer(
+            inv -> {
+              CompletionHandler<Integer, Void> handler = inv.getArgument(2);
+              handler.failed(new IOException("simulated write failure"), null);
+              return null;
+            })
+        .when(mockChannel)
+        .write(any(ByteBuffer.class), any(), any());
+
+    CompletableFuture<Void> writeFuture =
+        stream.write(ByteBuffer.wrap(new byte[] {1, 2})).toCompletableFuture();
+    assertTrue(writeFuture.isCompletedExceptionally());
+
+    // 2. Multi-chunk write (source.hasRemaining() branch)
+    AsynchronousSocketChannel mockChannel2 = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream2 = new TcpTunnelStream(mockChannel2, null);
+    ByteBuffer data = ByteBuffer.wrap(new byte[] {1, 2, 3, 4});
+    doAnswer(
+            inv -> {
+              ByteBuffer buf = inv.getArgument(0);
+              buf.position(buf.position() + 2);
+              CompletionHandler<Integer, Void> handler = inv.getArgument(2);
+              handler.completed(2, null);
+              return null;
+            })
+        .doAnswer(
+            inv -> {
+              ByteBuffer buf = inv.getArgument(0);
+              buf.position(buf.position() + 2);
+              CompletionHandler<Integer, Void> handler = inv.getArgument(2);
+              handler.completed(2, null);
+              return null;
+            })
+        .when(mockChannel2)
+        .write(any(ByteBuffer.class), any(), any());
+
+    CompletableFuture<Void> writeFuture2 = stream2.write(data).toCompletableFuture();
+    writeFuture2.join();
+    assertTrue(writeFuture2.isDone() && !writeFuture2.isCompletedExceptionally());
+
+    // 3. endOutput while write is pending
+    AsynchronousSocketChannel mockChannel3 = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream3 = new TcpTunnelStream(mockChannel3, null);
+    AtomicReference<CompletionHandler<Integer, Void>> writeHolder = new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              writeHolder.set(inv.getArgument(2));
+              ByteBuffer buf = inv.getArgument(0);
+              buf.position(buf.limit());
+              return null;
+            })
+        .when(mockChannel3)
+        .write(any(ByteBuffer.class), any(), any());
+
+    CompletableFuture<Void> wFuture =
+        stream3.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture();
+    CompletableFuture<Void> endFuture = stream3.endOutput().toCompletableFuture();
+    assertFalse(endFuture.isDone());
+
+    writeHolder.get().completed(1, null);
+    wFuture.join();
+    endFuture.join();
+    assertTrue(endFuture.isDone());
+    verify(mockChannel3).shutdownOutput();
+
+    // 4. Operations after close
+    stream3.close();
+    CompletableFuture<Void> endAfterClose = stream3.endOutput().toCompletableFuture();
+    assertTrue(endAfterClose.isDone());
+    CompletableFuture<Void> writeAfterClose =
+        stream3.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture();
+    assertTrue(writeAfterClose.isCompletedExceptionally());
+
+    // 5. Concurrent write not permitted
+    AsynchronousSocketChannel mockChannel4 = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream4 = new TcpTunnelStream(mockChannel4, null);
+    stream4.write(ByteBuffer.wrap(new byte[] {1}));
+    assertThrows(IllegalStateException.class, () -> stream4.write(ByteBuffer.wrap(new byte[] {2})));
+
+    // 6. Close while write and endOutput are pending cancels them
+    CompletableFuture<Void> end4 = stream4.endOutput().toCompletableFuture();
+    stream4.close();
+    assertTrue(end4.isCompletedExceptionally());
+
+    // 7. endOutput when pending write fails
+    AsynchronousSocketChannel mockChannel5 = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream5 = new TcpTunnelStream(mockChannel5, null);
+    AtomicReference<CompletionHandler<Integer, Void>> writeHolder5 = new AtomicReference<>();
+    doAnswer(
+            inv -> {
+              writeHolder5.set(inv.getArgument(2));
+              return null;
+            })
+        .when(mockChannel5)
+        .write(any(ByteBuffer.class), any(), any());
+
+    CompletableFuture<Void> w5 =
+        stream5.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture();
+    CompletableFuture<Void> end5 = stream5.endOutput().toCompletableFuture();
+    writeHolder5.get().failed(new IOException("write failed"), null);
+    assertTrue(w5.isCompletedExceptionally());
+    assertTrue(end5.isCompletedExceptionally());
+
+    // 8. performShutdownOutput throws exception
+    AsynchronousSocketChannel mockChannel6 = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream6 = new TcpTunnelStream(mockChannel6, null);
+    doThrow(new IOException("shutdown failure")).when(mockChannel6).shutdownOutput();
+    CompletableFuture<Void> end6 = stream6.endOutput().toCompletableFuture();
+    assertTrue(end6.isCompletedExceptionally());
   }
 }

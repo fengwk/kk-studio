@@ -350,4 +350,202 @@ class IdeGatewayDataPlaneTest {
 
     verify(res).sendError(409);
   }
+
+  @Test
+  void bootstrapAndSessionRouting() throws IOException {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    // 1. Bootstrap: No route -> 503
+    when(registry.route(ENV)).thenReturn(Optional.empty());
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123", req, res);
+    verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+
+    // 2. Bootstrap: Remote route -> forwardHttp
+    ClusterOwnerRoute remote =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:8080"));
+    when(registry.route(ENV)).thenReturn(Optional.of(remote));
+    HttpServletResponse resRemote = mock(HttpServletResponse.class);
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123", req, resRemote);
+    verify(forwarder)
+        .forwardHttp(
+            req,
+            resRemote,
+            remote,
+            ENV,
+            VIEW,
+            IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123");
+
+    // 3. Bootstrap: Local route -> browserSessionHandler.handleBootstrap
+    ClusterOwnerRoute local = ClusterOwnerRoute.local(UUID.randomUUID());
+    when(registry.route(ENV)).thenReturn(Optional.of(local));
+    HttpServletResponse resLocal = mock(HttpServletResponse.class);
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123", req, resLocal);
+    verify(sessionHandler).handleBootstrap(ENV, VIEW, req, resLocal);
+
+    // 4. Session: No route -> 503
+    when(registry.route(ENV)).thenReturn(Optional.empty());
+    HttpServletResponse resSessionNoRoute = mock(HttpServletResponse.class);
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, resSessionNoRoute);
+    verify(resSessionNoRoute).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+
+    // 5. Session: Remote route -> forwardHttp
+    when(registry.route(ENV)).thenReturn(Optional.of(remote));
+    HttpServletResponse resSessionRemote = mock(HttpServletResponse.class);
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, resSessionRemote);
+    verify(forwarder)
+        .forwardHttp(
+            req, resSessionRemote, remote, ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT);
+
+    // 6. Session: Local route -> browserSessionHandler.handleSession
+    when(registry.route(ENV)).thenReturn(Optional.of(local));
+    HttpServletResponse resSessionLocal = mock(HttpServletResponse.class);
+    dataPlane.handleBrowserTraffic(
+        ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, resSessionLocal);
+    verify(sessionHandler).handleSession(ENV, VIEW, req, resSessionLocal);
+  }
+
+  @Test
+  void internalDataPlaneEndpointsAndValidations() throws IOException {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    // 1. Internal bootstrap
+    dataPlane.handleInternalDataPlane(
+        ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=t", req, res);
+    verify(sessionHandler).handleBootstrap(ENV, VIEW, req, res);
+
+    // 2. Internal session
+    HttpServletResponse res2 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, res2);
+    verify(sessionHandler).handleSession(ENV, VIEW, req, res2);
+
+    // 3. Internal unsafe path -> 400
+    HttpServletResponse res3 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/../unsafe", req, res3);
+    verify(res3).sendError(HttpServletResponse.SC_BAD_REQUEST);
+
+    // 4. Unauthorized -> 401
+    when(authorizer.authorize(any(), any(), any())).thenReturn(Optional.empty());
+    HttpServletResponse res4 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res4);
+    verify(res4).sendError(HttpServletResponse.SC_UNAUTHORIZED);
+
+    // 5. Forbidden workspace -> 403
+    when(authorizer.authorize(any(), any(), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+    when(req.getParameter("workspace")).thenReturn("/forbidden");
+    HttpServletResponse res5 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res5);
+    verify(res5).sendError(HttpServletResponse.SC_FORBIDDEN);
+
+    // 6. Tunnel missing -> 503
+    when(req.getParameter("workspace")).thenReturn("/workspace");
+    HttpServletResponse res6 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res6);
+    verify(res6).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  void localHttpHeadAndErrorScenarios() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    FakeEnvironmentTunnel tunnel = tunnels.register(IDENTITY);
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    // 1. HEAD request returns without writing body
+    HttpServletRequest headReq = mock(HttpServletRequest.class);
+    when(headReq.getMethod()).thenReturn("HEAD");
+    when(headReq.getContextPath()).thenReturn("");
+    when(headReq.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(headReq.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse headRes = mock(HttpServletResponse.class);
+
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                while (tunnel.exchanges().isEmpty()) {
+                  Thread.sleep(10);
+                }
+                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
+                exchange.respond(new TunnelExchange.Response(200, Map.of()));
+              } catch (Exception ignored) {
+              }
+            });
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", headReq, headRes);
+    verify(headRes).setStatus(200);
+
+    // 2. Local WS dispatch failure waiting for headers returns 502
+    HttpServletRequest wsReq = mock(HttpServletRequest.class);
+    when(wsReq.getMethod()).thenReturn("GET");
+    when(wsReq.getHeader("Connection")).thenReturn("Upgrade");
+    when(wsReq.getHeader("Upgrade")).thenReturn("websocket");
+    when(wsReq.getHeader("Sec-WebSocket-Version")).thenReturn("13");
+    when(wsReq.getHeader("Sec-WebSocket-Key")).thenReturn("dGhlIHNhbXBsZSBub25jZQ==");
+    when(wsReq.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(wsReq.getHeader("Origin")).thenReturn("http://localhost");
+    when(wsReq.getScheme()).thenReturn("http");
+    when(wsReq.getServerName()).thenReturn("localhost");
+    when(wsReq.getServerPort()).thenReturn(80);
+    when(wsReq.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse wsRes = mock(HttpServletResponse.class);
+
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                while (tunnel.exchanges().isEmpty()) {
+                  Thread.sleep(10);
+                }
+                FakeTunnelExchange exchange = tunnel.exchanges().get(tunnel.exchanges().size() - 1);
+                exchange.failHeaders(new IOException("tunnel closed"));
+              } catch (Exception ignored) {
+              }
+            });
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/ws-fail", wsReq, wsRes);
+    verify(wsRes).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
 }
