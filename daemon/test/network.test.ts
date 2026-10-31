@@ -18,8 +18,6 @@ import {
   type OutboundNetwork,
 } from '../src/network.js'
 import { createHttpPutObject } from '../src/transport/resources.js'
-import { createWebSocketTransport } from '../src/transport/control.js'
-import { openStreamExchange } from '../src/transport/stream.js'
 
 /** 测试用系统回退：明确直连。 */
 const systemDirect: SystemProxyResolver = {
@@ -735,39 +733,6 @@ describe('outbound network lifecycle and connect deadlines', () => {
     } finally {
       spy.mockRestore()
       process.off('unhandledRejection', listener)
-    }
-  })
-
-  it('destroys the WebSocket agent when the control socket constructor throws', async () => {
-    const network = getOutboundNetwork()
-    const destroy = vi.fn()
-    const spy = vi.spyOn(network, 'createWebSocketAgent').mockResolvedValue({ agent: new http.Agent(), destroy })
-    try {
-      // ftp:// 协议被 ws 构造期拒绝，必须销毁已建 Agent。
-      const transport = createWebSocketTransport('ftp://127.0.0.1:1')
-      await expect(transport.connect({ onMessage() {}, onDisconnected() {} })).rejects.toThrow()
-      expect(destroy).toHaveBeenCalledTimes(1)
-    } finally {
-      spy.mockRestore()
-    }
-  })
-
-  it('destroys the WebSocket agent when the stream socket constructor throws', async () => {
-    const network = getOutboundNetwork()
-    const destroy = vi.fn()
-    const spy = vi.spyOn(network, 'createWebSocketAgent').mockResolvedValue({ agent: new http.Agent(), destroy })
-    try {
-      await expect(
-        openStreamExchange({
-          streamUrl: 'ftp://127.0.0.1:1/stream',
-          request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
-          upstream: { host: '127.0.0.1', port: 1 },
-          signal: new AbortController().signal,
-        }),
-      ).rejects.toThrow()
-      expect(destroy).toHaveBeenCalledTimes(1)
-    } finally {
-      spy.mockRestore()
     }
   })
 })

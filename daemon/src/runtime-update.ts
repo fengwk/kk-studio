@@ -201,8 +201,14 @@ export async function executeUpdateAttempt(
     if (ide !== null) {
       await ide.stopForUpdate(signal)
     }
+    const plainCommand: Record<string, unknown> = {
+      operationId: command.operationId,
+      targetVersion: command.targetVersion,
+      artifactUrl: command.artifactUrl,
+      artifactSha256: command.artifactSha256,
+    }
     const raw = await update.handleUpdate(
-      command as unknown as Record<string, unknown>,
+      plainCommand,
       config,
       signal,
       reportProgress,

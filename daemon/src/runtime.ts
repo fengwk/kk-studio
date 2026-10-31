@@ -72,6 +72,7 @@ import {
   admitIdeCommand,
   ideFailureReply,
   requireFreshIdeLease,
+  toProtoIdeResult,
   type ActiveIdeLeaseRound,
 } from './runtime-ide.js'
 import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from './runtime-ports.js'
@@ -1330,35 +1331,4 @@ function toContractsCommand(proto: ProtoIdeCommand): IdeCommand {
     directory: proto.directory,
     discard: proto.discard,
   }
-}
-
-function toProtoIdeResult(reply: IdeReply): IdeResult {
-  const views = reply.views?.map((view) =>
-    create(IdeViewSummarySchema, {
-      viewId: view.viewId,
-      documentId: view.documentId,
-      eventNodeId: view.eventNodeId,
-      connectionId: view.connectionId,
-      claimId: view.claimId,
-      bindingEpoch: BigInt(view.bindingEpoch),
-      directory: view.directory,
-      workspacePath: view.workspacePath,
-      state: view.state === 'OPEN' ? IdeViewState.OPEN : IdeViewState.CLOSING,
-    }),
-  )
-
-  return create(IdeResultSchema, {
-    ok: reply.ok,
-    viewId: reply.viewId,
-    documentId: reply.documentId,
-    eventNodeId: reply.eventNodeId,
-    connectionId: reply.connectionId,
-    claimId: reply.claimId,
-    bindingEpoch: reply.bindingEpoch !== undefined ? BigInt(reply.bindingEpoch) : undefined,
-    directory: reply.directory,
-    workspacePath: reply.workspacePath,
-    views: views ?? [],
-    code: reply.code,
-    message: reply.message,
-  })
 }

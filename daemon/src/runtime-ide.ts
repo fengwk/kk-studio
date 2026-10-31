@@ -1,7 +1,13 @@
 import { create } from '@bufbuild/protobuf'
 
 import type { IdeCommand, IdeService } from './contracts.js'
-import { IdeResultSchema, type IdeResult } from './generated/control/v8/control_pb.js'
+import {
+  IdeResultSchema,
+  IdeViewState,
+  IdeViewSummarySchema,
+  type IdeResult,
+} from './generated/control/v8/control_pb.js'
+import type { IdeReply } from './contracts.js'
 
 /** 在途 IDE 请求条数上界，防止无界 map 与资源耗尽。 */
 export const MAX_IN_FLIGHT_IDE_COMMANDS = 256
@@ -80,5 +86,36 @@ export function ideFailureReply(error: unknown, message: string): IdeResult {
     ok: false,
     code: error instanceof Error && error.name === 'AbortError' ? 'BUSY' : 'UNAVAILABLE',
     message,
+  })
+}
+
+export function toProtoIdeResult(reply: IdeReply): IdeResult {
+  const views = reply.views?.map((view) =>
+    create(IdeViewSummarySchema, {
+      viewId: view.viewId,
+      documentId: view.documentId,
+      eventNodeId: view.eventNodeId,
+      connectionId: view.connectionId,
+      claimId: view.claimId,
+      bindingEpoch: BigInt(view.bindingEpoch),
+      directory: view.directory,
+      workspacePath: view.workspacePath,
+      state: view.state === 'OPEN' ? IdeViewState.OPEN : IdeViewState.CLOSING,
+    }),
+  )
+
+  return create(IdeResultSchema, {
+    ok: reply.ok,
+    viewId: reply.viewId,
+    documentId: reply.documentId,
+    eventNodeId: reply.eventNodeId,
+    connectionId: reply.connectionId,
+    claimId: reply.claimId,
+    bindingEpoch: reply.bindingEpoch !== undefined ? BigInt(reply.bindingEpoch) : undefined,
+    directory: reply.directory,
+    workspacePath: reply.workspacePath,
+    views: views ?? [],
+    code: reply.code,
+    message: reply.message,
   })
 }
