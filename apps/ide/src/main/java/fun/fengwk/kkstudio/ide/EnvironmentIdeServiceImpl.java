@@ -641,22 +641,20 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (value == null) {
       return null;
     }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-      return null;
+    if (value.isBlank()) {
+      throw new AiValidationException("environment", "directory must not be blank when present");
     }
-    if (trimmed.length() > 512) {
-      throw new AiValidationException(
-          "environment", "directory length must not exceed 512 characters");
+    if (value.length() > 4096) {
+      throw new AiValidationException("environment", "directory exceeds 4096 characters");
     }
-    for (int i = 0; i < trimmed.length(); i++) {
-      char c = trimmed.charAt(i);
-      if (Character.isISOControl(c)) {
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c < 0x20 || c == 0x7F) {
         throw new AiValidationException(
             "environment", "directory must not contain control characters");
       }
     }
-    return trimmed;
+    return value;
   }
 
   private static boolean requireDiscard(Boolean value) {
