@@ -13,11 +13,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
-import jakarta.websocket.CloseReason;
-import jakarta.websocket.RemoteEndpoint.Async;
-import jakarta.websocket.SendHandler;
-import jakarta.websocket.SendResult;
-import jakarta.websocket.Session;
+import org.eclipse.jetty.websocket.api.Callback;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.api.StatusCode;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -47,6 +46,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -84,6 +84,7 @@ class ApplicationEventWebSocketHandlerTest {
   private WebSocketSession springSession;
   private SentRecorder recorder;
   private AtomicLong nowNanos;
+  private ScheduledExecutorService heartbeatScheduler;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -115,8 +116,19 @@ class ApplicationEventWebSocketHandlerTest {
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 
+  @AfterEach
+  void tearDown() {
+    if (heartbeatScheduler != null) {
+      heartbeatScheduler.shutdownNow();
+    }
+  }
+
   /** 用给定 sender 容量重建 handler 与 recorder mock（容量小可驱动 backpressure 路径）。 */
   private void rebuildHandler(int capacity) throws Exception {
+    if (heartbeatScheduler != null) {
+      heartbeatScheduler.shutdownNow();
+    }
+    heartbeatScheduler = Executors.newSingleThreadScheduledExecutor();
     handler =
         new ApplicationEventWebSocketHandler(
             hub,
@@ -125,39 +137,41 @@ class ApplicationEventWebSocketHandlerTest {
                 capacity, TEST_MAX_BYTES, TEST_SEND_TIMEOUT_MILLIS, TEST_HEARTBEAT_INTERVAL_MILLIS),
             EVENT_NODE,
             browserUseRegistry,
-            null,
+            heartbeatScheduler,
             nowNanos::get);
     recorder = new SentRecorder();
-    Session jakartaSession = mock(Session.class);
-    Async async = mock(Async.class);
+    Session jettySession = mock(Session.class);
     doAnswer(
             inv -> {
               String text = inv.getArgument(0);
-              SendHandler sendHandler = inv.getArgument(1);
+              Callback callback = inv.getArgument(1);
               if (text.contains("\"type\":\"connected\"")) {
                 // connected 是最先发出的帧；测试自动完成它，后续断言仍以订阅/IDE 帧起点。
                 recorder.connectedFrame = text;
-                sendHandler.onResult(new SendResult());
+                callback.succeed();
                 return null;
               }
               recorder.sent.add(text);
-              recorder.handlers.add(sendHandler);
+              recorder.callbacks.add(callback);
               return null;
             })
-        .when(async)
-        .sendText(any(String.class), any(SendHandler.class));
+        .when(jettySession)
+        .sendText(any(String.class), any(Callback.class));
     doAnswer(
             inv -> {
               recorder.pings.add(inv.getArgument(0));
+              Callback callback = inv.getArgument(1);
+              if (callback != null) {
+                callback.succeed();
+              }
               return null;
             })
-        .when(async)
-        .sendPing(any(ByteBuffer.class));
-    when(jakartaSession.getAsyncRemote()).thenReturn(async);
+        .when(jettySession)
+        .sendPing(any(ByteBuffer.class), any(Callback.class));
     springSession =
         mock(WebSocketSession.class, withSettings().extraInterfaces(NativeWebSocketSession.class));
     when(springSession.getId()).thenReturn("session-1");
-    when(((NativeWebSocketSession) springSession).getNativeSession()).thenReturn(jakartaSession);
+    when(((NativeWebSocketSession) springSession).getNativeSession()).thenReturn(jettySession);
   }
 
   @Test
@@ -183,14 +197,14 @@ class ApplicationEventWebSocketHandlerTest {
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", IDE_CLAIM, 5L)));
     assertEquals(1, recorder.sent.size());
     assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(0));
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(1L, browserUseRegistry.usage(identity).orElseThrow().revision());
 
     // 同 revision 同内容幂等 ack，不改变登记。
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", IDE_CLAIM, 5L)));
     assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(1));
-    recorder.handlers.get(1).onResult(new SendResult());
+    recorder.complete(1);
 
     // 同 revision 不同内容拒绝，但连接保持可用。
     handler.handleTextMessage(
@@ -199,12 +213,12 @@ class ApplicationEventWebSocketHandlerTest {
         "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
         recorder.sent.get(2));
     verify(springSession, never()).close(any());
-    recorder.handlers.get(2).onResult(new SendResult());
+    recorder.complete(2);
 
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "2", IDE_CLAIM, 6L)));
     assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"2\"}", recorder.sent.get(3));
-    recorder.handlers.get(3).onResult(new SendResult());
+    recorder.complete(3);
     IdeBrowserUse accepted = browserUseRegistry.usage(identity).orElseThrow();
     assertEquals(2L, accepted.revision());
     assertEquals(6L, accepted.views().getFirst().bindingEpoch());
@@ -232,11 +246,11 @@ class ApplicationEventWebSocketHandlerTest {
         browserUseRegistry.usage(identity).isPresent(),
         "failed connection must stop providing usage before the physical close");
 
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
-    recorder.handlers.get(1).onResult(new SendResult());
+    recorder.complete(1);
   }
 
   @Test
@@ -245,7 +259,7 @@ class ApplicationEventWebSocketHandlerTest {
     ConnectionIdentity identity = connectedIdentity();
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", IDE_CLAIM, 5L)));
-    recorder.handlers.getFirst().onResult(new SendResult());
+    recorder.completeFirst();
     assertTrue(browserUseRegistry.usage(identity).isPresent());
 
     long start = nowNanos.get();
@@ -263,10 +277,10 @@ class ApplicationEventWebSocketHandlerTest {
 
     handler.ping(start + 4 * second);
     assertFalse(browserUseRegistry.usage(identity).isPresent());
-    ArgumentCaptor<CloseReason> reason = ArgumentCaptor.forClass(CloseReason.class);
+    ArgumentCaptor<Integer> reason = ArgumentCaptor.forClass(Integer.class);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reason.capture());
-    assertEquals(CloseReason.CloseCodes.TRY_AGAIN_LATER, reason.getValue().getCloseCode());
+        .close(reason.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.TRY_AGAIN_LATER, reason.getValue());
   }
 
   @Test
@@ -279,7 +293,7 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(1, recorder.sent.size());
     assertTrue(recorder.pings.isEmpty(), "ping must not overtake in-flight text");
 
-    recorder.handlers.getFirst().onResult(new SendResult());
+    recorder.completeFirst();
     assertEquals(1, recorder.pings.size());
 
     rebuildHandler(1);
@@ -289,7 +303,7 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(1, recorder.sent.size());
     assertTrue(recorder.pings.isEmpty());
 
-    recorder.handlers.getFirst().onResult(new SendResult());
+    recorder.completeFirst();
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
@@ -312,7 +326,7 @@ class ApplicationEventWebSocketHandlerTest {
     versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
     assertEquals(1, recorder.sent.size(), "event must wait for the ack frame to be sent");
 
-    recorder.handlers.get(0).onResult(new SendResult()); // 完成 ack 发送，事件帧随后串行发出
+    recorder.complete(0); // 完成 ack 发送，事件帧随后串行发出
     assertEquals(2, recorder.sent.size(), "ack frame must precede the buffered event frame");
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
@@ -361,12 +375,12 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(
         "{\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.type must be a string\"}",
         recorder.sent.get(0));
-    recorder.handlers.get(0).onResult(new SendResult());
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    recorder.complete(0);
+    ArgumentCaptor<Integer> reasonCaptor = ArgumentCaptor.forClass(Integer.class);
     verify(springSession, never()).close(any());
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.PROTOCOL_ERROR, reasonCaptor.getValue().getCloseCode());
+        .close(reasonCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.PROTOCOL, reasonCaptor.getValue());
   }
 
   @Test
@@ -382,9 +396,9 @@ class ApplicationEventWebSocketHandlerTest {
             + THREAD
             + "\"}}",
         recorder.sent.get(0));
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession(), never())
-        .close(any());
+        .close(any(int.class), any(String.class), any(Callback.class));
 
     // 连接保持：后续合法帧仍被处理。
     doReturn(new SourceSubscribed(5L, () -> {})).when(threadVersionSource).subscribe(any(), any());
@@ -411,7 +425,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     resync.get().run();
     assertEquals(1, recorder.sent.size(), "resync frame must wait behind the in-flight ack");
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(2, recorder.sent.size());
     assertEquals(
         "{\"type\":\"resync\",\"resource\":{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}}",
@@ -439,16 +453,16 @@ class ApplicationEventWebSocketHandlerTest {
     handler.heartbeat(); // 入队失败，error 排在在途 heartbeat 后
 
     assertEquals(List.of("{\"type\":\"heartbeat\"}"), recorder.sent);
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(2, recorder.sent.size());
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
-    recorder.handlers.get(1).onResult(new SendResult());
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    recorder.complete(1);
+    ArgumentCaptor<Integer> reasonCaptor = ArgumentCaptor.forClass(Integer.class);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.TRY_AGAIN_LATER, reasonCaptor.getValue().getCloseCode());
+        .close(reasonCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.TRY_AGAIN_LATER, reasonCaptor.getValue());
   }
 
   @Test
@@ -474,16 +488,16 @@ class ApplicationEventWebSocketHandlerTest {
     // 第二个订阅的 ack 入队失败：刚建订阅必须释放（不 activate、不留在订阅表），并回 BACKPRESSURE 后关闭。
     verify(versionHandle2).close();
     assertEquals(1, recorder.sent.size(), "error frame must wait behind the in-flight ack");
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(2, recorder.sent.size());
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
-    recorder.handlers.get(1).onResult(new SendResult());
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    recorder.complete(1);
+    ArgumentCaptor<Integer> reasonCaptor = ArgumentCaptor.forClass(Integer.class);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.TRY_AGAIN_LATER, reasonCaptor.getValue().getCloseCode());
+        .close(reasonCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.TRY_AGAIN_LATER, reasonCaptor.getValue());
 
     // fail 已关闭本代际：迟到 subscribe 不得重新建立上游。
     verify(canvasVersionSource, times(1)).subscribe(any(), any());
@@ -503,24 +517,24 @@ class ApplicationEventWebSocketHandlerTest {
     rebuildHandler(2);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
-    recorder.handlers.get(0).onResult(new SendResult()); // ack 完成
+    recorder.complete(0); // ack 完成
     versionConsumer.get().accept(new ThreadVersionEventSource.Event("6", false));
-    recorder.handlers.get(1).onResult(new SendResult()); // 事件 6 完成
+    recorder.complete(1); // 事件 6 完成
     versionConsumer.get().accept(new ThreadVersionEventSource.Event("7", false)); // 在途
     versionConsumer.get().accept(new ThreadVersionEventSource.Event("8", false)); // 排队
     versionConsumer.get().accept(new ThreadVersionEventSource.Event("9", false)); // 溢出
 
     assertEquals(3, recorder.sent.size(), "error frame must wait behind the in-flight event");
-    recorder.handlers.get(2).onResult(new SendResult()); // 事件 7 完成
+    recorder.complete(2); // 事件 7 完成
     assertEquals(4, recorder.sent.size());
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(3));
-    recorder.handlers.get(3).onResult(new SendResult());
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    recorder.complete(3);
+    ArgumentCaptor<Integer> reasonCaptor = ArgumentCaptor.forClass(Integer.class);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.TRY_AGAIN_LATER, reasonCaptor.getValue().getCloseCode());
+        .close(reasonCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.TRY_AGAIN_LATER, reasonCaptor.getValue());
   }
 
   @Test
@@ -555,16 +569,16 @@ class ApplicationEventWebSocketHandlerTest {
     verify(versionHandle).close();
     verify(realtimeHandle).close();
     assertEquals(1, recorder.sent.size(), "error frame must wait behind the in-flight ack");
-    recorder.handlers.get(0).onResult(new SendResult());
+    recorder.complete(0);
     assertEquals(2, recorder.sent.size());
     assertEquals(
         "{\"type\":\"error\",\"code\":\"SEND_FAILED\",\"message\":\"event channel is shutting down\"}",
         recorder.sent.get(1));
-    recorder.handlers.get(1).onResult(new SendResult());
-    ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
+    recorder.complete(1);
+    ArgumentCaptor<Integer> reasonCaptor = ArgumentCaptor.forClass(Integer.class);
     verify((Session) ((NativeWebSocketSession) springSession).getNativeSession())
-        .close(reasonCaptor.capture());
-    assertEquals(CloseReason.CloseCodes.SERVICE_RESTART, reasonCaptor.getValue().getCloseCode());
+        .close(reasonCaptor.capture(), any(String.class), any(Callback.class));
+    assertEquals(StatusCode.SERVICE_RESTART, reasonCaptor.getValue());
 
     // 幂等：再次 shutdown 与后续帧均安全。
     handler.shutdown();
@@ -640,25 +654,24 @@ class ApplicationEventWebSocketHandlerTest {
     CountDownLatch ackEnqueued = new CountDownLatch(1);
     CountDownLatch ackRelease = new CountDownLatch(1);
     CountDownLatch secondTaskStarted = new CountDownLatch(1);
-    Async async =
-        ((Session) ((NativeWebSocketSession) springSession).getNativeSession()).getAsyncRemote();
+    Session jettySession = (Session) ((NativeWebSocketSession) springSession).getNativeSession();
     doAnswer(
             inv -> {
               String text = inv.getArgument(0);
-              SendHandler sendHandler = inv.getArgument(1);
+              Callback callback = inv.getArgument(1);
               if (text.contains("\"type\":\"connected\"")) {
                 recorder.connectedFrame = text;
-                sendHandler.onResult(new SendResult());
+                callback.succeed();
                 return null;
               }
               ackEnqueued.countDown();
               ackRelease.await();
               recorder.sent.add(text);
-              recorder.handlers.add(sendHandler);
+              recorder.callbacks.add(callback);
               return null;
             })
-        .when(async)
-        .sendText(any(String.class), any(SendHandler.class));
+        .when(jettySession)
+        .sendText(any(String.class), any(Callback.class));
     handler.afterConnectionEstablished(springSession);
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -719,8 +732,21 @@ class ApplicationEventWebSocketHandlerTest {
 
   private static final class SentRecorder {
     private final List<String> sent = new ArrayList<>();
-    private final List<SendHandler> handlers = new ArrayList<>();
+    private final List<Callback> callbacks = new ArrayList<>();
     private final List<ByteBuffer> pings = new ArrayList<>();
+    private final List<Callback> pingCallbacks = new ArrayList<>();
     private String connectedFrame;
+
+    private void complete(int index) {
+      callbacks.get(index).succeed();
+    }
+
+    private void completeFirst() {
+      callbacks.getFirst().succeed();
+    }
+
+    private void completePing(int index) {
+      pingCallbacks.get(index).succeed();
+    }
   }
 }

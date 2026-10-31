@@ -182,7 +182,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     WebSocket socket = connect(collector);
     assertConnected(collector);
 
-    // Jetty 12 的 AsyncRemote.sendPing 阻塞等到该 ping 帧写完才返回（FutureCallback.block）。
+    // 文本与原生 ping 全部经由 AsyncTextSender 的异步 Callback 串行队列发出。
     // 连续触发文本、ping、文本，由同一物理 writer 串行排队发送，不产生并发写异常或帧损坏。
     for (int i = 1; i <= 16; i++) {
       String unknown = new UUID(0L, i).toString();
