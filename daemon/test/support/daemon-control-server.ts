@@ -67,7 +67,7 @@ export async function createControlServer(): Promise<ControlFixture> {
               case: 'invoke',
               value: create(InvokeSchema, {
                 capabilityId: payload.capabilityId,
-                capabilityVersion: '1',
+                capabilityVersion: '3',
                 argumentsJson: payload.argumentsJson,
                 timeoutMillis: payload.timeoutMillis ?? 0n,
               }),

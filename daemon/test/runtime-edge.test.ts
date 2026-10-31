@@ -218,10 +218,11 @@ describe('runtime lifecycle guards', () => {
 })
 
 describe('runtime inbound protocol branches', () => {
-  it('rejects a second SETTINGS on the same connection and disconnects', async () => {
+  it('rejects a second SETTINGS on the same connection', async () => {
     const { runtime, transport } = await ready()
     transport.receive(makeSettingsEnvelope())
-    await waitFor(() => transport.connectCount >= 2)
+    await tick()
+    expect(sentTypes(transport)).toContain(MessageType.ERROR)
     runtime.close()
   })
 
@@ -244,8 +245,8 @@ describe('runtime inbound protocol branches', () => {
         },
       }),
     )
-    // 触发重连
-    await waitFor(() => transport.connectCount >= 2)
+    await tick()
+    expect(sentTypes(transport)).toContain(MessageType.ERROR)
     transport.receive(makeSettingsEnvelope())
     await waitFor(() => runtime.getState() === 'READY')
     transport.receive(
@@ -261,7 +262,7 @@ describe('runtime inbound protocol branches', () => {
       }),
     )
     // 服务端 ERROR 导致断开并重新连接
-    await waitFor(() => transport.connectCount >= 3)
+    await waitFor(() => transport.connectCount >= 2)
     runtime.close()
   })
 
@@ -465,14 +466,15 @@ describe('runtime managed update branches', () => {
     })
   }
 
-  it('rejects an UPDATE before READY and disconnects', async () => {
+  it('rejects an UPDATE before READY', async () => {
     const transport = new FakeTransport()
     const runtime = new Runtime(baseOptions({ transport, update: { async handleUpdate() { return { phase: 'PREPARED' } } } }))
     runtime.start()
     await waitFor(() => transport.connection !== null)
     await tick()
     transport.receive(makeUpdateEnvelope())
-    await waitFor(() => transport.connectCount >= 2)
+    await tick()
+    expect(sentTypes(transport)).toContain(MessageType.ERROR)
     runtime.close()
   })
 
@@ -547,7 +549,7 @@ describe('runtime managed update branches', () => {
 })
 
 describe('runtime IDE branches', () => {
-  it('rejects an IDE_COMMAND before READY and disconnects', async () => {
+  it('rejects an IDE_COMMAND before READY', async () => {
     const transport = new FakeTransport()
     const runtime = new Runtime(baseOptions({ transport }))
     runtime.start()
@@ -566,7 +568,8 @@ describe('runtime IDE branches', () => {
         },
       }),
     )
-    await waitFor(() => transport.connectCount >= 2)
+    await tick()
+    expect(sentTypes(transport)).toContain(MessageType.ERROR)
     runtime.close()
   })
 

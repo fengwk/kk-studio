@@ -19,6 +19,14 @@ export interface RuntimeStatusUpdate {
   totalBytes: number | null
 }
 
+export interface RuntimeStatus {
+  revision: string
+  status: {
+    daemonVersion: string
+    update: RuntimeStatusUpdate | null
+  }
+}
+
 const LONG_MAX = 9223372036854775807n
 
 /**
@@ -49,6 +57,16 @@ export class RuntimeStatusTracker {
             }),
       }),
     })
+  }
+
+  plainSnapshot(): RuntimeStatus {
+    return {
+      revision: this.revision.toString(),
+      status: {
+        daemonVersion: this.daemonVersion,
+        update: this.update === null ? null : { ...this.update },
+      },
+    }
   }
 
   getUpdate(): RuntimeStatusUpdate | null {

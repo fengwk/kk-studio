@@ -667,7 +667,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'test.echo',
-              capabilityVersion: '1.0.0',
+              capabilityVersion: '3',
               argumentsJson: JSON.stringify({ msg: 'ping' }),
               timeoutMillis: 5000n,
             }),

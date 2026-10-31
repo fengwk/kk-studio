@@ -96,7 +96,6 @@ export class FakeTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closed = true
-    this.connection?.close()
   }
 
   receive(envelope: Envelope): void {

@@ -55,6 +55,7 @@ import {
   type Ready,
   type Recover,
   type ResourceUploadTicket,
+  type RuntimeSnapshot,
   type Settings,
   type Started,
   type TemporaryResourcePolicy,
@@ -69,7 +70,7 @@ import {
   type JournalEntry,
   type TerminalMessage,
 } from './journal.js'
-import { RuntimeStatusTracker, type RuntimeStatusUpdate, type UpdateByteProgress } from './runtime-status.js'
+import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate, type UpdateByteProgress } from './runtime-status.js'
 import { detectEnvironmentInfo } from './runtime-environment.js'
 import {
   admitIdeCommand,
@@ -117,7 +118,7 @@ export type {
   UpdateProgressReporter,
   RuntimeOptions,
 } from './runtime-ports.js'
-export type { UpdateByteProgress } from './runtime-status.js'
+export type { RuntimeStatus, UpdateByteProgress } from './runtime-status.js'
 export { detectArchitecture, detectEnvironmentInfo, defaultNote } from './runtime-environment.js'
 export type { UploadedResource } from './runtime-resources.js'
 
@@ -128,6 +129,7 @@ const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
+const CAPABILITY_CATALOG_VERSION = '3'
 
 const ACTION_MAP: Record<number, IdeCommand['action']> = {
   [ProtoIdeAction.OPEN_VIEW]: 'OPEN_VIEW',
@@ -147,6 +149,7 @@ export class Runtime {
   private readonly config: DaemonConfig
   private readonly transport: ControlTransport
   private readonly capabilities: Record<string, CapabilityExecutor>
+  private readonly capabilityCatalogVersion: string
   private readonly processes: ProcessSupervisor
   private readonly environment: Parameters<typeof detectEnvironmentInfo>[0] extends never ? never : ReturnType<typeof detectEnvironmentInfo>
   private readonly daemonVersion: string
@@ -203,6 +206,7 @@ export class Runtime {
     this.config = options.config
     this.transport = options.transport
     this.capabilities = options.capabilities
+    this.capabilityCatalogVersion = options.capabilityCatalogVersion ?? CAPABILITY_CATALOG_VERSION
     this.processes = options.processes
     this.daemonVersion = options.daemonVersion ?? DAEMON_VERSION
     if (!DAEMON_VERSION_PATTERN.test(this.daemonVersion)) {
@@ -288,8 +292,9 @@ export class Runtime {
   }
 
   /** 当前完整运行状态快照；与 READY/HEARTBEAT/RUNTIME_STATUS 的 wire 结构一致。 */
-  getRuntimeStatus(): ReturnType<RuntimeStatusTracker['snapshot']> {
-    return this.currentRuntimeStatus()
+  getRuntimeStatus(): RuntimeStatus {
+    this.refreshUpdateProgress()
+    return this.runtimeStatus.plainSnapshot()
   }
 
   /** 当前更新字节进度；无更新时 null。供更新器/运维适配器读取同一份事实，不产生历史。 */
@@ -568,7 +573,6 @@ export class Runtime {
           },
         }),
       )
-      this.handleDisconnected(connection.generation)
     }
   }
 
@@ -682,6 +686,11 @@ export class Runtime {
       const executor = this.capabilities[capabilityId]
       if (executor === undefined) {
         throw new Error(`unknown Environment capability: ${capabilityId}`)
+      }
+      if (invoke.capabilityVersion && invoke.capabilityVersion !== this.capabilityCatalogVersion) {
+        throw new Error(
+          `capabilityVersion does not match environment descriptor: ${invoke.capabilityVersion}`,
+        )
       }
       if (this.running.size >= this.maxConcurrentInvocations) {
         throw new Error('too many concurrent capability invocations')
@@ -1134,7 +1143,7 @@ export class Runtime {
     }
   }
 
-  private currentRuntimeStatus(): ReturnType<RuntimeStatusTracker['snapshot']> {
+  private currentRuntimeStatus(): RuntimeSnapshot {
     this.refreshUpdateProgress()
     return this.runtimeStatus.snapshot()
   }
@@ -1226,9 +1235,17 @@ export class Runtime {
     }
     const active = requireFreshIdeLease(this.activeIdeLeaseRound, lease.round ?? 0n, this.monotonicNow())
     active.consumed = true
+    const plainLease = {
+      round: String(lease.round ?? 0n),
+      bindings: (lease.bindings ?? []).map((b) => ({
+        viewId: b.viewId,
+        documentId: b.documentId,
+        bindingEpoch: String(b.bindingEpoch ?? 0n),
+      })),
+    }
     this.runExtensionHandler('IDE_LEASE', () =>
       this.ideLease?.apply(
-        lease,
+        plainLease as any,
         active.sentAt,
       ),
     )
