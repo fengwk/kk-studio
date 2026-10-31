@@ -802,6 +802,72 @@ class ThreadSnapshotTest {
                 false,
                 List.of(),
                 false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                new EntrySlice(null, List.of()),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    Entry otherEntry =
+        userMessageEntry(differentId, baseline.sessionId(), base.thread().headEntryId(), T5);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                new EntrySlice(null, List.of(otherEntry)),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread().advanceHead(differentId, T5),
+                base.entryState(),
+                base.entrySlice(),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                base.entrySlice(),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                -1,
+                false,
+                List.of(),
+                false));
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */
