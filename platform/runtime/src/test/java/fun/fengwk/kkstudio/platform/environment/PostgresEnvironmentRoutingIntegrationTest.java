@@ -70,7 +70,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private static final Duration LEASE_DURATION = Duration.ofSeconds(60);
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,

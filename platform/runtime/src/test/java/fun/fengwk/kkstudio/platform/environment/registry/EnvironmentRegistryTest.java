@@ -44,7 +44,6 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   private static final String PROD_TOKEN = "token-2";
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,

@@ -79,7 +79,7 @@
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.4.2</version>
                 <executions>
-                    <!-- 隧道测试 fake 供 X4 复用；消费者接入前不改 apps/ide POM。 -->
+                    <!-- 把隧道测试替身打包为 test-jar，供 apps/ide 测试复用。 -->
                     <execution>
                         <id>tunnel-test-support</id>
                         <phase>process-test-classes</phase>

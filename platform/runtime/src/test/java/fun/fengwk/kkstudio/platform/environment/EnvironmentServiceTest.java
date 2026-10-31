@@ -206,7 +206,6 @@ class EnvironmentServiceTest {
             UUID.randomUUID(),
             LiveEnvironmentStatus.READY,
             new DaemonCapabilities(
-                DaemonCapabilities.VERSION,
                 "1.0.9",
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX,
@@ -304,7 +303,6 @@ class EnvironmentServiceTest {
             UUID.randomUUID(),
             LiveEnvironmentStatus.CONNECTING,
             new DaemonCapabilities(
-                DaemonCapabilities.VERSION,
                 "1.0.9",
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.WSL,
@@ -1042,7 +1040,6 @@ class EnvironmentServiceTest {
         UUID.randomUUID(),
         LiveEnvironmentStatus.READY,
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
             "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX,
@@ -1066,7 +1063,6 @@ class EnvironmentServiceTest {
         UUID.randomUUID(),
         status,
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
             "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.LINUX,

@@ -91,7 +91,6 @@ class EnvironmentSkillSyncOrchestratorTest {
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,
@@ -297,7 +296,6 @@ class EnvironmentSkillSyncOrchestratorTest {
     rowCapabilities.put(
         ENV,
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
             "1.0.9",
             new DaemonEnvironmentInfo(
                 DaemonOperatingSystem.WINDOWS,

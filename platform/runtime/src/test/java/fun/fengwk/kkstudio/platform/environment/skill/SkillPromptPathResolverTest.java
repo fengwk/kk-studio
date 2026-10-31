@@ -40,7 +40,6 @@ class SkillPromptPathResolverTest {
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,

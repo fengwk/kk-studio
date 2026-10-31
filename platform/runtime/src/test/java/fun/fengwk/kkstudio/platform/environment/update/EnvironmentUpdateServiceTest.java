@@ -312,7 +312,6 @@ class EnvironmentUpdateServiceTest {
         UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
         LiveEnvironmentStatus.READY,
         new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
             daemonVersion,
             new DaemonEnvironmentInfo(
                 operatingSystem,

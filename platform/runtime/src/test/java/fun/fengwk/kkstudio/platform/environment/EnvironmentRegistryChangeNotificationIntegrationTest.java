@@ -54,7 +54,6 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
 
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
-          DaemonCapabilities.VERSION,
           "1.0.9",
           new DaemonEnvironmentInfo(
               DaemonOperatingSystem.LINUX,
