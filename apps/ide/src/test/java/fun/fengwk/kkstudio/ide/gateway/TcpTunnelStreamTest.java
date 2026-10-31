@@ -301,4 +301,23 @@ class TcpTunnelStreamTest {
     CompletableFuture<Void> end6 = stream6.endOutput().toCompletableFuture();
     assertTrue(end6.isCompletedExceptionally());
   }
+
+  @Test
+  void synchronousThrowsAndCloseExceptionHandling() throws Exception {
+    AsynchronousSocketChannel mockChannel = mock(AsynchronousSocketChannel.class);
+    TcpTunnelStream stream = new TcpTunnelStream(mockChannel, null);
+
+    doThrow(new RuntimeException("sync read err")).when(mockChannel).read(any(), any(), any());
+    CompletableFuture<ByteBuffer> r = stream.read().toCompletableFuture();
+    assertTrue(r.isCompletedExceptionally());
+
+    doThrow(new RuntimeException("sync write err"))
+        .when(mockChannel)
+        .write(any(ByteBuffer.class), any(), any());
+    CompletableFuture<Void> w = stream.write(ByteBuffer.wrap(new byte[] {1})).toCompletableFuture();
+    assertTrue(w.isCompletedExceptionally());
+
+    doThrow(new IOException("close err")).when(mockChannel).close();
+    stream.close();
+  }
 }

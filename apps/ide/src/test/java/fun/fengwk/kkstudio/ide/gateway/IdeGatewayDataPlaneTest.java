@@ -696,4 +696,154 @@ class IdeGatewayDataPlaneTest {
     verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
     verify(exchange).close();
   }
+
+  @Test
+  void handleBrowserTrafficRouteEmptyReturns503() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.empty());
+
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getContextPath()).thenReturn("");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+  }
+
+  @Test
+  void localHttpResponseHeadersFailureReturns502() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    FakeEnvironmentTunnel tunnel = tunnels.register(IDENTITY);
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getContextPath()).thenReturn("");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                while (tunnel.exchanges().isEmpty()) {
+                  Thread.sleep(10);
+                }
+                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
+                exchange.failHeaders(new IOException("headers error"));
+              } catch (Exception ignored) {
+              }
+            });
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
+
+  @Test
+  void localHttpResponseStreamTransferFailureReturns502() throws Exception {
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    when(registry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
+
+    FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
+    FakeEnvironmentTunnel tunnel = tunnels.register(IDENTITY);
+
+    IdeDataViewAuthorizer authorizer = mock(IdeDataViewAuthorizer.class);
+    when(authorizer.authorize(eq(ENV), eq(VIEW), any()))
+        .thenReturn(
+            Optional.of(
+                new IdeDataViewAuthorizer.IdeDataViewAccess(
+                    IDENTITY, VIEW, 1L, Set.of("/workspace"))));
+
+    IdeBrowserSessionHandler sessionHandler = mock(IdeBrowserSessionHandler.class);
+    IdeRemoteDataPlaneForwarder forwarder = mock(IdeRemoteDataPlaneForwarder.class);
+
+    IdeGatewayDataPlane dataPlane =
+        new IdeGatewayDataPlane(registry, tunnels, authorizer, sessionHandler, forwarder);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    when(req.getContextPath()).thenReturn("");
+    when(req.getHeader("Sec-Fetch-Site")).thenReturn("same-origin");
+    when(req.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+    HttpServletResponse res = mock(HttpServletResponse.class);
+    when(res.getOutputStream())
+        .thenReturn(
+            new ServletOutputStream() {
+              @Override
+              public boolean isReady() {
+                return true;
+              }
+
+              @Override
+              public void setWriteListener(WriteListener writeListener) {}
+
+              @Override
+              public void write(int b) throws IOException {
+                throw new IOException("simulated write failure");
+              }
+
+              @Override
+              public void write(byte[] b, int off, int len) throws IOException {
+                throw new IOException("simulated write failure");
+              }
+            });
+
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try {
+                while (tunnel.exchanges().isEmpty()) {
+                  Thread.sleep(10);
+                }
+                FakeTunnelExchange exchange = tunnel.exchanges().get(0);
+                exchange.respond(new TunnelExchange.Response(200, Map.of()));
+                exchange
+                    .fakeStream()
+                    .peer()
+                    .write(ByteBuffer.wrap(new byte[] {1, 2, 3}))
+                    .toCompletableFuture()
+                    .join();
+              } catch (Exception ignored) {
+              }
+            });
+
+    dataPlane.handleBrowserTraffic(ENV, VIEW, "/file.txt", req, res);
+
+    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
 }
