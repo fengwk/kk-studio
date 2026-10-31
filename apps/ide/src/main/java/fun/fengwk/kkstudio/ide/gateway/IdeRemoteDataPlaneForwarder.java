@@ -13,11 +13,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,8 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 非 owner 节点的 IDE 数据面转发服务：单跳转发到目标 owner 内部端口。
@@ -39,17 +39,10 @@ public class IdeRemoteDataPlaneForwarder {
 
   private final HttpClient httpClient;
   private final IdeClusterClient clusterClient;
-  private final Executor executor;
 
   public IdeRemoteDataPlaneForwarder(HttpClient httpClient, IdeClusterClient clusterClient) {
-    this(httpClient, clusterClient, ForkJoinPool.commonPool());
-  }
-
-  public IdeRemoteDataPlaneForwarder(
-      HttpClient httpClient, IdeClusterClient clusterClient, Executor executor) {
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
     this.clusterClient = Objects.requireNonNull(clusterClient, "clusterClient");
-    this.executor = Objects.requireNonNull(executor, "executor");
   }
 
   public void forwardHttp(
@@ -68,10 +61,13 @@ public class IdeRemoteDataPlaneForwarder {
 
     boolean hasBody =
         request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null;
-    HttpRequest.BodyPublisher bodyPublisher =
-        hasBody
-            ? HttpRequest.BodyPublishers.ofInputStream(() -> streamOrEmpty(request))
-            : HttpRequest.BodyPublishers.noBody();
+    HttpRequest.BodyPublisher bodyPublisher;
+    if (hasBody) {
+      InputStream bodyStream = request.getInputStream();
+      bodyPublisher = HttpRequest.BodyPublishers.ofInputStream(() -> bodyStream);
+    } else {
+      bodyPublisher = HttpRequest.BodyPublishers.noBody();
+    }
 
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(targetUri)
@@ -112,9 +108,13 @@ public class IdeRemoteDataPlaneForwarder {
       }
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      }
     } catch (Exception error) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      }
     }
   }
 
@@ -131,11 +131,13 @@ public class IdeRemoteDataPlaneForwarder {
     URI uri = owner.internalUrl();
     int port =
         uri.getPort() > 0 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
-    Socket socket = new Socket();
+
+    AsynchronousSocketChannel channel = AsynchronousSocketChannel.open();
     try {
-      socket.connect(
-          new InetSocketAddress(uri.getHost(), port),
-          (int) IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis());
+      channel
+          .connect(new InetSocketAddress(uri.getHost(), port))
+          .get(IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
       Map<String, String> authHeaders = clusterClient.signHeaders("GET", targetPath, owner);
 
       StringBuilder req = new StringBuilder();
@@ -157,41 +159,38 @@ public class IdeRemoteDataPlaneForwarder {
       }
       req.append("\r\n");
 
-      socket.getOutputStream().write(req.toString().getBytes(StandardCharsets.ISO_8859_1));
-      socket.getOutputStream().flush();
+      ByteBuffer requestBuffer =
+          ByteBuffer.wrap(req.toString().getBytes(StandardCharsets.ISO_8859_1));
+      while (requestBuffer.hasRemaining()) {
+        channel
+            .write(requestBuffer)
+            .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      }
 
       HttpResponseHeader head =
-          readHeaderBlock(socket.getInputStream(), IdeGatewayConstants.MAX_HEADER_BYTES);
+          readHeaderBlock(
+              channel,
+              IdeGatewayConstants.MAX_HEADER_BYTES,
+              IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toMillis());
+
       if (head.status == 101) {
-        TcpTunnelStream tunnelStream = new TcpTunnelStream(socket, executor, head.remainingBytes);
+        TcpTunnelStream tunnelStream = new TcpTunnelStream(channel, head.remainingBytes);
         JettyConnectionHandover.handover(request, 101, head.headers, tunnelStream);
       } else {
-        IdeDataHeaderPolicy.applyResponseHeaders(
-            head.status, head.headers, request, response, environmentId, viewId, false);
-        try (OutputStream out = response.getOutputStream()) {
-          if (head.remainingBytes != null && head.remainingBytes.length > 0) {
-            out.write(head.remainingBytes);
-          }
-          socket.getInputStream().transferTo(out);
-          out.flush();
-        } finally {
-          socket.close();
+        try {
+          channel.close();
+        } catch (IOException ignored) {
         }
+        IdeDataHeaderPolicy.sendError(response, head.status);
       }
     } catch (Exception error) {
       try {
-        socket.close();
+        channel.close();
       } catch (IOException ignored) {
       }
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
-    }
-  }
-
-  private static InputStream streamOrEmpty(HttpServletRequest request) {
-    try {
-      return request.getInputStream();
-    } catch (IOException error) {
-      return InputStream.nullInputStream();
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      }
     }
   }
 
@@ -206,19 +205,24 @@ public class IdeRemoteDataPlaneForwarder {
   public record HttpResponseHeader(
       int status, Map<String, List<String>> headers, byte[] remainingBytes) {}
 
-  public static HttpResponseHeader readHeaderBlock(InputStream input, int maxBytes)
-      throws IOException {
-    byte[] buffer = new byte[Math.min(maxBytes, 8192)];
+  public static HttpResponseHeader readHeaderBlock(
+      AsynchronousSocketChannel channel, int maxBytes, long timeoutMillis) throws Exception {
+    ByteBuffer buffer = ByteBuffer.allocate(Math.min(maxBytes, 8192));
     ByteArrayOutputStream headerBytes = new ByteArrayOutputStream();
     int totalRead = 0;
 
     while (totalRead < maxBytes) {
-      int read = input.read(buffer);
+      buffer.clear();
+      int read = channel.read(buffer).get(timeoutMillis, TimeUnit.MILLISECONDS);
       if (read < 0) {
         break;
       }
-      headerBytes.write(buffer, 0, read);
+      buffer.flip();
+      byte[] chunk = new byte[read];
+      buffer.get(chunk);
+      headerBytes.write(chunk);
       totalRead += read;
+
       byte[] current = headerBytes.toByteArray();
       int headerEndIndex = findHeaderEnd(current);
       if (headerEndIndex >= 0) {

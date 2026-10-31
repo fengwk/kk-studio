@@ -35,7 +35,7 @@ public final class IdeDataHeaderPolicy {
           "upgrade");
 
   private static final Set<String> DROPPED_REQUEST_HEADERS =
-      Set.of("host", "content-length", "connection", "upgrade", "transfer-encoding");
+      Set.of("host", "content-length", "connection", "upgrade", "transfer-encoding", "expect");
 
   private static final Set<String> NEVER_FORWARDED_REQUEST_HEADERS =
       Set.of(

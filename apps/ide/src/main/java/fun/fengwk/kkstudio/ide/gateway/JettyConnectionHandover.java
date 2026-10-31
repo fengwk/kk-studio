@@ -55,6 +55,6 @@ public final class JettyConnectionHandover {
     }
     coreResponse.getHeaders().put("Connection", "Upgrade");
     coreResponse.getHeaders().put("Upgrade", "websocket");
-    coreResponse.write(true, null, Callback.NOOP);
+    coreResponse.write(true, null, Callback.from(() -> {}, err -> tunnel.close()));
   }
 }

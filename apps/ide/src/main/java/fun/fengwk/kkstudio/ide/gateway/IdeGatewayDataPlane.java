@@ -21,9 +21,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -39,7 +36,6 @@ public class IdeGatewayDataPlane {
   private final IdeDataViewAuthorizer viewAuthorizer;
   private final IdeBrowserSessionHandler browserSessionHandler;
   private final IdeRemoteDataPlaneForwarder remoteForwarder;
-  private final Executor executor;
 
   public IdeGatewayDataPlane(
       ClusterNodeRegistry clusterNodeRegistry,
@@ -47,29 +43,12 @@ public class IdeGatewayDataPlane {
       IdeDataViewAuthorizer viewAuthorizer,
       IdeBrowserSessionHandler browserSessionHandler,
       IdeRemoteDataPlaneForwarder remoteForwarder) {
-    this(
-        clusterNodeRegistry,
-        environmentTunnels,
-        viewAuthorizer,
-        browserSessionHandler,
-        remoteForwarder,
-        ForkJoinPool.commonPool());
-  }
-
-  public IdeGatewayDataPlane(
-      ClusterNodeRegistry clusterNodeRegistry,
-      EnvironmentTunnels environmentTunnels,
-      IdeDataViewAuthorizer viewAuthorizer,
-      IdeBrowserSessionHandler browserSessionHandler,
-      IdeRemoteDataPlaneForwarder remoteForwarder,
-      Executor executor) {
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.environmentTunnels = Objects.requireNonNull(environmentTunnels, "environmentTunnels");
     this.viewAuthorizer = Objects.requireNonNull(viewAuthorizer, "viewAuthorizer");
     this.browserSessionHandler =
         Objects.requireNonNull(browserSessionHandler, "browserSessionHandler");
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
-    this.executor = Objects.requireNonNull(executor, "executor");
   }
 
   /**
@@ -212,27 +191,28 @@ public class IdeGatewayDataPlane {
     try {
       boolean hasBody =
           request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null;
-      CompletableFuture.runAsync(
-          () -> {
-            try {
-              if (hasBody) {
-                try (InputStream in = request.getInputStream()) {
-                  byte[] buffer = new byte[16 * 1024];
-                  int read;
-                  while ((read = in.read(buffer)) >= 0) {
-                    if (read > 0) {
-                      ByteBuffer bb = ByteBuffer.wrap(buffer, 0, read);
-                      exchange.stream().write(bb).toCompletableFuture().join();
+      Thread.ofVirtual()
+          .name("ide-local-http-pump")
+          .start(
+              () -> {
+                try {
+                  if (hasBody) {
+                    try (InputStream in = request.getInputStream()) {
+                      byte[] buffer = new byte[16 * 1024];
+                      int read;
+                      while ((read = in.read(buffer)) >= 0) {
+                        if (read > 0) {
+                          ByteBuffer bb = ByteBuffer.wrap(buffer, 0, read);
+                          exchange.stream().write(bb).toCompletableFuture().join();
+                        }
+                      }
                     }
                   }
+                  exchange.stream().endOutput().toCompletableFuture().join();
+                } catch (Exception error) {
+                  exchange.close();
                 }
-              }
-              exchange.stream().endOutput().toCompletableFuture().join();
-            } catch (Exception error) {
-              exchange.close();
-            }
-          },
-          executor);
+              });
 
       TunnelExchange.Response tunnelResponse;
       try {
@@ -242,7 +222,9 @@ public class IdeGatewayDataPlane {
                 .toCompletableFuture()
                 .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
       } catch (Exception error) {
-        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+        if (!response.isCommitted()) {
+          IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+        }
         return;
       }
 
@@ -275,6 +257,7 @@ public class IdeGatewayDataPlane {
             byte[] bytes = new byte[chunk.remaining()];
             chunk.get(bytes);
             out.write(bytes);
+            out.flush();
           }
         }
         out.flush();
@@ -308,47 +291,17 @@ public class IdeGatewayDataPlane {
               .get(IdeGatewayConstants.DEFAULT_CONNECT_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
     } catch (Exception error) {
       exchange.close();
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      }
       return;
     }
 
     if (tunnelResponse.status() == 200) {
       JettyConnectionHandover.handover(request, 101, tunnelResponse.headers(), exchange.stream());
     } else {
-      try {
-        IdeDataHeaderPolicy.applyResponseHeaders(
-            tunnelResponse.status(),
-            tunnelResponse.headers(),
-            request,
-            response,
-            environmentId,
-            viewId,
-            false);
-        try (OutputStream out = response.getOutputStream()) {
-          while (true) {
-            ByteBuffer chunk =
-                exchange.stream()
-                    .read()
-                    .toCompletableFuture()
-                    .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-            if (chunk == null) {
-              break;
-            }
-            if (chunk.hasRemaining()) {
-              byte[] bytes = new byte[chunk.remaining()];
-              chunk.get(bytes);
-              out.write(bytes);
-            }
-          }
-          out.flush();
-        }
-      } catch (Exception error) {
-        if (!response.isCommitted()) {
-          IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
-        }
-      } finally {
-        exchange.close();
-      }
+      exchange.close();
+      IdeDataHeaderPolicy.sendError(response, tunnelResponse.status());
     }
   }
 

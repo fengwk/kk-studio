@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,7 +30,7 @@ public final class JettyUpgradeConnection extends AbstractConnection
 
   public JettyUpgradeConnection(EndPoint endPoint, Executor executor, TunnelStream tunnel) {
     super(endPoint, executor);
-    this.tunnel = tunnel;
+    this.tunnel = Objects.requireNonNull(tunnel, "tunnel");
   }
 
   @Override
@@ -45,10 +46,6 @@ public final class JettyUpgradeConnection extends AbstractConnection
   @Override
   public void onOpen() {
     super.onOpen();
-    if (tunnel == null) {
-      abort();
-      return;
-    }
     ByteBuffer pre = prefetched.getAndSet(null);
     if (pre != null && pre.hasRemaining()) {
       tunnel
@@ -110,23 +107,20 @@ public final class JettyUpgradeConnection extends AbstractConnection
 
   private void upstreamFinished(boolean graceful) {
     if (upstreamDone.compareAndSet(false, true)) {
-      if (tunnel != null) {
-        if (graceful) {
-          tunnel
-              .endOutput()
-              .whenComplete(
-                  (v, error) -> {
-                    if (error != null) {
-                      abort();
-                    } else {
-                      closeWhenBothDone();
-                    }
-                  });
-          return;
-        } else {
-          tunnel.close();
-        }
+      if (graceful) {
+        tunnel
+            .endOutput()
+            .whenComplete(
+                (v, error) -> {
+                  if (error != null) {
+                    abort();
+                  } else {
+                    closeWhenBothDone();
+                  }
+                });
+        return;
       }
+      tunnel.close();
       closeWhenBothDone();
     }
   }
@@ -156,10 +150,7 @@ public final class JettyUpgradeConnection extends AbstractConnection
   private void downstreamFinished(boolean graceful) {
     if (downstreamDone.compareAndSet(false, true)) {
       if (graceful) {
-        try {
-          getEndPoint().shutdownOutput();
-        } catch (Exception ignored) {
-        }
+        getEndPoint().shutdownOutput();
       } else {
         abort();
         return;
@@ -170,31 +161,14 @@ public final class JettyUpgradeConnection extends AbstractConnection
 
   private void closeWhenBothDone() {
     if (upstreamDone.get() && downstreamDone.get()) {
-      closeSocket();
-    }
-  }
-
-  private void closeSocket() {
-    if (closed.compareAndSet(false, true)) {
-      if (tunnel != null) {
-        tunnel.close();
-      }
-      try {
-        getEndPoint().close();
-      } catch (Exception ignored) {
-      }
+      abort();
     }
   }
 
   private void abort() {
     if (closed.compareAndSet(false, true)) {
-      if (tunnel != null) {
-        tunnel.close();
-      }
-      try {
-        getEndPoint().close();
-      } catch (Exception ignored) {
-      }
+      tunnel.close();
+      getEndPoint().close();
     }
   }
 

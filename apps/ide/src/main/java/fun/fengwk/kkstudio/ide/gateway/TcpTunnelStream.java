@@ -3,80 +3,91 @@ package fun.fengwk.kkstudio.ide.gateway;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousSocketChannel;
+import java.nio.channels.CompletionHandler;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 将 TCP Socket 适配为双向异步 {@link TunnelStream}，供集群节点间透传 WebSocket 连接。
+ * 将 {@link AsynchronousSocketChannel} 适配为双向异步 {@link TunnelStream}，供集群节点间透传 WebSocket 连接。
  *
- * <p>读取初始响应头时溢出的预读字节优先消费；每个方向至多一个 pending 操作；写方向支持正常半关闭。
+ * <p>读取初始响应头时溢出的预读字节优先消费；每个方向至多一个 pending 操作；写方向支持正常半关闭；使用 NIO CompletionHandler，不占用阻塞工作线程。
  */
 public final class TcpTunnelStream implements TunnelStream {
 
   private static final int BUFFER_SIZE = 16 * 1024;
 
-  private final Socket socket;
-  private final InputStream input;
-  private final OutputStream output;
-  private final Executor executor;
-
+  private final AsynchronousSocketChannel channel;
   private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicBoolean outputEnded = new AtomicBoolean();
-  private final AtomicBoolean readPending = new AtomicBoolean();
-  private final AtomicBoolean writePending = new AtomicBoolean();
 
+  private final Object lock = new Object();
+  private CompletableFuture<ByteBuffer> pendingRead;
+  private CompletableFuture<Void> pendingWrite;
+  private CompletableFuture<Void> pendingEndOutput;
   private byte[] initialBytes;
-  private CompletableFuture<Void> endOutputFuture;
 
-  public TcpTunnelStream(Socket socket, Executor executor, byte[] initialBytes) throws IOException {
-    this.socket = Objects.requireNonNull(socket, "socket");
-    this.executor = Objects.requireNonNull(executor, "executor");
-    this.input = socket.getInputStream();
-    this.output = socket.getOutputStream();
+  public TcpTunnelStream(AsynchronousSocketChannel channel, byte[] initialBytes) {
+    this.channel = Objects.requireNonNull(channel, "channel");
     this.initialBytes =
         initialBytes != null && initialBytes.length > 0 ? initialBytes.clone() : null;
   }
 
   @Override
   public CompletionStage<ByteBuffer> read() {
-    if (closed.get()) {
-      return CompletableFuture.failedFuture(new CancellationException("stream closed"));
-    }
-    if (!readPending.compareAndSet(false, true)) {
-      throw new IllegalStateException("concurrent read not permitted");
-    }
-    if (initialBytes != null) {
-      byte[] bytes = initialBytes;
-      initialBytes = null;
-      readPending.set(false);
-      return CompletableFuture.completedFuture(ByteBuffer.wrap(bytes));
-    }
-    return CompletableFuture.supplyAsync(
-            () -> {
-              try {
-                byte[] buffer = new byte[BUFFER_SIZE];
-                int n = input.read(buffer);
-                if (n < 0) {
-                  return null;
+    synchronized (lock) {
+      if (closed.get()) {
+        return CompletableFuture.failedFuture(new CancellationException("tunnel stream closed"));
+      }
+      if (pendingRead != null) {
+        throw new IllegalStateException("concurrent read not permitted");
+      }
+      if (initialBytes != null) {
+        byte[] bytes = initialBytes;
+        initialBytes = null;
+        return CompletableFuture.completedFuture(ByteBuffer.wrap(bytes));
+      }
+
+      ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+      CompletableFuture<ByteBuffer> future = new CompletableFuture<>();
+      pendingRead = future;
+
+      try {
+        channel.read(
+            buffer,
+            null,
+            new CompletionHandler<Integer, Void>() {
+              @Override
+              public void completed(Integer result, Void attachment) {
+                synchronized (lock) {
+                  pendingRead = null;
                 }
-                return ByteBuffer.wrap(buffer, 0, n);
-              } catch (IOException error) {
-                if (closed.get()) {
-                  return null;
+                if (result == null || result < 0) {
+                  future.complete(null);
+                } else {
+                  buffer.flip();
+                  future.complete(buffer);
                 }
-                throw new IllegalStateException("socket read failed", error);
               }
-            },
-            executor)
-        .whenComplete((res, err) -> readPending.set(false));
+
+              @Override
+              public void failed(Throwable exc, Void attachment) {
+                synchronized (lock) {
+                  pendingRead = null;
+                }
+                future.completeExceptionally(exc);
+              }
+            });
+      } catch (Throwable t) {
+        pendingRead = null;
+        future.completeExceptionally(t);
+      }
+      return future;
+    }
   }
 
   @Override
@@ -85,62 +96,123 @@ public final class TcpTunnelStream implements TunnelStream {
     if (!source.hasRemaining()) {
       throw new IllegalArgumentException("source must have remaining bytes");
     }
-    if (closed.get()) {
-      return CompletableFuture.failedFuture(new CancellationException("stream closed"));
+    synchronized (lock) {
+      if (closed.get()) {
+        return CompletableFuture.failedFuture(new CancellationException("tunnel stream closed"));
+      }
+      if (outputEnded.get()) {
+        throw new IllegalStateException("output has already ended");
+      }
+      if (pendingWrite != null) {
+        throw new IllegalStateException("concurrent write not permitted");
+      }
+
+      CompletableFuture<Void> future = new CompletableFuture<>();
+      pendingWrite = future;
+      writeFully(source, future);
+      return future;
     }
-    if (outputEnded.get()) {
-      throw new IllegalStateException("output has already ended");
-    }
-    if (!writePending.compareAndSet(false, true)) {
-      throw new IllegalStateException("concurrent write not permitted");
-    }
-    byte[] bytes = new byte[source.remaining()];
-    source.get(bytes);
-    return CompletableFuture.runAsync(
-            () -> {
-              try {
-                output.write(bytes);
-                output.flush();
-              } catch (IOException error) {
-                if (!closed.get()) {
-                  throw new IllegalStateException("socket write failed", error);
+  }
+
+  private void writeFully(ByteBuffer source, CompletableFuture<Void> future) {
+    try {
+      channel.write(
+          source,
+          null,
+          new CompletionHandler<Integer, Void>() {
+            @Override
+            public void completed(Integer result, Void attachment) {
+              if (source.hasRemaining()) {
+                writeFully(source, future);
+              } else {
+                synchronized (lock) {
+                  pendingWrite = null;
                 }
+                future.complete(null);
               }
-            },
-            executor)
-        .whenComplete((res, err) -> writePending.set(false));
+            }
+
+            @Override
+            public void failed(Throwable exc, Void attachment) {
+              synchronized (lock) {
+                pendingWrite = null;
+              }
+              future.completeExceptionally(exc);
+            }
+          });
+    } catch (Throwable t) {
+      synchronized (lock) {
+        pendingWrite = null;
+      }
+      future.completeExceptionally(t);
+    }
   }
 
   @Override
   public CompletionStage<Void> endOutput() {
-    if (closed.get()) {
-      return CompletableFuture.completedFuture(null);
-    }
-    synchronized (this) {
-      if (endOutputFuture != null) {
-        return endOutputFuture;
+    synchronized (lock) {
+      if (closed.get()) {
+        return CompletableFuture.completedFuture(null);
       }
-      outputEnded.set(true);
-      endOutputFuture =
-          CompletableFuture.runAsync(
-              () -> {
-                try {
-                  if (!socket.isOutputShutdown() && !socket.isClosed()) {
-                    socket.shutdownOutput();
-                  }
-                } catch (IOException ignored) {
+      if (outputEnded.compareAndSet(false, true)) {
+        CompletableFuture<Void> endFuture = new CompletableFuture<>();
+        pendingEndOutput = endFuture;
+        CompletableFuture<Void> currentWrite = pendingWrite;
+        if (currentWrite != null && !currentWrite.isDone()) {
+          currentWrite.whenComplete(
+              (v, err) -> {
+                if (err != null) {
+                  endFuture.completeExceptionally(err);
+                } else {
+                  performShutdownOutput(endFuture);
                 }
-              },
-              executor);
-      return endOutputFuture;
+              });
+        } else {
+          performShutdownOutput(endFuture);
+        }
+        return endFuture;
+      }
+      return pendingEndOutput != null ? pendingEndOutput : CompletableFuture.completedFuture(null);
+    }
+  }
+
+  private void performShutdownOutput(CompletableFuture<Void> endFuture) {
+    try {
+      channel.shutdownOutput();
+      endFuture.complete(null);
+    } catch (IOException e) {
+      endFuture.completeExceptionally(e);
+    } catch (Throwable t) {
+      endFuture.completeExceptionally(t);
     }
   }
 
   @Override
   public void close() {
     if (closed.compareAndSet(false, true)) {
+      CompletableFuture<ByteBuffer> r;
+      CompletableFuture<Void> w;
+      CompletableFuture<Void> e;
+      synchronized (lock) {
+        r = pendingRead;
+        pendingRead = null;
+        w = pendingWrite;
+        pendingWrite = null;
+        e = pendingEndOutput;
+        pendingEndOutput = null;
+      }
+      CancellationException cancel = new CancellationException("tunnel stream closed");
+      if (r != null) {
+        r.completeExceptionally(cancel);
+      }
+      if (w != null) {
+        w.completeExceptionally(cancel);
+      }
+      if (e != null) {
+        e.completeExceptionally(cancel);
+      }
       try {
-        socket.close();
+        channel.close();
       } catch (IOException ignored) {
       }
     }

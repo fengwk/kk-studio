@@ -29,27 +29,28 @@ class IdeDataHeaderPolicyTest {
   void forwardRequestHeadersFiltersCredentialsAndHopByHop() {
     HttpServletRequest req = mock(HttpServletRequest.class);
     when(req.getHeaderNames())
-        .thenReturn(
-            Collections.enumeration(
-                List.of(
-                    "Cookie",
-                    "Authorization",
-                    "Host",
-                    "Content-Length",
-                    "Connection",
-                    "Upgrade",
-                    "X-Forwarded-For",
-                    "X-KK-Cluster-Signature",
-                    "X-Custom-Safe",
-                    "Sec-WebSocket-Key")));
-    when(req.getHeaders("Cookie")).thenReturn(Collections.enumeration(List.of("session=1")));
+        .thenAnswer(
+            inv ->
+                Collections.enumeration(
+                    List.of(
+                        "Cookie",
+                        "Authorization",
+                        "Host",
+                        "Content-Length",
+                        "Connection",
+                        "Upgrade",
+                        "X-Forwarded-For",
+                        "X-KK-Cluster-Signature",
+                        "X-Custom-Safe",
+                        "Sec-WebSocket-Key")));
+    when(req.getHeaders("Cookie")).thenAnswer(inv -> Collections.enumeration(List.of("session=1")));
     when(req.getHeaders("Authorization"))
-        .thenReturn(Collections.enumeration(List.of("Bearer abc")));
+        .thenAnswer(inv -> Collections.enumeration(List.of("Bearer abc")));
     when(req.getHeaders("X-Custom-Safe"))
-        .thenReturn(Collections.enumeration(List.of("safe-value")));
+        .thenAnswer(inv -> Collections.enumeration(List.of("safe-value")));
     when(req.getHeaders("Sec-WebSocket-Key"))
-        .thenReturn(Collections.enumeration(List.of("key123")));
-    when(req.getHeaders("Connection")).thenReturn(Collections.enumeration(List.of("Close")));
+        .thenAnswer(inv -> Collections.enumeration(List.of("key123")));
+    when(req.getHeaders("Connection")).thenAnswer(inv -> Collections.enumeration(List.of("Close")));
 
     Map<String, List<String>> httpHeaders = IdeDataHeaderPolicy.forwardRequestHeaders(req, false);
     assertFalse(httpHeaders.containsKey("Cookie"));
