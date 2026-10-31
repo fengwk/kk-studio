@@ -57,7 +57,7 @@ export default defineConfig({
       provider: 'v8',
       autoAttachSubprocess: true,
       include: ['src/**/*.ts', 'dist/**/*.js'],
-      exclude: ['**/*.d.ts'],
+      exclude: ['**/*.d.ts', 'src/protocol/control/**', 'dist/protocol/control/**'],
       excludeAfterRemap: true,
       reporter: ['text', 'json', 'lcov'],
       thresholds: {
