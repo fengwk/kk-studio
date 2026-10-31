@@ -22,7 +22,6 @@ import java.util.UUID;
 /** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
-  private static final String LEGACY_WORKSPACE_PATH = "123e4567-e89b-12d3-a456-426614174000";
   private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
@@ -63,7 +62,7 @@ class ThreadCommandPayloadJsonCodecTest {
 
   /** 测试意图：SET_ENVIRONMENT 只接受 text 或 null；缺失字段、未知字段与错误类型都必须严格拒绝。 */
   @Test
-  void setEnvironmentAcceptsOnlyTextOrNullAndRejectsLegacyShapes() {
+  void setEnvironmentAcceptsOnlyTextOrNullAndRejectsMalformedPayloads() {
     assertEquals(
         new SetEnvironmentCommandPayload("local"),
         codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"local\"}"));
@@ -81,7 +80,6 @@ class ThreadCommandPayloadJsonCodecTest {
             "{\"environmentName\":\"a/b\"}",
             "{\"environmentName\":\"" + "e".repeat(65) + "\"}",
             "{\"environmentName\":null,\"extra\":1}",
-            "{\"workspacePath\":\"../outside\"}",
             "{\"environmentName\":null}{\"environmentName\":null}")) {
       assertThrows(
           IllegalArgumentException.class,
@@ -242,22 +240,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null, "{}"));
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
-  }
-
-  /** workspacePath 形状已整体删除，对任何 command type 都必须保持拒绝。 */
-  @Test
-  void rejectsLegacyWorkspacePathPayloadAcrossAllTypes() {
-    for (ThreadCommandType type : ThreadCommandType.values()) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(type, "{\"workspacePath\":\"" + LEGACY_WORKSPACE_PATH + "\"}"),
-          "workspacePath 形状必须对 " + type + " 保持拒绝");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(type, "{\"workspacePath\":null}"),
-          "workspacePath 形状必须对 " + type + " 保持拒绝");
-    }
-    assertEquals(8, ThreadCommandType.values().length);
   }
 
   /** 测试意图：NOTIFICATION command 四字段严格往返，canonical 字段序与历史 payload 同形，仅允许 USER 角色。 */

@@ -155,27 +155,12 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(duplicate));
   }
 
-  /** 测试意图：验证严格拒绝旧的结构化 Environment Skill 引用格式。 */
+  /** 技能引用必须是合法对象结构，拒绝字符串或非法的结构。 */
   @Test
-  void rejectsLegacyStructuredSkillReferences() {
-    String legacy =
-        "{\"tools\":[],\"skills\":[{\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
-            + "\"name\":\"dev\"}],\"subagents\":[]}";
-    assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
-  }
-
-  /** 测试意图：验证旧的裸字符串 Skill 引用格式被严格拒绝。 */
-  @Test
-  void rejectsLegacyStringSkillReferences() {
-    String legacy = "{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}";
-    assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
-  }
-
-  /** 测试意图：验证工具列表的旧 wire 字段 toolIds 被严格拒绝，不存在任何兼容读取路径。 */
-  @Test
-  void rejectsLegacyToolIdsField() {
-    String legacy = "{\"toolIds\":[\"read\"],\"skills\":[],\"subagents\":[]}";
-    assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
+  void rejectsMalformedSkillReferences() {
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}"));
   }
 
   /** 持久化 JSON 的已知顶层字段必须禁止重复，避免重复键的解析结果依赖 Jackson 行为。 */

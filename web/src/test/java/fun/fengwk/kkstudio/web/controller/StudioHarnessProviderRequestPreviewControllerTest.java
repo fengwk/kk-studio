@@ -270,30 +270,24 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                             .formatted(USER_MESSAGE_KEY))))
         .andExpect(status().isBadRequest());
 
-    // owner / target 已不在请求体中：多携带即未知字段，入口拒绝而不是静默忽略。
-    String legacyOwnerAndTargetShape =
+    // 请求体严格拒绝未知字段。
+    String unknownFieldShape =
         """
         {
-          "owner":{"type":"CHAT","chatId":"%s"},
-          "target":{
-            "type":"THREAD",
-            "threadId":"%s",
-            "expectedHeadEntryId":"%s",
-            "expectedNextCommandSequence":"7"
-          },
+          "extra":true,
           "expectedHeadEntryId":"%s",
           "expectedNextCommandSequence":"7",
           "commands":%s
         }
         """
-            .formatted(OWNER_ID, THREAD_ID, HEAD_ENTRY_ID, HEAD_ENTRY_ID, draftCommands());
+            .formatted(HEAD_ENTRY_ID, draftCommands());
     mockMvc
         .perform(
             post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(legacyOwnerAndTargetShape))
+                .content(unknownFieldShape))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown thread command batch field: owner"));
+        .andExpect(jsonPath("$.errors.detail").value("unknown thread command batch field: extra"));
 
     verify(previewService, never()).preview(any(UUID.class), any());
   }

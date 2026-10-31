@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test;
  */
 class ToolCallMessageContentTest {
 
-  /** 旧槽位与 normalization 路径使用 4 参构造，冻结事实为空。 */
+  /** 省略可选字段时，冻结事实为空。 */
   @Test
-  void legacyShapeCarriesNoFrozenFacts() {
+  void carriesNoFrozenFactsWhenOmitted() {
     ToolCallMessageContent content =
         new ToolCallMessageContent("call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}");
 

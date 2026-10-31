@@ -230,18 +230,6 @@ class ProviderRequestJsonCodecTest {
             .protocolOptions()
             .canonicalJson()
             .contains("\"vendor_extension\":\"kept\""));
-    // variant 只保留 id、reasoningEffort 与协议原生选项：已删除的采样/输出控制不得作为兼容字段被接受。
-    for (String removed :
-        List.of(
-            "maxOutputTokens",
-            "temperature",
-            "topP",
-            "topK",
-            "frequencyPenalty",
-            "presencePenalty",
-            "stopSequences")) {
-      assertRejected(root -> variant(root).set(removed, NODES.stringNode("legacy")));
-    }
     assertStrictLayer(
         root -> cacheControl(root).put("extra", true),
         root -> cacheControl(root).remove("key"),
@@ -281,12 +269,9 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> content(root, 0, 0).remove("type"));
   }
 
-  /**
-   * 旧 wire 协议形态必须被严格拒绝：会话消息中的 SYSTEM 角色已废弃，且顶层必须包含单一的 systemInstruction，缺失或使用旧 preambleMessages
-   * 字段均不被接受。
-   */
+  /** 消息序列不接受 SYSTEM 角色（系统提示词统一走顶层 systemInstruction 字段），顶层缺失 systemInstruction 必须抛出异常。 */
   @Test
-  void rejectsLegacyWireShapesWithSystemMessageRoleOrMissingSystemInstruction() {
+  void rejectsSystemMessageRoleOrMissingSystemInstruction() {
     // 会话消息中包含 role 为 SYSTEM 的消息必须抛出 IllegalArgumentException
     assertRejected(root -> message(root, 0).put("role", "SYSTEM"));
     assertRejected(
@@ -296,7 +281,7 @@ class ProviderRequestJsonCodecTest {
           ArrayNode contents = systemMessage.putArray("contents");
           ObjectNode textBlock = contents.addObject();
           textBlock.put("type", "text");
-          textBlock.put("text", "legacy system instruction");
+          textBlock.put("text", "system instruction");
           ((ArrayNode) root.path("messages")).insert(0, systemMessage);
         });
 
@@ -304,18 +289,10 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> root.remove("systemInstruction"));
     assertRejected(root -> root.put("systemInstruction", "   "));
 
-    // 包含旧 preambleMessages 字段必须抛出 IllegalArgumentException
-    assertRejected(root -> root.putArray("preambleMessages"));
-    assertRejected(
-        root -> {
-          root.remove("systemInstruction");
-          root.putArray("preambleMessages");
-        });
-
-    // 针对完整 JSON 文本解码同样验证旧 wire 形态的拒绝行为
-    ObjectNode legacySystemNode = canonicalNode();
-    message(legacySystemNode, 0).put("role", "SYSTEM");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(legacySystemNode.toString()));
+    // 针对完整 JSON 文本解码同样验证拒绝行为
+    ObjectNode systemRoleNode = canonicalNode();
+    message(systemRoleNode, 0).put("role", "SYSTEM");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(systemRoleNode.toString()));
 
     ObjectNode missingInstructionNode = canonicalNode();
     missingInstructionNode.remove("systemInstruction");

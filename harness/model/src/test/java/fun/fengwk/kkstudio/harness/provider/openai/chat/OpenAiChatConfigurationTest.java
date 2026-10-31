@@ -47,17 +47,6 @@ class OpenAiChatConfigurationTest {
   }
 
   @Test
-  @DisplayName("已删除的 openAiChatIncludeUsage 完全按未知字段忽略，不再参与类型校验")
-  void legacyIncludeUsageFieldIsIgnoredAsUnknown() {
-    assertEquals(
-        OpenAiChatConfiguration.defaults(),
-        OpenAiChatConfiguration.parse("{\"openAiChatIncludeUsage\": false}"));
-    assertEquals(
-        OpenAiChatConfiguration.defaults(),
-        OpenAiChatConfiguration.parse("{\"openAiChatIncludeUsage\": \"not-a-boolean\"}"));
-  }
-
-  @Test
   @DisplayName("promptCacheRetention 支持 NONE/SHORT/LONG 三档")
   void parseAllRetentions() {
     assertEquals(

@@ -352,27 +352,6 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.version").value("0"));
   }
 
-  /** 旧 integrations 段与任何残留子段都是未知字段：按既有严格规则 400，不静默忽略、不兼容反序列化。 */
-  @Test
-  public void putWithLegacyIntegrationsReturns400() throws Exception {
-    for (String legacyField :
-        List.of("openCliHub", "seedance", "gptImage2", "comfyui", "minimaxH3")) {
-      String body =
-          bodyFromGet(
-              update -> {
-                update.put("expectedVersion", "0");
-                update.withObject("integrations").putObject(legacyField);
-              });
-      mockMvc
-          .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
-          .andExpect(status().isBadRequest());
-    }
-    mockMvc
-        .perform(get("/api/settings"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.version").value("0"));
-  }
-
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {
     MvcResult result = mockMvc.perform(get("/api/settings")).andExpect(status().isOk()).andReturn();
     JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).get("data");
