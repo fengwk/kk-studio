@@ -3,14 +3,18 @@ package fun.fengwk.kkstudio.ide.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.WriteListener;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
@@ -244,7 +248,7 @@ class IdeRemoteDataPlaneForwarderTest {
     when(res.isCommitted()).thenReturn(false);
 
     forwarder.forwardHttp(req, res, owner, ENV, VIEW, "/test");
-    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+    verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
   }
 
   @Test
@@ -266,5 +270,110 @@ class IdeRemoteDataPlaneForwarderTest {
 
     forwarder.forwardWebSocket(req, res, owner, ENV, VIEW, "/ws");
     verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
+
+  @Test
+  void managementVsDataForwardingPolicies() throws Exception {
+    HttpClient httpClient = mock(HttpClient.class);
+    IdeClusterClient clusterClient = mock(IdeClusterClient.class);
+    ClusterOwnerRoute owner =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:8080"));
+    when(clusterClient.signHeaders(any(), any(), any())).thenReturn(Map.of());
+
+    HttpResponse<InputStream> response = mock(HttpResponse.class);
+    when(response.statusCode()).thenReturn(303);
+    when(response.headers())
+        .thenReturn(
+            HttpHeaders.of(
+                Map.of(
+                    "Set-Cookie",
+                    List.of("kk_ide_session=val; Path=/"),
+                    "Location",
+                    List.of("/target"),
+                    "Service-Worker-Allowed",
+                    List.of("/sw")),
+                (k, v) -> true));
+    when(response.body()).thenReturn(new ByteArrayInputStream(new byte[0]));
+    when(httpClient.send(any(), any())).thenReturn((HttpResponse) response);
+
+    IdeRemoteDataPlaneForwarder forwarder =
+        new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+
+    // 1. Management forwarding: keeps Set-Cookie and does not rebase Location
+    HttpServletRequest reqMgmt = mock(HttpServletRequest.class);
+    when(reqMgmt.getMethod()).thenReturn("GET");
+    HttpServletResponse resMgmt = mock(HttpServletResponse.class);
+    when(resMgmt.getOutputStream())
+        .thenReturn(
+            new ServletOutputStream() {
+              @Override
+              public boolean isReady() {
+                return true;
+              }
+
+              @Override
+              public void setWriteListener(WriteListener writeListener) {}
+
+              @Override
+              public void write(int b) {}
+            });
+
+    forwarder.forwardManagementHttp(reqMgmt, resMgmt, owner, ENV, VIEW, "/__ide/bootstrap");
+    verify(resMgmt).addHeader("Set-Cookie", "kk_ide_session=val; Path=/");
+    verify(resMgmt).addHeader("Location", "/target");
+    verify(resMgmt).addHeader("Service-Worker-Allowed", "/sw");
+
+    // 2. Data forwarding: drops Set-Cookie and rebases Location and Service-Worker-Allowed
+    HttpServletRequest reqData = mock(HttpServletRequest.class);
+    when(reqData.getMethod()).thenReturn("GET");
+    when(reqData.getContextPath()).thenReturn("");
+    HttpServletResponse resData = mock(HttpServletResponse.class);
+    when(resData.getOutputStream())
+        .thenReturn(
+            new ServletOutputStream() {
+              @Override
+              public boolean isReady() {
+                return true;
+              }
+
+              @Override
+              public void setWriteListener(WriteListener writeListener) {}
+
+              @Override
+              public void write(int b) {}
+            });
+
+    forwarder.forwardDataHttp(reqData, resData, owner, ENV, VIEW, "/page");
+    verify(resData, never()).addHeader(eq("Set-Cookie"), any());
+    verify(resData).addHeader("Location", "/environment-ide/" + ENV + "/" + VIEW + "/target");
+  }
+
+  @Test
+  void ideCookieAndBrowserSchemeValidation() {
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    // null cookies
+    when(req.getCookies()).thenReturn(null);
+    assertNull(IdeRemoteDataPlaneForwarder.ideCookie(req, "kk_ide_session"));
+
+    // multiple cookies
+    Cookie c1 = new Cookie("other", "123");
+    Cookie c2 = new Cookie("kk_ide_session", "session-val");
+    when(req.getCookies()).thenReturn(new Cookie[] {c1, c2});
+    assertEquals(
+        "kk_ide_session=session-val", IdeRemoteDataPlaneForwarder.ideCookie(req, "kk_ide_session"));
+    assertNull(IdeRemoteDataPlaneForwarder.ideCookie(req, "non-existent"));
+
+    // browserScheme: request.isSecure() -> https
+    when(req.isSecure()).thenReturn(true);
+    assertEquals("https", IdeRemoteDataPlaneForwarder.browserScheme(req));
+
+    // browserScheme: X-Forwarded-Proto -> https
+    when(req.isSecure()).thenReturn(false);
+    when(req.getHeader("X-Forwarded-Proto")).thenReturn("http, HTTPS ");
+    assertEquals("https", IdeRemoteDataPlaneForwarder.browserScheme(req));
+
+    // browserScheme: default http
+    when(req.getHeader("X-Forwarded-Proto")).thenReturn("http");
+    assertEquals("http", IdeRemoteDataPlaneForwarder.browserScheme(req));
   }
 }

@@ -99,7 +99,7 @@ public class IdeGatewayDataPlane {
         remoteForwarder.forwardWebSocket(
             request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       } else {
-        remoteForwarder.forwardHttp(
+        remoteForwarder.forwardDataHttp(
             request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       }
       return;
@@ -318,7 +318,7 @@ public class IdeGatewayDataPlane {
       return;
     }
     if (!route.get().local()) {
-      remoteForwarder.forwardHttp(
+      remoteForwarder.forwardManagementHttp(
           request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       return;
     }
@@ -338,7 +338,7 @@ public class IdeGatewayDataPlane {
       return;
     }
     if (!route.get().local()) {
-      remoteForwarder.forwardHttp(
+      remoteForwarder.forwardManagementHttp(
           request, response, route.get(), environmentId, viewId, rawPathAndQuery);
       return;
     }

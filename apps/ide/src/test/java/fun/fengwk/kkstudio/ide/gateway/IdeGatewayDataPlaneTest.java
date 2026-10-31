@@ -98,7 +98,7 @@ class IdeGatewayDataPlaneTest {
     HttpServletResponse res = mock(HttpServletResponse.class);
 
     dataPlane.handleBrowserTraffic(ENV, VIEW, "/index.html", req, res);
-    verify(forwarder).forwardHttp(req, res, remoteRoute, ENV, VIEW, "/index.html");
+    verify(forwarder).forwardDataHttp(req, res, remoteRoute, ENV, VIEW, "/index.html");
   }
 
   @Test
@@ -371,7 +371,7 @@ class IdeGatewayDataPlaneTest {
         ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123", req, res);
     verify(res).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
 
-    // 2. Bootstrap: Remote route -> forwardHttp
+    // 2. Bootstrap: Remote route -> forwardManagementHttp
     ClusterOwnerRoute remote =
         ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:8080"));
     when(registry.route(ENV)).thenReturn(Optional.of(remote));
@@ -379,7 +379,7 @@ class IdeGatewayDataPlaneTest {
     dataPlane.handleBrowserTraffic(
         ENV, VIEW, IdeGatewayConstants.BOOTSTRAP_ENDPOINT + "?token=123", req, resRemote);
     verify(forwarder)
-        .forwardHttp(
+        .forwardManagementHttp(
             req,
             resRemote,
             remote,
@@ -402,13 +402,13 @@ class IdeGatewayDataPlaneTest {
         ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, resSessionNoRoute);
     verify(resSessionNoRoute).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
 
-    // 5. Session: Remote route -> forwardHttp
+    // 5. Session: Remote route -> forwardManagementHttp
     when(registry.route(ENV)).thenReturn(Optional.of(remote));
     HttpServletResponse resSessionRemote = mock(HttpServletResponse.class);
     dataPlane.handleBrowserTraffic(
         ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT, req, resSessionRemote);
     verify(forwarder)
-        .forwardHttp(
+        .forwardManagementHttp(
             req, resSessionRemote, remote, ENV, VIEW, IdeGatewayConstants.SESSION_ENDPOINT);
 
     // 6. Session: Local route -> browserSessionHandler.handleSession

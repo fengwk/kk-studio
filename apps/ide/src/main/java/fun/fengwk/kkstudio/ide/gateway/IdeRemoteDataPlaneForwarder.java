@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -23,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -34,6 +37,7 @@ import java.util.concurrent.TimeUnit;
  * <p>HTTP 请求使用 JDK HttpClient 流式转发，携带 HMAC 签名头； WebSocket 握手使用原始 TCP 发送带 HMAC 头的 HTTP/1.1
  * Upgrade，有界读取响应头后中继字节。
  */
+@Slf4j
 @Component
 public class IdeRemoteDataPlaneForwarder {
 
@@ -45,6 +49,28 @@ public class IdeRemoteDataPlaneForwarder {
     this.clusterClient = Objects.requireNonNull(clusterClient, "clusterClient");
   }
 
+  public void forwardDataHttp(
+      HttpServletRequest request,
+      HttpServletResponse response,
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery)
+      throws IOException {
+    forwardHttp(request, response, owner, environmentId, viewId, rawPathAndQuery, false);
+  }
+
+  public void forwardManagementHttp(
+      HttpServletRequest request,
+      HttpServletResponse response,
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery)
+      throws IOException {
+    forwardHttp(request, response, owner, environmentId, viewId, rawPathAndQuery, true);
+  }
+
   public void forwardHttp(
       HttpServletRequest request,
       HttpServletResponse response,
@@ -52,6 +78,18 @@ public class IdeRemoteDataPlaneForwarder {
       EnvironmentId environmentId,
       UUID viewId,
       String rawPathAndQuery)
+      throws IOException {
+    forwardDataHttp(request, response, owner, environmentId, viewId, rawPathAndQuery);
+  }
+
+  private void forwardHttp(
+      HttpServletRequest request,
+      HttpServletResponse response,
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      boolean management)
       throws IOException {
     Objects.requireNonNull(owner, "owner");
     String targetPath = IdeDataPaths.dataHttpPath(environmentId, viewId, rawPathAndQuery);
@@ -74,7 +112,7 @@ public class IdeRemoteDataPlaneForwarder {
             .method(request.getMethod(), bodyPublisher)
             .timeout(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT);
 
-    builder.header(IdeForwardedRequest.SCHEME_HEADER, request.isSecure() ? "https" : "http");
+    builder.header(IdeForwardedRequest.SCHEME_HEADER, browserScheme(request));
     Map<String, List<String>> forwardHeaders =
         IdeDataHeaderPolicy.forwardRequestHeaders(request, false);
     for (Map.Entry<String, List<String>> entry : forwardHeaders.entrySet()) {
@@ -82,7 +120,7 @@ public class IdeRemoteDataPlaneForwarder {
         builder.header(entry.getKey(), value);
       }
     }
-    String cookie = request.getHeader("Cookie");
+    String cookie = ideCookie(request, IdeGatewayConstants.SESSION_COOKIE_NAME);
     if (cookie != null && !cookie.isBlank()) {
       builder.header("Cookie", cookie);
     }
@@ -93,29 +131,90 @@ public class IdeRemoteDataPlaneForwarder {
     try {
       HttpResponse<InputStream> httpResponse =
           httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
-      IdeDataHeaderPolicy.applyResponseHeaders(
-          httpResponse.statusCode(),
-          httpResponse.headers().map(),
-          request,
-          response,
-          environmentId,
-          viewId,
-          false);
-      try (InputStream in = httpResponse.body();
-          OutputStream out = response.getOutputStream()) {
-        in.transferTo(out);
-        out.flush();
-      }
+      copyResponse(httpResponse, response, request, environmentId, viewId, management);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+      log.info(
+          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD_INTERRUPTED; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
       if (!response.isCommitted()) {
-        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       }
     } catch (Exception error) {
+      log.info(
+          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
       if (!response.isCommitted()) {
-        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       }
     }
+  }
+
+  private static void copyResponse(
+      HttpResponse<InputStream> httpResponse,
+      HttpServletResponse response,
+      HttpServletRequest request,
+      EnvironmentId environmentId,
+      UUID viewId,
+      boolean management)
+      throws IOException {
+    response.setStatus(httpResponse.statusCode());
+    for (Map.Entry<String, List<String>> header : httpResponse.headers().map().entrySet()) {
+      String name = header.getKey();
+      String lower = name == null ? null : name.toLowerCase(Locale.ROOT);
+      if (lower == null
+          || lower.equals("content-length")
+          || IdeDataHeaderPolicy.isHopByHop(lower)
+          || (!management && "set-cookie".equals(lower))) {
+        continue;
+      }
+      for (String value : header.getValue()) {
+        if (!management && "location".equals(lower)) {
+          value = IdeDataPaths.rebaseLocation(value, request, environmentId, viewId);
+        }
+        if (!management && "service-worker-allowed".equals(lower)) {
+          value = IdeDataPaths.rebaseWorkerScope(value, request, environmentId, viewId);
+        }
+        response.addHeader(name, value);
+      }
+    }
+    try (InputStream in = httpResponse.body();
+        OutputStream out = response.getOutputStream()) {
+      in.transferTo(out);
+      out.flush();
+    }
+  }
+
+  static String ideCookie(HttpServletRequest request, String cookieName) {
+    Cookie[] cookies = request.getCookies();
+    if (cookies == null) {
+      return null;
+    }
+    for (Cookie cookie : cookies) {
+      if (cookieName.equals(cookie.getName())) {
+        return cookieName + "=" + cookie.getValue();
+      }
+    }
+    return null;
+  }
+
+  static String browserScheme(HttpServletRequest request) {
+    if (request.isSecure()) {
+      return "https";
+    }
+    String forwardedProto = request.getHeader("X-Forwarded-Proto");
+    if (forwardedProto != null) {
+      for (String value : forwardedProto.split(",")) {
+        if (value.trim().equalsIgnoreCase("https")) {
+          return "https";
+        }
+      }
+    }
+    return "http";
   }
 
   public void forwardWebSocket(
@@ -149,10 +248,13 @@ public class IdeRemoteDataPlaneForwarder {
       addHeaderIfPresent(req, request, "Sec-WebSocket-Version");
       addHeaderIfPresent(req, request, "Sec-WebSocket-Protocol");
       addHeaderIfPresent(req, request, "Sec-WebSocket-Extensions");
-      addHeaderIfPresent(req, request, "Cookie");
+      String cookie = ideCookie(request, IdeGatewayConstants.SESSION_COOKIE_NAME);
+      if (cookie != null) {
+        req.append("Cookie: ").append(cookie).append("\r\n");
+      }
       req.append(IdeForwardedRequest.SCHEME_HEADER)
           .append(": ")
-          .append(request.isSecure() ? "https" : "http")
+          .append(browserScheme(request))
           .append("\r\n");
       for (Map.Entry<String, String> entry : authHeaders.entrySet()) {
         req.append(entry.getKey()).append(": ").append(entry.getValue()).append("\r\n");
@@ -177,17 +279,20 @@ public class IdeRemoteDataPlaneForwarder {
         TcpTunnelStream tunnelStream = new TcpTunnelStream(channel, head.remainingBytes);
         JettyConnectionHandover.handover(request, 101, head.headers, tunnelStream);
       } else {
-        try {
-          channel.close();
-        } catch (IOException ignored) {
-        }
+        channel.close();
         IdeDataHeaderPolicy.sendError(response, head.status);
       }
     } catch (Exception error) {
       try {
         channel.close();
-      } catch (IOException ignored) {
+      } catch (IOException closeErr) {
+        log.debug("failed to close channel after forward error", closeErr);
       }
+      log.info(
+          "remote ide data plane forward failed; phase=IDE_REMOTE_WS_FORWARD; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
       }

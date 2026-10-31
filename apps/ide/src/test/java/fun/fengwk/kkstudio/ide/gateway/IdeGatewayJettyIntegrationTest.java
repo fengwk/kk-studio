@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
@@ -96,6 +98,7 @@ class IdeGatewayJettyIntegrationTest {
   private static TestEnvironmentTunnels ownerTunnels;
   private static WebSocketCoreClient wsClient;
   private static HttpClient httpClient;
+  private static IdeBootstrapTicketService ticketService;
 
   @BeforeAll
   static void startServers() throws Exception {
@@ -112,8 +115,9 @@ class IdeGatewayJettyIntegrationTest {
     when(transport.connectionIdentity(ENV)).thenReturn(Optional.of(IDENTITY));
     SessionIdeDataViewAuthorizer authorizer = new SessionIdeDataViewAuthorizer(registry, transport);
 
+    ticketService = mock(IdeBootstrapTicketService.class);
     IdeBrowserSessionHandler sessionHandler =
-        new IdeBrowserSessionHandler(mock(), registry, transport);
+        new IdeBrowserSessionHandler(ticketService, registry, transport);
     IdeClusterClient clusterClient = mock(IdeClusterClient.class);
     when(clusterClient.signHeaders(any(), any(), any()))
         .thenReturn(Map.of("X-KK-Cluster-Signature", "sig123"));
@@ -539,6 +543,86 @@ class IdeGatewayJettyIntegrationTest {
     // Verify bounded memory: stream.read() is called strictly sequentially by the pump
     assertEquals(1, maxConcurrentReads.get());
     assertEquals(totalChunks + 1, chunksServed.get());
+  }
+
+  @Test
+  void nonOwnerBootstrapPreservesCookieAndLocation() throws Exception {
+    when(ticketService.consume("bootstrap-token-1"))
+        .thenReturn(
+            Optional.of(
+                new IdeBootstrapTicketService.Ticket(
+                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace")));
+
+    // Test 1: plain http request to Node 1 (non-owner)
+    HttpRequest request =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + node1Port
+                        + "/environment-ide/"
+                        + ENV
+                        + "/"
+                        + VIEW
+                        + "/__ide/bootstrap?token=bootstrap-token-1"))
+            .header("Origin", "http://127.0.0.1:" + node1Port)
+            .header("Sec-Fetch-Site", "same-origin")
+            .GET()
+            .build();
+
+    HttpResponse<Void> response =
+        HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build()
+            .send(request, HttpResponse.BodyHandlers.discarding());
+
+    assertEquals(303, response.statusCode());
+    Optional<String> setCookie = response.headers().firstValue("Set-Cookie");
+    assertTrue(setCookie.isPresent());
+    assertTrue(setCookie.get().contains(IdeGatewayConstants.SESSION_COOKIE_NAME + "="));
+    assertTrue(setCookie.get().contains("Path=/environment-ide/" + ENV + "/" + VIEW + "/"));
+    assertTrue(setCookie.get().contains("HttpOnly"));
+    assertTrue(setCookie.get().contains("SameSite=Strict"));
+    assertFalse(setCookie.get().contains("Secure"));
+
+    Optional<String> location = response.headers().firstValue("Location");
+    assertTrue(location.isPresent());
+    String expectedLocation =
+        "/environment-ide/" + ENV + "/" + VIEW + "/?workspace=%2Fmanaged%2Fworkspace";
+    assertEquals(expectedLocation, location.get());
+
+    // Test 2: X-Forwarded-Proto: https -> cookie has Secure flag
+    when(ticketService.consume("bootstrap-token-2"))
+        .thenReturn(
+            Optional.of(
+                new IdeBootstrapTicketService.Ticket(
+                    IDENTITY, VIEW.toString(), 1L, "/managed/workspace")));
+
+    HttpRequest secureRequest =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + node1Port
+                        + "/environment-ide/"
+                        + ENV
+                        + "/"
+                        + VIEW
+                        + "/__ide/bootstrap?token=bootstrap-token-2"))
+            .header("Origin", "http://127.0.0.1:" + node1Port)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("X-Forwarded-Proto", "https")
+            .GET()
+            .build();
+
+    HttpResponse<Void> secureResponse =
+        HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build()
+            .send(secureRequest, HttpResponse.BodyHandlers.discarding());
+
+    assertEquals(303, secureResponse.statusCode());
+    Optional<String> secureSetCookie = secureResponse.headers().firstValue("Set-Cookie");
+    assertTrue(secureSetCookie.isPresent());
+    assertTrue(secureSetCookie.get().contains("; Secure"));
   }
 
   @Test
