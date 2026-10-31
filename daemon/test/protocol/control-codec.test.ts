@@ -6,15 +6,54 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  Architecture,
+  CancelSchema,
+  CancelledSchema,
   CapabilityResultSchema,
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
+  EnvironmentInfoSchema,
+  ErrorSchema,
   ExecutionExitedSchema,
+  ExpectedFileSchema,
+  FailedSchema,
+  HeartbeatSchema,
+  IdeAction,
+  IdeCommandSchema,
+  IdeLeaseBindingSchema,
+  IdeLeaseSchema,
+  IdeOpenMode,
+  IdeResultSchema,
+  IdeViewState,
+  IdeViewSummarySchema,
   InvokeSchema,
+  JsonContentSchema,
   MessageType,
+  OperatingSystem,
+  PresignedPutSchema,
+  ProgressSchema,
+  ReadySchema,
+  RecoverNotFoundSchema,
+  RecoverSchema,
+  ResourceBudgetsSchema,
   ResourceContentSchema,
+  ResourceUploadCommitSchema,
+  ResourceUploadRequestSchema,
+  ResourceUploadTicketSchema,
+  RuntimeBodySchema,
+  RuntimeSnapshotSchema,
+  RuntimeStatusSchema,
+  SettingsSchema,
+  StartedSchema,
+  TemporaryResourcePolicySchema,
   TextContentSchema,
+  TicketState,
+  UpdatePhase,
+  UpdateProgressSchema,
+  UpdateResultSchema,
+  UpdateSchema,
+  UpgradeRequiredSchema,
   type CapabilityResult,
   type Invoke,
   type ResourceContent,
@@ -27,7 +66,13 @@ import {
   validateUpgrade,
 } from '../../src/protocol/control/codec.js'
 import { frame, unframe } from '../../src/protocol/control/framing.js'
-import { MAX_MESSAGE_BYTES, MAX_SAFE_BIGINT } from '../../src/protocol/control/runtime.js'
+import {
+  MAX_MESSAGE_BYTES,
+  MAX_SAFE_BIGINT,
+  parseJsonObject,
+  parseJsonValue,
+  requireSafeLong,
+} from '../../src/protocol/control/runtime.js'
 import {
   ARGUMENTS_JSON,
   CALL_ID,
@@ -42,6 +87,7 @@ import {
   executionExitedEnvelope,
   invokeEnvelope,
   upgradeRequired,
+  GOLDEN_FIXTURES,
 } from './control-fixtures.mjs'
 
 const GOLDEN = fileURLToPath(
@@ -92,13 +138,13 @@ function validInvoke() {
 
 describe('control binary codec', () => {
   it('encodes the shared fixtures to golden byte-for-byte', () => {
-    assertBytesEqual(encodeBinary(invokeEnvelope()), readGolden('invoke.bin'))
-    assertBytesEqual(encodeBinary(completedEnvelope()), readGolden('completed.bin'))
-    assertBytesEqual(encodeBinary(executionExitedEnvelope()), readGolden('execution-exited.bin'))
+    for (const [name, factory] of GOLDEN_FIXTURES) {
+      assertBytesEqual(encodeBinary(factory()), readGolden(name))
+    }
   })
 
   it('roundtrips shared golden through bare and framed paths', () => {
-    for (const name of ['invoke.bin', 'completed.bin', 'execution-exited.bin']) {
+    for (const [name] of GOLDEN_FIXTURES) {
       const golden = readGolden(name)
       assertBytesEqual(encodeBinary(decodeBinary(golden)), golden)
       assertBytesEqual(encodeBinary(decodeFrame(encodeFrame(decodeBinary(golden)))), golden)
@@ -280,6 +326,1058 @@ describe('control binary codec', () => {
       contents,
     })
     expect(() => encodeBinary(completedWithResult(result))).toThrow(/64 items/)
+  })
+
+  it('validates SETTINGS bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SETTINGS,
+          environmentId: ENVIRONMENT_ID,
+          payload: { case: 'settings', value: create(SettingsSchema, {}) },
+        }),
+      ),
+    ).toThrow(/resourceBudgets is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SETTINGS,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'settings',
+            value: create(SettingsSchema, {
+              resourceBudgets: create(ResourceBudgetsSchema, {
+                maxResourceBytes: 0n,
+                temporaryResourceTtlSeconds: 60n,
+                temporaryResourceCleanupIntervalSeconds: 30n,
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/maxResourceBytes/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SETTINGS,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: 'inv-bad',
+          payload: {
+            case: 'settings',
+            value: create(SettingsSchema, {
+              resourceBudgets: create(ResourceBudgetsSchema, {
+                maxResourceBytes: 1024n,
+                temporaryResourceTtlSeconds: 60n,
+                temporaryResourceCleanupIntervalSeconds: 30n,
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must not declare invocationId/)
+  })
+
+  it('validates READY bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.READY,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ready',
+            value: create(ReadySchema, { daemonVersion: '6.0.0' }),
+          },
+        }),
+      ),
+    ).toThrow(/ready\.environment is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.READY,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ready',
+            value: create(ReadySchema, {
+              daemonVersion: '6.0.0',
+              environment: create(EnvironmentInfoSchema, {
+                operatingSystem: OperatingSystem.LINUX,
+                architecture: Architecture.AMD64,
+                timeZone: 'Invalid/Zone',
+                userName: 'test',
+                homeDirectory: '/home/test',
+                tempDirectory: '/tmp',
+              }),
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/valid ZoneId/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.READY,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ready',
+            value: create(ReadySchema, {
+              daemonVersion: '6.0.0',
+              environment: create(EnvironmentInfoSchema, {
+                operatingSystem: OperatingSystem.LINUX,
+                architecture: Architecture.AMD64,
+                timeZone: 'UTC',
+                userName: 'test',
+                homeDirectory: '/home/test',
+                tempDirectory: '/tmp',
+                note: 'test-note',
+              }),
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, { daemonVersion: '5.0.0' }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must match ready\.daemonVersion/)
+  })
+
+  it('validates HEARTBEAT and RUNTIME_STATUS bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.HEARTBEAT,
+          environmentId: ENVIRONMENT_ID,
+          payload: { case: 'heartbeat', value: create(HeartbeatSchema, {}) },
+        }),
+      ),
+    ).toThrow(/runtimeStatus is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.HEARTBEAT,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'heartbeat',
+            value: create(HeartbeatSchema, {
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 0n,
+                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/revision/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RUNTIME_STATUS,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'runtimeStatus',
+            value: create(RuntimeStatusSchema, {
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, {
+                  daemonVersion: '6.0.0',
+                  update: create(UpdateProgressSchema, {
+                    targetVersion: '6.1.0',
+                    downloadedBytes: 100n,
+                    totalBytes: 50n,
+                  }),
+                }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/totalBytes/)
+  })
+
+  it('validates INVOKE and STARTED bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'Bad_Capability!',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{}',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/invalid syntax/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{}',
+              timeoutMillis: 0n,
+              expectedFile: create(ExpectedFileSchema, {
+                path: 'test.txt',
+                sha256: 'a'.repeat(64),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/only valid for fs\.edit/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.STARTED,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'started',
+            value: create(StartedSchema, { replayed: false }),
+          },
+        }),
+      ),
+    ).toThrow(/started\.replayed must be true/)
+  })
+
+  it('validates PROGRESS, FAILED, and CANCELLED bounds', () => {
+    const progressWithResource = create(EnvelopeSchema, {
+      messageType: MessageType.PROGRESS,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'progress',
+        value: create(ProgressSchema, {
+          result: create(CapabilityResultSchema, {
+            callId: CALL_ID,
+            error: false,
+            detailsJson: '{}',
+            contents: [
+              create(ContentSchema, {
+                body: {
+                  case: 'resource',
+                  value: create(ResourceContentSchema, {
+                    uploadId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                    mediaType: 'text/plain',
+                    size: 10n,
+                    sha256: 'b'.repeat(64),
+                  }),
+                },
+              }),
+            ],
+          }),
+        }),
+      },
+    })
+    expect(() => encodeBinary(progressWithResource)).toThrow(/must not declare a resource/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.FAILED,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: { case: 'failed', value: create(FailedSchema, { message: '' }) },
+        }),
+      ),
+    ).toThrow(/failed\.message/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.CANCELLED,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: { case: 'cancelled', value: create(CancelledSchema, { reason: '   ' }) },
+        }),
+      ),
+    ).toThrow(/cancelled\.reason/)
+  })
+
+  it('validates UPLOAD tickets and commits', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceUploadTicket',
+            value: create(ResourceUploadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_PENDING,
+              uploadId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              message: 'should not be here',
+              presignedPut: create(PresignedPutSchema, {
+                method: 'PUT',
+                url: 'https://example.com/upload',
+                expiresAt: '2026-10-31T00:00:00Z',
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/PENDING ticket requires uploadId and presignedPut only/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceUploadTicket',
+            value: create(ResourceUploadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_PENDING,
+              uploadId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              presignedPut: create(PresignedPutSchema, {
+                method: 'POST',
+                url: 'https://example.com/upload',
+                expiresAt: '2026-10-31T00:00:00Z',
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/presignedPut\.method must be PUT/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceUploadTicket',
+            value: create(ResourceUploadTicketSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              state: TicketState.TICKET_PENDING,
+              uploadId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              presignedPut: create(PresignedPutSchema, {
+                method: 'PUT',
+                url: 'https://example.com/upload',
+                expiresAt: 'not-a-date',
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/canonical ISO-8601/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RESOURCE_UPLOAD_COMMIT,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'resourceUploadCommit',
+            value: create(ResourceUploadCommitSchema, {
+              transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/uploadCommit\.uploadId/)
+  })
+
+  it('validates UPDATE and POLICY bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.TEMPORARY_RESOURCE_POLICY,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'temporaryResourcePolicy',
+            value: create(TemporaryResourcePolicySchema, {
+              temporaryResourceTtlSeconds: 0n,
+              temporaryResourceCleanupIntervalSeconds: 30n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/temporaryResourceTtlSeconds/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.UPDATE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'update',
+            value: create(UpdateSchema, {
+              operationId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              targetVersion: '6.0.0',
+              artifactUrl: 'https://attacker.com/evil.tar.gz',
+              artifactSha256: 'a'.repeat(64),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/official archive/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.UPDATE_RESULT,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'updateResult',
+            value: create(UpdateResultSchema, {
+              operationId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              phase: UpdatePhase.UPDATE_PHASE_UNSPECIFIED,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/updateResult\.phase is required/)
+  })
+
+  it('validates IDE_COMMAND, IDE_RESULT, IDE_LEASE, and ERROR bounds', () => {
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_COMMAND,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideCommand',
+            value: create(IdeCommandSchema, { action: IdeAction.IDE_ACTION_UNSPECIFIED }),
+          },
+        }),
+      ),
+    ).toThrow(/ideCommand\.action is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_COMMAND,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideCommand',
+            value: create(IdeCommandSchema, {
+              action: IdeAction.OPEN_VIEW,
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              mode: IdeOpenMode.CREATE,
+              bindingEpoch: 1n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/OPEN_VIEW must not declare bindingEpoch/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_COMMAND,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideCommand',
+            value: create(IdeCommandSchema, {
+              action: IdeAction.CHANGE_DIRECTORY,
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              bindingEpoch: 1n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/ideCommand\.directory is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_COMMAND,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideCommand',
+            value: create(IdeCommandSchema, {
+              action: IdeAction.CLOSE_VIEW,
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              bindingEpoch: 1n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/ideCommand\.discard is required/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_RESULT,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideResult',
+            value: create(IdeResultSchema, {
+              ok: false,
+              code: 'VIEW_GONE',
+              message: 'gone',
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/failed IDE result must only declare code and message/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_RESULT,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideResult',
+            value: create(IdeResultSchema, {
+              ok: true,
+              code: 'VIEW_GONE',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/successful IDE result must not declare code or message/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_LEASE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ideLease',
+            value: create(IdeLeaseSchema, { round: 0n }),
+          },
+        }),
+      ),
+    ).toThrow(/ideLease\.round/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_LEASE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ideLease',
+            value: create(IdeLeaseSchema, {
+              round: 1n,
+              bindings: [
+                create(IdeLeaseBindingSchema, {
+                  viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  bindingEpoch: 1n,
+                }),
+                create(IdeLeaseBindingSchema, {
+                  viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae8',
+                  bindingEpoch: 1n,
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must not repeat viewId/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.ERROR,
+          environmentId: ENVIRONMENT_ID,
+          payload: { case: 'error', value: create(ErrorSchema, { message: '' }) },
+        }),
+      ),
+    ).toThrow(/error\.message/)
+  })
+
+  it('validates Unicode and JSON text parsing rules', () => {
+    // 孤立高位代理
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{"file": "\ud800"}',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be valid Unicode/)
+
+    // 孤立低位代理
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{"file": "\udc00"}',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be valid Unicode/)
+
+    // JSON 包含重复属性
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{"a": 1, "a": 2}',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/contains duplicate field/)
+
+    // JSON 语法错误
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '{not_json}',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be valid JSON/)
+
+    // JSON 非对象（数字/数组）
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '[1, 2, 3]',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be a JSON object/)
+
+    // JSON 为空
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.INVOKE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'invoke',
+            value: create(InvokeSchema, {
+              capabilityId: 'fs.read',
+              capabilityVersion: '1.0.0',
+              argumentsJson: '   ',
+              timeoutMillis: 0n,
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/is required/)
+
+    // ContentSchema JSON 非法
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.COMPLETED,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'completed',
+            value: create(CompletedSchema, {
+              result: create(CapabilityResultSchema, {
+                callId: CALL_ID,
+                error: false,
+                detailsJson: '{}',
+                contents: [
+                  create(ContentSchema, {
+                    body: {
+                      case: 'json',
+                      value: create(JsonContentSchema, { json: 'not-json' }),
+                    },
+                  }),
+                ],
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be valid JSON/)
+
+    // requireSingleLine 包含换行或首尾空格
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.READY,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ready',
+            value: create(ReadySchema, {
+              daemonVersion: '6.0.0',
+              environment: create(EnvironmentInfoSchema, {
+                operatingSystem: OperatingSystem.LINUX,
+                architecture: Architecture.AMD64,
+                timeZone: 'UTC',
+                userName: ' user ',
+                homeDirectory: '/home/test',
+                tempDirectory: '/tmp',
+                note: 'test-note',
+              }),
+              runtimeStatus: create(RuntimeSnapshotSchema, {
+                revision: 1n,
+                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+              }),
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/single line without surrounding whitespace/)
+
+    // requireIdePath 包含控制字符
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_COMMAND,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideCommand',
+            value: create(IdeCommandSchema, {
+              action: IdeAction.OPEN_VIEW,
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              mode: IdeOpenMode.CREATE,
+              directory: '/bad\x00path',
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must not contain control characters/)
+  })
+
+  it('validates and roundtrips IDE commands and results across all actions', () => {
+    // FOCUS_TERMINAL
+    const focusCmd = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_COMMAND,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideCommand',
+        value: create(IdeCommandSchema, {
+          action: IdeAction.FOCUS_TERMINAL,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          bindingEpoch: 1n,
+        }),
+      },
+    })
+    const focusDecoded = decodeBinary(encodeBinary(focusCmd))
+    expect(focusDecoded.payload.case).toBe('ideCommand')
+
+    // DETACH_VIEW
+    const detachCmd = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_COMMAND,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideCommand',
+        value: create(IdeCommandSchema, {
+          action: IdeAction.DETACH_VIEW,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          bindingEpoch: 1n,
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(detachCmd)).payload.case).toBe('ideCommand')
+
+    // LIST_VIEWS
+    const listCmd = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_COMMAND,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideCommand',
+        value: create(IdeCommandSchema, {
+          action: IdeAction.LIST_VIEWS,
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(listCmd)).payload.case).toBe('ideCommand')
+
+    // CLOSE_VIEW with discard: true
+    const closeCmd = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_COMMAND,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideCommand',
+        value: create(IdeCommandSchema, {
+          action: IdeAction.CLOSE_VIEW,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          bindingEpoch: 1n,
+          discard: true,
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(closeCmd)).payload.case).toBe('ideCommand')
+
+    // IDE_RESULT with views list
+    const listResult = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          views: [
+            create(IdeViewSummarySchema, {
+              viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+              bindingEpoch: 1n,
+              directory: '/workspace/dir',
+              workspacePath: '/workspace/dir/project.code-workspace',
+              state: IdeViewState.OPEN,
+            }),
+          ],
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(listResult)).payload.case).toBe('ideResult')
+
+    // IDE_RESULT with change directory
+    const dirResult = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          directory: '/workspace/new-dir',
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(dirResult)).payload.case).toBe('ideResult')
+
+    // IDE_RESULT with single viewId
+    const viewResult = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(viewResult)).payload.case).toBe('ideResult')
+
+    // IDE_RESULT with full binding
+    const boundResult = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          bindingEpoch: 1n,
+          directory: '/workspace/dir',
+          workspacePath: '/workspace/dir/project.code-workspace',
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(boundResult)).payload.case).toBe('ideResult')
+
+    // IDE_RESULT views list with invalid view.state
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_RESULT,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'ideResult',
+            value: create(IdeResultSchema, {
+              ok: true,
+              views: [
+                create(IdeViewSummarySchema, {
+                  viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+                  bindingEpoch: 1n,
+                  directory: '/workspace/dir',
+                  workspacePath: '/workspace/dir/project.code-workspace',
+                  state: IdeViewState.IDE_VIEW_STATE_UNSPECIFIED,
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/state is required/)
+
+    // IDE_LEASE bindings limit > 64
+    const tooManyBindings = Array.from({ length: 65 }, (_, i) =>
+      create(IdeLeaseBindingSchema, {
+        viewId: `7c9e6679-7425-40de-944b-${String(i).padStart(12, '0')}`,
+        documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        bindingEpoch: 1n,
+      }),
+    )
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.IDE_LEASE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'ideLease',
+            value: create(IdeLeaseSchema, { round: 1n, bindings: tooManyBindings }),
+          },
+        }),
+      ),
+    ).toThrow(/must not exceed 64/)
+  })
+
+  it('validates upload tickets in READY and FAILED states', () => {
+    // READY ticket
+    const readyTicket = create(EnvelopeSchema, {
+      messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'resourceUploadTicket',
+        value: create(ResourceUploadTicketSchema, {
+          transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          state: TicketState.TICKET_READY,
+          uploadId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(readyTicket)).payload.case).toBe('resourceUploadTicket')
+
+    // FAILED ticket
+    const failedTicket = create(EnvelopeSchema, {
+      messageType: MessageType.RESOURCE_UPLOAD_TICKET,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'resourceUploadTicket',
+        value: create(ResourceUploadTicketSchema, {
+          transferId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          state: TicketState.TICKET_FAILED,
+          message: 'upload failed due to quota',
+        }),
+      },
+    })
+    expect(decodeBinary(encodeBinary(failedTicket)).payload.case).toBe('resourceUploadTicket')
+  })
+
+  it('rejects unknown protobuf fields via assertNoUnknown', () => {
+    const raw = create(EnvelopeSchema, {
+      messageType: MessageType.ERROR,
+      environmentId: ENVIRONMENT_ID,
+      payload: {
+        case: 'error',
+        value: create(ErrorSchema, { message: 'boom' }),
+      },
+    })
+    // 注入未知字段
+    ;(raw as unknown as { $unknown: unknown[] }).$unknown = [
+      { no: 999, wireType: 0, data: new Uint8Array([1]) },
+    ]
+    expect(() => encodeBinary(raw)).toThrow(/contains unknown protobuf fields/)
+  })
+
+  it('directly validates runtime helper error paths', () => {
+    expect(() => requireSafeLong(123 as unknown as bigint, 'val', 0n, 100n)).toThrow(/must be an int64/)
+    expect(() => parseJsonObject('not json', 'jsonObj', 1024)).toThrow(/must be valid JSON/)
+    expect(() => parseJsonValue('not json', 'jsonVal', 1024)).toThrow(/must be valid JSON/)
+    expect(() => parseJsonObject('{"a": 1, "a": 2, "b": 3}', 'dupObj', 1024)).toThrow(/contains duplicate field/)
   })
 })
 
