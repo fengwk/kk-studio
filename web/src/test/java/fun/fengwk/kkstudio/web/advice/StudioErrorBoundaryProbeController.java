@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.catalina.connector.ClientAbortException;
+import org.eclipse.jetty.io.EofException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,7 +22,7 @@ import java.nio.charset.StandardCharsets;
 @RestController
 public class StudioErrorBoundaryProbeController {
 
-  /** 客户端断连：Tomcat 以消息为 {@code Broken pipe} 的 IOException 或 ClientAbortException 表达。 */
+  /** 客户端断连：Jetty 以 EofException、或以消息为 {@code Broken pipe} 的 IOException 表达。 */
   @GetMapping("/__probe/disconnect")
   public ApiResponse<Void> disconnect() throws IOException {
     throw new IOException("Broken pipe");
@@ -30,7 +30,7 @@ public class StudioErrorBoundaryProbeController {
 
   @GetMapping("/__probe/client-abort")
   public ApiResponse<Void> clientAbort() throws IOException {
-    throw new ClientAbortException(new IOException("Connection reset"));
+    throw new EofException(new IOException("Connection reset"));
   }
 
   /** 非断连 IOException：必须继续按正常 API 错误翻译，不能被断连隔离吞掉。 */

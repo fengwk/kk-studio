@@ -161,11 +161,11 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
-  void connectionStartsWithV2IdentityFrame() throws Exception {
+  void connectionStartsWithIdentityFrame() throws Exception {
     handler.afterConnectionEstablished(springSession);
 
     JsonNode connected = JsonMapper.builder().build().readTree(recorder.connectedFrame);
-    assertEquals(2, connected.path("version").asInt());
+    assertFalse(connected.has("version"));
     assertEquals("connected", connected.path("type").asText());
     assertEquals(EVENT_NODE.toString(), connected.path("eventNodeId").asText());
     UUID connectionId = UUID.fromString(connected.path("connectionId").asText());
@@ -182,31 +182,28 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", IDE_CLAIM, 5L)));
     assertEquals(1, recorder.sent.size());
-    assertEquals(
-        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(0));
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(0));
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(1L, browserUseRegistry.usage(identity).orElseThrow().revision());
 
     // 同 revision 同内容幂等 ack，不改变登记。
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", IDE_CLAIM, 5L)));
-    assertEquals(
-        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(1));
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"1\"}", recorder.sent.get(1));
     recorder.handlers.get(1).onResult(new SendResult());
 
     // 同 revision 不同内容拒绝，但连接保持可用。
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "1", UUID.randomUUID(), 5L)));
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
+        "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"ide-use revision must increase and keep identical content for the same revision\"}",
         recorder.sent.get(2));
     verify(springSession, never()).close(any());
     recorder.handlers.get(2).onResult(new SendResult());
 
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(IDE_DOCUMENT, "2", IDE_CLAIM, 6L)));
-    assertEquals(
-        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"2\"}", recorder.sent.get(3));
+    assertEquals("{\"type\":\"ide-use-accepted\",\"revision\":\"2\"}", recorder.sent.get(3));
     recorder.handlers.get(3).onResult(new SendResult());
     IdeBrowserUse accepted = browserUseRegistry.usage(identity).orElseThrow();
     assertEquals(2L, accepted.revision());
@@ -216,7 +213,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(
         springSession, textMessage(ideUseFrame(UUID.randomUUID(), "3", IDE_CLAIM, 7L)));
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"documentId is fixed for this connection\"}",
+        "{\"type\":\"error\",\"code\":\"IDE_USE_REJECTED\",\"message\":\"documentId is fixed for this connection\"}",
         recorder.sent.get(4));
   }
 
@@ -237,7 +234,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
     recorder.handlers.get(1).onResult(new SendResult());
   }
@@ -294,7 +291,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     recorder.handlers.getFirst().onResult(new SendResult());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
   }
 
@@ -318,12 +315,12 @@ class ApplicationEventWebSocketHandlerTest {
     recorder.handlers.get(0).onResult(new SendResult()); // 完成 ack 发送，事件帧随后串行发出
     assertEquals(2, recorder.sent.size(), "ack frame must precede the buffered event frame");
     assertEquals(
-        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"5\"}",
         recorder.sent.get(0));
     assertEquals(
-        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"version\",\"cursor\":\"6\",\"data\":{\"version\":\"6\"}}",
         recorder.sent.get(1));
@@ -362,7 +359,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     assertEquals(1, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.version must be the integer 2\"}",
+        "{\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"invalid frame: frame.type must be a string\"}",
         recorder.sent.get(0));
     recorder.handlers.get(0).onResult(new SendResult());
     ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
@@ -381,7 +378,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     assertEquals(1, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Resource not found\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"}}",
         recorder.sent.get(0));
@@ -394,7 +391,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     assertEquals(2, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"5\"}",
         recorder.sent.get(1));
@@ -417,9 +414,7 @@ class ApplicationEventWebSocketHandlerTest {
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(2, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"resync\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
-            + "\"}}",
+        "{\"type\":\"resync\",\"resource\":{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}}",
         recorder.sent.get(1));
   }
 
@@ -429,7 +424,7 @@ class ApplicationEventWebSocketHandlerTest {
 
     handler.heartbeat();
 
-    assertEquals(List.of("{\"version\":2,\"type\":\"heartbeat\"}"), recorder.sent);
+    assertEquals(List.of("{\"type\":\"heartbeat\"}"), recorder.sent);
     handler.afterConnectionClosed(springSession, CloseStatus.NORMAL);
     handler.heartbeat();
     assertEquals(1, recorder.sent.size());
@@ -443,11 +438,11 @@ class ApplicationEventWebSocketHandlerTest {
     handler.heartbeat(); // heartbeat 在途，占满容量
     handler.heartbeat(); // 入队失败，error 排在在途 heartbeat 后
 
-    assertEquals(List.of("{\"version\":2,\"type\":\"heartbeat\"}"), recorder.sent);
+    assertEquals(List.of("{\"type\":\"heartbeat\"}"), recorder.sent);
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(2, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
     recorder.handlers.get(1).onResult(new SendResult());
     ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
@@ -472,7 +467,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(
         springSession,
         textMessage(
-            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
                 + CANVAS_KEY.id()
                 + "\"}}"));
 
@@ -482,7 +477,7 @@ class ApplicationEventWebSocketHandlerTest {
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(2, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(1));
     recorder.handlers.get(1).onResult(new SendResult());
     ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
@@ -519,7 +514,7 @@ class ApplicationEventWebSocketHandlerTest {
     recorder.handlers.get(2).onResult(new SendResult()); // 事件 7 完成
     assertEquals(4, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
+        "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
         recorder.sent.get(3));
     recorder.handlers.get(3).onResult(new SendResult());
     ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
@@ -563,7 +558,7 @@ class ApplicationEventWebSocketHandlerTest {
     recorder.handlers.get(0).onResult(new SendResult());
     assertEquals(2, recorder.sent.size());
     assertEquals(
-        "{\"version\":2,\"type\":\"error\",\"code\":\"SEND_FAILED\",\"message\":\"event channel is shutting down\"}",
+        "{\"type\":\"error\",\"code\":\"SEND_FAILED\",\"message\":\"event channel is shutting down\"}",
         recorder.sent.get(1));
     recorder.handlers.get(1).onResult(new SendResult());
     ArgumentCaptor<CloseReason> reasonCaptor = ArgumentCaptor.forClass(CloseReason.class);
@@ -692,7 +687,7 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   private static String subscribeFrame(UUID threadId) {
-    return "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+    return "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
         + threadId
         + "\"}}";
   }
@@ -706,14 +701,14 @@ class ApplicationEventWebSocketHandlerTest {
   private static String ideUseFrame(
       UUID documentId, String revision, UUID claimId, long bindingEpoch) {
     return """
-        {"version":2,"type":"ide-use","documentId":"%s","revision":"%s","views":[
+        {"type":"ide-use","documentId":"%s","revision":"%s","views":[
           {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"%d"}]}
         """
         .formatted(documentId, revision, IDE_ENVIRONMENT, IDE_VIEW, claimId, bindingEpoch);
   }
 
   private static String unsubscribeFrame(UUID threadId) {
-    return "{\"version\":2,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+    return "{\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
         + threadId
         + "\"}}";
   }

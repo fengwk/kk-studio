@@ -26,11 +26,10 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 事件通道 v2 帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:2}；客户端帧手工字段校验（duplicate/trailing/
- * unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
+ * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
- * <p>客户端帧 {@code {version:2,type:'subscribe'|'unsubscribe',resource}} 与 {@code
- * {version:2,type:'ide-use',documentId,revision,views}} 字段集精确。服务端帧 {@code connected} / {@code
+ * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe',resource}} 与 {@code
+ * {type:'ide-use',documentId,revision,views}} 字段集精确。服务端帧 {@code connected} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
  * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
  * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
@@ -51,9 +50,9 @@ final class EventFrameCodec {
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> SUBSCRIPTION_FIELDS = orderedSet("version", "type", "resource");
+  private static final Set<String> SUBSCRIPTION_FIELDS = orderedSet("type", "resource");
   private static final Set<String> IDE_USE_FIELDS =
-      orderedSet("version", "type", "documentId", "revision", "views");
+      orderedSet("type", "documentId", "revision", "views");
   private static final Set<String> IDE_USE_VIEW_FIELDS =
       orderedSet("environmentId", "viewId", "claimId", "bindingEpoch");
   private static final Set<String> IDE_USE_VIEW_REQUIRED_FIELDS =
@@ -96,7 +95,6 @@ final class EventFrameCodec {
       throw new IllegalArgumentException("malformed client frame JSON");
     }
     ObjectNode node = requireObject(root, "frame");
-    requireVersionTwo(node, "frame");
     String typeName = requiredText(node, "type", "frame");
     return switch (typeName) {
       case "subscribe" -> {
@@ -123,7 +121,6 @@ final class EventFrameCodec {
     Objects.requireNonNull(eventNodeId, "eventNodeId");
     Objects.requireNonNull(connectionId, "connectionId");
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "connected");
     node.put("eventNodeId", eventNodeId.toString());
     node.put("connectionId", connectionId.toString());
@@ -136,7 +133,6 @@ final class EventFrameCodec {
       throw new IllegalArgumentException("revision must be positive");
     }
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "ide-use-accepted");
     node.put("revision", Long.toString(revision));
     return write(node);
@@ -152,7 +148,6 @@ final class EventFrameCodec {
       throw new IllegalArgumentException("hint resource cursor must be zero");
     }
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "subscribed");
     node.set("resource", resourceNode(resource));
     node.put("cursor", Long.toString(cursor));
@@ -160,7 +155,7 @@ final class EventFrameCodec {
   }
 
   /**
-   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；前进事件额外携带 canonical {@code
+   * 编码 {@code event} 帧：统一 {@code {type,resource,name,data}}；前进事件额外携带 canonical {@code
    * cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
    *
    * <p>前进事件的 {@code name} 与 {@code data} 字段名跟随资源坐标系：Thread 是 {@code version}，Canvas 是 {@code
@@ -169,7 +164,6 @@ final class EventFrameCodec {
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "event");
     node.set("resource", resourceNode(resource));
     if (signal instanceof Signal.Version version) {
@@ -234,7 +228,6 @@ final class EventFrameCodec {
   /** 编码 {@code resync} 帧。 */
   String resync(ResourceKey resource) {
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "resync");
     node.set("resource", resourceNode(resource));
     return write(node);
@@ -243,7 +236,6 @@ final class EventFrameCodec {
   /** 编码连接级 {@code heartbeat} 帧；不绑定资源、不携带游标。 */
   String heartbeat() {
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "heartbeat");
     return write(node);
   }
@@ -251,7 +243,6 @@ final class EventFrameCodec {
   /** 编码 {@code error} 帧（连接级，不含 resource）。 */
   String error(String code, String message) {
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "error");
     node.put("code", code);
     node.put("message", message);
@@ -261,7 +252,6 @@ final class EventFrameCodec {
   /** 编码 {@code error} 帧（资源级，附带 resource 供客户端定位）。 */
   String error(String code, String message, ResourceKey resource) {
     ObjectNode node = NODES.objectNode();
-    node.put("version", 2);
     node.put("type", "error");
     node.put("code", code);
     node.put("message", message);
@@ -283,14 +273,6 @@ final class EventFrameCodec {
       String message =
           value == null ? field + " must not be null" : field + " must be a canonical UUID";
       throw new IllegalArgumentException(message);
-    }
-  }
-
-  private static void requireVersionTwo(ObjectNode node, String context) {
-    JsonNode version = node.get("version");
-    // 数值必须精确等于 integer 2；asLong() 会接受溢出整数的截断结果，isInt() 限定 int 范围。
-    if (version == null || !version.isInt() || version.asInt() != 2) {
-      throw new IllegalArgumentException(context + ".version must be the integer 2");
     }
   }
 

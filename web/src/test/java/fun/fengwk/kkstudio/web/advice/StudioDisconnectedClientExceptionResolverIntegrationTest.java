@@ -29,9 +29,9 @@ class StudioDisconnectedClientExceptionResolverIntegrationTest extends WebPostgr
     mockMvc.perform(get("/__probe/disconnect")).andExpect(content().string(""));
   }
 
-  /** 测试意图：Tomcat {@code ClientAbortException} 同样被视为断连，不产生第二次 body 写。 */
+  /** 测试意图：Jetty {@code EofException} 同样被视为断连，不产生第二次 body 写。 */
   @Test
-  void clientAbortExceptionDoesNotWriteSecondaryJsonBody() throws Exception {
+  void jettyEofExceptionDoesNotWriteSecondaryJsonBody() throws Exception {
     mockMvc.perform(get("/__probe/client-abort")).andExpect(content().string(""));
   }
 
