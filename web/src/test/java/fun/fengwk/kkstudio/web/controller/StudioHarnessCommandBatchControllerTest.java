@@ -652,12 +652,14 @@ class StudioHarnessCommandBatchControllerTest {
 
   /** 来源 Thread 快照：sessionId 固定为 {@link #SESSION_ID}，只用于 guard 解析来源会话。 */
   private static ThreadSnapshot sessionForkSnapshot(UUID sourceThreadId) {
+    // 快照要求 Thread head 与当前 Entry 状态一致；guard 只读取 sessionId。
+    EntryPath path = new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry()));
     ThreadState thread =
         new ThreadState(
             sourceThreadId,
             UUID.fromString(SESSION_ID),
             null,
-            UUID.fromString(ENTRY_ID),
+            path.head().id(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "thread",
             sourceThreadId,
@@ -670,7 +672,6 @@ class StudioHarnessCommandBatchControllerTest {
             3,
             HarnessRuntimeTestFixtures.NOW,
             HarnessRuntimeTestFixtures.NOW);
-    EntryPath path = new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry()));
     return new ThreadSnapshot(
         thread,
         EntryCurrentState.from(path),
