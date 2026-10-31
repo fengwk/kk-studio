@@ -37,7 +37,7 @@ public class ModelCatalogService {
   private final ModelCatalogTransport transport;
   private final ModelsDevCatalogParser parser;
   private final Clock clock;
-  private final SourceState state = new SourceState();
+  private final CatalogState state = new CatalogState();
   private final Object lock = new Object();
   private final AtomicLong generation = new AtomicLong();
 
@@ -67,7 +67,7 @@ public class ModelCatalogService {
       try {
         load.future().join();
       } catch (CompletionException ignored) {
-        // 错误已经记录在来源状态中；保留旧快照语义。
+        // 错误已记录在目录状态中，上次成功的快照保持不变。
       }
     }
     synchronized (lock) {
@@ -75,7 +75,7 @@ public class ModelCatalogService {
     }
   }
 
-  /** 手动刷新当前来源；存在进行中的 single-flight 时直接复用。 */
+  /** 手动刷新目录；存在进行中的 single-flight 时直接复用。 */
   public ModelCatalogPageDTO refresh() {
     synchronized (lock) {
       startLoadLocked(state);
@@ -83,7 +83,7 @@ public class ModelCatalogService {
     }
   }
 
-  private void startLoadLocked(SourceState state) {
+  private void startLoadLocked(CatalogState state) {
     if (state.loading) {
       return;
     }
@@ -120,7 +120,7 @@ public class ModelCatalogService {
   }
 
   private ModelCatalogPageDTO pageLocked(
-      SourceState state, String query, String cursor, int pageSize) {
+      CatalogState state, String query, String cursor, int pageSize) {
     int size = pageSize <= 0 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
     String generationText = Long.toString(state.generation);
     int offset = cursorOffset(cursor, generationText);
@@ -181,7 +181,7 @@ public class ModelCatalogService {
     return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
   }
 
-  private boolean expired(SourceState state) {
+  private boolean expired(CatalogState state) {
     return state.fetchedAt == null || !state.fetchedAt.plus(TTL).isAfter(Instant.now(clock));
   }
 
@@ -212,7 +212,7 @@ public class ModelCatalogService {
     return message == null || message.isBlank() ? "catalog refresh failed" : message;
   }
 
-  private static final class SourceState {
+  private static final class CatalogState {
 
     private List<ModelDefaultCandidateDTO> snapshot;
     private Instant fetchedAt;
