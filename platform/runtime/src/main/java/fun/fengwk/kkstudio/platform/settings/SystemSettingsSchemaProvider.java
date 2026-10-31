@@ -37,7 +37,7 @@ public class SystemSettingsSchemaProvider {
     return schema;
   }
 
-  /** AI 运行时：调用重试、HTTP 错误码、模型目录来源、压缩与 subagent 限额。 */
+  /** AI 运行时：调用重试、HTTP 错误码、压缩与 subagent 限额。 */
   private static SystemSettingsSchemaDTO.SectionDTO aiRuntimeSection() {
     return section(
         "aiRuntime",
@@ -46,7 +46,6 @@ public class SystemSettingsSchemaProvider {
         false,
         retryGroup(),
         httpErrorsGroup(),
-        modelCatalogGroup(),
         compactionGroup(),
         subagentGroup());
   }
@@ -109,25 +108,6 @@ public class SystemSettingsSchemaProvider {
             false,
             400,
             599));
-  }
-
-  private static SystemSettingsSchemaDTO.GroupDTO modelCatalogGroup() {
-    return group(
-        "aiRuntime.modelCatalog",
-        "settings.section.aiRuntime.modelCatalog.title",
-        "settings.section.aiRuntime.modelCatalog.description",
-        false,
-        ApplyTiming.NEXT_HTTP_REQUEST,
-        field(
-            "aiRuntime.modelCatalogSource",
-            "settings.field.aiRuntime.modelCatalogSource",
-            "settings.field.aiRuntime.modelCatalogSource.hint",
-            FieldType.ENUM,
-            false,
-            null,
-            null,
-            option("models_dev_v2", "settings.option.modelCatalogSource.modelsDevV2"),
-            option("models_dev_v1", "settings.option.modelCatalogSource.modelsDevV1")));
   }
 
   private static SystemSettingsSchemaDTO.GroupDTO compactionGroup() {

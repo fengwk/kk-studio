@@ -1624,12 +1624,9 @@ export interface ModelCatalogPageDTO {
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource */
-export type ModelCatalogSource =
-  | 'models_dev_v1'
-  | 'models_dev_v2'
+export type ModelCatalogSource = 'models_dev_v2'
 
 export const MODEL_CATALOG_SOURCE_VALUES: readonly ModelCatalogSource[] = [
-  'models_dev_v1',
   'models_dev_v2',
 ]
 
@@ -2015,7 +2012,6 @@ export interface SystemSettingsAiRuntimeDTO {
   subagentMaxTotalConcurrency: number
   subagentMaxTurns: number
   modelHttpRetryStatusCodes: number[]
-  modelCatalogSource: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO */

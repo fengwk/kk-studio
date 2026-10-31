@@ -14,7 +14,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -88,11 +87,8 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
   }
 
   static Map<ModelCatalogSource, URI> endpoints() {
-    Map<ModelCatalogSource, URI> endpoints = new EnumMap<>(ModelCatalogSource.class);
-    endpoints.put(ModelCatalogSource.MODELS_DEV_V1, URI.create("https://models.dev/api.json"));
-    endpoints.put(
+    return Map.of(
         ModelCatalogSource.MODELS_DEV_V2,
         URI.create("https://models.dev/experimental/v2.0/api.json"));
-    return Map.copyOf(endpoints);
   }
 }

@@ -112,7 +112,6 @@ describe('system settings schema renderer', () => {
       'aiRuntime.retryBaseDelayMillis',
       'aiRuntime.retryMaxDelayMillis',
       'aiRuntime.modelHttpRetryStatusCodes',
-      'aiRuntime.modelCatalogSource',
       'aiRuntime.compactionKeepRecentTokens',
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',

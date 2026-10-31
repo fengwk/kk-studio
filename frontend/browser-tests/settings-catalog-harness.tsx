@@ -13,7 +13,7 @@ systemSettingsService.get = async () => settings
 systemSettingsService.getSchema = async () => makeSettingsSchema()
 systemSettingsService.update = async (update) => {
   settings = { ...settings, ...update, version: '1' }
-  document.body.dataset.savedSource = update.aiRuntime.modelCatalogSource
+  document.body.dataset.savedStrategy = update.aiRuntime.retryBackoffStrategy
   return settings
 }
 createRoot(document.getElementById('root')!).render(
