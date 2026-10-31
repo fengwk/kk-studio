@@ -29,6 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.protocol.IdeResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
@@ -37,8 +39,6 @@ import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -367,21 +367,13 @@ class StudioEnvironmentIdeControllerTest {
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand ideCommand) {
       command = ideCommand;
-      CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+      CompletableFuture<IdeResult> reply = new CompletableFuture<>();
       reply.complete(
-          new IdeReply(
-              false,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              null,
-              "UNAVAILABLE",
-              "not used by this test"));
+          IdeResult.newBuilder()
+              .setOk(false)
+              .setCode("UNAVAILABLE")
+              .setMessage("not used by this test")
+              .build());
       return new IdeRequest(
           new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
     }
