@@ -29,6 +29,7 @@ import {
   MessageType,
   ProgressSchema,
   ReadySchema,
+  RecoverNotFoundSchema,
   ResourceContentSchema,
   RuntimeBodySchema,
   RuntimeSnapshotSchema,
@@ -924,9 +925,19 @@ export class Runtime {
    * 已终结的调用重放终态与独立退出确认；从未收到的调用保持静默。
    */
   private handleRecover(envelope: Envelope): void {
-    const entry = this.journal.find(requireInvocationId(envelope))
+    const invocationId = requireInvocationId(envelope)
+    const entry = this.journal.find(invocationId)
     if (entry !== undefined) {
       this.replay(entry)
+    } else {
+      this.send(
+        create(EnvelopeSchema, {
+          messageType: MessageType.RECOVER_NOT_FOUND,
+          environmentId: this.boundEnvironmentId ?? undefined,
+          invocationId,
+          payload: { case: 'recoverNotFound', value: create(RecoverNotFoundSchema, {}) },
+        }),
+      )
     }
   }
 

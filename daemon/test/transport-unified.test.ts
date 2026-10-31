@@ -620,7 +620,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
         transport,
         capabilities: {
           'test.echo': async (call) => ({
-            callId: 'call-1',
+            callId: call.invocationId,
             error: false,
             details: {},
             contents: [{ type: 'text', text: `result:${call.arguments.msg}` }],
@@ -674,6 +674,11 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
           },
         }),
       )
+
+      // 接收 STARTED
+      const started = await peer.nextEnvelope()
+      expect(started.messageType).toBe(MessageType.STARTED)
+      expect(started.invocationId).toBe('invoke-100')
 
       // 接收 COMPLETED
       const completed = await peer.nextEnvelope()

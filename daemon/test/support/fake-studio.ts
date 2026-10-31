@@ -54,6 +54,7 @@ export class FakeStudioPeer {
   private controlStream: ClientHttp2Stream | null = null
   private controlBuffer = Buffer.alloc(0)
   private readonly receivedEnvelopes: Envelope[] = []
+  private readonly allReceivedEnvelopes: Envelope[] = []
   private readonly envelopeListeners: Array<(envelope: Envelope) => void> = []
   private readonly sockets = new Set<net.Socket>()
   private readonly options: FakeStudioOptions
@@ -134,7 +135,7 @@ export class FakeStudioPeer {
   }
 
   get received(): Envelope[] {
-    return this.receivedEnvelopes
+    return this.allReceivedEnvelopes
   }
 
   private setupHttp2(ws: WebSocket): void {
@@ -218,10 +219,12 @@ export class FakeStudioPeer {
           this.controlBuffer = this.controlBuffer.subarray(totalLength)
           try {
             const envelope = decodeFrame(new Uint8Array(frameBytes))
-            this.receivedEnvelopes.push(envelope)
+            this.allReceivedEnvelopes.push(envelope)
             if (this.envelopeListeners.length > 0) {
               const listener = this.envelopeListeners.shift()!
               listener(envelope)
+            } else {
+              this.receivedEnvelopes.push(envelope)
             }
           } catch {}
         }
