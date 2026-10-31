@@ -36,7 +36,8 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -45,7 +46,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -151,17 +151,15 @@ class HarnessStreamCatchupServiceTest {
     UUID ownerTurnId = new UUID(0L, 11L);
     ThreadState foreignThread = mock(ThreadState.class);
     when(foreignThread.id()).thenReturn(foreignThreadId);
+    when(foreignThread.headEntryId()).thenReturn(foreignTurnId);
+    BranchSettings settings = new BranchSettings("agent", new ModelSelection("model", "v1"), null);
     Entry foreignTurn = mock(Entry.class);
     when(foreignTurn.id()).thenReturn(foreignTurnId);
     when(foreignTurn.payload())
-        .thenReturn(
-            new TurnStartPayload(
-                TurnStartReason.INPUT,
-                new BranchSettings("agent", new ModelSelection("model", "v1"), null),
-                foreignThreadId));
-    EntryPath foreignPath = mock(EntryPath.class);
-    when(foreignPath.openTurnStart()).thenReturn(Optional.of(foreignTurn));
-    when(foreignPath.entries()).thenReturn(List.of(foreignTurn));
+        .thenReturn(new TurnStartPayload(TurnStartReason.INPUT, settings, foreignThreadId));
+    EntryCurrentState foreignCurrent =
+        new EntryCurrentState(foreignTurn, foreignTurn, foreignTurn, null, settings);
+    EntrySlice foreignSlice = new EntrySlice(foreignTurnId, List.of());
     GenerationProjection foreignGeneration =
         new GenerationProjection(
             INVOCATION,
@@ -182,7 +180,8 @@ class HarnessStreamCatchupServiceTest {
         () ->
             new ThreadSnapshot(
                 foreignThread,
-                foreignPath,
+                foreignCurrent,
+                foreignSlice,
                 List.of(),
                 foreignGeneration,
                 List.of(),

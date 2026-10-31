@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
@@ -800,12 +800,12 @@ class InteractionQueryServiceTest {
     when(thread.sessionId()).thenReturn(sessionId);
     when(thread.name()).thenReturn("nightly report");
     when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
-    EntryPath entryPath = mock(EntryPath.class);
-    when(entryPath.baseSettings())
+    EntryCurrentState entryState = mock(EntryCurrentState.class);
+    when(entryState.baseSettings())
         .thenReturn(new BranchSettings("worker", ModelSelection.model("m", "v1"), null));
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
-    when(snapshot.entryPath()).thenReturn(entryPath);
+    when(snapshot.entryState()).thenReturn(entryState);
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
     when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
     when(issueAgentOwnership.findBoundRoot(rootThreadId)).thenReturn(Optional.empty());

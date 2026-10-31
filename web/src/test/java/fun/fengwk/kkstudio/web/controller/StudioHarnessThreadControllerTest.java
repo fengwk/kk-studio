@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -37,16 +38,25 @@ import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
@@ -162,15 +172,18 @@ class StudioHarnessThreadControllerTest {
             HarnessRuntimeTestFixtures.NOW,
             HarnessRuntimeTestFixtures.NOW.plusSeconds(1),
             List.of());
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                HarnessRuntimeTestFixtures.rootEntry(),
+                HarnessRuntimeTestFixtures.turnStartEntry(id(1)),
+                HarnessRuntimeTestFixtures.userMessageEntry(),
+                HarnessRuntimeTestFixtures.assistantEntry()));
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
             HarnessRuntimeTestFixtures.activeThread(id(1), id(4)),
-            new EntryPath(
-                List.of(
-                    HarnessRuntimeTestFixtures.rootEntry(),
-                    HarnessRuntimeTestFixtures.turnStartEntry(id(1)),
-                    HarnessRuntimeTestFixtures.userMessageEntry(),
-                    HarnessRuntimeTestFixtures.assistantEntry())),
+            EntryCurrentState.from(path),
+            new EntrySlice(null, path.entries()),
             List.of(),
             generation,
             List.of(
@@ -212,8 +225,18 @@ class StudioHarnessThreadControllerTest {
     when(runtime.getThreadTree(id(1)))
         .thenReturn(
             List.of(
-                HarnessRuntimeTestFixtures.idleSnapshot(id(2)),
-                HarnessRuntimeTestFixtures.idleParentSnapshot(id(2))));
+                new ThreadTreeNode(
+                    HarnessRuntimeTestFixtures.idleSnapshot(id(2)).thread(),
+                    new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+                    ThreadRuntimeStatus.IDLE,
+                    null,
+                    new EntryPathMetrics(0, 0)),
+                new ThreadTreeNode(
+                    HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)).thread(),
+                    new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+                    ThreadRuntimeStatus.IDLE,
+                    null,
+                    new EntryPathMetrics(0, 0))));
 
     mockMvc
         .perform(get("/api/threads/" + idText(1) + "/tree"))
@@ -1041,5 +1064,140 @@ class StudioHarnessThreadControllerTest {
     assertEquals(toolInvocationId, captor.getValue().toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
     assertEquals("alice", captor.getValue().actor());
+  }
+
+  @Test
+  void getSnapshotWithNonCanonicalAfterEntryIdRejectsBadRequest() throws Exception {
+    mockMvc
+        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=not-a-valid-uuid"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+  }
+
+  @Test
+  void getSnapshotWithCursorAtHeadReturnsEmptyDeltaWithBaseAsHead() throws Exception {
+    UUID threadId = id(1);
+    UUID headId = id(10);
+    Entry root = HarnessRuntimeTestFixtures.rootEntry();
+    Entry head =
+        new Entry(
+            headId,
+            id(1),
+            root.id(),
+            new TurnStartPayload(
+                TurnStartReason.INPUT, HarnessRuntimeTestFixtures.settings(), threadId),
+            HarnessRuntimeTestFixtures.NOW);
+    EntryCurrentState current =
+        new EntryCurrentState(head, head, null, null, HarnessRuntimeTestFixtures.settings());
+    EntrySlice emptySlice = new EntrySlice(headId, List.of());
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.activeThread(threadId, headId),
+            current,
+            emptySlice,
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    when(runtime.getThreadSnapshot(threadId, headId)).thenReturn(snapshot);
+
+    mockMvc
+        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + headId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.baseEntryId").value(headId.toString()))
+        .andExpect(jsonPath("$.data.entries").isEmpty());
+    verify(runtime).getThreadSnapshot(threadId, headId);
+  }
+
+  @Test
+  void getSnapshotWithNonAncestorCursorFallsBackToFullSnapshot() throws Exception {
+    UUID threadId = id(1);
+    UUID nonAncestorId = id(999);
+    EntryPath fullPath = new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry()));
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.activeThread(threadId, fullPath.head().id()),
+            EntryCurrentState.from(fullPath),
+            new EntrySlice(null, fullPath.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    when(runtime.getThreadSnapshot(threadId, nonAncestorId)).thenReturn(snapshot);
+
+    mockMvc
+        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + nonAncestorId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.baseEntryId").value(nullValue()))
+        .andExpect(jsonPath("$.data.entries.length()").value(1));
+    verify(runtime).getThreadSnapshot(threadId, nonAncestorId);
+  }
+
+  @Test
+  void getSnapshotProjectsUsageCostOnlyForEntriesInSlice() throws Exception {
+    UUID threadId = id(1);
+    UUID cursorId = id(5);
+    UUID newEntryId = id(6);
+    Entry root = HarnessRuntimeTestFixtures.rootEntry();
+    Entry entry1 =
+        new Entry(
+            cursorId,
+            id(1),
+            root.id(),
+            new TurnStartPayload(
+                TurnStartReason.INPUT, HarnessRuntimeTestFixtures.settings(), threadId),
+            HarnessRuntimeTestFixtures.NOW);
+    Entry entry2 =
+        new Entry(
+            newEntryId,
+            id(1),
+            cursorId,
+            HarnessRuntimeTestFixtures.assistantEntry().payload(),
+            HarnessRuntimeTestFixtures.NOW);
+    EntryCurrentState current =
+        new EntryCurrentState(entry2, entry2, null, null, HarnessRuntimeTestFixtures.settings());
+    EntrySlice deltaSlice = new EntrySlice(cursorId, List.of(entry2));
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.activeThread(threadId, newEntryId),
+            current,
+            deltaSlice,
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    when(runtime.getThreadSnapshot(threadId, cursorId)).thenReturn(snapshot);
+
+    HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
+    cost.setCurrency("USD");
+    cost.setAmount("0.420000000000");
+    when(usageCostProjectionService.project(List.of(entry2))).thenReturn(Map.of(newEntryId, cost));
+
+    mockMvc
+        .perform(get("/api/threads/" + idText(1) + "?afterEntryId=" + cursorId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.baseEntryId").value(cursorId.toString()))
+        .andExpect(jsonPath("$.data.entries.length()").value(1))
+        .andExpect(jsonPath("$.data.entries[0].entryId").value(newEntryId.toString()))
+        .andExpect(jsonPath("$.data.entries[0].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.data.entries[0].usageCost.amount").value("0.420000000000"));
+    verify(usageCostProjectionService).project(List.of(entry2));
+    verify(usageCostProjectionService, never())
+        .project(argThat((List<Entry> list) -> list.contains(root) || list.contains(entry1)));
   }
 }

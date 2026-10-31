@@ -23,15 +23,21 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
@@ -92,8 +98,20 @@ class HarnessRuntimeResponseMapperTest {
   /** 关系树投影沿用快照状态与计数，不向未结束节点伪造成功。 */
   @Test
   void projectsTreeNodesFromRuntimeSnapshots() {
-    ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
-    ThreadSnapshot continuing = HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3));
+    ThreadTreeNode parent =
+        new ThreadTreeNode(
+            HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)).thread(),
+            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            ThreadRuntimeStatus.IDLE,
+            null,
+            new EntryPathMetrics(0, 0));
+    ThreadTreeNode continuing =
+        new ThreadTreeNode(
+            HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3)).thread(),
+            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            ThreadRuntimeStatus.RUNNING,
+            null,
+            new EntryPathMetrics(1, 0));
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(parent, continuing));
 
@@ -102,7 +120,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(id(1).toString(), node.getThreadId());
     assertEquals(id(2).toString(), node.getParentThreadId());
     assertEquals(parent.thread().name(), node.getName());
-    assertEquals(parent.entryPath().baseSettings().agentName(), node.getAgentName());
+    assertEquals(parent.branchSettings().agentName(), node.getAgentName());
     assertEquals("gpt-5", node.getModel().getModelName());
     assertEquals("IDLE", node.getStatus());
     assertEquals("RUNNABLE", node.getExecutionControl());
@@ -122,9 +140,9 @@ class HarnessRuntimeResponseMapperTest {
     // 测试意图：对外状态严格收敛为三态（RUNNING / WAITING / IDLE），与持久 executionControl 正交。
     ThreadSnapshot idle = HarnessRuntimeTestFixtures.idleSnapshot();
     ThreadSnapshot waiting =
-        new ThreadSnapshot(
+        snapshot(
             idle.thread(),
-            idle.entryPath(),
+            new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
             List.of(),
             null,
             List.of(),
@@ -157,20 +175,13 @@ class HarnessRuntimeResponseMapperTest {
   @Test
   void treeNodeWithWaitingLocalTurnEndDoesNotExposeCompletedOutcome() {
     // 测试意图：tree 非 IDLE outcome 不得声明 COMPLETED；子任务未完成时 WAITING 且 outcome 必须为 null。
-    ThreadSnapshot completed = HarnessRuntimeTestFixtures.completedTurnSnapshot(id(3));
-    ThreadSnapshot waitingWithTurnEnd =
-        new ThreadSnapshot(
-            completed.thread(),
-            completed.entryPath(),
-            List.of(),
+    ThreadTreeNode waitingWithTurnEnd =
+        new ThreadTreeNode(
+            HarnessRuntimeTestFixtures.completedTurnSnapshot(id(3)).thread(),
+            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            ThreadRuntimeStatus.WAITING,
             null,
-            List.of(),
-            ThreadLiveState.IDLE_OR_HISTORICAL,
-            List.of(),
-            1,
-            false,
-            List.of(),
-            false);
+            new EntryPathMetrics(1, 0));
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waitingWithTurnEnd));
     assertEquals("WAITING", nodes.getFirst().getStatus());
@@ -565,7 +576,7 @@ class HarnessRuntimeResponseMapperTest {
                 new CancelledThreadInput(
                     1, id(50), new UserMessageCommandPayload(AgentMessage.user("draft")))));
     ThreadSnapshot snapshot =
-        new ThreadSnapshot(
+        snapshot(
             HarnessRuntimeTestFixtures.thread(id(1)),
             new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
             List.of(),
@@ -623,7 +634,7 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ThreadSnapshot idleSnapshot(BranchSettings settings) {
     Entry root = new Entry(id(1), id(1), null, new RootPayload(settings), NOW);
-    return new ThreadSnapshot(
+    return snapshot(
         HarnessRuntimeTestFixtures.thread(id(1)),
         new EntryPath(List.of(root)),
         List.of(),
@@ -663,7 +674,7 @@ class HarnessRuntimeResponseMapperTest {
                 HarnessRuntimeTestFixtures.rootEntry(),
                 turnStartEntryForThread(id(1)),
                 HarnessRuntimeTestFixtures.userMessageEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         HarnessRuntimeTestFixtures.activeThread(id(1), id(3)),
         path,
         queued,
@@ -702,7 +713,7 @@ class HarnessRuntimeResponseMapperTest {
                 turnStartEntryForThread(id(1)),
                 HarnessRuntimeTestFixtures.userMessageEntry(),
                 HarnessRuntimeTestFixtures.assistantEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         HarnessRuntimeTestFixtures.activeThread(id(1), id(4)),
         path,
         List.of(),
@@ -863,7 +874,8 @@ class HarnessRuntimeResponseMapperTest {
             thread.updatedAt());
     return new ThreadSnapshot(
         changed,
-        snapshot.entryPath(),
+        snapshot.entryState(),
+        snapshot.entrySlice(),
         snapshot.queuedCommands(),
         snapshot.generation(),
         snapshot.toolSiblings(),
@@ -873,6 +885,33 @@ class HarnessRuntimeResponseMapperTest {
         snapshot.unconsumedAppliedNotifications(),
         snapshot.unconfirmedExecutions(),
         snapshot.hasIncompleteOwnerChildJoin());
+  }
+
+  private static ThreadSnapshot snapshot(
+      ThreadState thread,
+      EntryPath path,
+      List<ThreadCommand> commands,
+      GenerationProjection generation,
+      List<ToolInvocation> toolSiblings,
+      ThreadLiveState liveState,
+      List<StoppedThreadReceipt> stopReceipts,
+      int incompleteChildJoins,
+      boolean unconsumedAppliedNotifications,
+      List<ExecutionExitFact> unconfirmedExecutions,
+      boolean hasIncompleteOwnerChildJoin) {
+    return new ThreadSnapshot(
+        thread,
+        EntryCurrentState.from(path),
+        new EntrySlice(null, path.entries()),
+        commands,
+        generation,
+        toolSiblings,
+        liveState,
+        stopReceipts,
+        incompleteChildJoins,
+        unconsumedAppliedNotifications,
+        unconfirmedExecutions,
+        hasIncompleteOwnerChildJoin);
   }
 
   private static UUID id(long value) {

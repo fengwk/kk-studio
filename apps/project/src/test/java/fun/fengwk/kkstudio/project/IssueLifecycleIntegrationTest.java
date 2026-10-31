@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -152,7 +153,9 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     ThreadSnapshot inFlightSnapshot = mock(ThreadSnapshot.class);
     when(inFlightSnapshot.thread()).thenReturn(threadState);
-    when(inFlightSnapshot.entryPath()).thenReturn(entryPath);
+    when(inFlightSnapshot.entryState())
+        .thenReturn(new EntryCurrentState(rootEntry, rootEntry, null, null, null));
+    when(inFlightSnapshot.requireFullPath()).thenReturn(entryPath);
     when(inFlightSnapshot.executionFacts())
         .thenReturn(new ThreadExecutionFacts(true, false, false));
     when(runtime.getThreadSnapshot(activeRun.getThreadId())).thenReturn(inFlightSnapshot);

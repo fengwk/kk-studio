@@ -133,12 +133,16 @@ public final class ProviderRequestPreviewService {
     Instant now = clock.instant();
     EntryPath candidatePath =
         TurnPlanPreview.inputCandidatePath(
-            threadId, snapshot.entryPath(), snapshot.thread().nextCommandSequence(), prepared, now);
+            threadId,
+            snapshot.requireFullPath(),
+            snapshot.thread().nextCommandSequence(),
+            prepared,
+            now);
     return planAndEncode(
         turnResolver.planLive(threadId, candidatePath, now),
         candidatePath,
         now,
-        snapshot.entryPath().head().id(),
+        snapshot.entryState().head().id(),
         HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
         HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
   }
@@ -605,7 +609,7 @@ public final class ProviderRequestPreviewService {
           Reason.PREVIEW_THREAD_BUSY, "thread is not idle; the next step is not an input turn");
     }
     if (runtime.prepareAutomaticCompaction(
-            thread, snapshot.entryPath(), compactionConfigProvider.compactionConfig(), true)
+            thread, snapshot.requireFullPath(), compactionConfigProvider.compactionConfig(), true)
         != null) {
       throw new ProviderRequestPreviewUnavailableException(
           Reason.PREVIEW_COMPACTION_REQUIRED,

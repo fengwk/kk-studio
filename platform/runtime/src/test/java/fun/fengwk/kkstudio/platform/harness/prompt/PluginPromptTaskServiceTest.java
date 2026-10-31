@@ -30,7 +30,10 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
@@ -586,12 +589,17 @@ class PluginPromptTaskServiceTest {
   }
 
   private static ThreadSnapshot idle(UUID threadId) {
+    UUID sessionId = UUID.randomUUID();
+    UUID headEntryId = UUID.randomUUID();
+    BranchSettings settings =
+        new BranchSettings("prompt-agent", ModelSelection.group("gpt-4o"), "default");
+    Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW, null);
     ThreadState thread =
         new ThreadState(
             threadId,
-            UUID.randomUUID(),
+            sessionId,
             null,
-            UUID.randomUUID(),
+            headEntryId,
             "0".repeat(64),
             "prompt-task",
             threadId,
@@ -606,7 +614,8 @@ class PluginPromptTaskServiceTest {
             NOW);
     return new ThreadSnapshot(
         thread,
-        mock(EntryPath.class),
+        new EntryCurrentState(root, root, null, null, settings),
+        new EntrySlice(null, List.of(root)),
         List.of(),
         null,
         List.of(),

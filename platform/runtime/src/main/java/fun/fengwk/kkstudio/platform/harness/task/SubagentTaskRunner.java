@@ -288,7 +288,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     }
     TurnStartPayload turnStart =
         parent
-            .entryPath()
+            .entryState()
             .openTurnStart()
             .map(
                 entry -> {
@@ -312,7 +312,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     return new ParentInvocation(
         request.parentThreadId(),
         parent.thread().headEntryId(),
-        parent.entryPath().baseSettings().environmentName(),
+        parent.entryState().baseSettings().environmentName(),
         configProvider.subagentConfig());
   }
 
