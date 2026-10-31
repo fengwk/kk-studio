@@ -307,7 +307,7 @@ describe('ChatWorkspacePage', () => {
     seedLastState(CHAT_ID, paneState('split-2', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     await waitFor(() =>
-      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID),
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID, expect.anything()),
     )
     const localSnapshot = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))
     const sessionSnapshot = readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
@@ -351,7 +351,7 @@ describe('ChatWorkspacePage', () => {
     seedLastState(CHAT_ID, paneState('single', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID, expect.anything()))
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 

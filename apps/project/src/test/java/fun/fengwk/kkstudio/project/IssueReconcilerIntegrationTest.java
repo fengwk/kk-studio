@@ -28,10 +28,8 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -136,18 +134,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     }
     EntryPath path = mock(EntryPath.class);
     when(path.entries()).thenReturn(List.copyOf(entries));
-    Entry headEntry = entries.isEmpty() ? null : entries.get(entries.size() - 1);
-    if (headEntry != null) {
-      when(path.head()).thenReturn(headEntry);
+    if (!entries.isEmpty()) {
+      when(path.head()).thenReturn(entries.get(entries.size() - 1));
     }
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.requireFullPath()).thenReturn(path);
-    when(snapshot.entrySlice()).thenReturn(new EntrySlice(null, List.copyOf(entries)));
-    if (headEntry != null) {
-      when(snapshot.entryState())
-          .thenReturn(new EntryCurrentState(headEntry, headEntry, null, null, null));
-    }
     when(snapshot.queuedCommands()).thenReturn(List.of());
     when(snapshot.generation()).thenReturn(null);
     when(snapshot.toolSiblings()).thenReturn(List.of());
@@ -219,11 +211,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
       ThreadExecutionFacts executionFacts) {
     ThreadSnapshot base = createSnapshot(threadId);
     ThreadState thread = base.thread();
+    EntryPath entryPath = base.requireFullPath();
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
-    when(snapshot.entryState()).thenReturn(base.entryState());
-    when(snapshot.entrySlice()).thenReturn(base.entrySlice());
-    when(snapshot.requireFullPath()).thenReturn(base.requireFullPath());
+    when(snapshot.requireFullPath()).thenReturn(entryPath);
     when(snapshot.queuedCommands()).thenReturn(commands);
     when(snapshot.toolSiblings()).thenReturn(tools);
     when(snapshot.executionFacts()).thenReturn(executionFacts);
@@ -1597,13 +1588,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 受控假件在投影边界模拟：存在排队命令（工作）与结果未定工具（UNKNOWN），由用例显式给出事实。
     ThreadSnapshot settled = createSnapshot(run.getThreadId());
     ThreadState settledThread = settled.thread();
+    EntryPath settledPath = settled.requireFullPath();
     List<ToolInvocation> unknownTools =
         List.of(unknownTool("shell", "call-z"), unknownTool("http", "call-a"));
     ThreadSnapshot stillRunning = mock(ThreadSnapshot.class);
     when(stillRunning.thread()).thenReturn(settledThread);
-    when(stillRunning.entryState()).thenReturn(settled.entryState());
-    when(stillRunning.entrySlice()).thenReturn(settled.entrySlice());
-    when(stillRunning.requireFullPath()).thenReturn(settled.requireFullPath());
+    when(stillRunning.requireFullPath()).thenReturn(settledPath);
     when(stillRunning.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
     when(stillRunning.generation()).thenReturn(null);
     when(stillRunning.toolSiblings()).thenReturn(unknownTools);
