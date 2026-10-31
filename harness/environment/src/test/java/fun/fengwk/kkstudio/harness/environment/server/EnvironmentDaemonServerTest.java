@@ -1791,10 +1791,7 @@ class EnvironmentDaemonServerTest {
 
     EnvironmentCapabilityDescriptor drifted =
         new EnvironmentCapabilityDescriptor(
-            EnvironmentCapabilityIds.FS_READ,
-            "999",
-            descriptor().inputSchema(),
-            Duration.ofSeconds(5));
+            EnvironmentCapabilityIds.FS_READ, descriptor().inputSchema(), Duration.ofSeconds(5));
     assertThrows(
         IllegalArgumentException.class,
         () ->

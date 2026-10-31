@@ -131,7 +131,6 @@ const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
-const CAPABILITY_CATALOG_VERSION = '3'
 
 function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
   switch (action) {
@@ -170,7 +169,6 @@ export class Runtime {
   private readonly config: DaemonConfig
   private readonly transport: ControlTransport
   private readonly capabilities: Record<string, CapabilityExecutor>
-  private readonly capabilityCatalogVersion: string
   private readonly processes: ProcessSupervisor
   private readonly environment: Parameters<typeof detectEnvironmentInfo>[0] extends never ? never : ReturnType<typeof detectEnvironmentInfo>
   private readonly daemonVersion: string
@@ -226,7 +224,6 @@ export class Runtime {
     this.config = options.config
     this.transport = options.transport
     this.capabilities = options.capabilities
-    this.capabilityCatalogVersion = options.capabilityCatalogVersion ?? CAPABILITY_CATALOG_VERSION
     this.processes = options.processes
     this.daemonVersion = options.daemonVersion ?? DAEMON_VERSION
     if (!DAEMON_VERSION_PATTERN.test(this.daemonVersion)) {
@@ -722,11 +719,6 @@ export class Runtime {
       const executor = this.capabilities[capabilityId]
       if (executor === undefined) {
         throw new Error(`unknown Environment capability: ${capabilityId}`)
-      }
-      if (invoke.capabilityVersion !== this.capabilityCatalogVersion) {
-        throw new Error(
-          `capabilityVersion does not match environment descriptor: ${invoke.capabilityVersion}`,
-        )
       }
       if (this.running.size >= this.maxConcurrentInvocations) {
         throw new Error('too many concurrent capability invocations')

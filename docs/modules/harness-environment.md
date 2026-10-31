@@ -11,13 +11,12 @@ Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 
 ## 原子能力目录
 
 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)
-的 `VERSION = "3"`，它既是 catalog 版本（HELLO 的 `capabilityCatalogVersion` 必须
-相等），也是全部 descriptor 的 capability 版本。
+定义了全部原子能力。
 [`EnvironmentCapabilityDescriptor`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityDescriptor.java)
-只有四个契约属性（INVOKE wire 上的 `capabilityId` / `capabilityVersion` 就是前两项）：
+只有三个契约属性：
 
 ```text
-id / version / inputSchema / defaultTimeout
+id / inputSchema / defaultTimeout
 ```
 
 目录按固定 canonical 顺序排列，共 11 项：
@@ -282,8 +281,7 @@ COMPLETED
 
 ### 受管更新与准入
 
-`EnvironmentDaemonServer` 额外承载专用管理通道（`UPDATE` / `UPDATE_RESULT`），它不经过 capability 目录，因此即使 Daemon 声明的
-`capabilityCatalogVersion` 与本地目录不一致，连接仍可完成认证并承载版本查询与受管更新；只有普通 capability 调用在起点被拒绝。
+`EnvironmentDaemonServer` 额外承载专用管理通道（`UPDATE` / `UPDATE_RESULT`），它不经过 capability 目录，因此即使连接未注册任何普通 capability，连接仍可完成认证并承载版本查询与受管更新。
 
 - `beginUpdate(environmentId, operationId)`：要求当前节点 READY、无在途调用、无其它活动 operation；成功后登记该 operation，此后该
   Environment 的普通调用（含 Skill 同步）在起点 busy。同一 operationId 重复准入幂等。
@@ -363,7 +361,7 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 测试守卫：
 
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
-- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
+- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
 - [`ControlProtocolCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/protocol/ControlProtocolCodecTest.java)：成帧大端长度、超限防爆（16 MiB 上限）、强类型 Protobuf 消息往返与各消息类型字段校验。
 - [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：宿主 metadata 只接受 `{version, daemonVersion, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。

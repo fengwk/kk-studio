@@ -223,10 +223,10 @@ registerCase({
         fromA.homeDirectory === fromB.homeDirectory && fromA.userName === fromB.userName,
         `${label}: host facts must come from DB routing, not the caller's local socket`,
       )
-      // live 投影的原子能力来自权威 catalog 3。
+      // live 投影的原子能力来自权威能力目录。
       const capabilityKey = (card) =>
         (card.capabilities || [])
-          .map((capability) => `${capability.id}@${capability.version}`)
+          .map((capability) => capability.id)
           .sort()
           .join(',')
       assert(
@@ -235,9 +235,9 @@ registerCase({
       )
       assert(
         (fromA.capabilities || []).some(
-          (capability) => capability.id === 'fs.read' && capability.version === '3',
+          (capability) => capability.id === 'fs.read',
         ),
-        `${label}: coding capabilities must advertise fs.read@3, got ${capabilityKey(fromA)}`,
+        `${label}: coding capabilities must advertise fs.read, got ${capabilityKey(fromA)}`,
       )
     }
 

@@ -429,7 +429,6 @@ public class EnvironmentService {
                     c -> {
                       LiveEnvironmentCapabilityDTO cdto = new LiveEnvironmentCapabilityDTO();
                       cdto.setId(c.id().value());
-                      cdto.setVersion(c.version());
                       return cdto;
                     })
                 .toList()

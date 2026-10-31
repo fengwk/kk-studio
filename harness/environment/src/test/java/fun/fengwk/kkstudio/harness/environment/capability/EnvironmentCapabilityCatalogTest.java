@@ -40,7 +40,6 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
             EnvironmentCapabilityIds.SKILL_SYNC);
 
-    assertEquals("3", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
@@ -68,9 +67,6 @@ class EnvironmentCapabilityCatalogTest {
             .count());
     assertEquals(
         expected.size(), EnvironmentCapabilityCatalog.descriptors().stream().distinct().count());
-    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      assertEquals("3", descriptor.version(), descriptor.id().value());
-    }
     // Schema 是参数必填性的唯一事实源；只有无目标 path 的进程执行始终需要 workdir。
     assertEquals(
         List.of(EnvironmentCapabilityIds.PROCESS_EXEC),

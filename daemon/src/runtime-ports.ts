@@ -54,7 +54,6 @@ export interface RuntimeOptions {
   /** READY 上报的宿主 metadata；缺省时按当前进程检测。 */
   environment?: EnvironmentInfo
   daemonVersion?: string
-  capabilityCatalogVersion?: string
   journal?: InvocationJournal
   /** 自定义资源上传端口；缺省时使用内置控制面客户端。 */
   resources?: ResourceUploader

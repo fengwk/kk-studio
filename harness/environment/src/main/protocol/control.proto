@@ -183,10 +183,9 @@ message UpdateProgress {
 
 message Invoke {
   optional string capability_id = 1;
-  optional string capability_version = 2;
-  optional string arguments_json = 3;
-  optional int64 timeout_millis = 4;
-  optional ExpectedFile expected_file = 5;
+  optional string arguments_json = 2;
+  optional int64 timeout_millis = 3;
+  optional ExpectedFile expected_file = 4;
 }
 
 message ExpectedFile {

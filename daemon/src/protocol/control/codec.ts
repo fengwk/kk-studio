@@ -51,7 +51,6 @@ import {
 
 export const PROTOCOL_VERSION = 1
 export const MAX_INVOCATION_ID_CHARS = 256
-export const MAX_CAPABILITY_VERSION_CHARS = 128
 export const MAX_CALL_ID_CHARS = 256
 export const MAX_ARGUMENTS_JSON_UTF8_BYTES = MAX_MESSAGE_BYTES
 export const MAX_DETAILS_JSON_UTF8_BYTES = 1024 * 1024
@@ -413,10 +412,6 @@ function validateInvoke(invoke: Invoke): void {
     nonBlank: true,
     maxChars: 128,
     pattern: CAPABILITY_ID_PATTERN,
-  })
-  requireText(invoke.capabilityVersion, 'invoke.capabilityVersion', {
-    nonBlank: true,
-    maxChars: MAX_CAPABILITY_VERSION_CHARS,
   })
   parseJsonObject(invoke.argumentsJson, 'invoke.argumentsJson', MAX_ARGUMENTS_JSON_UTF8_BYTES)
   requireSafeLong(invoke.timeoutMillis, 'invoke.timeoutMillis', 0n, MAX_SAFE_BIGINT)

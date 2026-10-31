@@ -23,9 +23,6 @@ import java.util.stream.Collectors;
  */
 public final class EnvironmentCapabilityCatalog {
 
-  /** 基础 capability 与 catalog 版本。 */
-  public static final String VERSION = "3";
-
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
 
@@ -38,11 +35,6 @@ public final class EnvironmentCapabilityCatalog {
                   EnvironmentCapabilityDescriptor::id, Function.identity()));
 
   private EnvironmentCapabilityCatalog() {}
-
-  /** 返回当前 capability catalog 版本，用于 HELLO 与 Platform 对齐判定。 */
-  public static String version() {
-    return VERSION;
-  }
 
   /** 返回按固定 canonical 顺序排列的不可变 capability descriptor 列表。 */
   public static List<EnvironmentCapabilityDescriptor> descriptors() {
@@ -74,10 +66,10 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ZERO));
   }
 
-  /** 构造单个 capability descriptor：id、catalog 版本、从 classpath 加载的 input schema 与默认执行超时。 */
+  /** 构造单个 capability descriptor：id、从 classpath 加载的 input schema 与默认执行超时。 */
   private static EnvironmentCapabilityDescriptor descriptor(
       EnvironmentCapabilityId id, Duration defaultTimeout) {
-    return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), defaultTimeout);
+    return new EnvironmentCapabilityDescriptor(id, loadSchema(id), defaultTimeout);
   }
 
   /** 该能力是否要求 arguments 携带目标 Daemon 上的显式绝对 workdir。 */

@@ -119,7 +119,6 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
               case: 'invoke',
               value: create(InvokeSchema, {
                 capabilityId,
-                capabilityVersion: '3',
                 argumentsJson: JSON.stringify(args),
                 timeoutMillis: 10_000n,
               }),
@@ -192,7 +191,6 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
               case: 'invoke',
               value: create(InvokeSchema, {
                 capabilityId,
-                capabilityVersion: '3',
                 argumentsJson: JSON.stringify(args),
                 timeoutMillis: 10_000n,
               }),

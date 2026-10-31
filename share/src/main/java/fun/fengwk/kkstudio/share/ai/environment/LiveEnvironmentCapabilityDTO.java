@@ -7,7 +7,4 @@ import lombok.Data;
 public class LiveEnvironmentCapabilityDTO {
   /** capability 的稳定 canonical ID。 */
   private String id;
-
-  /** capability 版本字符串。 */
-  private String version;
 }

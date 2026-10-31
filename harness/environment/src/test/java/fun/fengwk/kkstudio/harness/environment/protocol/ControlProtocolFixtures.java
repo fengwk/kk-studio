@@ -10,7 +10,6 @@ final class ControlProtocolFixtures {
   static final String ENVIRONMENT_ID = "3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f";
   static final String INVOCATION_ID = "invoke-0001";
   static final String CAPABILITY_ID = "fs.edit";
-  static final String CAPABILITY_VERSION = "1.0.0";
   static final String ARGUMENTS_JSON =
       "{\"path\":\"src/main/java/App.java\",\"exponent\":1e-7,"
           + "\"highPrecision\":0.123456789012345678901234567890,\"negativeZero\":-0}";
@@ -77,7 +76,6 @@ final class ControlProtocolFixtures {
             .setInvoke(
                 Invoke.newBuilder()
                     .setCapabilityId(CAPABILITY_ID)
-                    .setCapabilityVersion(CAPABILITY_VERSION)
                     .setArgumentsJson(ARGUMENTS_JSON)
                     .setTimeoutMillis(TIMEOUT_MILLIS)
                     .setExpectedFile(

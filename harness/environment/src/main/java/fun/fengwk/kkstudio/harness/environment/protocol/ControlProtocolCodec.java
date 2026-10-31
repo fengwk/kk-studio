@@ -48,9 +48,6 @@ public final class ControlProtocolCodec {
   /** invocationId 的字符上限。 */
   public static final int MAX_INVOCATION_ID_CHARS = 256;
 
-  /** capabilityVersion 的字符上限。 */
-  public static final int MAX_CAPABILITY_VERSION_CHARS = 128;
-
   /** callId 的字符上限。 */
   public static final int MAX_CALL_ID_CHARS = 256;
 
@@ -495,12 +492,6 @@ public final class ControlProtocolCodec {
             EnvironmentCapabilityId.MAX_LENGTH,
             true);
     requireCapabilityId(capabilityId);
-    requireText(
-        invoke.hasCapabilityVersion(),
-        invoke.getCapabilityVersion(),
-        "invoke.capabilityVersion",
-        MAX_CAPABILITY_VERSION_CHARS,
-        true);
     requireJsonObject(
         invoke.hasArgumentsJson(),
         invoke.getArgumentsJson(),

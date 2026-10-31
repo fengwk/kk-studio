@@ -54,7 +54,6 @@ import {
 export const ENVIRONMENT_ID = '3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f'
 export const INVOCATION_ID = 'invoke-0001'
 export const CAPABILITY_ID = 'fs.edit'
-export const CAPABILITY_VERSION = '1.0.0'
 export const ARGUMENTS_JSON =
   '{"path":"src/main/java/App.java","exponent":1e-7,"highPrecision":0.123456789012345678901234567890,"negativeZero":-0}'
 export const TIMEOUT_MILLIS = 30000n
@@ -81,7 +80,6 @@ export function invokeEnvelope() {
     case: 'invoke',
     value: create(InvokeSchema, {
       capabilityId: CAPABILITY_ID,
-      capabilityVersion: CAPABILITY_VERSION,
       argumentsJson: ARGUMENTS_JSON,
       timeoutMillis: TIMEOUT_MILLIS,
       expectedFile: create(ExpectedFileSchema, {

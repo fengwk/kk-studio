@@ -311,7 +311,6 @@ public final class EnvironmentDaemonServer
       Invoke.Builder invokeBuilder =
           Invoke.newBuilder()
               .setCapabilityId(descriptor.id().value())
-              .setCapabilityVersion(descriptor.version())
               .setArgumentsJson(request.call().argumentsJson())
               .setTimeoutMillis(request.timeout().toMillis());
       if (request.expectedFile() != null) {

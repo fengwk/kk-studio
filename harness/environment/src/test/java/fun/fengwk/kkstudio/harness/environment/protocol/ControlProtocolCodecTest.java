@@ -528,11 +528,7 @@ class ControlProtocolCodecTest {
 
     Envelope missingCapabilityId =
         ControlProtocolFixtures.invokeEnvelope().toBuilder()
-            .setInvoke(
-                Invoke.newBuilder()
-                    .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
-                    .setArgumentsJson("{}")
-                    .setTimeoutMillis(0))
+            .setInvoke(Invoke.newBuilder().setArgumentsJson("{}").setTimeoutMillis(0))
             .build();
     assertThrows(
         ControlProtocolException.class,
@@ -710,7 +706,6 @@ class ControlProtocolCodecTest {
     Invoke missingArguments =
         Invoke.newBuilder()
             .setCapabilityId(ControlProtocolFixtures.CAPABILITY_ID)
-            .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
             .setTimeoutMillis(0)
             .build();
     assertThrows(
@@ -734,7 +729,6 @@ class ControlProtocolCodecTest {
     Invoke expectedFileOnOtherCapability =
         Invoke.newBuilder()
             .setCapabilityId("fs.read")
-            .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
             .setArgumentsJson("{}")
             .setTimeoutMillis(0)
             .setExpectedFile(
@@ -786,26 +780,6 @@ class ControlProtocolCodecTest {
             ControlProtocolCodec.encodeBinary(
                 ControlProtocolFixtures.invokeEnvelope().toBuilder()
                     .setInvocationId("   ")
-                    .build()));
-
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                ControlProtocolFixtures.invokeEnvelope().toBuilder()
-                    .setInvoke(
-                        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
-                            .setCapabilityVersion("x".repeat(129)))
-                    .build()));
-
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                ControlProtocolFixtures.invokeEnvelope().toBuilder()
-                    .setInvoke(
-                        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
-                            .setCapabilityVersion("\uD800"))
                     .build()));
 
     assertThrows(

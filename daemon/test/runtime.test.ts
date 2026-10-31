@@ -63,7 +63,6 @@ import {
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 const OTHER_ENV = '99999999-2222-4333-8444-555555555555'
-const CAPABILITY_CATALOG_VERSION = '3'
 
 const environment = {
   operatingSystem: 'linux' as const,
@@ -84,10 +83,9 @@ export interface DecodedSentEnvelope {
 }
 
 
-function encodeInvoke(options: { capabilityId: string; capabilityVersion?: string; arguments?: Record<string, unknown>; timeoutMillis?: number }): string {
+function encodeInvoke(options: { capabilityId: string; arguments?: Record<string, unknown>; timeoutMillis?: number }): string {
   return JSON.stringify({
     capabilityId: options.capabilityId,
-    capabilityVersion: options.capabilityVersion ?? '3',
     arguments: options.arguments ?? {},
     timeoutMillis: options.timeoutMillis ?? 0,
   })
@@ -244,7 +242,7 @@ function sent(transport: FakeTransport): DecodedSentEnvelope[] {
 }
 
 function invokePayload(capabilityId = 'fs.read', timeoutMillis = 0, args: Record<string, unknown> = {}): Record<string, unknown> {
-  return { capabilityId, capabilityVersion: '3', arguments: args, timeoutMillis }
+  return { capabilityId, arguments: args, timeoutMillis }
 }
 
 const ACTION_ENUM_MAP: Record<string, ProtoIdeAction> = {
@@ -270,7 +268,6 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         case: 'invoke',
         value: create(InvokeSchema, {
           capabilityId: rawPayload.capabilityId ?? 'fs.read',
-          capabilityVersion: rawPayload.capabilityVersion ?? '3',
           argumentsJson: JSON.stringify(rawPayload.arguments ?? {}),
           timeoutMillis: BigInt(rawPayload.timeoutMillis ?? 0),
         }),
@@ -848,7 +845,6 @@ describe('runtime invocation lifecycle', () => {
         const payload = JSON.parse(
           encodeInvoke({
             capabilityId: 'fs.edit',
-            capabilityVersion: CAPABILITY_CATALOG_VERSION,
             arguments: editArgs,
             timeoutMillis,
           }),
@@ -969,7 +965,6 @@ describe('runtime invocation lifecycle', () => {
       const invoke = JSON.parse(
         encodeInvoke({
           capabilityId: 'process.exec',
-          capabilityVersion: CAPABILITY_CATALOG_VERSION,
           arguments: { command: 'sleep 100', workdir: dir },
           timeoutMillis: 80,
         }),
@@ -1041,24 +1036,18 @@ describe('runtime invocation lifecycle', () => {
     }
   })
 
-  it('fails unknown capabilities and mismatched capability versions', async () => {
+  it('fails unknown capabilities', async () => {
     const setup = buildRuntime()
     await handshake(setup)
     setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload('nope.nope') }))
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
     expect(setup.runtime.getJournal().find('inv-1')?.state).toBe('FAILED')
-
-    const mismatched = JSON.parse(
-      encodeInvoke({ capabilityId: 'fs.read', capabilityVersion: '9', arguments: {}, timeoutMillis: 0 }),
-    ) as Record<string, unknown>
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-2', payload: mismatched }))
-    await waitFor(() => setup.runtime.getJournal().find('inv-2')?.state === 'FAILED')
     // 参数/能力确定未进入执行器：可以直接确认未执行，且每个调用至多一次。
     expect(
       sent(setup.transport)
         .filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')
         .map((envelope) => envelope.invocationId),
-    ).toEqual(['inv-1', 'inv-2'])
+    ).toEqual(['inv-1'])
     setup.runtime.close()
   })
 

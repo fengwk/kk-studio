@@ -57,29 +57,29 @@ const ids = [
 const card = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,
   userName: 'test', homeDirectory: '/home/test', statusExpiresAt: '2099-01-01T00:00:00Z',
-  capabilities: ids.map((id) => ({ id, version: '3' })),
+  capabilities: ids.map((id) => ({ id })),
 }
 
-test('daemon.ready accepts catalog 3 including internal preview and rejects catalog 2', async () => {
+test('daemon.ready accepts valid capability catalog including internal preview and rejects incomplete catalog', async () => {
   const run = (environment) => getCase('daemon.ready').run({
     daemonEnv: 'fixture', vars: {},
     call: async () => ({ json: { data: [environment] } }),
   })
   await run(card)
   await assert.rejects(run({
-    ...card, capabilities: ids.map((id) => ({ id, version: '2' })),
+    ...card, capabilities: ids.filter((id) => id !== 'fs.read').map((id) => ({ id })),
   }))
 })
 
-test('distributed lease projection requires catalog 3 across both nodes', async () => {
-  const run = (version) => getCase('distributed.lease_routing').run({
+test('distributed lease projection requires complete capability catalog across both nodes', async () => {
+  const run = (caps) => getCase('distributed.lease_routing').run({
     baseUrls: { a: 'http://127.0.0.1:1', b: 'http://127.0.0.1:2' },
     callNode: async (_node, _method, path) => ({
       json: { data: { ...card, id: path.split('/').at(-1),
-        capabilities: ids.map((id) => ({ id, version })) } },
+        capabilities: caps } },
     }),
     writeArtifact() {},
   })
-  await run('3')
-  await assert.rejects(run('2'), /fs.read@3/)
+  await run(ids.map((id) => ({ id })))
+  await assert.rejects(run(ids.filter((id) => id !== 'fs.read').map((id) => ({ id }))), /fs.read/)
 })

@@ -98,7 +98,6 @@ function invokeEnvelope(invocationId = 'inv-1', args: Record<string, unknown> = 
       case: 'invoke',
       value: create(InvokeSchema, {
         capabilityId: 'fs.read',
-        capabilityVersion: '3',
         argumentsJson: JSON.stringify(args),
         timeoutMillis: 60_000n,
       }),

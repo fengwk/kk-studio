@@ -12,13 +12,10 @@ import java.util.Objects;
  * deadline。调用携带的已解析超时严格覆盖该默认值，两者不合并、不取最小值。
  */
 public record EnvironmentCapabilityDescriptor(
-    EnvironmentCapabilityId id, String version, InputSchema inputSchema, Duration defaultTimeout) {
+    EnvironmentCapabilityId id, InputSchema inputSchema, Duration defaultTimeout) {
 
   public EnvironmentCapabilityDescriptor {
     id = Objects.requireNonNull(id, "id");
-    if (version == null || version.isBlank()) {
-      throw new IllegalArgumentException("version must not be blank");
-    }
     inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
     defaultTimeout = Objects.requireNonNull(defaultTimeout, "defaultTimeout");
     if (defaultTimeout.isNegative()) {

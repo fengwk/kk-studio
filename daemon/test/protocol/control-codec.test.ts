@@ -77,7 +77,6 @@ import {
   ARGUMENTS_JSON,
   CALL_ID,
   CAPABILITY_ID,
-  CAPABILITY_VERSION,
   DETAILS_JSON,
   ENVIRONMENT_ID,
   INVOCATION_ID,
@@ -130,7 +129,6 @@ function baseEnvelope(messageType: MessageType, payload: number[]): Uint8Array {
 function validInvoke() {
   return create(InvokeSchema, {
     capabilityId: CAPABILITY_ID,
-    capabilityVersion: CAPABILITY_VERSION,
     argumentsJson: ARGUMENTS_JSON,
     timeoutMillis: TIMEOUT_MILLIS,
   })
@@ -230,7 +228,6 @@ describe('control binary codec', () => {
   it('rejects duplicate JSON keys, invalid JSON and missing required fields', () => {
     const duplicate = create(InvokeSchema, {
       capabilityId: CAPABILITY_ID,
-      capabilityVersion: CAPABILITY_VERSION,
       argumentsJson: '{"a":1,"a":2}',
       timeoutMillis: TIMEOUT_MILLIS,
     })
@@ -238,14 +235,12 @@ describe('control binary codec', () => {
 
     const invalid = create(InvokeSchema, {
       capabilityId: CAPABILITY_ID,
-      capabilityVersion: CAPABILITY_VERSION,
       argumentsJson: '{"a":}',
       timeoutMillis: TIMEOUT_MILLIS,
     })
     expect(() => encodeBinary(envelope(MessageType.INVOKE, invalid))).toThrow(/valid JSON/)
 
     const missing = create(InvokeSchema, {
-      capabilityVersion: CAPABILITY_VERSION,
       argumentsJson: '{}',
       timeoutMillis: 0n,
     })
@@ -259,7 +254,6 @@ describe('control binary codec', () => {
           MessageType.INVOKE,
           create(InvokeSchema, {
             capabilityId: CAPABILITY_ID,
-            capabilityVersion: CAPABILITY_VERSION,
             argumentsJson: '{}',
             timeoutMillis: MAX_SAFE_BIGINT + 1n,
           }),
@@ -515,7 +509,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'Bad_Capability!',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{}',
               timeoutMillis: 0n,
             }),
@@ -534,7 +527,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{}',
               timeoutMillis: 0n,
               expectedFile: create(ExpectedFileSchema, {
@@ -931,7 +923,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{"file": "\ud800"}',
               timeoutMillis: 0n,
             }),
@@ -951,7 +942,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{"file": "\udc00"}',
               timeoutMillis: 0n,
             }),
@@ -971,7 +961,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{"a": 1, "a": 2}',
               timeoutMillis: 0n,
             }),
@@ -991,7 +980,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '{not_json}',
               timeoutMillis: 0n,
             }),
@@ -1011,7 +999,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '[1, 2, 3]',
               timeoutMillis: 0n,
             }),
@@ -1031,7 +1018,6 @@ describe('control binary codec', () => {
             case: 'invoke',
             value: create(InvokeSchema, {
               capabilityId: 'fs.read',
-              capabilityVersion: '1.0.0',
               argumentsJson: '   ',
               timeoutMillis: 0n,
             }),

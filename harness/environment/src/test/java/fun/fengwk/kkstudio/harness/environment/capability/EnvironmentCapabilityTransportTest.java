@@ -27,7 +27,6 @@ class EnvironmentCapabilityTransportTest {
   private static final EnvironmentCapabilityDescriptor DESCRIPTOR =
       new EnvironmentCapabilityDescriptor(
           EnvironmentCapabilityIds.FS_READ,
-          "1",
           new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),
           Duration.ofSeconds(10));
   private static final EnvironmentId ENVIRONMENT_ID =

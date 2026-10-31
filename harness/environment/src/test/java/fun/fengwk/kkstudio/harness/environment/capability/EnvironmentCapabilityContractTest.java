@@ -38,7 +38,7 @@ class EnvironmentCapabilityContractTest {
 
   private static final EnvironmentCapabilityDescriptor DESCRIPTOR =
       new EnvironmentCapabilityDescriptor(
-          new EnvironmentCapabilityId("fs.read"), "1.0.0", SCHEMA, Duration.ofSeconds(10));
+          new EnvironmentCapabilityId("fs.read"), SCHEMA, Duration.ofSeconds(10));
 
   /** 反射锁定 capability descriptor 只有执行所需字段，不引入模型展示、renderer 或权限元数据。 */
   @Test
@@ -46,12 +46,10 @@ class EnvironmentCapabilityContractTest {
     RecordComponent[] components = EnvironmentCapabilityDescriptor.class.getRecordComponents();
 
     assertArrayEquals(
-        new String[] {"id", "version", "inputSchema", "defaultTimeout"},
-        componentNames(components));
+        new String[] {"id", "inputSchema", "defaultTimeout"}, componentNames(components));
     assertEquals(EnvironmentCapabilityId.class, components[0].getType());
-    assertEquals(String.class, components[1].getType());
-    assertEquals(InputSchema.class, components[2].getType());
-    assertEquals(Duration.class, components[3].getType());
+    assertEquals(InputSchema.class, components[1].getType());
+    assertEquals(Duration.class, components[2].getType());
   }
 
   /** 文件前置条件属于执行元数据；不把 workdir 或模型参数提升为第二份执行状态。 */
@@ -62,24 +60,19 @@ class EnvironmentCapabilityContractTest {
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
-  /** descriptor 版本必须非空，defaultTimeout 允许 zero 但不能为负。 */
+  /** defaultTimeout 允许 zero 但不能为负。 */
   @Test
   void validatesDescriptorBounds() {
     assertEquals(
         Duration.ZERO,
         new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ZERO)
+                new EnvironmentCapabilityId("fs.read"), SCHEMA, Duration.ZERO)
             .defaultTimeout());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("fs.read"), " ", SCHEMA, Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EnvironmentCapabilityDescriptor(
-                new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ofSeconds(-1)));
+                new EnvironmentCapabilityId("fs.read"), SCHEMA, Duration.ofSeconds(-1)));
   }
 
   /** 数字字符串经过归一化器改为 JSON integer，且原调用保持不变。 */

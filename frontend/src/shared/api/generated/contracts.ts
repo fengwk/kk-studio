@@ -1571,7 +1571,6 @@ export interface IssueStageBudgetDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO */
 export interface LiveEnvironmentCapabilityDTO {
   id: string
-  version: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO */
