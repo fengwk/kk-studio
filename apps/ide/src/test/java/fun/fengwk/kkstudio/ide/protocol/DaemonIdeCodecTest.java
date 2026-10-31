@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 
 import java.util.List;
@@ -235,8 +234,13 @@ class DaemonIdeCodecTest {
                   null));
     }
     for (String epoch : List.of("", "0", "01", "-1", "9223372036854775808", "1.0")) {
-      assertThrows(
-          IllegalArgumentException.class, () -> DecimalLongs.parsePositive(epoch, "bindingEpoch"));
+      // 从真实 wire 解码，验证 codec 委托共同解析器并保留协议异常边界。
+      String command =
+          """
+          {"action":"FOCUS_TERMINAL","viewId":"%s","documentId":"%s","bindingEpoch":"%s"}
+          """
+              .formatted(VIEW, DOCUMENT, epoch);
+      assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(command));
     }
   }
 

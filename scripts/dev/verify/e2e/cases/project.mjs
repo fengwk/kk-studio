@@ -144,7 +144,7 @@ registerCase({
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(UNKNOWN)/resolve-unknown/resume 门禁与 400 约定、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
+    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(UNKNOWN)/resolve-unknown/resume 门禁与 400 约定、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
@@ -166,6 +166,19 @@ registerCase({
         JSON.stringify(project),
       )
       assertWorkflow(project.workflow, DEFAULT_WORKFLOW_STATES)
+      // UUID 与版本不得归一后进入业务服务。
+      await expectHttpError(
+        () => ctx.call('GET', '/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'),
+        { status: 400 },
+      )
+      await expectHttpError(
+        () => ctx.call('PUT', `/api/projects/${project.id}`, {
+          expectedVersion: ` ${project.version}`,
+          title: project.title,
+          description: project.description,
+        }),
+        { status: 400 },
+      )
       // 默认 workflow 只有人工阶段：没有 Agent、Environment、instructions 或 Run 额度。
       for (const state of project.workflow.states) {
         assert(

@@ -20,9 +20,6 @@ public record EnvironmentId(UUID value) {
 
   /** 解析 canonical UUID 文本；{@code null}、空白、大小写变体或非法形状都抛 {@link IllegalArgumentException}。 */
   public static EnvironmentId parse(String raw) {
-    if (raw == null) {
-      throw new IllegalArgumentException("environmentId must not be null");
-    }
     return new EnvironmentId(Uuids.parseCanonical(raw, "environmentId"));
   }
 

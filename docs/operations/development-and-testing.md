@@ -244,8 +244,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 根 [pom.xml](../../pom.xml) 的 JaCoCo 为测试 JVM 注入 agent，在 `test` 阶段生成各模块的
 `target/site/jacoco/`。配置了 `check` 的模块在 `verify` 阶段执行覆盖率门禁；
 检查范围、CLASS/BUNDLE 口径与阈值以对应模块 POM 为准，定向测试报告只代表选中的集合。
-Harness 的公共 Runtime 与 Builtin Driver 由 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml)
-中的官方 JaCoCo Ant report/check 联合分析两个 classfiles 目录，Runtime 的旧本地 check 不再执行。
+Harness 的公共 Runtime 与 Builtin Driver 分别由 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml)
+与 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml) 持有各自的关键类门禁，不跨模块合并覆盖率。
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
@@ -398,6 +398,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
+
+Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
+返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
 
 安装配置与安装码兑换属于免费 L1 API 契约。可用
 `node scripts/dev/verify/e2e/run-matrix.mjs --only environment.install_script_code_roundtrip`
