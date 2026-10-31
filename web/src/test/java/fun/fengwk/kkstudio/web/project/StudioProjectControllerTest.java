@@ -322,10 +322,10 @@ class StudioProjectControllerTest {
   void rejectsUppercaseProjectIdAndPaddedVersionBeforeService() throws Exception {
     // 测试意图：HTTP UUID 与 version 都是严格 canonical，大写和前后空白不再归一后进入服务。
     mockMvc
-        .perform(get("/api/projects/" + projectId.toString().toUpperCase()))
+        .perform(get("/api/projects/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(delete("/api/projects/" + projectId + "?expectedVersion=%201"))
+        .perform(delete("/api/projects/" + projectId).param("expectedVersion", " 1"))
         .andExpect(status().isBadRequest());
     verifyNoInteractions(projectService);
   }

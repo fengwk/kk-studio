@@ -22,7 +22,7 @@ class EnvironmentIdTest {
   /** null、空白与非 canonical 文本必须在边界拒绝。 */
   @Test
   void rejectsNonCanonicalOrBlankText() {
-    assertThrows(NullPointerException.class, () -> EnvironmentId.parse(null));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentId.parse(null));
     assertThrows(IllegalArgumentException.class, () -> EnvironmentId.parse(""));
     assertThrows(IllegalArgumentException.class, () -> EnvironmentId.parse(" "));
     assertThrows(IllegalArgumentException.class, () -> EnvironmentId.parse("not-a-uuid"));

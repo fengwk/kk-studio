@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 
 import java.util.List;
@@ -234,7 +235,8 @@ class DaemonIdeCodecTest {
                   null));
     }
     for (String epoch : List.of("", "0", "01", "-1", "9223372036854775808", "1.0")) {
-      assertThrows(IllegalArgumentException.class, () -> IdeCommand.parseBindingEpoch(epoch));
+      assertThrows(
+          IllegalArgumentException.class, () -> DecimalLongs.parsePositive(epoch, "bindingEpoch"));
     }
   }
 

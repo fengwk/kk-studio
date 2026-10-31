@@ -58,7 +58,7 @@ public class StudioAgentTaskController {
     return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
-              UUID ticketId = parse(request.getTicketId());
+              UUID ticketId = Uuids.parseCanonical(request.getTicketId(), "ticketId");
               String agent = requireText(request.getAgent(), "agent");
               String prompt = requireText(request.getPrompt(), "prompt");
               Integer maxTurns = request.getMaxTurns();
@@ -98,7 +98,8 @@ public class StudioAgentTaskController {
   @GetMapping("/{ticketId}")
   public ApiResponse<AgentTaskDTO> get(@PathVariable String ticketId) {
     return ApiResponse.ok(
-        StudioHarnessThreadController.withRuntimeTranslation(() -> status(parse(ticketId))));
+        StudioHarnessThreadController.withRuntimeTranslation(
+            () -> status(Uuids.parseCanonical(ticketId, "ticketId"))));
   }
 
   /** 停止任务（含其子树）并返回停止后的状态；已结束的任务按原样返回。 */
@@ -107,7 +108,7 @@ public class StudioAgentTaskController {
     return ApiResponse.ok(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
-              UUID id = parse(ticketId);
+              UUID id = Uuids.parseCanonical(ticketId, "ticketId");
               agentTasks.stop(id);
               return status(id);
             }));
@@ -139,10 +140,6 @@ public class StudioAgentTaskController {
   private static UUID derivedId(UUID ticketId, String role) {
     return UUID.nameUUIDFromBytes(
         ("agent-task:" + role + ":" + ticketId).getBytes(StandardCharsets.UTF_8));
-  }
-
-  private static UUID parse(String ticketId) {
-    return Uuids.parseCanonical(ticketId, "ticketId");
   }
 
   private static String requireText(String value, String field) {

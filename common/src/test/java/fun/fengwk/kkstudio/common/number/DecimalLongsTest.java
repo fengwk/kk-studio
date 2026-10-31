@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.common.number;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -50,9 +51,11 @@ class DecimalLongsTest {
     assertRejected(
         () -> DecimalLongs.parseNonNegative("1.5", "version"),
         "version must be a canonical non-negative decimal: 1.5");
-    assertRejected(
-        () -> DecimalLongs.parseNonNegative("9223372036854775808", "version"),
-        "version exceeds long range: 9223372036854775808");
+    IllegalArgumentException overflow =
+        assertRejected(
+            () -> DecimalLongs.parseNonNegative("9223372036854775808", "version"),
+            "version exceeds long range: 9223372036854775808");
+    assertInstanceOf(NumberFormatException.class, overflow.getCause());
   }
 
   // 正数解析额外拒绝 0，同时保留越界与非数字拒绝。
@@ -73,8 +76,9 @@ class DecimalLongsTest {
         "sequence exceeds long range: 9223372036854775808");
   }
 
-  private static void assertRejected(Executable executable, String message) {
+  private static IllegalArgumentException assertRejected(Executable executable, String message) {
     IllegalArgumentException error = assertThrows(IllegalArgumentException.class, executable);
     assertEquals(message, error.getMessage());
+    return error;
   }
 }

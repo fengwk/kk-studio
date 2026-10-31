@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
@@ -602,7 +603,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   private static UUID parseUuid(String value, String field) {
     try {
       return Uuids.parseCanonical(value, field);
-    } catch (IllegalArgumentException | NullPointerException error) {
+    } catch (IllegalArgumentException error) {
       throw new AiValidationException("environment", field + " must be a canonical UUID");
     }
   }
@@ -613,7 +614,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   private static long parseEpoch(String value) {
     try {
-      return IdeCommand.parseBindingEpoch(value);
+      return DecimalLongs.parsePositive(value, "bindingEpoch");
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(
           "environment", "bindingEpoch must be a canonical positive decimal");

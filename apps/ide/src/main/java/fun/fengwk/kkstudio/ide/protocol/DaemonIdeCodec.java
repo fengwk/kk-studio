@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 
 import java.util.ArrayList;
@@ -334,7 +335,7 @@ public final class DaemonIdeCodec {
       return null;
     }
     try {
-      return IdeCommand.parseBindingEpoch(text);
+      return DecimalLongs.parsePositive(text, field);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           context + "." + field + " must be a canonical positive decimal", error);

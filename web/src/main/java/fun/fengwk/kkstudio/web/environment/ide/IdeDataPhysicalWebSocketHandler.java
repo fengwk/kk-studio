@@ -9,7 +9,6 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.data.IdeDataConnection;
@@ -216,9 +215,8 @@ final class IdeDataPhysicalWebSocketHandler extends AbstractWebSocketHandler {
       return null;
     }
     try {
-      Uuids.parseCanonical(candidate, "environmentId");
       return EnvironmentId.parse(candidate);
-    } catch (RuntimeException error) {
+    } catch (IllegalArgumentException error) {
       return null;
     }
   }

@@ -13,31 +13,11 @@ public final class CatalogVersions {
 
   /** 解析十进制字符串版本。成功时返回解析后的 long。 */
   public static long parse(String value, String field) {
-    if (value == null) {
-      throw new AiValidationException(
-          field, field + " must not be null (expectedVersion is required)");
-    }
     try {
       return DecimalLongs.parseNonNegative(value, field);
     } catch (IllegalArgumentException error) {
-      if (value.isEmpty()) {
-        throw new AiValidationException(field, field + " must not be blank", error);
-      }
-      if (!value.equals(value.trim())) {
-        throw new AiValidationException(
-            field, field + " must be a canonical non-negative decimal string: " + value, error);
-      }
-      if (exceedsLong(error)) {
-        throw new AiValidationException(field, field + " exceeds long range: " + value, error);
-      }
-      throw new AiValidationException(
-          field, field + " must be a non-negative decimal string: " + value, error);
+      throw new AiValidationException(field, error.getMessage(), error);
     }
-  }
-
-  private static boolean exceedsLong(IllegalArgumentException error) {
-    String message = error.getMessage();
-    return message != null && message.contains("exceeds long range");
   }
 
   /** 把非负内部版本格式化为其 canonical 十进制字符串。 */
