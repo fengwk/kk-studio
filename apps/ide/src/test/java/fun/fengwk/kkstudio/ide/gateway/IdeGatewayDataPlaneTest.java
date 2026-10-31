@@ -470,6 +470,19 @@ class IdeGatewayDataPlaneTest {
     HttpServletResponse res6 = mock(HttpServletResponse.class);
     dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res6);
     verify(res6).sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+
+    // 7. Tunnel generation mismatch (view generation REPLACED) -> 409
+    DaemonConnectionIdentity otherIdentity = new DaemonConnectionIdentity(ENV, "other-daemon");
+    tunnels.replace(otherIdentity);
+    HttpServletResponse res7 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/safe", req, res7);
+    verify(res7).sendError(HttpServletResponse.SC_CONFLICT);
+
+    // 8. Bootstrap suffix prefix like /__ide/bootstrapxxx is NOT bootstrap endpoint
+    HttpServletResponse res8 = mock(HttpServletResponse.class);
+    dataPlane.handleInternalDataPlane(ENV, VIEW, "/__ide/bootstrapxxx", req, res8);
+    // treated as data path -> 409 because otherTunnel does not match IDENTITY
+    verify(res8).sendError(HttpServletResponse.SC_CONFLICT);
   }
 
   @Test

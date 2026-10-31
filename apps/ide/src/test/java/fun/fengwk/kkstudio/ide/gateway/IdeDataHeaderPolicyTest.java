@@ -106,4 +106,54 @@ class IdeDataHeaderPolicyTest {
     verify(res).reset();
     verify(res).sendError(404);
   }
+
+  @Test
+  void hopByHopIncludesProxyConnection() {
+    assertTrue(IdeDataHeaderPolicy.isHopByHop("proxy-connection"));
+    assertTrue(IdeDataHeaderPolicy.isHopByHop("Proxy-Connection"));
+    assertFalse(IdeDataHeaderPolicy.isForwardableResponseHeader("proxy-connection", false));
+  }
+
+  @Test
+  void headerValidationAndMalformedDiscard() {
+    assertTrue(IdeDataHeaderPolicy.isValidHeaderName("Content-Type"));
+    assertTrue(IdeDataHeaderPolicy.isValidHeaderName("X-Custom_Header.1"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderName(""));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderName("Header:Colon"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderName("Header Space"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderName("Header\nBreak"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderName(null));
+
+    assertTrue(IdeDataHeaderPolicy.isValidHeaderValue("plain text"));
+    assertTrue(IdeDataHeaderPolicy.isValidHeaderValue("value\twith\ttab"));
+    assertFalse(IdeDataHeaderValueTest("value\r\nCRLF"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderValue(null));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderValue("bad\0null"));
+    assertFalse(IdeDataHeaderPolicy.isValidHeaderValue("bad\u0007bell"));
+
+    // forwardRequestHeaders discards malformed names and values
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getHeaderNames())
+        .thenReturn(Collections.enumeration(List.of("Bad:Name", "Valid-Name", "Bad-Val-Name")));
+    when(req.getHeaders("Valid-Name")).thenReturn(Collections.enumeration(List.of("good-val")));
+    when(req.getHeaders("Bad-Val-Name")).thenReturn(Collections.enumeration(List.of("bad\r\nval")));
+    Map<String, List<String>> forwarded = IdeDataHeaderPolicy.forwardRequestHeaders(req, false);
+    assertFalse(forwarded.containsKey("Bad:Name"));
+    assertFalse(forwarded.containsKey("Bad-Val-Name"));
+    assertEquals(List.of("good-val"), forwarded.get("Valid-Name"));
+
+    // applyResponseHeaders discards malformed names and values
+    HttpServletRequest respReq = mock(HttpServletRequest.class);
+    HttpServletResponse resp = mock(HttpServletResponse.class);
+    Map<String, List<String>> respHeaders =
+        Map.of(
+            "Bad:Resp", List.of("v"),
+            "Good-Resp", List.of("bad\nval", "good-val"));
+    IdeDataHeaderPolicy.applyResponseHeaders(200, respHeaders, respReq, resp, ENV, VIEW, false);
+    verify(resp).addHeader("Good-Resp", "good-val");
+  }
+
+  private static boolean IdeDataHeaderValueTest(String val) {
+    return IdeDataHeaderPolicy.isValidHeaderValue(val);
+  }
 }

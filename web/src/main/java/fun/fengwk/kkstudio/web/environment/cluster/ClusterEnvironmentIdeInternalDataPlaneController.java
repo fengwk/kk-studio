@@ -102,7 +102,7 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
     }
     boolean local = clusterNodeRegistry.route(envId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      response.sendError(HttpServletResponse.SC_CONFLICT);
       return null;
     }
     return envId;

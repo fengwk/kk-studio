@@ -165,14 +165,19 @@ public class IdeRemoteDataPlaneForwarder {
     response.setStatus(httpResponse.statusCode());
     for (Map.Entry<String, List<String>> header : httpResponse.headers().map().entrySet()) {
       String name = header.getKey();
-      String lower = name == null ? null : name.toLowerCase(Locale.ROOT);
-      if (lower == null
-          || lower.equals("content-length")
+      if (!IdeDataHeaderPolicy.isValidHeaderName(name)) {
+        continue;
+      }
+      String lower = name.toLowerCase(Locale.ROOT);
+      if (lower.equals("content-length")
           || IdeDataHeaderPolicy.isHopByHop(lower)
           || (!management && "set-cookie".equals(lower))) {
         continue;
       }
       for (String value : header.getValue()) {
+        if (!IdeDataHeaderPolicy.isValidHeaderValue(value)) {
+          continue;
+        }
         if (!management && "location".equals(lower)) {
           value = IdeDataPaths.rebaseLocation(value, request, environmentId, viewId);
         }

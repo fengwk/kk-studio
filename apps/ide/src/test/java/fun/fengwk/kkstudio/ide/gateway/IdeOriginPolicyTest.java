@@ -8,6 +8,9 @@ import static org.mockito.Mockito.when;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+import java.util.List;
+
 class IdeOriginPolicyTest {
 
   @Test
@@ -86,9 +89,33 @@ class IdeOriginPolicyTest {
   @Test
   void isWebSocketUpgradeValidation() {
     HttpServletRequest ws = mock(HttpServletRequest.class);
-    when(ws.getHeader("Upgrade")).thenReturn("websocket");
+    when(ws.getHeader("Upgrade")).thenReturn("  WebSocket  ");
     when(ws.getHeader("Connection")).thenReturn("keep-alive, Upgrade");
     assertTrue(IdeOriginPolicy.isWebSocketUpgrade(ws));
+
+    // Substring in connection is not exact token -> false
+    HttpServletRequest substringWs = mock(HttpServletRequest.class);
+    when(substringWs.getHeader("Upgrade")).thenReturn("websocket");
+    when(substringWs.getHeader("Connection")).thenReturn("not-upgrade, other");
+    assertFalse(IdeOriginPolicy.isWebSocketUpgrade(substringWs));
+
+    HttpServletRequest prefixWs = mock(HttpServletRequest.class);
+    when(prefixWs.getHeader("Upgrade")).thenReturn("websocket");
+    when(prefixWs.getHeader("Connection")).thenReturn("upgrade-action");
+    assertFalse(IdeOriginPolicy.isWebSocketUpgrade(prefixWs));
+
+    // Multiple Connection headers via getHeaders
+    HttpServletRequest multiHeadersWs = mock(HttpServletRequest.class);
+    when(multiHeadersWs.getHeader("Upgrade")).thenReturn("websocket");
+    when(multiHeadersWs.getHeaders("Connection"))
+        .thenReturn(Collections.enumeration(List.of("keep-alive", "close, upgrade")));
+    assertTrue(IdeOriginPolicy.isWebSocketUpgrade(multiHeadersWs));
+
+    HttpServletRequest multiHeadersNoWs = mock(HttpServletRequest.class);
+    when(multiHeadersNoWs.getHeader("Upgrade")).thenReturn("websocket");
+    when(multiHeadersNoWs.getHeaders("Connection"))
+        .thenReturn(Collections.enumeration(List.of("keep-alive", "close")));
+    assertFalse(IdeOriginPolicy.isWebSocketUpgrade(multiHeadersNoWs));
 
     HttpServletRequest notWs = mock(HttpServletRequest.class);
     when(notWs.getHeader("Upgrade")).thenReturn(null);

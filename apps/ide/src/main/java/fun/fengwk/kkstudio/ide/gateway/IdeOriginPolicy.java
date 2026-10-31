@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Enumeration;
 import java.util.Locale;
 
 /**
@@ -18,11 +19,32 @@ public final class IdeOriginPolicy {
   /** 判断请求是否为 WebSocket Upgrade 请求。 */
   public static boolean isWebSocketUpgrade(HttpServletRequest request) {
     String upgrade = request.getHeader("Upgrade");
+    if (upgrade == null || !"websocket".equalsIgnoreCase(upgrade.trim())) {
+      return false;
+    }
+    Enumeration<String> connectionHeaders = request.getHeaders("Connection");
+    if (connectionHeaders != null && connectionHeaders.hasMoreElements()) {
+      while (connectionHeaders.hasMoreElements()) {
+        String header = connectionHeaders.nextElement();
+        if (header != null) {
+          for (String token : header.split(",")) {
+            if ("upgrade".equalsIgnoreCase(token.trim())) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
     String connection = request.getHeader("Connection");
-    return upgrade != null
-        && upgrade.equalsIgnoreCase("websocket")
-        && connection != null
-        && connection.toLowerCase(Locale.ROOT).contains("upgrade");
+    if (connection != null) {
+      for (String token : connection.split(",")) {
+        if ("upgrade".equalsIgnoreCase(token.trim())) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** 非 WS 的 HTTP 请求准入：所有方法都要求同源声明，OPTIONS 不代理。 */

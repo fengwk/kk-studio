@@ -67,11 +67,11 @@ public class IdeGatewayDataPlane {
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
 
-    if (rawPathAndQuery.startsWith(IdeGatewayConstants.BOOTSTRAP_ENDPOINT)) {
+    if (isExactEndpoint(rawPathAndQuery, IdeGatewayConstants.BOOTSTRAP_ENDPOINT)) {
       handleBootstrap(environmentId, viewId, rawPathAndQuery, request, response);
       return;
     }
-    if (rawPathAndQuery.startsWith(IdeGatewayConstants.SESSION_ENDPOINT)) {
+    if (isExactEndpoint(rawPathAndQuery, IdeGatewayConstants.SESSION_ENDPOINT)) {
       handleSession(environmentId, viewId, rawPathAndQuery, request, response);
       return;
     }
@@ -120,11 +120,11 @@ public class IdeGatewayDataPlane {
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
 
-    if (rawPathAndQuery.startsWith(IdeGatewayConstants.BOOTSTRAP_ENDPOINT)) {
+    if (isExactEndpoint(rawPathAndQuery, IdeGatewayConstants.BOOTSTRAP_ENDPOINT)) {
       browserSessionHandler.handleBootstrap(environmentId, viewId, request, response);
       return;
     }
-    if (rawPathAndQuery.startsWith(IdeGatewayConstants.SESSION_ENDPOINT)) {
+    if (isExactEndpoint(rawPathAndQuery, IdeGatewayConstants.SESSION_ENDPOINT)) {
       browserSessionHandler.handleSession(environmentId, viewId, request, response);
       return;
     }
@@ -158,6 +158,10 @@ public class IdeGatewayDataPlane {
     Optional<EnvironmentTunnel> tunnel = environmentTunnels.local(environmentId);
     if (tunnel.isEmpty()) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    }
+    if (!tunnel.get().identity().equals(access.get().controlIdentity())) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_CONFLICT);
       return;
     }
 
@@ -354,5 +358,14 @@ public class IdeGatewayDataPlane {
       }
     }
     return true;
+  }
+
+  private static boolean isExactEndpoint(String rawPathAndQuery, String endpoint) {
+    if (rawPathAndQuery == null) {
+      return false;
+    }
+    int question = rawPathAndQuery.indexOf('?');
+    String path = question < 0 ? rawPathAndQuery : rawPathAndQuery.substring(0, question);
+    return endpoint.equals(path);
   }
 }

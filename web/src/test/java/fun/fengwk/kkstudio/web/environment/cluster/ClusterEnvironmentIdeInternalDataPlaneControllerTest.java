@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
+import java.net.URI;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -69,5 +70,28 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
 
     verify(auth).verify(any(), any(), any());
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/ws"), any(), eq(res));
+  }
+
+  @Test
+  void nonOwnerReturns409Conflict() throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    ClusterInternalAuthentication auth = mock(ClusterInternalAuthentication.class);
+
+    // Route is remote (not local)
+    when(registry.route(ENV))
+        .thenReturn(
+            Optional.of(
+                ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:8080"))));
+
+    ClusterEnvironmentIdeInternalDataPlaneController controller =
+        new ClusterEnvironmentIdeInternalDataPlaneController(dataPlane, registry, auth);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    controller.dataHttp(ENV.toString(), VIEW.toString(), "/path", req, res);
+    verify(res).sendError(HttpServletResponse.SC_CONFLICT);
   }
 }

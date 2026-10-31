@@ -29,6 +29,7 @@ public final class IdeDataHeaderPolicy {
           "keep-alive",
           "proxy-authenticate",
           "proxy-authorization",
+          "proxy-connection",
           "te",
           "trailer",
           "transfer-encoding",
@@ -66,6 +67,9 @@ public final class IdeDataHeaderPolicy {
       Set<String> connectionTokens = connectionTokens(request);
       while (names.hasMoreElements()) {
         String name = names.nextElement();
+        if (!isValidHeaderName(name)) {
+          continue;
+        }
         String lower = name.toLowerCase(Locale.ROOT);
         if (isNeverForwarded(lower, webSocket) || connectionTokens.contains(lower)) {
           continue;
@@ -74,7 +78,10 @@ public final class IdeDataHeaderPolicy {
         if (values != null) {
           List<String> list = new ArrayList<>();
           while (values.hasMoreElements()) {
-            list.add(values.nextElement());
+            String val = values.nextElement();
+            if (isValidHeaderValue(val)) {
+              list.add(val);
+            }
           }
           if (!list.isEmpty()) {
             headers.put(name, list);
@@ -93,11 +100,17 @@ public final class IdeDataHeaderPolicy {
 
   private static void addHeaderIfPresent(
       HttpServletRequest request, Map<String, List<String>> headers, String name) {
+    if (!isValidHeaderName(name)) {
+      return;
+    }
     Enumeration<String> values = request.getHeaders(name);
     if (values != null && values.hasMoreElements()) {
       List<String> list = new ArrayList<>();
       while (values.hasMoreElements()) {
-        list.add(values.nextElement());
+        String val = values.nextElement();
+        if (isValidHeaderValue(val)) {
+          list.add(val);
+        }
       }
       if (!list.isEmpty()) {
         headers.put(name, list);
@@ -164,11 +177,17 @@ public final class IdeDataHeaderPolicy {
       return;
     }
     for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+      if (!isValidHeaderName(entry.getKey())) {
+        continue;
+      }
       String lower = entry.getKey().toLowerCase(Locale.ROOT);
       if (!isForwardableResponseHeader(lower, webSocket)) {
         continue;
       }
       for (String value : entry.getValue()) {
+        if (!isValidHeaderValue(value)) {
+          continue;
+        }
         if ("location".equals(lower)) {
           String location =
               request instanceof IdeForwardedRequest
@@ -186,6 +205,38 @@ public final class IdeDataHeaderPolicy {
         }
       }
     }
+  }
+
+  public static boolean isValidHeaderName(String name) {
+    if (name == null || name.isEmpty()) {
+      return false;
+    }
+    for (int i = 0; i < name.length(); i++) {
+      if (!isTokenCharacter(name.charAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public static boolean isValidHeaderValue(String value) {
+    if (value == null) {
+      return false;
+    }
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c == '\r' || c == '\n' || c == '\0' || (c < 0x20 && c != '\t') || c == 0x7F) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean isTokenCharacter(char c) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+      return true;
+    }
+    return "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
   }
 
   public static void sendError(HttpServletResponse response, int status) throws IOException {
