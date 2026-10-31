@@ -37,7 +37,7 @@ function renderPage() {
   const sockets = new FakeWebSocketHarness()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
         <EnvironmentsPage />
       </ApplicationEventProvider>
     </QueryClientProvider>,

@@ -46,7 +46,7 @@ describe('settings extension architecture', () => {
     const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
           <ApplicationContributionsProvider contributions={contributions}>
             <BrowserPreferencesProvider>
               <MemoryRouter initialEntries={['/settings']}>

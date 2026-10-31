@@ -81,7 +81,7 @@ function renderShell(
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ApplicationContributionsProvider contributions={applicationContributions}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
           <MemoryRouter initialEntries={[initialEntry]}>
             <AppShell navItems={navItems} pages={options?.pages}>
               {children}

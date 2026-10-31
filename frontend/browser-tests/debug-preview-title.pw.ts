@@ -196,7 +196,7 @@ async function installPreviewApiMock(
 ): Promise<RecordedRequest[]> {
   const recorded: RecordedRequest[] = []
 
-  await page.routeWebSocket(/\/api\/events\/v2$/, () => {
+  await page.routeWebSocket(/\/api\/events$/, () => {
     // 应用事件通道在本用例中无事件，拦截后不连接任何真实后端。
   })
 

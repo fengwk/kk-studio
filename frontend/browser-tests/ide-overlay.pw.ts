@@ -84,7 +84,7 @@ function directory(environmentId: string): string {
 }
 
 async function installTransport(page: Page, state: TransportState): Promise<void> {
-  await page.routeWebSocket(/\/api\/events\/v2$/, (socket) => {
+  await page.routeWebSocket(/\/api\/events$/, (socket) => {
     state.eventConnectionIds.push(connectionId(state.eventConnectionIds.length + 1))
     const currentConnection = state.eventConnectionIds.at(-1)!
     let connected = false
