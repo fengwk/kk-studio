@@ -159,7 +159,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
             endPoint.onOpen();
             session.start();
             connection.onOpen();
-          } catch (Throwable error) {
+          } catch (Exception error) {
             log.error("Failed to start HTTP/2 client session for {}", identity, error);
             onSessionFailed(error);
           }
@@ -281,7 +281,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       daemonSession = sessions.open(admitted, controlStream, tunnel);
       controlStream.bindSession(daemonSession);
       sessionEstablished.complete(daemonSession);
-    } catch (Throwable error) {
+    } catch (Exception error) {
       log.error("Failed to open daemon session in core for {}", identity, error);
       sessionEstablished.completeExceptionally(error);
       onSessionFailed(error);
@@ -295,7 +295,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       session.goAway(
           new GoAwayFrame(session.getStreams().size() * 2 + 1, ErrorCode.NO_ERROR.code, null),
           Callback.NOOP);
-    } catch (Throwable ex) {
+    } catch (RuntimeException ex) {
       log.warn("Failed to send GOAWAY to daemon {}", identity, ex);
     }
     DaemonControlStream ctrl = controlStream;
@@ -396,7 +396,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     }
     try {
       session.close(ErrorCode.NO_ERROR.code, "session closed", Callback.NOOP);
-    } catch (Throwable ex) {
+    } catch (RuntimeException ex) {
       log.warn("Exception closing HTTP/2 session for {}", identity, ex);
     }
     DaemonSession ds = daemonSession;

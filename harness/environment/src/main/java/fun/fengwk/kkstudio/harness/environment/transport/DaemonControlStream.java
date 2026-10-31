@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlFraming;
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
 import fun.fengwk.kkstudio.harness.environment.protocol.Error;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
@@ -304,7 +305,7 @@ public class DaemonControlStream implements DaemonControlChannel {
                   try {
                     Envelope envelope = ControlProtocolCodec.decodeBinary(bodyBuffer);
                     readyEnvelopes.add(envelope);
-                  } catch (Throwable ex) {
+                  } catch (ControlProtocolException ex) {
                     errorMsg = "failed to decode control envelope: " + ex.getMessage();
                     break;
                   } finally {
@@ -327,15 +328,13 @@ public class DaemonControlStream implements DaemonControlChannel {
           }
         }
 
-        // 锁外按到达顺序分发给 DaemonSession.receive
+        // 锁外按到达顺序分发给 DaemonSession.receive（绑定前不 demand，因此会话已就绪）
         DaemonSession currentSession;
         synchronized (lock) {
           currentSession = daemonSession;
         }
-        if (currentSession != null) {
-          for (Envelope envelope : readyEnvelopes) {
-            currentSession.receive(envelope);
-          }
+        for (Envelope envelope : readyEnvelopes) {
+          currentSession.receive(envelope);
         }
 
         if (errorMsg != null) {

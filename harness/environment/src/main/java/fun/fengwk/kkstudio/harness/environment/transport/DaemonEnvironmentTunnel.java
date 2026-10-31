@@ -217,6 +217,7 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
     void failStream(Throwable failure) {
       CompletableFuture<ByteBuffer> readToFail = null;
       List<CompletableFuture<Void>> writesToFail = new ArrayList<>();
+      CompletableFuture<Void> endOutputToFail = null;
       synchronized (streamLock) {
         if (streamFailure != null) {
           return;
@@ -232,6 +233,8 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         while (!pendingWrites.isEmpty()) {
           writesToFail.add(pendingWrites.poll().future);
         }
+        endOutputToFail = endOutputFuture;
+        endOutputFuture = null;
       }
 
       responseHeadersFuture.completeExceptionally(failure);
@@ -241,8 +244,8 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
       for (CompletableFuture<Void> wf : writesToFail) {
         wf.completeExceptionally(failure);
       }
-      if (endOutputFuture != null) {
-        endOutputFuture.completeExceptionally(failure);
+      if (endOutputToFail != null) {
+        endOutputToFail.completeExceptionally(failure);
       }
       removeActive();
     }
@@ -284,13 +287,24 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         public void onDataAvailable(Stream source) {
           Stream.Data data = source.readData();
           if (data == null) {
+            source.demand();
             return;
           }
           ByteBuffer buffer = data.frame().getByteBuffer();
-          byte[] bytes = new byte[buffer.remaining()];
-          buffer.get(bytes);
+          int remaining = buffer.remaining();
           boolean endStream = data.frame().isEndStream();
+          byte[] bytes = new byte[remaining];
+          buffer.get(bytes);
           data.release();
+
+          if (remaining == 0) {
+            if (endStream) {
+              onInboundEof();
+            } else {
+              source.demand();
+            }
+            return;
+          }
 
           CompletableFuture<ByteBuffer> toComplete = null;
           ByteBuffer payload = ByteBuffer.wrap(bytes);
@@ -353,6 +367,7 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
 
     @Override
     public CompletionStage<ByteBuffer> read() {
+      CompletableFuture<ByteBuffer> future;
       Stream s = null;
       synchronized (streamLock) {
         if (streamFailure != null) {
@@ -374,13 +389,14 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         }
 
         pendingRead = new CompletableFuture<>();
+        future = pendingRead;
         s = stream;
       }
 
       if (s != null) {
         s.demand();
       }
-      return pendingRead;
+      return future;
     }
 
     @Override
@@ -490,6 +506,7 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
     public void close() {
       CompletableFuture<ByteBuffer> readToCancel = null;
       List<CompletableFuture<Void>> writesToCancel = new ArrayList<>();
+      CompletableFuture<Void> endOutputToCancel = null;
       Stream s = null;
       synchronized (streamLock) {
         if (streamClosed) {
@@ -505,6 +522,8 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         while (!pendingWrites.isEmpty()) {
           writesToCancel.add(pendingWrites.poll().future);
         }
+        endOutputToCancel = endOutputFuture;
+        endOutputFuture = null;
         s = stream;
       }
 
@@ -516,8 +535,8 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
       for (CompletableFuture<Void> wf : writesToCancel) {
         wf.completeExceptionally(cancel);
       }
-      if (endOutputFuture != null) {
-        endOutputFuture.completeExceptionally(cancel);
+      if (endOutputToCancel != null) {
+        endOutputToCancel.completeExceptionally(cancel);
       }
 
       if (s != null) {

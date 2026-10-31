@@ -42,6 +42,7 @@ import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 class DaemonEnvironmentTunnelTest {
@@ -220,6 +221,84 @@ class DaemonEnvironmentTunnelTest {
     CompletableFuture<ByteBuffer> r1 = stream.read().toCompletableFuture();
     exchange.close();
     assertThrows(CancellationException.class, r1::get);
+  }
+
+  @Test
+  void readDataNullRedemands() {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/null-data", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    CompletableFuture<ByteBuffer> readStage = tunnelStream.read().toCompletableFuture();
+    assertEquals(1, stream.demandCount.get());
+
+    // 触发 onDataAvailable 但 readData 返回 null
+    stream.listener.onDataAvailable(stream);
+    // 应该再次 demand
+    assertEquals(2, stream.demandCount.get());
+    assertFalse(readStage.isDone());
+  }
+
+  @Test
+  void emptyDataFrameWithoutEndStreamRedemands() {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/empty-data", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    CompletableFuture<ByteBuffer> readStage = tunnelStream.read().toCompletableFuture();
+    assertEquals(1, stream.demandCount.get());
+
+    // 传入 0 字节非 endStream 的 DATA 帧
+    stream.inboundQueue.add(new TestData(ByteBuffer.allocate(0), false));
+    stream.listener.onDataAvailable(stream);
+
+    // 不得完成空缓冲，必须再次 demand
+    assertEquals(2, stream.demandCount.get());
+    assertFalse(readStage.isDone());
+  }
+
+  @Test
+  void zeroByteEndStreamCompletesWithNull() throws Exception {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/zero-end", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    CompletableFuture<ByteBuffer> readStage = tunnelStream.read().toCompletableFuture();
+    assertEquals(1, stream.demandCount.get());
+
+    // 传入 0 字节且 endStream = true 的 DATA 帧
+    stream.inboundQueue.add(new TestData(ByteBuffer.allocate(0), true));
+    stream.listener.onDataAvailable(stream);
+
+    // 应直接以 null 完成读取
+    assertTrue(readStage.isDone());
+    assertNull(readStage.get());
+  }
+
+  @Test
+  void concurrentReadAndInboundDataNeverReturnsNullFuture() throws Exception {
+    TunnelHttpRequest request = new TunnelHttpRequest("GET", "/concurrent", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    for (int i = 0; i < 50; i++) {
+      stream.inboundQueue.add(new TestData(ByteBuffer.wrap(new byte[] {1}), false));
+      CompletableFuture<ByteBuffer> readFuture =
+          CompletableFuture.supplyAsync(
+              () -> {
+                var stage = tunnelStream.read();
+                assertNotNull(stage, "read() must never return null future");
+                return stage.toCompletableFuture().join();
+              });
+      stream.listener.onDataAvailable(stream);
+      ByteBuffer buf = readFuture.get(5, TimeUnit.SECONDS);
+      assertNotNull(buf);
+      assertEquals(1, buf.remaining());
+    }
   }
 
   @Test
