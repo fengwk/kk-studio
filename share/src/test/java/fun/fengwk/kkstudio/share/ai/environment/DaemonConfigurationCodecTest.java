@@ -9,7 +9,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -39,9 +38,6 @@ class DaemonConfigurationCodecTest {
     assertEquals(
         " argument with spaces ", parsed.getLsp().getServers().get("z").getCommand().get(1));
     assertEquals("\u2003 trusted note \u2003", json.get("note").stringValue());
-    assertEquals(
-        URI.create("wss://studio.example/api/harness/environment-daemon/v1"),
-        DaemonConfigurationCodec.gatewayUri(parsed.getStudioUrl()));
     assertEquals(parsed, DaemonConfigurationCodec.validate(parsed));
   }
 
@@ -49,7 +45,9 @@ class DaemonConfigurationCodecTest {
   @ValueSource(
       strings = {"http://localhost", "https://host:65535/", "http://[::1]:8080", "HTTPS://host/"})
   void acceptsOrigins(String origin) {
-    assertNotNull(DaemonConfigurationCodec.gatewayUri(origin));
+    DaemonConfiguration config = new DaemonConfiguration();
+    config.setStudioUrl(origin);
+    assertNotNull(DaemonConfigurationCodec.validate(config).getStudioUrl());
   }
 
   @ParameterizedTest
@@ -74,7 +72,9 @@ class DaemonConfigurationCodecTest {
         "https://host\u007f"
       })
   void rejectsInvalidOriginsWithoutValues(String origin) {
-    assertSafe(() -> DaemonConfigurationCodec.gatewayUri(origin), "daemon.studioUrl");
+    DaemonConfiguration config = new DaemonConfiguration();
+    config.setStudioUrl(origin);
+    assertSafe(() -> DaemonConfigurationCodec.validate(config), "daemon.studioUrl");
   }
 
   @ParameterizedTest

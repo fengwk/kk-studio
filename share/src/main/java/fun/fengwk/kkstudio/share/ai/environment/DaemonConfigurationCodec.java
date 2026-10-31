@@ -115,16 +115,6 @@ public final class DaemonConfigurationCodec {
     return result;
   }
 
-  /** Studio HTTP(S) origin 对应的 Environment WebSocket 入口。 */
-  public static URI gatewayUri(String studioUrl) {
-    URI origin = origin(studioUrl);
-    return URI.create(
-        ("https".equals(origin.getScheme()) ? "wss" : "ws")
-            + "://"
-            + origin.getRawAuthority()
-            + "/api/harness/environment-daemon/v1");
-  }
-
   private static URI origin(String value) {
     String path = "daemon.studioUrl";
     nonblank(value, path);
