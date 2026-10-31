@@ -194,9 +194,8 @@ final class AsyncTextSender {
         };
     try {
       if (frame.isPing()) {
-        // Tomcat 11 的 AsyncRemote.sendPing 实际走 WsRemoteEndpointImplBase.sendMessageBlock：
-        // 同步取得 messagePartInProgress 信号量，由 BlockingSendHandler 等到该 ping 写完才返回。
-        // 因此返回后继续 drain 仍是同一物理 writer 的串行写；不另建 ping 线程或发送队列。
+        // Jetty 12 的 AsyncRemote.sendPing 同步阻塞等到该 ping 帧写完才返回（FutureCallback.block）。
+        // 因此返回后继续 drain 仍由同一物理 writer 串行排队；不另建 ping 线程或发送队列。
         session.getAsyncRemote().sendPing(ByteBuffer.allocate(0));
         drain();
       } else {

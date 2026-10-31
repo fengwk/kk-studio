@@ -331,16 +331,17 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
 })
 
 test('centralizes security revisions without downgrading the Boot platform', () => {
-    // Intent: only the root dependencyManagement may override Boot's supported Tomcat 11 / Netty 4.2.
+    // Intent: only the root dependencyManagement may override Boot's supported Netty 4.2;
+    // Tomcat is completely removed and replaced with Jetty 12.
     // Classpath regression tests separately verify the actual resolved revisions, not just these declarations.
     const pom = readFileSync(POM, 'utf8')
     const bootVersion = /<spring-boot\.version>(\d+)\.\d+/.exec(pom)?.[1]
-    assert.equal(bootVersion, '4', 'Boot 4 is the platform owner that requires Tomcat 11 / Netty 4.2')
+    assert.equal(bootVersion, '4', 'Boot 4 is the platform owner that manages Jetty 12 / Netty 4.2')
     assert.match(
         pom,
         /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<scope>import<\/scope>/,
     )
-    assert.match(pom, /<tomcat\.version>11\.0\.26<\/tomcat\.version>/)
+    assert.doesNotMatch(pom, /<tomcat\.version>/, 'Tomcat version lock must be removed')
     assert.match(pom, /<netty\.version>4\.2\.18\.Final<\/netty\.version>/)
     const managementStart = pom.indexOf('<dependencyManagement>')
     const managementEnd = pom.indexOf('</dependencyManagement>')
@@ -366,24 +367,30 @@ test('centralizes security revisions without downgrading the Boot platform', () 
         const relativePath = path.relative(REPOSITORY_ROOT, pomFile)
         const content = readFileSync(pomFile, 'utf8')
         if (pomFile !== POM) {
-            assert.doesNotMatch(content, /<tomcat\.version>|<netty\.version>/,
+            assert.doesNotMatch(content, /<tomcat\.version>|<netty\.version>|<jetty\.version>/,
                 `${relativePath} must inherit the centralized security revisions`)
         }
         for (const dependency of content.matchAll(/<dependency>[\s\S]*?<\/dependency>/gu)) {
             const block = dependency[0]
-            if (!/org\.apache\.tomcat\.embed|io\.netty/.test(block)) {
+            const withoutExclusions = block.replace(/<exclusions>[\s\S]*?<\/exclusions>/gu, '')
+            assert.doesNotMatch(
+                withoutExclusions,
+                /<groupId>org\.apache\.tomcat(?:\.embed)?<\/groupId>/,
+                `${relativePath} must not declare Tomcat dependencies: ${block}`,
+            )
+            if (!/io\.netty/.test(block)) {
                 continue
             }
             const index = dependency.index
             if (pomFile === POM && index > managementStart && index < managementEnd) {
-                assert.match(block, /<artifactId>(?:tomcat-embed-(?:core|el|websocket)|netty-bom)<\/artifactId>/)
-                assert.match(block, /<version>\$\{(?:tomcat|netty)\.version\}<\/version>/)
+                assert.match(block, /<artifactId>netty-bom<\/artifactId>/)
+                assert.match(block, /<version>\$\{netty\.version\}<\/version>/)
                 continue
             }
             assert.doesNotMatch(
                 block,
                 /<version>/,
-                `${relativePath} must inherit the centralized servlet container and Netty versions: ${block}`,
+                `${relativePath} must inherit the centralized Netty version: ${block}`,
             )
         }
     }
