@@ -1263,7 +1263,7 @@ create table harness_tool_invocation (
     ),
     constraint ck_harness_tool_invocation_effects_status check (
         status = 'SUCCEEDED'
-        or effects = '{"version": 1, "customEntries": []}'::jsonb
+        or effects = '{"customEntries": []}'::jsonb
     )
 );
 

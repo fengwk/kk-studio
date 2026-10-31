@@ -641,7 +641,7 @@ class PostgresqlHarnessSchemaTest {
             + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
             + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
             // 非 SUCCEEDED 行的 effects 必须是空批（ck_harness_tool_invocation_effects_status）。
-            + " '{\"version\":1,\"customEntries\":[]}'::jsonb, null,"
+            + " '{\"customEntries\":[]}'::jsonb, null,"
             + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
         id,
         threadId,

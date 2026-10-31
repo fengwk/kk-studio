@@ -867,7 +867,7 @@ insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assista
     values (pg_temp.uid(1200), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 0,
         jsonb_build_object('id','call-question','toolName','ask_user',
             'argumentsJson','{"questions":[{"question":"Which?","options":[{"label":"A"}]}]}'::text),
-        '{"thread":{}}', 'WAITING_INPUT', 0, '{"version":1,"customEntries":[]}', now(), now());
+        '{"thread":{}}', 'WAITING_INPUT', 0, '{"customEntries":[]}', now(), now());
 select pg_temp.rejects('WAITING_REQUEST is not a Tool status',
     $$update harness_tool_invocation set status='WAITING_REQUEST' where id=pg_temp.uid(1200)$$,
     '23514', 'ck_harness_tool_invocation_status');
@@ -880,24 +880,24 @@ select pg_temp.assert_true('pending input joins back through the public Tool own
         where t.status = 'WAITING_INPUT' and th.session_id = pg_temp.uid(102)));
 select pg_temp.rejects('a Tool cannot reference a missing public Thread',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1203),pg_temp.uid(9999),pg_temp.uid(210),pg_temp.uid(211),3,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1203),pg_temp.uid(9999),pg_temp.uid(210),pg_temp.uid(211),3,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
     '23503', 'fk_harness_tool_invocation_thread');
 select pg_temp.rejects('a Tool cannot reference a missing TurnStart',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1204),pg_temp.uid(302),pg_temp.uid(9998),pg_temp.uid(211),4,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1204),pg_temp.uid(302),pg_temp.uid(9998),pg_temp.uid(211),4,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
     '23503', 'fk_harness_tool_invocation_turn_start');
 select pg_temp.rejects('a Tool cannot reference a missing Assistant',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,'{"customEntries":[]}',now(),now())$$,
     '23503', 'fk_harness_tool_invocation_assistant');
 select pg_temp.rejects('a nonterminal Tool requires a frozen binding',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1206),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),6,'{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1206),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),6,'{}','READY',0,'{"customEntries":[]}',now(),now())$$,
     '23514', 'ck_harness_tool_invocation_binding');
 insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
     call_index, call, status, attempt, effects, error, created_at, updated_at)
     values (pg_temp.uid(1207), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 7,
-        '{}', 'FAILED', 0, '{"version":1,"customEntries":[]}',
+        '{}', 'FAILED', 0, '{"customEntries":[]}',
         '{"code":"UNKNOWN_TOOL","message":"unknown"}', now(), now());
 select pg_temp.assert_true('a terminal unknown Tool may have no binding',
     (select binding is null and status = 'FAILED'
@@ -906,11 +906,11 @@ select pg_temp.assert_true('a terminal unknown Tool may have no binding',
 -- same Thread/Session as the model invocation, so only the tested shape fails.
 select pg_temp.rejects('WAITING_INPUT cannot lack a frozen binding',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1201),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),1,'{}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1201),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),1,'{}','WAITING_INPUT',0,'{"customEntries":[]}',now(),now())$$,
     '23514', 'ck_harness_tool_invocation_binding');
 select pg_temp.rejects('WAITING_INPUT cannot carry a terminal result',
     $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,result,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1202),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),2,'{}','{}','{"ok":true}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+      values(pg_temp.uid(1202),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),2,'{}','{}','{"ok":true}','WAITING_INPUT',0,'{"customEntries":[]}',now(),now())$$,
     '23514', 'ck_harness_tool_waiting_input');
 select pg_temp.rejects('WAITING_INPUT cannot carry a terminal error',
     $$update harness_tool_invocation set error='{"message":"x"}' where id=pg_temp.uid(1200)$$, '23514',
