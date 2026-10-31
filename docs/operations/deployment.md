@@ -234,14 +234,9 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 | 流量 | 端点 | 要求 |
 | --- | --- | --- |
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
-| Environment Daemon gateway | `/api/harness/environment-daemon/v1` | 透传 WebSocket，并协商 `permessage-deflate`；未协商时 Daemon 以 RFC 6455 close code `1010` 断开，不会退化为未压缩会话 |
+| Environment Daemon gateway | `/api/harness/environment-daemon` | 透传 WebSocket；承载 Daemon 准入、控制流与环境隧道数据面 |
 | 浏览器 Application Event WebSocket | `/api/events` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步，并以新连接身份登记 IDE 使用证明 |
 | 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
-| Daemon IDE 复用数据连接 | `/api/harness/environment-data/v2/{environmentId}?ticket=...` | 透传 WebSocket；票据一次性、30 秒有效，Daemon 只连接 DATA_BIND 下发的受控地址 |
-
-Daemon 的 IDE 数据连接地址由 `DATA_BIND` 下发，生产通过
-`kk-studio.harness.ide-gateway.data-stream-base-url` 指向 Daemon 可达的 Studio 同源 origin；路径固定为
-`/api/harness/environment-data/v2/{environmentId}`。票据只在查询中传递一次，不写入日志，跨节点时由非 owner 单跳桥接到 owner。
 
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。
@@ -323,7 +318,7 @@ distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操�
 ./scripts/dev/verify/reliability/stack.sh down --volumes
 ```
 
-Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon/v1` 连接 App。
+Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon` 连接 App。
 
 容器入口在启动前按与产品相同的布局物化配置与凭证：把注入的注册凭证写为
 `/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
@@ -522,7 +517,7 @@ tag 不同：
 
 Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机通过 Studio 的安装弹窗保存
 配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
-`wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制、安装设置字段、注册 token
+`wss://<studio-origin>/api/harness/environment-daemon`。安装机制、安装设置字段、注册 token
 文件、更新与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界

@@ -800,7 +800,7 @@ install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared
 
 Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，通过 Studio 的
 安装弹窗保存配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
-`wss://<studio-origin>/api/harness/environment-daemon/v1`。
+`wss://<studio-origin>/api/harness/environment-daemon`。
 
 ### 共享数据库重建
 

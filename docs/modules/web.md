@@ -82,7 +82,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
-| Environment data | `/api/harness/environment-data/v2/{environmentId}?ticket=...` | Daemon 复用数据 WebSocket（DATA_BIND）入口 |
+| Environment Daemon | `/api/harness/environment-daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
 `POST /api/chats` 省略 `yoloEnabled` 时为 `false`；创建请求的 `environmentName` 可省略或为 null（都表示无默认环境），
 携带时必须为已存在的 Environment 名；响应中的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为 null）。
@@ -191,7 +191,7 @@ locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.m
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
-Daemon registration token 在 HELLO 中绑定 Environment，通用 Card 只返回安全投影。
+Daemon registration token 在准入请求中绑定 Environment，通用 Card 只返回安全投影。
 Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
 Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；

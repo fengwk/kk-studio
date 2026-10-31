@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 重新生成前端传输契约与 Daemon 协议常量。会写文件，提交前必须人工审阅 diff；
+# 重新生成前端传输契约与 Daemon 协议代码。会写文件，提交前必须人工审阅 diff；
 # 日常校验用 read-only 的 check.sh（mvn verify 也执行同一 check）。
 set -euo pipefail
 

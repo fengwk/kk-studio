@@ -373,7 +373,7 @@ HOME 也不是默认工作目录。
 
 - 改配置：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行同一条 `install`。
 - 轮换 token：环境 ID 不变，但旧安装 code 立即失效；在 Web 重新复制并执行安装命令，
-  或安全更新 `daemon.token` 文件后重启受管服务。Daemon 每次 HELLO 前读取 token 文件；已被拒绝
+  或安全更新 `daemon.token` 文件后重启受管服务。Daemon 每次连接准入前读取 token 文件；已被拒绝
   而退出的进程需要重启。
 
 ### 受管在线更新
@@ -391,8 +391,7 @@ HOME 也不是默认工作目录。
 SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧二进制。
 
 - 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
-  capability 调用在起点被 busy 拒绝，连接仍保持认证（catalog 版本不一致时只禁止普通工具，不影响
-  版本查询与更新）。
+  capability 调用在起点被 busy 拒绝，连接仍保持认证。
 - 只有受管安装（存在 `lib/main.js` 与同目录 `daemon.json`）接受更新；更新只替换
   `lib` 下的程序发行目录，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
 - 下载/预检/备份后，Daemon 把制品交给一个 **OS 级独立、短生命周期的更新器**（Linux `systemd-run`
@@ -401,15 +400,9 @@ SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` �
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。
-- 只有与当前 Studio 使用同一 wire 协议版本、且已在运行受管 Node Daemon 的安装才能远程更新。协议版本不同的
-  Daemon（升级 Studio 后仍在运行旧协议的 Daemon，或已发行的 Java 1.1.0 Daemon）在 HELLO 阶段即被拒绝，
-  收不到更新命令；旧 Node Daemon 的 UPDATE 入口也只接受 `.jar` 制品，会拒绝当前的 `.tar.gz` 发行归档。
-
-因此升级到改变了 wire 协议版本的 Studio 后，每台主机都要重新执行一次安装命令。从这些旧版本迁移不需要先卸载或删除数据：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次
-覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务；旧程序、`daemon.json` 与
-`daemon.token` 保留在独立的 `backups/` 子目录，然后发布新程序、配置与 token 并重启服务。
-数据目录、日志与既有备份保留。覆盖安装重新 `READY` 后才继续
-使用在线更新。
+- 只有与当前 Studio 协议兼容、且已在运行受管 Node Daemon 的安装才能远程更新。协议不兼容的
+  Daemon 在连接准入阶段即被拒绝，收不到更新命令。
+- 如需覆盖安装：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。数据目录、日志与既有备份保留。重新 `READY` 后才继续正常使用。
 
 重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
 更新后重新确认 Studio `READY`。

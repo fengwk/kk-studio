@@ -1,6 +1,6 @@
 # Environment、Daemon 与 IDE 契约
 
-本文是 Environment、Daemon、受管 code-server 与浏览器 IDE 视图的当前契约：谁拥有哪个事实、连接与数据面如何建立、视图如何被绑定与回收、运行状态如何上报。生效版本为 5.0.0：控制 wire 版本 7、READY payload 版本 6、IDE 数据 wire 版本 2、能力目录版本 3。协议细节见 [Harness Environment](harness-environment.md)，IDE 应用见 [IDE](ide.md)，宿主进程见 [Environment Daemon](daemon.md)，浏览器侧见 [Frontend](frontend.md)。
+本文是 Environment、Daemon、受管 code-server 与浏览器 IDE 视图的当前契约：谁拥有哪个事实、连接与数据面如何建立、视图如何被绑定与回收、运行状态如何上报。协议细节见 [Harness Environment](harness-environment.md)，IDE 应用见 [IDE](ide.md)，宿主进程见 [Environment Daemon](daemon.md)，浏览器侧见 [Frontend](frontend.md)。
 
 设计遵循“一个事实只有一个负责方”：Platform 管身份、配置和路由，Daemon 管本机执行与资源，code-server 提供工作台，浏览器表达操作和保存展示偏好。用户系统、资源依赖授权、团队与工作空间权限不在本契约内；Environment 保持共享平台资源，不增加用户所有者字段。
 
@@ -20,7 +20,7 @@ Browser tab
                      │ 单跳内部 HTTP / WS
                 owner Server
                      ║
-           控制 WS + 一条复用数据 WS
+           统一 Daemon 连接（控制流 + 环境隧道数据面）
                      ║
                    Daemon
                      ├─ 工具执行与进程监管
@@ -92,71 +92,39 @@ Server 重启可以重建当前快照，不能凭缓存决定本机进程已经�
 
 控制 WS 长期保持，承载传输握手、心跳、工具命令与有界结果、IDE 管理命令、更新命令、视图租约和数据连接授权。协议严格拒绝未知字段、越界长度和错误消息顺序。已有工具执行、取消、RECOVER 和真实退出证据契约不变。
 
-控制协议在 5.0.0 的形状：
+控制协议形状：
 
 | 消息 | 方向 | 载荷 |
 | --- | --- | --- |
-| `READY` | Daemon → Server | `version=6`、`daemonVersion`、`environment`、`runtimeStatus` |
+| `READY` | Daemon → Server | `daemonVersion`、`environment`、`runtimeStatus` |
 | `HEARTBEAT` | Daemon → Server | `runtimeStatus`、`ideLeaseRound` |
 | `RUNTIME_STATUS` | Daemon → Server | 与 `runtimeStatus` 相同的关键变化快照 |
-| `DATA_BIND` | Server → Daemon | `generation`、`ticket`、`streamUrl` |
 | `IDE_LEASE` | Server → Daemon | `round`、`bindings[]` |
 
 `runtimeStatus` 是 `{revision, status}`：`revision` 是规范正十进制字符串且不超过 Java long 上限，只在当前控制代际内比较；`status` 固定为 `{daemonVersion, update}`，`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`，字节计数非负，`totalBytes` 为 null 或不小于已下载量。READY 的 `daemonVersion` 必须与 `runtimeStatus.status.daemonVersion` 一致。Server 只在接受更高 revision 后替换缓存；同 revision 内容不同是协议错误，更低 revision 视为迟到快照忽略。
 
-数据连接首次有需求时，由 owner 经控制连接给出一次性 256-bit 绑定票据，30 秒内消费。票据绑定 Environment、Daemon 实例、owner 租约代际和数据连接代际；只用于整条数据连接，不为每个 HTTP 请求签发。Daemon 仍只主动连接配置的 Studio 受控地址；票据和完整连接 URL 不记日志。每个当前控制代际最多一条已接受的数据连接，数据连接失效后的新连接使用新代际；旧回调不能注销新连接。控制连接失联后不建立新流；已有流只能在 owner 租约仍有效时收尾，围栏失效即关闭。
+数据面复用与当前 Daemon 连接绑定的环境隧道（`EnvironmentTunnel`）。owner 节点直接通过本地环境隧道向 Daemon 发起 HTTP/WS 交换，非 owner 节点透传至 owner。控制连接失联后不建立新流；已有流只能在 owner 租约仍有效时收尾，代际失效即关闭。
 
 ### 非 owner 请求
 
 浏览器不要求粘性路由：
 
 ```text
-管理：Browser --HTTP--> B --内部 HTTP--> owner A --控制 WS--> Daemon
-页面：Browser --HTTP--> B --内部 HTTP--> owner A ==逻辑流== Daemon --本机 HTTP--> code-server
-长流：Browser ==WS== B ==内部 WS== owner A ==逻辑流== Daemon ==本机 WS== code-server
+管理：Browser --HTTP--> B --内部 HTTP--> owner A --控制流--> Daemon
+页面：Browser --HTTP--> B --内部 HTTP--> owner A ==环境隧道== Daemon --本机 HTTP--> code-server
+长流：Browser ==WS== B --内部 WS--> owner A ==环境隧道== Daemon ==本机 WS== code-server
 ```
 
-B 从 `environment_connection` 和 `cluster_node` 找到 owner，使用现有内部认证单跳转发。A 再次验证自己持有有效路由。原始请求、cookie 和内部头使用已有受控转发规则；业务字节不通过 PostgreSQL 通知搬运。
+B 从 `environment_connection` 和 `cluster_node` 找到 owner，使用现有内部认证单跳转发。A 再次验证自己持有有效路由。原始请求、cookie 和内部头使用已有受控转发规则；业务字节不通过 PostgreSQL 通知搬运。非 owner 节点 B 收到浏览器 IDE 流量时，通过内部单跳代理给 owner 节点 A；只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-Daemon 的数据连接若落到 B，B 将整条 WS 单跳桥接给 A。中继不解析或生成逻辑流 ACK，不增加另一套 credit。只有原 owner 消费绑定票据。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
+### 数据隧道
 
-### 数据 wire
+数据面直接复用已有 Daemon 连接的环境隧道（`EnvironmentTunnel`），专用于受控 IDE 视图的 HTTP 请求与 WebSocket 流量，不接受任意外部目标。网关在同源视图路径 `/environment-ide/{environmentId}/{viewId}/...` 拦截请求，校验视图授权，并通过 `EnvironmentTunnel` 打开 HTTP 交换或 WebSocket 隧道直达 Daemon 托管的 code-server。
 
-数据通道专用于受控 IDE 上游，不接受任意目标 host/port。每个逻辑流携带 `viewId`、视图绑定代际、模式、方法、路径和过滤后的 headers；Daemon 校验视图仍可用，再访问私有 loopback code-server。静态资源也使用视图作用域路由。
-
-每个 WebSocket binary message 正好携带一帧，头部固定 12 字节，数据 wire 版本为 2：
-
-```text
-version:u8 | type:u8 | flags:u16 | streamId:u32 | payloadLength:u32 | payload
-```
-
-多字节整数使用网络字节序。payload 最大 65536 字节，元数据 JSON 最大 16 KiB。未定义 flags、长度不符和不支持的版本使整条数据连接失败。
-
-非 DATA 帧 flags=0。WS DATA 的 bit0=TEXT、bit1=BINARY，二者必须且只能设置一个；bit2=FIN 表示该上游消息的最后一段，其余位为 0。同一消息的各段类型一致。CLOSE 载荷为 `code:u16 + UTF-8 reason`，按 RFC 6455 校验关闭码及 123 字节原因上限；RESET JSON 固定为 `code, message`，message 上限 500 字符且去除凭据和控制字符。
-
-Server 在真正发出 OPEN 时从 1 严格连续递增分配 streamId，只在本连接内有效且不复用；用尽后先排空再重建连接。streamId 0 保留给连接级 WINDOW。
-
-| type | 载荷与约束 |
-| --- | --- |
-| 1 OPEN | Server 发出严格请求 JSON，预占流额度；只有 Server 可开流 |
-| 2 READY | Daemon 接受逻辑流；拒绝以 RESET 回应，收到 READY 前不发送 body |
-| 3 HEADERS | HTTP 状态/响应头，或 WS 上游握手结果；在响应 DATA 前且只发一次 |
-| 4 DATA | HTTP flags=0；WS flags 表达 TEXT/BINARY 和 FIN，逐段透传消息边界 |
-| 5 WINDOW | 正的 u32 增量额度；streamId=0 补连接额度，否则补对应流额度 |
-| 6 END | 空载荷，HTTP 当前方向结束；请求 END 不结束响应 |
-| 7 COMPLETE | 空载荷；Server 已消费响应 END 并成功 flush 浏览器输出 |
-| 8 RESET | 有界错误码与去敏原因，结束该流两个方向，不表示业务副作用未发生 |
-| 9 CLOSE | WS 关闭码和有界原因，保留上游关闭语义，完成双向关闭后回收 |
-
-固定资源预算：最多 64 条并发流，每流每方向初始 credit 为 256 KiB；整连接每方向初始 credit 为 4 MiB。每个 DATA 的成本是 `max(payloadLength, 512)`，必须同时取得流和连接额度；额度只覆盖数据，不覆盖头部和有界管理帧。管理帧队列上限 256 帧/256 KiB，耗尽关闭连接。
-
-接收方真实写入下游并受其背压约束后，归还精确累计消费额度；按至少 64 KiB 消费或队列排空触发。WINDOW 不能超过已发送但未确认的成本，溢出/伪造额度关闭连接。发送器是单一写入者，按流 round-robin 每次最多发送一个 DATA，管理帧优先但不得越过同流先前 DATA 的 END。
-
-RESET 可以放弃该流尚未发送的数据；每侧按本地账本释放丢弃的接收缓冲并归还连接级额度。已关闭流的迟到 DATA 仍计入连接额度，消费后丢弃并返还。对从未分配的流发 DATA、重复 OPEN 或违反连接额度为协议错误；已关闭流的迟到 END/WINDOW 不复活该流。
-
-HTTP 成功条件是响应 END 写入回调成功且收到 COMPLETE。flush 失败使用 RESET，不能用关闭共享 WS 的 1000 表达某条请求成功。首次物理写失败后发送器停用，不重试损坏的底层写状态；所有流以结果未确认/失败终结。TCP 断开、RESET 都不触发自动请求重放。
-
-整条数据连接使用原生 Ping/Pong，15 秒探测、45 秒未响应失效。中继同样必须有界转发，不能先缓存无限数据再归还上游额度。浏览器自身的 code-server WS 仍是独立连接，HTTP 也仍走正常请求；它们不塞进 Studio 的应用事件 WS。GitHub 下载和对象存储直传不经过此数据通道。
+- **HTTP 交换**：网关通过 `EnvironmentTunnel.openHttp` 提交请求行、请求头与输入流；响应头到达后写入浏览器响应，响应体通过流式复制透传至浏览器输出，完成后正常关闭交换。
+- **WebSocket 隧道**：网关通过 `EnvironmentTunnel.openWebSocket` 发起隧道建立，上游 code-server 确认后返回双向字节流，网关直接接管底层 TCP/WebSocket 连接进行双向透传。
+- **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
+- **边界控制**：静态资源与 code-server 页面也使用视图作用域路由。浏览器自身的 code-server WS 与 HTTP 请求均不进入 Studio 应用事件 WS。GitHub 下载和对象存储直传不经过此数据通道。
 
 ## 浏览器工作状态：sessionStorage 与 localStorage
 
@@ -377,17 +345,17 @@ Daemon 在同一准入门闩下检查并进入更新：没有未收敛普通执�
 | [Environment service](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentService.java) | 一次性授权事务、token 修改统一失效 |
 | [Environment registry](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java) | 保留租约与三种投影，不存 IDE/更新任务 |
 | [Environment server](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) | 控制状态契约、更新准入、代际绑定；IDE 载荷仍由应用定义 |
-| [IDE application](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/) | mux codec/流状态、视图管理命令、租约协调与跨节点服务 |
+| [IDE application](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/) | 视图数据网关、视图管理命令、租约协调与跨节点服务 |
 | [IDE Web gateway](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/cluster/ClusterEnvironmentIdeInternalController.java) | 跨节点 IDE 控制入口与鉴权 |
 | [Browser event channel](../../web/src/main/java/fun/fengwk/kkstudio/web/events/) | connectionId、ide-use、原生 Ping/Pong 和连接释放 |
 | [Daemon runtime](../../daemon/src/runtime.ts) / [update](../../daemon/src/update.ts) | 本机准入、完整状态、下载进度与更新器交接 |
-| [Daemon IDE](../../daemon/src/ide/) / [transport](../../daemon/src/transport/) | 视图权威、期限和资源句柄、数据复用 |
+| [Daemon IDE](../../daemon/src/ide/) / [transport](../../daemon/src/transport/) | 视图权威、期限和资源句柄、数据隧道 |
 | [Runtime manifest](../../daemon/runtime-manifest.json) / [IDE extension](../../daemon/ide-extension/) | 固定带管理接口的 code-server 发行与桥接契约 |
 | [IDE panel](../../frontend/src/features/environment/ide/IdeOverlayPanel.tsx) / [pane entry](../../frontend/src/features/chat/runtime/AgentPane.tsx) | pane 入口调用全局面板，移除 pane 对 IDE 生命周期所有权 |
 | [Chat page](../../frontend/src/features/chat/ChatWorkspacePage.tsx) / [pane state](../../frontend/src/features/chat/chat-pane-state.ts) / [pane target hook](../../frontend/src/features/chat/runtime/usePaneTarget.ts) | tab 单一状态来源、用户动作双写、初始化只读 |
 | [Pending contracts](../../frontend/src/features/chat/runtime/agent-pane/pane-target.ts) / [composer storage](../../frontend/src/features/chat/composer/composer-draft.ts) | 呈现状态与副作用恢复资料分离，保留精确重试 |
 
-协议破坏性变更分别升级协议号：控制 wire 7、READY 6、IDE 数据 wire 2、浏览器事件协议 2；能力目录保持 3。产品版本必须升级，固定 code-server fork 也必须发布新不可变制品并更新摘要。
+产品版本升级时，固定 code-server fork 必须发布不可变制品并更新摘要。
 
 ## 验收要点
 
@@ -398,10 +366,10 @@ Daemon 在同一准入门闩下检查并进入更新：没有未收敛普通执�
 | 更新互斥 | 相同目标重复请求不重复执行；新任务/新视图与进入更新原子互斥 |
 | 下载 | 累计超过 300 秒仍有进展则成功；无进展/取消/网络错误区分，body 后慢清理不误报超时 |
 | 更新交接 | 在停止、替换、启动各边界注入崩溃，不出现两更新器或新进程提前准入 |
-| 数据并发 | 多流字节、类型、FIN、半关闭正确；慢流不吞噬整连接内存 |
-| 协议故障 | 超窗/畸形帧失败；单流 RESET 不误杀其他流；物理发送失败不重试底层坏状态 |
-| HTTP 完成 | END 写回调、消费及 flush 任一失败都不能报告成功 |
-| 多节点 | 浏览器事件 WS、管理 HTTP、Daemon 数据 WS 分别落在不同非 owner 时仍能正确绑定/转发；owner 换代时不重放请求 |
+| 数据并发 | 隧道并发流字节与类型正确；慢流受背压约束不无限消耗内存 |
+| 协议故障 | 隧道异常与断开能正确感知并释放资源；物理传输失败不重试损坏状态 |
+| HTTP 完成 | 响应头与流式内容正确透传至浏览器 |
+| 多节点 | 浏览器事件 WS、管理 HTTP 落在不同非 owner 时仍能正确绑定/转发；owner 换代时不重放请求 |
 | tab 存储 | A/B 各自恢复，用户动作双写，初始化不覆盖全局，viewId 永不进入 local 默认 |
 | 未知请求 | pane 切换/刷新不生成新身份重复提交；pending/Stop/上传对账契约保持 |
 | 面板 | 同环境跨 pane 复用；跨环境保留 iframe；普通路由切换不销毁；删除与离线不同处理 |
