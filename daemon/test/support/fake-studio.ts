@@ -14,8 +14,13 @@ import {
   PROTOCOL_VERSION,
 } from '../../src/protocol/control/codec.js'
 import {
+  EnvelopeSchema,
+  MessageType,
+  ResourceBudgetsSchema,
+  SettingsSchema,
   type Envelope,
 } from '../../src/generated/control_pb.js'
+import { create } from '@bufbuild/protobuf'
 
 const {
   HTTP2_HEADER_METHOD,
@@ -35,6 +40,8 @@ export interface HandshakeInfo {
 
 export interface FakeStudioOptions {
   onHandshake?: (req: IncomingMessage, res: ServerResponse) => boolean | void
+  autoControl?: boolean
+  environmentId?: string
 }
 
 export class FakeStudioPeer {
@@ -49,8 +56,11 @@ export class FakeStudioPeer {
   private readonly receivedEnvelopes: Envelope[] = []
   private readonly envelopeListeners: Array<(envelope: Envelope) => void> = []
   private readonly sockets = new Set<net.Socket>()
+  private readonly options: FakeStudioOptions
+  private rejectStatus: number | null = null
 
   constructor(options: FakeStudioOptions = {}) {
+    this.options = options
     this.server = http.createServer((req, res) => {
       if (options.onHandshake) {
         const handled = options.onHandshake(req, res)
@@ -70,6 +80,13 @@ export class FakeStudioPeer {
     this.wss = new WebSocketServer({ noServer: true })
 
     this.server.on('upgrade', (req, socket, head) => {
+      if (this.rejectStatus !== null) {
+        const status = this.rejectStatus
+        socket.write(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+        socket.destroy()
+        return
+      }
+
       this.latestHandshake = {
         headers: req.headers,
         token: req.headers['authorization']?.replace(/^Bearer\s+/, ''),
@@ -116,6 +133,10 @@ export class FakeStudioPeer {
     return this.latestHandshake
   }
 
+  get received(): Envelope[] {
+    return this.receivedEnvelopes
+  }
+
   private setupHttp2(ws: WebSocket): void {
     const wsStream = createWebSocketStream(ws)
     const session = http2.connect('https://daemon', {
@@ -125,6 +146,29 @@ export class FakeStudioPeer {
     this.clientSession = session
 
     session.on('error', () => {})
+
+    if (this.options.autoControl) {
+      void this.openControlStream().then(({ statusCode }) => {
+        if (statusCode === 200) {
+          this.sendEnvelope(
+            create(EnvelopeSchema, {
+              messageType: MessageType.SETTINGS,
+              environmentId: this.options.environmentId ?? '4e0d3c2b-1a09-4f8e-9d7c-6b5a49382716',
+              payload: {
+                case: 'settings',
+                value: create(SettingsSchema, {
+                  resourceBudgets: create(ResourceBudgetsSchema, {
+                    maxResourceBytes: 1048576n,
+                    temporaryResourceTtlSeconds: 60n,
+                    temporaryResourceCleanupIntervalSeconds: 30n,
+                  }),
+                }),
+              },
+            }),
+          )
+        }
+      })
+    }
   }
 
   async awaitSession(): Promise<ClientHttp2Session> {
@@ -174,11 +218,10 @@ export class FakeStudioPeer {
           this.controlBuffer = this.controlBuffer.subarray(totalLength)
           try {
             const envelope = decodeFrame(new Uint8Array(frameBytes))
+            this.receivedEnvelopes.push(envelope)
             if (this.envelopeListeners.length > 0) {
               const listener = this.envelopeListeners.shift()!
               listener(envelope)
-            } else {
-              this.receivedEnvelopes.push(envelope)
             }
           } catch {}
         }
@@ -268,6 +311,15 @@ export class FakeStudioPeer {
   sendGoaway(code = h2constants.NGHTTP2_NO_ERROR): void {
     if (this.clientSession && !this.clientSession.closed && !this.clientSession.destroyed) {
       this.clientSession.goaway(code)
+    }
+  }
+
+  rejectAndClose(status = 401): void {
+    this.rejectStatus = status
+    if (this.activeWs) {
+      try {
+        this.activeWs.close()
+      } catch {}
     }
   }
 

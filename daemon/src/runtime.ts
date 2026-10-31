@@ -1165,9 +1165,11 @@ export class Runtime {
     this.resources.close()
 
     void (async () => {
-      releaseStep(this.shutdownFailures, 'transport', () => {
-        void this.transport.close()
-      })
+      try {
+        await this.transport.close()
+      } catch (error) {
+        recordShutdownFailure(this.shutdownFailures, 'transport close', error)
+      }
       await Promise.allSettled([...this.inFlight])
       this.terminationResolve(this.state)
     })()
