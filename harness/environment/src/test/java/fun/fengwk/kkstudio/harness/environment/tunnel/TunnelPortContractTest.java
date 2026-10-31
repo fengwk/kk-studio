@@ -34,7 +34,6 @@ class TunnelPortContractTest {
 
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-4111-8111-111111111111");
-  private static final String VIEW = "22222222-2222-4222-8222-222222222222";
 
   @Test
   void localReturnsOnlyReadyUndrainedSession() {
@@ -44,10 +43,10 @@ class TunnelPortContractTest {
     FakeEnvironmentTunnel tunnel = register(tunnels, "daemon-a");
     assertSame(tunnel, tunnels.local(ENVIRONMENT).orElseThrow());
 
-    TunnelStream retained = tunnel.openRaw(rawTarget());
+    TunnelExchange retained = tunnel.openWebSocket(wsRequest());
     tunnel.drain();
     assertTrue(tunnels.local(ENVIRONMENT).isEmpty());
-    assertThrows(IllegalStateException.class, () -> tunnel.openRaw(rawTarget()));
+    assertThrows(IllegalStateException.class, () -> tunnel.openWebSocket(wsRequest()));
     retained.close();
   }
 
@@ -127,7 +126,7 @@ class TunnelPortContractTest {
   void closeCancelsPendingAndDisconnectFailsAllStreams() {
     FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
     FakeEnvironmentTunnel tunnel = register(tunnels, "daemon-a");
-    TunnelStream cancelled = tunnel.openRaw(rawTarget());
+    TunnelStream cancelled = tunnel.openWebSocket(wsRequest()).stream();
     CompletionStage<ByteBuffer> pendingRead = cancelled.read();
     CompletionStage<Void> pendingWrite = cancelled.write(bytes("cancel"));
     cancelled.close();
@@ -138,7 +137,8 @@ class TunnelPortContractTest {
 
     tunnels.remove(ENVIRONMENT);
     FakeEnvironmentTunnel disconnectedSession = register(tunnels, "daemon-a");
-    FakeTunnelStream disconnected = (FakeTunnelStream) disconnectedSession.openRaw(rawTarget());
+    FakeTunnelStream disconnected =
+        (FakeTunnelStream) disconnectedSession.openWebSocket(wsRequest()).stream();
     CompletionStage<Void> blocked = disconnected.write(bytes("pending"));
     assertThrows(IllegalStateException.class, () -> disconnected.write(bytes("blocked")));
     disconnectedSession.disconnect();
@@ -146,7 +146,7 @@ class TunnelPortContractTest {
     assertThrows(IOException.class, () -> join(blocked));
     assertThrows(IOException.class, () -> join(disconnected.read()));
     assertTrue(tunnels.local(ENVIRONMENT).isEmpty());
-    assertThrows(IllegalStateException.class, () -> disconnectedSession.openRaw(rawTarget()));
+    assertThrows(IllegalStateException.class, () -> disconnectedSession.openWebSocket(wsRequest()));
   }
 
   @Test
@@ -212,7 +212,10 @@ class TunnelPortContractTest {
         IllegalArgumentException.class,
         () -> new TunnelHttpRequest("GET", "/v1", Map.of("X-Bad", List.of("a\nb"))));
     assertThrows(IllegalArgumentException.class, () -> new TunnelExchange.Response(99, Map.of()));
-    assertThrows(IllegalArgumentException.class, () -> tunnel.openRaw("ide/not-a-uuid"));
+    assertThrows(IllegalArgumentException.class, () -> tunnel.openWebSocket(null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> tunnel.openWebSocket(new TunnelHttpRequest("POST", "/ws", Map.of())));
     assertThrows(
         IllegalArgumentException.class, () -> streamBytes(tunnel).write(ByteBuffer.allocate(0)));
 
@@ -237,7 +240,7 @@ class TunnelPortContractTest {
   void replacementDoesNotMigrateExistingHandle() throws Exception {
     FakeEnvironmentTunnels tunnels = new FakeEnvironmentTunnels();
     FakeEnvironmentTunnel original = register(tunnels, "daemon-a");
-    TunnelStream stream = original.openRaw(rawTarget());
+    TunnelStream stream = original.openWebSocket(wsRequest()).stream();
     DaemonConnectionIdentity first = original.identity();
 
     FakeEnvironmentTunnel replacement =
@@ -250,7 +253,7 @@ class TunnelPortContractTest {
     stream.write(bytes("stays")).toCompletableFuture().get(2, TimeUnit.SECONDS);
     assertSame(first, original.identity());
     assertTrue(original.draining());
-    assertThrows(IllegalStateException.class, () -> original.openRaw(rawTarget()));
+    assertThrows(IllegalStateException.class, () -> original.openWebSocket(wsRequest()));
     replacement.disconnect();
     assertEquals("stays", text(retained.toCompletableFuture().get(2, TimeUnit.SECONDS)));
     assertTrue(original.streams().contains(stream));
@@ -258,11 +261,11 @@ class TunnelPortContractTest {
   }
 
   private static TunnelStream streamBytes(FakeEnvironmentTunnel tunnel) {
-    return tunnel.openRaw(rawTarget());
+    return tunnel.openWebSocket(wsRequest()).stream();
   }
 
   private static FakeTunnelStream open(FakeEnvironmentTunnel tunnel) {
-    return (FakeTunnelStream) tunnel.openRaw(rawTarget());
+    return (FakeTunnelStream) tunnel.openWebSocket(wsRequest()).stream();
   }
 
   private static FakeEnvironmentTunnel register(
@@ -274,8 +277,8 @@ class TunnelPortContractTest {
     return new TunnelHttpRequest("GET", "/v1", Map.of());
   }
 
-  private static String rawTarget() {
-    return "ide/" + VIEW;
+  private static TunnelHttpRequest wsRequest() {
+    return new TunnelHttpRequest("GET", "/ws", Map.of());
   }
 
   private static ByteBuffer bytes(String value) {

@@ -1,8 +1,12 @@
 /**
  * Environment 数据面的传输无关隧道端口。
  *
- * <p>本包只定义本节点会话查询、HTTP 交换与原始字节流的窄契约和值对象。它不选择 HTTP/2、WebSocket 或其他引擎，也不包含运行时 fallback、网络 I/O
- * 或生产实现；X2 实现端口，X4 只依赖这些端口及其测试 fake。
+ * <p>本包只定义本节点会话查询、HTTP 交换与 WebSocket 隧道的窄契约和值对象。它不选择 HTTP/2、WebSocket 或其他引擎，也不包含运行时 fallback、网络 I/O
+ * 或生产实现。
+ *
+ * <p>{@link EnvironmentTunnel#openWebSocket(TunnelHttpRequest)} 基于 extended CONNECT，{@code
+ * request.method} 必须是 GET（否则抛出 {@link IllegalArgumentException}）；响应 200 表示隧道建立，{@link
+ * TunnelExchange#stream()} 为原始双向字节流。端口不理解具体应用协议，由调用方组装路径，传输只负责映射。
  *
  * <p>非法参数在调用线程同步抛出 {@link IllegalArgumentException}。同一流的每个方向最多一个未完成操作，重复调用是编程错误，同步抛出 {@link
  * IllegalStateException}。正常 EOF 后每次 {@code read} 都完成 {@code null}；{@code endOutput}

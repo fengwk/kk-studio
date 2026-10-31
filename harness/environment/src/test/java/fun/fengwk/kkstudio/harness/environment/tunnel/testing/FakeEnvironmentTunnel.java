@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.environment.tunnel.testing;
 
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
@@ -93,17 +92,23 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
   }
 
   @Override
-  public TunnelStream openRaw(String target) {
-    requireRawTarget(target);
-    FakeTunnelStream stream = new FakeTunnelStream();
+  public TunnelExchange openWebSocket(TunnelHttpRequest request) {
+    if (request == null) {
+      throw new IllegalArgumentException("request must not be null");
+    }
+    if (!"GET".equals(request.method())) {
+      throw new IllegalArgumentException("webSocket request method must be GET");
+    }
+    FakeTunnelExchange exchange = new FakeTunnelExchange(request, new FakeTunnelStream());
     synchronized (lock) {
       ensureOpen();
-      streams.add(stream);
+      exchanges.add(exchange);
+      streams.add(exchange.fakeStream());
     }
-    return stream;
+    return exchange;
   }
 
-  /** 本连接句柄上按打开顺序捕获的 HTTP 交换。 */
+  /** 本连接句柄上按打开顺序捕获的 HTTP 与 WebSocket 交换。 */
   public List<FakeTunnelExchange> exchanges() {
     synchronized (lock) {
       return List.copyOf(exchanges);
@@ -124,17 +129,5 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
     if (draining) {
       throw new IllegalStateException("environment tunnel is draining");
     }
-  }
-
-  static void requireRawTarget(String target) {
-    if (target == null) {
-      throw new IllegalArgumentException("raw target must be ide/<canonical UUID>");
-    }
-    String prefix = "ide/";
-    if (!target.startsWith(prefix) || target.indexOf('/', prefix.length()) >= 0) {
-      throw new IllegalArgumentException("raw target must be ide/<canonical UUID>");
-    }
-    String rawId = target.substring(prefix.length());
-    Uuids.parseCanonical(rawId, "viewId");
   }
 }

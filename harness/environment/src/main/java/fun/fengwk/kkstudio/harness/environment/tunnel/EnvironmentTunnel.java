@@ -26,12 +26,14 @@ public interface EnvironmentTunnel {
   TunnelExchange openHttp(TunnelHttpRequest request);
 
   /**
-   * 打开一条双向原始字节流。
+   * 打开一次 extended CONNECT WebSocket 隧道；request.method 必须是 GET。
    *
-   * @param target 只允许 {@code ide/<canonical UUID>}，不能携带主机或端口
-   * @return 绑定当前连接代际的字节流
-   * @throws IllegalArgumentException {@code target} 不是唯一允许的形式
+   * <p>响应 200 表示隧道建立，{@link TunnelExchange#stream()} 为原始双向字节流。
+   *
+   * @param request 必须以 GET 为方法的已校验请求，不能为 {@code null}
+   * @return 绑定当前连接代际的交换
+   * @throws IllegalArgumentException 请求为 {@code null} 或请求方法不是 GET
    * @throws IllegalStateException 会话已排空或已断开
    */
-  TunnelStream openRaw(String target);
+  TunnelExchange openWebSocket(TunnelHttpRequest request);
 }

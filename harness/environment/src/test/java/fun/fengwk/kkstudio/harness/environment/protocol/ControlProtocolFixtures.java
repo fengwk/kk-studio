@@ -162,7 +162,6 @@ final class ControlProtocolFixtures {
 
   static Envelope envelope(MessageType messageType, Envelope.Builder builder) {
     return builder
-        .setProtocolVersion(ControlProtocolCodec.PROTOCOL_VERSION)
         .setMessageType(messageType)
         .setEnvironmentId(ENVIRONMENT_ID)
         .setInvocationId(INVOCATION_ID)

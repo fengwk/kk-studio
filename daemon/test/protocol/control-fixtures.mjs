@@ -7,7 +7,6 @@ import {
   CompletedSchema,
   ContentSchema,
   EnvelopeSchema,
-  ErrorCode,
   ErrorSchema,
   ExecutionExitedSchema,
   ExpectedFileSchema,
@@ -50,7 +49,7 @@ import {
   CancelledSchema,
   EnvironmentInfoSchema,
   RuntimeBodySchema,
-} from '../../dist/generated/control/v8/control_pb.js'
+} from '../../dist/generated/control_pb.js'
 
 export const ENVIRONMENT_ID = '3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f'
 export const INVOCATION_ID = 'invoke-0001'
@@ -69,7 +68,6 @@ export const JSON_CONTENT =
   '{"answer":42,"exponent":1e-7,"highPrecision":0.123456789012345678901234567890,"negativeZero":-0}'
 
 const ENVELOPE_BASE = {
-  protocolVersion: 8,
   environmentId: ENVIRONMENT_ID,
   invocationId: INVOCATION_ID,
 }
@@ -183,7 +181,6 @@ function runtimeSnapshot(withUpdate) {
 
 export function settingsEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.SETTINGS,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -202,13 +199,11 @@ export function settingsEnvelope() {
 
 export function readyEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.READY,
     environmentId: ENVIRONMENT_ID,
     payload: {
       case: 'ready',
       value: create(ReadySchema, {
-        capabilitiesVersion: 6,
         daemonVersion: '5.0.1',
         environment: create(EnvironmentInfoSchema, {
           operatingSystem: OperatingSystem.LINUX,
@@ -227,7 +222,6 @@ export function readyEnvelope() {
 
 export function heartbeatEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.HEARTBEAT,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -239,7 +233,6 @@ export function heartbeatEnvelope() {
 
 export function runtimeStatusEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.RUNTIME_STATUS,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -329,7 +322,6 @@ export function uploadCommitEnvelope() {
 
 export function policyEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.TEMPORARY_RESOURCE_POLICY,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -344,7 +336,6 @@ export function policyEnvelope() {
 
 export function updateEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.UPDATE,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -361,7 +352,6 @@ export function updateEnvelope() {
 
 export function updateResultEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.UPDATE_RESULT,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -411,7 +401,6 @@ export function ideResultEnvelope() {
 
 export function ideLeaseEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.IDE_LEASE,
     environmentId: ENVIRONMENT_ID,
     payload: {
@@ -426,19 +415,18 @@ export function ideLeaseEnvelope() {
 
 export function errorEnvelope() {
   return create(EnvelopeSchema, {
-    protocolVersion: 8,
     messageType: MessageType.ERROR,
     environmentId: ENVIRONMENT_ID,
     payload: {
       case: 'error',
-      value: create(ErrorSchema, { message: 'retry', code: ErrorCode.RETRY_LATER }),
+      value: create(ErrorSchema, { message: 'retry' }),
     },
   })
 }
 
 export function upgradeRequired() {
   return create(UpgradeRequiredSchema, {
-    targetProtocolVersion: 8,
+    targetProtocolVersion: 1,
     artifactUrl: ARTIFACT,
     artifactSha256: 'b'.repeat(64),
   })

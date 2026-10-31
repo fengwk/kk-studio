@@ -29,20 +29,15 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * v8 控制协议的 protobuf binary codec 与应用层校验。
+ * 控制协议的 protobuf binary codec 与应用层校验。
  *
- * <p>protobuf 负责 wire 类型和字段号。这里补 proto3 无法表达的契约：协议版本、消息类型与 payload 一致性、scope、
+ * <p>protobuf 负责 wire 类型和字段号。这里补 proto3 无法表达的契约：消息类型与 payload 一致性、scope、
  * 必填、枚举未指定值、安全整数、UUID/SHA/媒体类型、UTF-8 字节上限、既有 granular limits，以及递归未知字段。嵌入 JSON 只做严格文本校验，绝不重新序列化。
- *
- * <p>本 codec 不接入 v7 运行路径，也不定义 Claude 的 AGENT_COMMAND / AGENT_RESULT。
  */
 public final class ControlProtocolCodec {
 
-  /** 控制协议版本；现有 v7 运行路径不受影响。 */
-  public static final int PROTOCOL_VERSION = 8;
-
-  /** READY capabilities 协议版本，与现有 DaemonCapabilities 一致。 */
-  public static final int CAPABILITIES_VERSION = DaemonCapabilities.VERSION;
+  /** 控制协议版本；用于握手与 426 升级载荷。 */
+  public static final int PROTOCOL_VERSION = 1;
 
   /** JavaScript 可无损表示的最大整数。 */
   public static final long MAX_SAFE_INTEGER = DaemonUpdateProgress.MAX_SAFE_BYTE_COUNT;
@@ -206,19 +201,27 @@ public final class ControlProtocolCodec {
         "upgradeRequired.targetProtocolVersion",
         1,
         Integer.MAX_VALUE);
-    String url =
-        requireText(
-            upgrade.hasArtifactUrl(),
-            upgrade.getArtifactUrl(),
-            "upgradeRequired.artifactUrl",
-            Integer.MAX_VALUE,
-            true);
-    requireArtifactUrl(url, "upgradeRequired.artifactUrl");
-    requirePattern(
-        upgrade.hasArtifactSha256(),
-        upgrade.getArtifactSha256(),
-        "upgradeRequired.artifactSha256",
-        DaemonUpdateArtifact.SHA256_PATTERN);
+    boolean hasUrl = upgrade.hasArtifactUrl();
+    boolean hasSha = upgrade.hasArtifactSha256();
+    if (hasUrl != hasSha) {
+      throw new ControlProtocolException(
+          "upgradeRequired artifactUrl and artifactSha256 must both be present or both absent");
+    }
+    if (hasUrl) {
+      String url =
+          requireText(
+              true,
+              upgrade.getArtifactUrl(),
+              "upgradeRequired.artifactUrl",
+              Integer.MAX_VALUE,
+              true);
+      requireArtifactUrl(url, "upgradeRequired.artifactUrl");
+      requirePattern(
+          true,
+          upgrade.getArtifactSha256(),
+          "upgradeRequired.artifactSha256",
+          DaemonUpdateArtifact.SHA256_PATTERN);
+    }
     return upgrade;
   }
 
@@ -228,9 +231,6 @@ public final class ControlProtocolCodec {
       throw new ControlProtocolException("envelope must not be null");
     }
     requireNoUnknown(envelope, "envelope");
-    if (!envelope.hasProtocolVersion() || envelope.getProtocolVersion() != PROTOCOL_VERSION) {
-      throw new ControlProtocolException("protocolVersion must be " + PROTOCOL_VERSION);
-    }
     MessageType messageType = envelope.getMessageType();
     if (messageType == MessageType.MESSAGE_TYPE_UNSPECIFIED
         || messageType == MessageType.UNRECOGNIZED) {
@@ -391,12 +391,6 @@ public final class ControlProtocolCodec {
   }
 
   private static void validateReady(Ready ready) {
-    requireInt32(
-        ready.hasCapabilitiesVersion(),
-        ready.getCapabilitiesVersion(),
-        "ready.capabilitiesVersion",
-        CAPABILITIES_VERSION,
-        CAPABILITIES_VERSION);
     String daemonVersion =
         requireDaemonVersion(
             ready.hasDaemonVersion(), ready.getDaemonVersion(), "ready.daemonVersion");
@@ -965,9 +959,6 @@ public final class ControlProtocolCodec {
 
   private static void validateError(Error error) {
     requireBoundedMessage(error.hasMessage(), error.getMessage(), "error.message");
-    if (error.getCode() == ErrorCode.UNRECOGNIZED) {
-      throw new ControlProtocolException("error.code is unknown");
-    }
   }
 
   private static void requirePayload(
