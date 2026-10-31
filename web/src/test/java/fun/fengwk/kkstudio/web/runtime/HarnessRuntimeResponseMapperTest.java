@@ -65,6 +65,7 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessActiveAssistantOutputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAgentMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
@@ -388,12 +389,7 @@ class HarnessRuntimeResponseMapperTest {
     usageCost.setCurrency("USD");
     usageCost.setAmount("0.010000000000");
     Map<UUID, HarnessUsageCostDTO> usageCosts = Map.of(id(3), usageCost);
-    HarnessThreadSnapshotDTO dto =
-        HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot,
-            ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.THREAD_BUSY),
-            usageCosts);
+    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
 
     assertEquals("3", dto.getVersion());
     assertEquals(3, dto.getEntries().size());
@@ -420,22 +416,19 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("retry", dto.getGenerationFailures().getFirst().getErrorMessage());
     assertEquals(NOW, dto.getGenerationFailures().getFirst().getFailedAt());
     assertEquals(NOW.plusSeconds(2), dto.getGenerationFailures().getFirst().getRetryAt());
-    assertFalse(dto.getManualCompaction().getAvailable());
-    assertEquals("THREAD_BUSY", dto.getManualCompaction().getDisabledReason());
+    assertNull(dto.getBaseEntryId());
   }
 
   @Test
   void passesStoppedManualCompactionReasonThroughAsStableName() {
     // DTO 只透传稳定枚举名；前端负责本地化，API 不新增私有 reason 枚举。
-    HarnessThreadSnapshotDTO dto =
-        HarnessRuntimeResponseMapper.toSnapshotDto(
-            HarnessRuntimeTestFixtures.idleSnapshot(),
+    HarnessManualCompactionDTO dto =
+        HarnessRuntimeResponseMapper.toManualCompactionDto(
             ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.THREAD_STOPPED),
-            Map.of());
+                ManualCompactionAvailability.DisabledReason.THREAD_STOPPED));
 
-    assertFalse(dto.getManualCompaction().getAvailable());
-    assertEquals("THREAD_STOPPED", dto.getManualCompaction().getDisabledReason());
+    assertFalse(dto.getAvailable());
+    assertEquals("THREAD_STOPPED", dto.getDisabledReason());
   }
 
   @Test
@@ -443,17 +436,18 @@ class HarnessRuntimeResponseMapperTest {
     // Tool phase snapshot 必须同时暴露已成功 Model 与完整 sibling，并清空 disabledReason。
     ThreadSnapshot snapshot = toolSnapshot(ToolInvocationStatus.WAITING_APPROVAL);
 
-    HarnessThreadSnapshotDTO dto =
-        HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot, ManualCompactionAvailability.enabled(), Map.of());
+    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, Map.of());
 
     assertEquals(4, dto.getEntries().size());
     assertEquals("SUCCEEDED", dto.getActiveAssistantOutput().getStatus());
     assertEquals(1, dto.getToolInvocations().size());
     assertEquals("WAITING_APPROVAL", dto.getToolInvocations().getFirst().getStatus());
     assertTrue(dto.getGenerationFailures().isEmpty());
-    assertTrue(dto.getManualCompaction().getAvailable());
-    assertNull(dto.getManualCompaction().getDisabledReason());
+    assertNull(dto.getBaseEntryId());
+    HarnessManualCompactionDTO availability =
+        HarnessRuntimeResponseMapper.toManualCompactionDto(ManualCompactionAvailability.enabled());
+    assertTrue(availability.getAvailable());
+    assertNull(availability.getDisabledReason());
   }
 
   @Test
@@ -584,9 +578,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             false);
 
-    HarnessThreadSnapshotDTO dto =
-        HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot, ManualCompactionAvailability.enabled(), Map.of());
+    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, Map.of());
 
     assertEquals(1, dto.getStopReceipts().size());
     HarnessStoppedThreadReceiptDTO receiptDto = dto.getStopReceipts().getFirst();
