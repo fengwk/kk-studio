@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { useBoundBranchPanel } from '@/features/chat/runtime/useBoundBranchPanel'
 import { useBoundThreadPanelViews } from '@/features/chat/runtime/useBoundThreadPanelViews'
 import type { ThreadPanelComposerInput } from '@/features/chat/runtime/thread-panel/ThreadPanel'
+import { harnessService } from '@/shared/api/harness-service'
+import { queryKeys } from '@/shared/lib/query-keys'
+import type { HarnessManualCompactionDTO } from '@/shared/api/generated/contracts'
 import {
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
@@ -478,14 +482,58 @@ export function useRootThreadControl({
       ? t('ai.chat.history.loadFailed') : null,
     onRetryHistory: () => { void (isDraftHistoryTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
   })
+  const [commandPaletteVisible, setCommandPaletteVisible] = useState(false)
+  useEffect(() => {
+    setCommandPaletteVisible(false)
+  }, [target])
+
   const rootEntryId = controller.entries?.find((e) => e.parentEntryId == null)?.entryId
     ?? treeEntriesQuery.data?.find((e) => e.parentEntryId == null)?.entryId
     ?? null
   const canBranchFromRoot = rootEntryId != null
+
+  const composerDraft = isBoundTarget(target) ? controller.draft : parts
+  const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
+  const composerDisabled = Boolean(capabilities?.readOnly)
+    || pending
+    || (isBoundTarget(target)
+      ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
+      : activeDraft == null || !draftHistoryReady)
+
+  const advisoryEnabled = Boolean(
+    commandPaletteVisible
+    && isBoundTarget(target)
+    && boundThreadId
+    && !composerDisabled,
+  )
+
+  const compactionAdvisoryQuery = useQuery({
+    queryKey: queryKeys.threads.compactionAvailability(boundThreadId),
+    queryFn: ({ signal }) => harnessService.getCompactionAvailability(boundThreadId, { signal }),
+    enabled: advisoryEnabled,
+  })
+
+  let manualCompaction: HarnessManualCompactionDTO | null = null
+  if (isBoundTarget(target)) {
+    if (compactionAdvisoryQuery.isError) {
+      manualCompaction = {
+        available: false,
+        disabledReason: t('ai.runtime.command.disabled.compaction.checkFailed'),
+      }
+    } else if (compactionAdvisoryQuery.data) {
+      manualCompaction = compactionAdvisoryQuery.data
+    } else {
+      manualCompaction = {
+        available: false,
+        disabledReason: t('ai.runtime.command.disabled.compaction.checking'),
+      }
+    }
+  }
+
   const commands = threadCommandsForTarget(
     target,
     {
-      manualCompaction: isBoundTarget(target) ? controller.manualCompaction : null,
+      manualCompaction,
       allowNewSession: capabilities?.allowNewSession,
       readOnly: capabilities?.readOnly,
       canBranchFromRoot,
@@ -531,18 +579,12 @@ export function useRootThreadControl({
     runControllerCommand: controller.runCommand,
   }
 
-  const composerDraft = isBoundTarget(target) ? controller.draft : parts
-  const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
-  const composerDisabled = Boolean(capabilities?.readOnly)
-    || pending
-    || (isBoundTarget(target)
-      ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
-      : activeDraft == null || !draftHistoryReady)
   const composer: ThreadPanelComposerInput = {
     scope: composerScope,
     parts: composerDraft,
     pending,
     disabled: composerDisabled,
+    onCommandPaletteVisibilityChange: setCommandPaletteVisible,
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')

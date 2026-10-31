@@ -36,6 +36,7 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
       createTime: 1774958400,
       updateTime: 1774958400,
     },
+    baseEntryId: null,
     entries: [],
     queuedCommands,
     executionStatus: 'IDLE',
@@ -44,7 +45,6 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
     generationFailures: [],
     stopReceipts: [],
     unconfirmedExecutions: [],
-    manualCompaction: { available: false, disabledReason: null },
   }
 }
 

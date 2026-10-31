@@ -59,13 +59,13 @@ function snapshot(thread: Record<string, unknown>) {
   return {
     version: thread.version ?? '1',
     thread,
+    baseEntryId: null,
     entries: [],
     queuedCommands: [],
     executionStatus: thread.status,
     activeAssistantOutput: null,
     toolInvocations: [],
     generationFailures: [],
-    manualCompaction: { available: false, disabledReason: null },
     stopReceipts: [],
     unconfirmedExecutions: [],
   }

@@ -44,8 +44,10 @@ describe('AgentPane command registry', () => {
     ]
     for (const reason of reasons) {
       const compact = threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: reason,
+        manualCompaction: {
+          available: false,
+          disabledReason: reason,
+        },
       }).find((command) => command.id === 'compact')
       expect(compact?.disabled).toBe(true)
       expect(compact?.disabledReason).toBeTruthy()
@@ -53,20 +55,30 @@ describe('AgentPane command registry', () => {
     }
     expect(
       threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: 'THREAD_STOPPED',
+        manualCompaction: {
+          available: false,
+          disabledReason: 'THREAD_STOPPED',
+        },
       }).find((command) => command.id === 'compact')?.disabledReason,
     ).toBe('Thread 已停止，恢复后才能压缩')
     expect(
       threadCommandsForTarget(target, {
-        available: false,
-        disabledReason: 'FUTURE_REASON',
+        manualCompaction: {
+          available: false,
+          disabledReason: 'FUTURE_REASON',
+        },
       }).find((command) => command.id === 'compact')?.disabledReason,
     ).toBe('当前无法手动压缩')
     expect(
-      threadCommandsForTarget(target, { available: true, disabledReason: null })
-        .find((command) => command.id === 'compact')?.disabled,
+      threadCommandsForTarget(target, {
+        manualCompaction: { available: true, disabledReason: null },
+      }).find((command) => command.id === 'compact')?.disabled,
     ).toBe(false)
+    expect(
+      threadCommandsForTarget(target, {
+        manualCompaction: { available: false, disabledReason: '正在检查压缩可用性...' },
+      }).find((command) => command.id === 'compact')?.disabledReason,
+    ).toBe('正在检查压缩可用性...')
   })
 
   it('filters command names, keywords, descriptions, and strips a slash prefix', () => {

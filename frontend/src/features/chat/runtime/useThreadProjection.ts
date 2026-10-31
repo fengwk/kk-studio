@@ -39,7 +39,6 @@ export function useThreadProjection(threadId: string) {
     generationFailures,
     stopReceipts,
     unconfirmedExecutions,
-    manualCompaction,
     snapshotQuery,
   } = useAgentThreadQueries(threadId)
   const bound = Boolean(thread)
@@ -106,7 +105,6 @@ export function useThreadProjection(threadId: string) {
     bodyRef,
     queuedCommands,
     queuedCustomMessages,
-    manualCompaction,
     stopReceipts,
     unconfirmedExecutions,
     activeAssistantOutput,

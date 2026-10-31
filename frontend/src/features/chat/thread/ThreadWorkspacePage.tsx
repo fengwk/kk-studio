@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -8,7 +8,7 @@ import { ThreadPresentationActions } from '@/features/chat/runtime/ThreadPresent
 import { Button } from '@/shared/ui/controls/Button'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/shared/api/environment-service'
-import { harnessService } from '@/shared/api/harness-service'
+import { fetchThreadSnapshot } from '@/features/chat/runtime/thread-snapshot-cache'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
@@ -25,12 +25,13 @@ export function ThreadWorkspacePage() {
   const { threadId = '' } = useParams<{ threadId: string }>()
   const navigate = useNavigate()
   const { t } = useI18n()
+  const queryClient = useQueryClient()
 
   const isValidUuid = Boolean(threadId) && UUID_PATTERN.test(threadId)
 
   const threadQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
-    queryFn: () => harnessService.getThreadSnapshot(threadId),
+    queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
     enabled: isValidUuid,
   })
 

@@ -6,6 +6,7 @@ type JsonParser = (text: string) => unknown
 interface RequestConfig {
   headers?: Record<string, string>
   jsonParser?: JsonParser
+  signal?: AbortSignal
 }
 
 interface GetConfig extends RequestConfig {

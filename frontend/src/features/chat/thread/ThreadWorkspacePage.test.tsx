@@ -156,10 +156,10 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         updateTime: 1785232801,
       },
     ],
+    baseEntryId: null,
     executionStatus: 'IDLE',
     activeAssistantOutput: null,
     generationFailures: [],
-    manualCompaction: { available: true, disabledReason: null },
     stopReceipts: [],
     unconfirmedExecutions: [],
   }
@@ -385,7 +385,7 @@ describe('ThreadWorkspacePage', () => {
       expect(screen.getAllByText('Child Worker Thread').length).toBeGreaterThan(0)
     })
 
-    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything())
     expect(chatService.getChat).not.toHaveBeenCalled()
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
@@ -476,7 +476,7 @@ describe('ThreadWorkspacePage', () => {
     })
 
     // 确保请求的是子线程的快照，而不是其他 owner 残留的 foreign thread
-    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything())
     expect(harnessService.getThreadSnapshot).not.toHaveBeenCalledWith('foreign-thread-999')
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
@@ -540,7 +540,7 @@ describe('ThreadWorkspacePage', () => {
     await user.click(backToRoot)
 
     await waitFor(() => {
-      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(rootId)
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(rootId, expect.anything())
     })
     expect(screen.queryByText('stale child draft')).not.toBeInTheDocument()
   })

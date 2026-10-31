@@ -24,6 +24,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { isConflictReason } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate } from '@/shared/i18n'
+import { mergeThreadSnapshotCache } from '@/features/chat/runtime/thread-snapshot-cache'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -635,7 +636,11 @@ export function useBoundBranchPanel({
             && generation === settingsGenerationRef.current
             && boundThreadIdRef.current === originThreadId
           ) {
-            queryClient.setQueryData(queryKeys.threads.snapshot(originThreadId), latest)
+            const authoritative = latest
+            queryClient.setQueryData<HarnessThreadSnapshotDTO>(
+              queryKeys.threads.snapshot(originThreadId),
+              (cached) => mergeThreadSnapshotCache(cached, authoritative) ?? { ...authoritative, baseEntryId: null },
+            )
             adoptAuthoritative(latest.thread)
             // 用服务端最新事实重建 diff 基准：下一次尝试读取新 cursor 与已回读的排队命令。
             baseRef.current = branchDraftFromThread(latest.thread)

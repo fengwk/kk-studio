@@ -125,8 +125,17 @@ const COMPACTION_DISABLED_REASON_KEYS: Record<string, TranslationKey> = {
 }
 
 function manualCompactionDisabledReason(reason: string | null): string {
-  const key = reason == null ? undefined : COMPACTION_DISABLED_REASON_KEYS[reason]
-  return translate(key ?? 'ai.runtime.action.compactUnavailable')
+  if (reason == null) {
+    return translate('ai.runtime.action.compactUnavailable')
+  }
+  const key = COMPACTION_DISABLED_REASON_KEYS[reason]
+  if (key) {
+    return translate(key)
+  }
+  if (/^[A-Z0-9_]+$/.test(reason)) {
+    return translate('ai.runtime.action.compactUnavailable')
+  }
+  return reason
 }
 
 export interface ThreadCommandOptions {
@@ -138,22 +147,10 @@ export interface ThreadCommandOptions {
   allowBranching?: boolean
 }
 
-function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
-  return (
-    value != null
-    && typeof value === 'object'
-    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value
-      || 'allowSwitchAgent' in value || 'allowBranching' in value)
-  )
-}
-
 export function threadCommandsForTarget(
   target: PaneTarget,
-  manualCompactionOrOptions?: ManualCompactionAvailability | ThreadCommandOptions | null,
+  options: ThreadCommandOptions = {},
 ): ThreadCommand[] {
-  const options: ThreadCommandOptions = isThreadCommandOptions(manualCompactionOrOptions)
-    ? manualCompactionOrOptions
-    : { manualCompaction: manualCompactionOrOptions }
   const manualCompaction = options.manualCompaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
   // 命令可用性只由目标 kind 与显式能力决定；owner 不参与既有 Thread 的能力裁剪。

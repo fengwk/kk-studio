@@ -6,6 +6,14 @@ describe('queryKeys', () => {
     expect(queryKeys.threads.snapshot('thread-1')).toEqual(['threads', 'snapshot', 'thread-1'])
   })
 
+  it('builds deterministic query keys for thread compaction availability advisory', () => {
+    expect(queryKeys.threads.compactionAvailability('thread-1')).toEqual([
+      'threads',
+      'compaction-availability',
+      'thread-1',
+    ])
+  })
+
   it('keeps the agent relationship tree key distinct from the Thread snapshot', () => {
     expect(queryKeys.threads.tree('thread-1')).toEqual(['threads', 'tree', 'thread-1'])
   })
