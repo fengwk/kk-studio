@@ -51,6 +51,14 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 
 `loadEntryPath` 用单条 `WITH RECURSIVE` CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出；只追加写入、同 Session 复合外键与「非 ROOT 必有父、不得指向自身」约束保证父链终止于唯一 ROOT，SQL 不另做环路检测。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 
+`loadCurrent` 读取分类所需的当前状态。本事务已有完整路径时直接派生。冷缓存先执行 `WITH RECURSIVE current_anchor`：递归只携带 id、parent、类型、TURN_END 引用和 TURN_START reason，在 head、最近非控制 Entry、open 或已关闭 Turn 引用、以及最近 ROOT、SETTINGS 或非 COMPACTION TURN_START 齐备后停止，再按这些 id 点读必要 payload。COMPACTION 是回合而不是控制 Entry，其 settings 不参与真实模型。控制 Entry 只包括 NOTIFICATION、SETTINGS 与 FORK。已关闭引用必须是当前祖先链上的 TURN_START，不按 id 全局查找。
+
+`isAncestor` 判断 candidate 是否位于 head 祖先链上，含 head 自身。完整路径已缓存时直接比较。冷查询执行 `WITH RECURSIVE ancestor_path`，只比较 id 与 parent，命中目标或到达 ROOT 即停；未知 candidate 与其它分支返回 false，head 缺失与 `loadEntryPath` 一样拒绝。
+
+`loadPathMetrics` 返回 root-to-head 的精确计数。完整路径已缓存时使用 `EntryPathMetrics.from`。冷查询执行 `WITH RECURSIVE metric_path`，在 SQL 中聚合 INPUT 与 CONTINUATION 轮次，以及 ASSISTANT MESSAGE 的 `tool_call` 数量；COMPACTION 与 STOP 不计，结果只返回标量，不在 Java 物化历史正文。
+
+三条窄结果都不写入完整路径缓存。
+
 `loadSlice` 读取 head 相对游标的增量。游标是当前祖先时 `baseEntryId` 等于游标且结果不含游标，游标即 head 时列表为空；游标不是祖先、属于另一 Session 或未知时返回完整链且 `baseEntryId` 为 null。head 缺失与 `loadEntryPath` 一样拒绝。本事务已有该 head 的完整路径时直接截取。冷缓存只执行一条 `WITH RECURSIVE entry_slice`：从 head 向上，遇到游标或 ROOT 即停，不先读完整路径，也不把部分结果写入完整路径缓存。
 
 `loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只返回 head（区分 head 不存在）与匹配该 `contributorId` 的 CUSTOM 节点，结果不回填完整路径缓存。
