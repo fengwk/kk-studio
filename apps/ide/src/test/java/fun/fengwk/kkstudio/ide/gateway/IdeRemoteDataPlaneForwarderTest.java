@@ -224,4 +224,47 @@ class IdeRemoteDataPlaneForwarderTest {
       verify(res).sendError(404);
     }
   }
+
+  @Test
+  void forwardHttpErrorHandling() throws Exception {
+    HttpClient httpClient = mock(HttpClient.class);
+    IdeClusterClient clusterClient = mock(IdeClusterClient.class);
+    ClusterOwnerRoute owner =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:8080"));
+
+    when(clusterClient.signHeaders(any(), any(), any())).thenReturn(Map.of());
+    when(httpClient.send(any(), any())).thenThrow(new IOException("network down"));
+
+    IdeRemoteDataPlaneForwarder forwarder =
+        new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    HttpServletResponse res = mock(HttpServletResponse.class);
+    when(res.isCommitted()).thenReturn(false);
+
+    forwarder.forwardHttp(req, res, owner, ENV, VIEW, "/test");
+    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
+
+  @Test
+  void forwardWebSocketConnectFailureSendsBadGateway() throws Exception {
+    HttpClient httpClient = mock(HttpClient.class);
+    IdeClusterClient clusterClient = mock(IdeClusterClient.class);
+    // Point to non-listening port
+    ClusterOwnerRoute owner =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("http://127.0.0.1:1"));
+
+    when(clusterClient.signHeaders(any(), any(), any())).thenReturn(Map.of());
+
+    IdeRemoteDataPlaneForwarder forwarder =
+        new IdeRemoteDataPlaneForwarder(httpClient, clusterClient);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    HttpServletResponse res = mock(HttpServletResponse.class);
+    when(res.isCommitted()).thenReturn(false);
+
+    forwarder.forwardWebSocket(req, res, owner, ENV, VIEW, "/ws");
+    verify(res).sendError(HttpServletResponse.SC_BAD_GATEWAY);
+  }
 }

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.eclipse.jetty.io.EndPoint;
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.junit.jupiter.api.Test;
 
@@ -55,7 +56,7 @@ class JettyUpgradeConnectionTest {
         .thenAnswer(
             inv -> {
               ByteBuffer buf = inv.getArgument(0);
-              buf.put("chunk1".getBytes(StandardCharsets.UTF_8));
+              BufferUtil.append(buf, ByteBuffer.wrap("chunk1".getBytes(StandardCharsets.UTF_8)));
               return 6;
             });
 

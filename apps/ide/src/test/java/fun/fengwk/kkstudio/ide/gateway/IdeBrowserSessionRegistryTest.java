@@ -63,6 +63,7 @@ class IdeBrowserSessionRegistryTest {
 
     Optional<IdeBrowserSessionRegistry.Session> session = registry.lookup(token, ENV, viewId);
     assertTrue(session.isPresent());
+    assertEquals(ENV, session.get().environmentId());
     assertEquals("/workspace", session.get().workspacePath());
     assertTrue(session.get().authorizesWorkspace("/workspace"));
     assertFalse(session.get().authorizesWorkspace("/other"));
@@ -101,5 +102,55 @@ class IdeBrowserSessionRegistryTest {
         IllegalStateException.class,
         () -> registry.viewOpened(IDENTITY, UUID.randomUUID().toString(), 1L, "/workspace"));
     assertThrows(IllegalStateException.class, () -> registry.ensureViewCapacity(ENV));
+  }
+
+  @Test
+  void lookupAndOpenEdgeCases() {
+    IdeBrowserSessionRegistry registry = new IdeBrowserSessionRegistry();
+    String viewId = UUID.randomUUID().toString();
+    registry.viewOpened(IDENTITY, viewId, 1L, "/workspace");
+
+    String token = registry.open(IDENTITY, viewId, 1L, "/workspace");
+
+    // Re-opening with same parameters returns existing token
+    String refreshedToken = registry.open(IDENTITY, viewId, 1L, "/workspace");
+    assertEquals(token, refreshedToken);
+
+    // Open with mismatched epoch or workspace throws IllegalStateException
+    assertThrows(
+        IllegalStateException.class, () -> registry.open(IDENTITY, viewId, 2L, "/workspace"));
+    assertThrows(IllegalStateException.class, () -> registry.open(IDENTITY, viewId, 1L, "/other"));
+
+    // Lookup with blank or null
+    assertFalse(registry.lookup(null, ENV, viewId).isPresent());
+    assertFalse(registry.lookup("  ", ENV, viewId).isPresent());
+    assertFalse(registry.lookup("non-existent", ENV, viewId).isPresent());
+
+    // Lookup with mismatched env or viewId
+    EnvironmentId otherEnv = EnvironmentId.parse("44444444-4444-4444-4444-444444444444");
+    assertFalse(registry.lookup(token, otherEnv, viewId).isPresent());
+    assertFalse(registry.lookup(token, ENV, "other-view").isPresent());
+
+    // View closed with wrong epoch does not remove view
+    registry.viewClosed(IDENTITY, viewId, 999L);
+    assertTrue(registry.lookup(token, ENV, viewId).isPresent());
+
+    // View closed with non-existent identity does not throw
+    registry.viewClosed(new DaemonConnectionIdentity(otherEnv, "daemon-x"), viewId, 1L);
+    assertTrue(registry.lookup(token, ENV, viewId).isPresent());
+
+    // Session record validation
+    assertThrows(
+        NullPointerException.class,
+        () -> new IdeBrowserSessionRegistry.Session(null, viewId, 1L, "/workspace"));
+    assertThrows(
+        NullPointerException.class,
+        () -> new IdeBrowserSessionRegistry.Session(IDENTITY, null, 1L, "/workspace"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new IdeBrowserSessionRegistry.Session(IDENTITY, viewId, 0L, "/workspace"));
+    assertThrows(
+        NullPointerException.class,
+        () -> new IdeBrowserSessionRegistry.Session(IDENTITY, viewId, 1L, null));
   }
 }

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 import org.eclipse.jetty.io.AbstractConnection;
 import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.io.EndPoint;
+import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
@@ -69,7 +70,7 @@ public final class JettyUpgradeConnection extends AbstractConnection
     if (closed.get()) {
       return;
     }
-    ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
+    ByteBuffer buffer = BufferUtil.allocate(16 * 1024);
     int read;
     try {
       read = getEndPoint().fill(buffer);
@@ -85,9 +86,11 @@ public final class JettyUpgradeConnection extends AbstractConnection
       fillInterested();
       return;
     }
-    buffer.flip();
+    ByteBuffer copy = ByteBuffer.allocate(buffer.remaining());
+    copy.put(buffer);
+    copy.flip();
     tunnel
-        .write(buffer)
+        .write(copy)
         .whenComplete(
             (v, error) -> {
               if (error != null) {

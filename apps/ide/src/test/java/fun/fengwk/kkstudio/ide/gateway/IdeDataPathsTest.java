@@ -92,6 +92,16 @@ class IdeDataPathsTest {
     assertEquals(
         "/environment-ide/" + ENV + "/" + VIEW + "/?workspace=a",
         IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1?workspace=a", req, ENV, VIEW));
+    assertEquals(null, IdeDataPaths.rebaseLocation(null, req, ENV, VIEW));
+    assertEquals("  ", IdeDataPaths.rebaseLocation("  ", req, ENV, VIEW));
+    assertEquals("//host/path", IdeDataPaths.rebaseLocation("//host/path", req, ENV, VIEW));
+    assertEquals(
+        "/environment-ide/" + ENV + "/" + VIEW + "/__kk/ide/view/" + VIEW + "/invalid-epoch/path",
+        IdeDataPaths.rebaseLocation(
+            "/__kk/ide/view/" + VIEW + "/invalid-epoch/path", req, ENV, VIEW));
+    assertEquals(
+        "/environment-ide/" + ENV + "/" + VIEW + "/",
+        IdeDataPaths.rebaseLocation("/__kk/ide/view/" + VIEW + "/1", req, ENV, VIEW));
   }
 
   @Test
@@ -105,5 +115,12 @@ class IdeDataPathsTest {
     assertEquals(base, IdeDataPaths.rebaseWorkerScope("https://other.com", req, ENV, VIEW));
     assertEquals(
         base, IdeDataPaths.rebaseWorkerScope("/__kk/ide/view/" + VIEW + "/1/", req, ENV, VIEW));
+    assertEquals(base, IdeDataPaths.rebaseWorkerScope("scope?query=1", req, ENV, VIEW));
+    assertEquals(
+        "/environment-ide/" + ENV + "/", IdeDataPaths.rebaseWorkerScope("scope", req, ENV, null));
+    assertEquals(
+        base + "sub/worker.js", IdeDataPaths.rebaseWorkerScope("./sub/worker.js", req, ENV, VIEW));
+    assertEquals(base, IdeDataPaths.rebaseWorkerScope("/outside/view", req, ENV, VIEW));
+    assertEquals(base, IdeDataPaths.rebaseWorkerScope(":bad-uri", req, ENV, VIEW));
   }
 }

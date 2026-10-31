@@ -113,8 +113,45 @@ class TcpTunnelStreamTest {
   void validationChecks() throws IOException {
     try (AsynchronousSocketChannel channel = AsynchronousSocketChannel.open()) {
       TcpTunnelStream stream = new TcpTunnelStream(channel, null);
+      assertThrows(NullPointerException.class, () -> stream.write(null));
       assertThrows(IllegalArgumentException.class, () -> stream.write(ByteBuffer.allocate(0)));
       stream.close();
+      stream.close(); // idempotent close
+    }
+  }
+
+  @Test
+  void concurrencyAndEndOutputScenarios() throws Exception {
+    try (AsynchronousServerSocketChannel server =
+        AsynchronousServerSocketChannel.open().bind(new InetSocketAddress("127.0.0.1", 0))) {
+      InetSocketAddress address = (InetSocketAddress) server.getLocalAddress();
+
+      try (AsynchronousSocketChannel client = AsynchronousSocketChannel.open()) {
+        client.connect(address).get();
+        try (AsynchronousSocketChannel accepted = server.accept().get()) {
+          TcpTunnelStream stream = new TcpTunnelStream(client, null);
+
+          // 1. Concurrent read throws IllegalStateException
+          CompletableFuture<ByteBuffer> r1 = stream.read().toCompletableFuture();
+          assertThrows(IllegalStateException.class, stream::read);
+
+          // Complete read by sending data from accepted
+          accepted.write(ByteBuffer.wrap(new byte[] {1})).get();
+          assertNotNull(r1.join());
+
+          // 2. End output is idempotent
+          CompletableFuture<Void> end1 = stream.endOutput().toCompletableFuture();
+          end1.join();
+          CompletableFuture<Void> end2 = stream.endOutput().toCompletableFuture();
+          end2.join();
+
+          // 3. Write after end output throws IllegalStateException
+          assertThrows(
+              IllegalStateException.class, () -> stream.write(ByteBuffer.wrap(new byte[] {2})));
+
+          stream.close();
+        }
+      }
     }
   }
 }
