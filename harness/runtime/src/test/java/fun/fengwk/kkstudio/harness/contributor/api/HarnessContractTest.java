@@ -247,7 +247,7 @@ class HarnessContractTest {
 
     EnvironmentCapabilityDescriptor cap =
         new EnvironmentCapabilityDescriptor(
-            new EnvironmentCapabilityId("fs.read"), "1.0", SCHEMA, Duration.ofSeconds(10));
+            new EnvironmentCapabilityId("fs.read"), SCHEMA, Duration.ofSeconds(10));
     ToolExecutionRequest req =
         new ToolExecutionRequest(
             DESCRIPTOR, new ToolCall("call-1", "test_tool", "{\"path\":\"a.txt\"}"), Duration.ZERO);

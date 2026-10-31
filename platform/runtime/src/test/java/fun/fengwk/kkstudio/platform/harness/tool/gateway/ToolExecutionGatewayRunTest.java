@@ -71,7 +71,6 @@ class ToolExecutionGatewayRunTest {
   private static final EnvironmentCapabilityDescriptor REMOTE_CAPABILITY =
       new EnvironmentCapabilityDescriptor(
           new EnvironmentCapabilityId("remote.test"),
-          "1",
           new InputSchema("arguments", Map.of(), Set.of(), false),
           Duration.ofSeconds(1));
   private static final byte[] BINARY_BYTES = new byte[] {1, 2, 3, 4, 5};

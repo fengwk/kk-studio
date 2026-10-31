@@ -69,7 +69,6 @@ class ToolExecutionGatewayRemoteDeadlineTest {
   private static final EnvironmentCapabilityDescriptor CAPABILITY =
       new EnvironmentCapabilityDescriptor(
           new EnvironmentCapabilityId("remote.test"),
-          "1",
           new InputSchema("arguments", Map.of(), Set.of(), false),
           CAPABILITY_TIMEOUT);
   private static final ToolDescriptor TOOL_DESCRIPTOR =
@@ -572,7 +571,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
 
   private static HarnessCatalog catalog(InputSchema schema, Duration timeout) {
     EnvironmentCapabilityDescriptor capability =
-        new EnvironmentCapabilityDescriptor(CAPABILITY.id(), CAPABILITY.version(), schema, timeout);
+        new EnvironmentCapabilityDescriptor(CAPABILITY.id(), schema, timeout);
     ToolDescriptor descriptor =
         new ToolDescriptor(
             TOOL_DESCRIPTOR.name(),
