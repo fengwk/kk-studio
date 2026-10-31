@@ -496,7 +496,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             mock(UsageCostProjectionService.class));
     var waitingTool =
         threadController
-            .getSnapshot(second.threadId().toString())
+            .getSnapshot(second.threadId().toString(), null)
             .getData()
             .getToolInvocations()
             .getFirst();
@@ -549,7 +549,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     markEnvironmentReady(firstEnvironmentId, UUID.randomUUID());
     assertFalse(
         threadController
-            .getSnapshot(second.threadId().toString())
+            .getSnapshot(second.threadId().toString(), null)
             .getData()
             .getToolInvocations()
             .getFirst()

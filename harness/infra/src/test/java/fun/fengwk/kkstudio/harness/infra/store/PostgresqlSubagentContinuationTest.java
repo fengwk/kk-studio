@@ -157,7 +157,7 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(accepted.acceptedCommands(), pendingBatch);
     assertEquals(
         List.of(2L, 3L, 4L, 5L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
-    BranchSettings settings = running.entryPath().baseSettings();
+    BranchSettings settings = running.entryState().baseSettings();
     assertEquals(
         List.of(
             new SetAgentCommandPayload(settings.agentName()),
@@ -188,7 +188,7 @@ class PostgresqlSubagentContinuationTest {
     processNext(childId);
     ThreadSnapshot firstFinal = snapshot(childId);
     UUID earlyTerminal = firstFinal.thread().headEntryId();
-    assertInstanceOf(TurnEndPayload.class, firstFinal.entryPath().head().payload());
+    assertInstanceOf(TurnEndPayload.class, firstFinal.entryState().head().payload());
     assertEquals(1L, firstFinal.thread().inputThroughSequence());
     assertEquals(pendingBatch, firstFinal.queuedCommands());
     assertUnmatchedWithoutReceipts(delegation, secondJoin);
@@ -197,7 +197,7 @@ class PostgresqlSubagentContinuationTest {
     processNext(childId);
     ThreadSnapshot appliedSettings = snapshot(childId);
     assertEquals(ThreadRuntimeStatus.RUNNING, appliedSettings.runtimeStatus());
-    assertInstanceOf(SettingsPayload.class, appliedSettings.entryPath().head().payload());
+    assertInstanceOf(SettingsPayload.class, appliedSettings.entryState().head().payload());
     assertEquals(1L, appliedSettings.thread().inputThroughSequence());
     assertEquals(List.of(secondInput), appliedSettings.queuedCommands());
     assertNull(appliedSettings.generation());
@@ -207,11 +207,11 @@ class PostgresqlSubagentContinuationTest {
     ThreadSnapshot secondTurn = snapshot(childId);
     assertEquals(ThreadRuntimeStatus.RUNNING, secondTurn.runtimeStatus());
     assertEquals(5L, secondTurn.thread().inputThroughSequence());
-    assertEquals(settings, secondTurn.entryPath().baseSettings());
+    assertEquals(settings, secondTurn.entryState().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());
     assertNotEquals(running.generation().generationId(), secondTurn.generation().generationId());
     assertTrue(
-        secondTurn.entryPath().entries().stream()
+        secondTurn.requireFullPath().entries().stream()
             .anyMatch(
                 entry ->
                     entry.payload() instanceof CustomMessagePayload custom
@@ -351,7 +351,7 @@ class PostgresqlSubagentContinuationTest {
   private AcceptCommandsCommand resume(UUID childId, NewThreadCommand prompt) {
     ThreadSnapshot snapshot = snapshot(childId);
     ThreadState child = snapshot.thread();
-    BranchSettings settings = snapshot.entryPath().baseSettings();
+    BranchSettings settings = snapshot.entryState().baseSettings();
     // 与 SubagentTaskRunner.appendCommand 一致：无条件发送完整 SET_* 前缀，再追加任务输入。
     return new AcceptCommandsCommand(
         new AcceptCommandsTarget.Thread(childId, child.headEntryId(), child.nextCommandSequence()),

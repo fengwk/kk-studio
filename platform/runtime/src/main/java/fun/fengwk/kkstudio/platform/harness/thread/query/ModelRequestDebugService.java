@@ -94,7 +94,7 @@ public final class ModelRequestDebugService {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(model, "model");
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-    EntryPath path = snapshot.entryPath();
+    EntryPath path = snapshot.requireFullPath();
     BranchSettings draftSettings =
         path.baseSettings().withModel(model).withEnvironmentName(environmentName);
 

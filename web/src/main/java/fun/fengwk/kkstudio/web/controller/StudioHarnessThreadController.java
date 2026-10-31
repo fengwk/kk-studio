@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugServic
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -101,14 +102,40 @@ public class StudioHarnessThreadController {
                     runtime.getThreadTree(Uuids.parseCanonical(threadId, "threadId")))));
   }
 
-  /** 查询一个一致性的 Thread 快照（单事务）；entryPath 的每个 Entry 都带上读取时费用投影。 */
+  /**
+   * 查询一个一致性的 Thread 快照（单事务）。
+   *
+   * <p>{@code afterEntryId} 为空时返回完整历史。canonical 祖先游标只返回其后的 Entry，费用只投影这次返回的 slice。当前 Thread、
+   * 队列、输出、工具与退出事实始终完整。不计算压缩 advisory。
+   */
   @GetMapping("/{threadId}")
-  public ApiResponse<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
+  public ApiResponse<HarnessThreadSnapshotDTO> getSnapshot(
+      @PathVariable String threadId, @RequestParam(required = false) String afterEntryId) {
     return ApiResponse.ok(
         withRuntimeTranslation(
             () ->
                 snapshotResponse(
-                    runtime.getThreadSnapshot(Uuids.parseCanonical(threadId, "threadId")))));
+                    afterEntryId == null
+                        ? runtime.getThreadSnapshot(Uuids.parseCanonical(threadId, "threadId"))
+                        : runtime.getThreadSnapshot(
+                            Uuids.parseCanonical(threadId, "threadId"),
+                            Uuids.parseCanonical(afterEntryId, "afterEntryId")))));
+  }
+
+  /**
+   * 按需查询手动压缩可用性。
+   *
+   * <p>调用现有完整压缩判断，保留真实 token 阈值、ownership 和模型判断。结果是瞬时 advisory，不是 compact 提交许可或 ETag。
+   */
+  @GetMapping("/{threadId}/compaction-availability")
+  public ApiResponse<HarnessManualCompactionDTO> getCompactionAvailability(
+      @PathVariable String threadId) {
+    return ApiResponse.ok(
+        withRuntimeTranslation(
+            () ->
+                HarnessRuntimeResponseMapper.toManualCompactionDto(
+                    runtime.manualCompactionAvailability(
+                        Uuids.parseCanonical(threadId, "threadId")))));
   }
 
   /**
@@ -135,12 +162,9 @@ public class StudioHarnessThreadController {
   }
 
   private HarnessThreadSnapshotDTO snapshotResponse(ThreadSnapshot snapshot) {
-    UUID id = snapshot.thread().id();
-    ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
     Map<UUID, HarnessUsageCostDTO> usageCosts =
-        usageCostProjectionService.project(snapshot.entryPath().entries());
-    HarnessThreadSnapshotDTO dto =
-        HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
+        usageCostProjectionService.project(snapshot.entrySlice().entries());
+    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
     Map<UUID, ToolInvocationDTO> tools = new HashMap<>();
     for (ToolInvocationDTO tool : dto.getToolInvocations()) {
       tools.put(UUID.fromString(tool.getId()), tool);

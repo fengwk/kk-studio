@@ -96,7 +96,8 @@ final class ToolInputControl {
           if (tool.status() != ToolInvocationStatus.WAITING_INPUT) {
             throw notApplicable("tool invocation " + tool.id() + " is not waiting for user input");
           }
-          return acceptInput(tx, thread, locked.path(), active, tool, command);
+          return acceptInput(
+              tx, thread, tx.entries().loadPath(thread.headEntryId()), active, tool, command);
         });
   }
 

@@ -6,13 +6,18 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -171,10 +176,37 @@ public final class HarnessRuntimeTestFixtures {
     return new Session(id(1), "session", NOW);
   }
 
+  private static ThreadSnapshot snapshot(
+      ThreadState thread,
+      EntryPath path,
+      List<ThreadCommand> commands,
+      GenerationProjection generation,
+      List<ToolInvocation> toolSiblings,
+      ThreadLiveState liveState,
+      List<StoppedThreadReceipt> stoppedReceipts,
+      int runningSubagentCount,
+      boolean continuationBlocked,
+      List<ExecutionExitFact> exitFacts,
+      boolean inFlightInterrupted) {
+    return new ThreadSnapshot(
+        thread,
+        EntryCurrentState.from(path),
+        new EntrySlice(null, path.entries()),
+        commands,
+        generation,
+        toolSiblings,
+        liveState,
+        stoppedReceipts,
+        runningSubagentCount,
+        continuationBlocked,
+        exitFacts,
+        inFlightInterrupted);
+  }
+
   /** IDLE 快照：仅 ROOT，无 open Turn、无 Invocation。 */
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         thread(id(1)),
         path,
         List.of(),
@@ -191,7 +223,7 @@ public final class HarnessRuntimeTestFixtures {
   /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
   public static ThreadSnapshot renamedIdleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         renamedThread(id(1)),
         path,
         List.of(),
@@ -208,7 +240,7 @@ public final class HarnessRuntimeTestFixtures {
   /** IDLE 快照（指定 thread id）。 */
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         thread(threadId, id(1)),
         path,
         List.of(),
@@ -225,7 +257,7 @@ public final class HarnessRuntimeTestFixtures {
   /** 带执行父关系的空闲快照：无本地工作和未完成的直接委派，活动状态为 IDLE。 */
   public static ThreadSnapshot idleParentSnapshot(UUID parentThreadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         thread(id(1), parentThreadId, ThreadExecutionControl.RUNNABLE, id(1)),
         path,
         List.of(),
@@ -242,7 +274,7 @@ public final class HarnessRuntimeTestFixtures {
   /** 无本地工作和未完成直接委派的停止快照：活动为 IDLE，执行控制为 STOPPED。 */
   public static ThreadSnapshot stoppedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         stoppedThread(id(1), id(1)),
         path,
         List.of(),
@@ -259,7 +291,7 @@ public final class HarnessRuntimeTestFixtures {
   /** 已接纳的用户输入尚未消费：RUNNABLE 下投影为待启动的 RUNNING。 */
   public static ThreadSnapshot queuedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(
+    return snapshot(
         thread(id(1), null, ThreadExecutionControl.RUNNABLE, id(1)),
         path,
         List.of(queuedUserMessageCommand()),
@@ -297,7 +329,7 @@ public final class HarnessRuntimeTestFixtures {
     EntryPath path =
         new EntryPath(
             List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
-    return new ThreadSnapshot(
+    return snapshot(
         activeThread(threadId, id(5)),
         path,
         List.of(),
@@ -329,7 +361,7 @@ public final class HarnessRuntimeTestFixtures {
     EntryPath path =
         new EntryPath(
             List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
-    return new ThreadSnapshot(
+    return snapshot(
         activeThread(threadId, id(5)),
         path,
         List.of(),

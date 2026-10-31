@@ -32,8 +32,12 @@ import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -193,7 +197,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot setOnlySnapshot =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(setCommand),
             null,
             List.of(),
@@ -226,7 +231,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot customMsgSnapshot =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(customMsgCommand),
             null,
             List.of(),
@@ -256,7 +262,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot notificationSnapshot =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(notificationCommand),
             null,
             List.of(),
@@ -277,7 +284,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot runningWithWatermark =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(),
             null,
             List.of(),
@@ -298,7 +306,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot waiting =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(),
             null,
             List.of(),
@@ -320,7 +329,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot waitingWithTurnEnd =
         new ThreadSnapshot(
             base.thread(),
-            base.entryPath(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
             List.of(),
             null,
             List.of(),
@@ -346,7 +356,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot stoppedWithWatermark =
         new ThreadSnapshot(
             stoppedBase.thread(),
-            stoppedBase.entryPath(),
+            EntryCurrentState.from(stoppedBase.requireFullPath()),
+            new EntrySlice(null, stoppedBase.requireFullPath().entries()),
             List.of(),
             null,
             List.of(),
@@ -362,7 +373,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot stoppedWithQueuedNotification =
         new ThreadSnapshot(
             stoppedBase.thread(),
-            stoppedBase.entryPath(),
+            EntryCurrentState.from(stoppedBase.requireFullPath()),
+            new EntrySlice(null, stoppedBase.requireFullPath().entries()),
             List.of(
                 new ThreadCommand(
                     baseline.threadId(),
@@ -399,7 +411,8 @@ class ThreadSnapshotTest {
     ThreadSnapshot awaitingOwnerSettlement =
         new ThreadSnapshot(
             stoppedBase.thread(),
-            stoppedBase.entryPath(),
+            EntryCurrentState.from(stoppedBase.requireFullPath()),
+            new EntrySlice(null, stoppedBase.requireFullPath().entries()),
             List.of(),
             null,
             List.of(),
@@ -426,7 +439,8 @@ class ThreadSnapshotTest {
         () ->
             new ThreadSnapshot(
                 otherSnapshot.thread(),
-                otherSnapshot.entryPath(),
+                EntryCurrentState.from(otherSnapshot.requireFullPath()),
+                new EntrySlice(null, otherSnapshot.requireFullPath().entries()),
                 List.of(),
                 ownerSnapshot.generation(),
                 List.of(),
@@ -439,32 +453,29 @@ class ThreadSnapshotTest {
   }
 
   private enum InvalidGenerationScope {
-    REQUEST_OFF_PATH,
-    RESULT_OFF_PATH,
-    CLOSED_TURN
+    CLOSED_TURN,
+    FOREIGN_TURN
   }
 
   @ParameterizedTest
   @EnumSource(InvalidGenerationScope.class)
-  void generationOutsideCurrentPathIsRejected(InvalidGenerationScope invalidScope) {
-    // Each corruption isolates one boundary: closed turn, foreign request, or foreign result.
+  void generationNotBelongingToOpenTurnIsRejected(InvalidGenerationScope invalidScope) {
     HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
     ThreadSnapshot active = runtimeWithGeneration(baseline).getThreadSnapshot(baseline.threadId());
     GenerationProjection original = active.generation();
-    UUID offPath = TestIds.id(987654);
     GenerationProjection candidate =
         new GenerationProjection(
             original.generationId(),
-            original.turnStartEntryId(),
-            invalidScope == InvalidGenerationScope.REQUEST_OFF_PATH
-                ? offPath
-                : original.requestHeadEntryId(),
+            invalidScope == InvalidGenerationScope.FOREIGN_TURN
+                ? UUID.randomUUID()
+                : original.turnStartEntryId(),
+            original.requestHeadEntryId(),
             original.status(),
             original.attempt(),
             original.sequence(),
             original.outputContents(),
             original.error(),
-            invalidScope == InvalidGenerationScope.RESULT_OFF_PATH ? offPath : null,
+            original.resultEntryId(),
             original.createdAt(),
             original.updatedAt(),
             original.failures());
@@ -476,11 +487,70 @@ class ThreadSnapshotTest {
         assertThrows(IllegalStateException.class, () -> withGeneration(basis, candidate));
     String expected =
         switch (invalidScope) {
-          case REQUEST_OFF_PATH -> "request head";
-          case RESULT_OFF_PATH -> "result entry";
           case CLOSED_TURN -> "requires an open TURN_START";
+          case FOREIGN_TURN -> "does not belong to thread";
         };
     assertTrue(error.getMessage().contains(expected));
+  }
+
+  @Test
+  void generationRequestHeadNotOnPathRaisesIseInSnapshot() {
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    UUID offPath = UUID.randomUUID();
+    GenerationProjection generation =
+        new GenerationProjection(
+            TestIds.id(700),
+            baseline.turnStartEntryId(),
+            offPath,
+            GenerationStatus.RUNNING,
+            1,
+            1,
+            List.of(),
+            null,
+            null,
+            T5,
+            T5,
+            List.of());
+    HarnessRuntime rt =
+        runtimeWithState(
+            new FakeLockedDriverState(
+                DriverActivity.ACTIVE, baseline.turnStartEntryId(), null, generation, null));
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> rt.getThreadSnapshot(baseline.threadId()));
+    assertTrue(
+        error
+            .getMessage()
+            .contains("driver generation request head " + offPath + " is not on the thread path"));
+  }
+
+  @Test
+  void generationResultEntryNotOnPathRaisesIseInSnapshot() {
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    UUID offPath = UUID.randomUUID();
+    GenerationProjection generation =
+        new GenerationProjection(
+            TestIds.id(700),
+            baseline.turnStartEntryId(),
+            baseline.turnStartEntryId(),
+            GenerationStatus.RUNNING,
+            1,
+            1,
+            List.of(),
+            null,
+            offPath,
+            T5,
+            T5,
+            List.of());
+    HarnessRuntime rt =
+        runtimeWithState(
+            new FakeLockedDriverState(
+                DriverActivity.ACTIVE, baseline.turnStartEntryId(), null, generation, null));
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> rt.getThreadSnapshot(baseline.threadId()));
+    assertTrue(
+        error
+            .getMessage()
+            .contains("driver generation result entry " + offPath + " is not on the thread path"));
   }
 
   @Test
@@ -552,7 +622,8 @@ class ThreadSnapshotTest {
       ThreadSnapshot base, GenerationProjection generation) {
     return new ThreadSnapshot(
         base.thread(),
-        base.entryPath(),
+        EntryCurrentState.from(base.requireFullPath()),
+        new EntrySlice(null, base.requireFullPath().entries()),
         base.queuedCommands(),
         generation,
         base.toolSiblings(),
@@ -573,7 +644,8 @@ class ThreadSnapshotTest {
         () ->
             new ThreadSnapshot(
                 base.thread(),
-                base.entryPath(),
+                EntryCurrentState.from(base.requireFullPath()),
+                new EntrySlice(null, base.requireFullPath().entries()),
                 List.of(),
                 null,
                 List.of(),
@@ -589,18 +661,20 @@ class ThreadSnapshotTest {
   void turnCountAndToolCallCountCountPathEntriesAccurately() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
-    assertEquals(0, base.turnCount());
-    assertEquals(0, base.toolCallCount());
+    assertEquals(0, EntryPathMetrics.from(base.requireFullPath().entries()).turnCount());
+    assertEquals(0, EntryPathMetrics.from(base.requireFullPath().entries()).toolCallCount());
     assertNull(base.outcome());
 
     // 1. 已有 tool 调用的真实快照上验证 toolCallCount
     HarnessRuntimeTestSupport.ToolBaseline toolBaseline = seedToolBaseline(store);
     ThreadSnapshot toolActiveSnapshot = runtime.getThreadSnapshot(toolBaseline.threadId());
-    assertEquals(1, toolActiveSnapshot.toolCallCount());
+    assertEquals(
+        1, EntryPathMetrics.from(toolActiveSnapshot.requireFullPath().entries()).toolCallCount());
 
     // 2. 构造一个普通的纯文本已完成回合
     ThreadSnapshot completedSnapshot = completedTurnSnapshot(baseline);
-    assertEquals(1, completedSnapshot.turnCount());
+    assertEquals(
+        1, EntryPathMetrics.from(completedSnapshot.requireFullPath().entries()).turnCount());
     assertEquals(ThreadRuntimeStatus.IDLE, completedSnapshot.runtimeStatus());
     assertEquals(TurnEndOutcome.COMPLETED, completedSnapshot.outcome());
   }
@@ -619,10 +693,12 @@ class ThreadSnapshotTest {
     Entry turnEnd =
         turnEndEntry(turnEndId, baseline.sessionId(), assistantMsgId, T5, turnStartId, false);
     EntryPath completedPath =
-        new EntryPath(List.of(base.entryPath().head(), turnStart, userMsg, assistantMsg, turnEnd));
+        new EntryPath(
+            List.of(base.requireFullPath().head(), turnStart, userMsg, assistantMsg, turnEnd));
     return new ThreadSnapshot(
         base.thread().advanceHead(turnEndId, T5),
-        completedPath,
+        EntryCurrentState.from(completedPath),
+        new EntrySlice(null, completedPath.entries()),
         List.of(),
         null,
         List.of(),
@@ -632,6 +708,166 @@ class ThreadSnapshotTest {
         false,
         List.of(),
         false);
+  }
+
+  @Test
+  void outcomeRequiresActualHeadToBeTurnEnd() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    UUID turnStartId = UUID.randomUUID();
+    UUID userMsgId = UUID.randomUUID();
+    UUID assistantMsgId = UUID.randomUUID();
+    UUID turnEndId = UUID.randomUUID();
+    UUID settingsId = UUID.randomUUID();
+    Entry turnStart =
+        turnStartEntry(
+            turnStartId, baseline.sessionId(), baseline.rootEntryId(), T5, baseline.threadId());
+    Entry userMsg = userMessageEntry(userMsgId, baseline.sessionId(), turnStartId, T5);
+    Entry assistantMsg = assistantEntry(assistantMsgId, baseline.sessionId(), userMsgId, T5);
+    Entry turnEnd =
+        turnEndEntry(turnEndId, baseline.sessionId(), assistantMsgId, T5, turnStartId, false);
+    Entry trailingSettings =
+        new Entry(
+            settingsId,
+            baseline.sessionId(),
+            turnEndId,
+            new SettingsPayload(HarnessRuntimeTestSupport.settings(), UUID.randomUUID()),
+            T5);
+    EntryPath trailingPath =
+        new EntryPath(
+            List.of(
+                base.requireFullPath().head(),
+                turnStart,
+                userMsg,
+                assistantMsg,
+                turnEnd,
+                trailingSettings));
+    ThreadSnapshot trailingSnapshot =
+        new ThreadSnapshot(
+            base.thread().advanceHead(settingsId, T5),
+            EntryCurrentState.from(trailingPath),
+            new EntrySlice(null, trailingPath.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    assertEquals(ThreadRuntimeStatus.IDLE, trailingSnapshot.runtimeStatus());
+    assertNull(trailingSnapshot.outcome());
+  }
+
+  @Test
+  void incrementalSnapshotRejectsRequireFullPath() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot incremental =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryState(),
+            new EntrySlice(base.thread().headEntryId(), List.of()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    assertThrows(IllegalStateException.class, incremental::requireFullPath);
+  }
+
+  @Test
+  void snapshotRejectsSliceMismatchingHead() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    UUID differentId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                new EntrySlice(differentId, List.of()),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                new EntrySlice(null, List.of()),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    Entry otherEntry =
+        userMessageEntry(differentId, baseline.sessionId(), base.thread().headEntryId(), T5);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                new EntrySlice(null, List.of(otherEntry)),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread().advanceHead(differentId, T5),
+                base.entryState(),
+                base.entrySlice(),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryState(),
+                base.entrySlice(),
+                List.of(),
+                null,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                -1,
+                false,
+                List.of(),
+                false));
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */

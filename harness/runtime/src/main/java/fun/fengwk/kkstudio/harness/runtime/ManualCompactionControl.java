@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
@@ -133,7 +134,7 @@ final class ManualCompactionControl {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_STOPPED);
     }
     CompactionConfig compactionConfig = compactionConfigProvider.compactionConfig();
-    ThreadContext context = threadContextProbe.probe(tx, thread, path);
+    ThreadContext context = threadContextProbe.probe(tx, thread, EntryCurrentState.from(path));
     if (!(context instanceof ThreadContext.IdleOrHistorical)
         || path.openTurnStart().isPresent()
         || !tx.joins().loadIncomplete(thread.id()).isEmpty()

@@ -41,7 +41,8 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueEvidenceDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
 | [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadDTO.java) | `parentThreadId` |
 | [`HarnessThreadSummaryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSummaryDTO.java) | `parentThreadId`、`headMessagePreview` |
-| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSnapshotDTO.java) | `modelInvocation` |
+| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSnapshotDTO.java) | `baseEntryId`、`activeAssistantOutput` |
+| [`HarnessManualCompactionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessManualCompactionDTO.java) | `disabledReason` |
 | [`ToolInvocationDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ToolInvocationDTO.java) | `environmentId`、`requiredEnvironmentId`、`requiredEnvironmentName`、`environmentWaitFreshnessAt`、`approvalJson`、`resultJson`、`errorJson` |
 | [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
 | [`HarnessSessionEntryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessSessionEntryDTO.java) | `usageCost` |

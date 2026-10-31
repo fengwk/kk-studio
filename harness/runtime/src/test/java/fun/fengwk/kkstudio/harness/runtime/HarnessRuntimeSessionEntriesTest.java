@@ -73,7 +73,7 @@ class HarnessRuntimeSessionEntriesTest {
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(
         List.of(baseline.rootEntryId(), activeTurnStartId, activeUserId),
-        snapshot.entryPath().entries().stream().map(Entry::id).toList());
+        snapshot.requireFullPath().entries().stream().map(Entry::id).toList());
 
     List<Entry> entries = runtime.getSessionEntries(baseline.sessionId());
     assertEquals(

@@ -36,7 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -63,7 +63,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -101,8 +100,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     // 父、子、孙分属不同 Session；同 Session 的另一个根和更晚创建但 UUID 更小的兄弟必须按永久关系取舍。
     TreeFixture tree = seedCrossSessionTree(store);
 
-    List<ThreadSnapshot> fromGrandchild = runtime.getThreadTree(tree.grandchildId());
-    List<ThreadSnapshot> fromChild = runtime.getThreadTree(tree.childId());
+    List<ThreadTreeNode> fromGrandchild = runtime.getThreadTree(tree.grandchildId());
+    List<ThreadTreeNode> fromChild = runtime.getThreadTree(tree.childId());
 
     assertEquals(ids(fromGrandchild), ids(fromChild));
     assertEquals(ids(fromGrandchild), ids(runtime.getThreadTree(tree.rootId())));
@@ -114,29 +113,29 @@ public abstract class HarnessRuntimeThreadTreeContract {
     // 尚未开始回合的空闲根不等于“已完成”。
     assertNull(runtime.getThreadTree(tree.unrelatedId()).get(0).outcome());
 
-    ThreadSnapshot root = fromGrandchild.get(0);
-    ThreadSnapshot child = fromGrandchild.get(1);
-    ThreadSnapshot grandchild = fromGrandchild.get(2);
-    ThreadSnapshot early = fromGrandchild.get(3);
+    ThreadTreeNode root = fromGrandchild.get(0);
+    ThreadTreeNode child = fromGrandchild.get(1);
+    ThreadTreeNode grandchild = fromGrandchild.get(2);
+    ThreadTreeNode early = fromGrandchild.get(3);
     assertNull(root.thread().parentThreadId());
     assertEquals(tree.rootId(), early.thread().parentThreadId());
     assertEquals(tree.rootId(), child.thread().parentThreadId());
     assertEquals(tree.childId(), grandchild.thread().parentThreadId());
     // 本例只有执行父关系，没有未完成的直接 Join；Root 无本地工作和输入需求，因此为 IDLE。
     // 后代本身活跃不等于祖先有等待义务；未完成的直接 NOTIFY_PARENT Join 才会影响 WAITING 投影。
-    assertEquals(ThreadRuntimeStatus.IDLE, root.runtimeStatus());
-    assertEquals(ThreadRuntimeStatus.IDLE, early.runtimeStatus());
-    assertEquals(ThreadRuntimeStatus.RUNNING, child.runtimeStatus());
-    assertEquals(ThreadRuntimeStatus.RUNNING, grandchild.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.IDLE, root.status());
+    assertEquals(ThreadRuntimeStatus.IDLE, early.status());
+    assertEquals(ThreadRuntimeStatus.RUNNING, child.status());
+    assertEquals(ThreadRuntimeStatus.RUNNING, grandchild.status());
     assertEquals(TurnEndOutcome.FAILED, early.outcome());
     assertNull(root.outcome());
     assertNull(child.outcome());
-    assertEquals(1, child.turnCount());
-    assertEquals(0, child.toolCallCount());
-    assertEquals(1, grandchild.turnCount());
-    assertEquals(1, grandchild.toolCallCount());
-    assertEquals(1, early.turnCount());
-    assertEquals(0, early.toolCallCount());
+    assertEquals(1, child.metrics().turnCount());
+    assertEquals(0, child.metrics().toolCallCount());
+    assertEquals(1, grandchild.metrics().turnCount());
+    assertEquals(1, grandchild.metrics().toolCallCount());
+    assertEquals(1, early.metrics().turnCount());
+    assertEquals(0, early.metrics().toolCallCount());
   }
 
   @Test
@@ -144,12 +143,12 @@ public abstract class HarnessRuntimeThreadTreeContract {
     // STOP/COMPACTION 不是模型工作轮；resume 后新的 INPUT 继续累加，离开当前 head 的分支不计入。
     UUID threadId = seedCountedHistory(store);
 
-    ThreadSnapshot snapshot = runtime.getThreadTree(threadId).get(0);
+    ThreadTreeNode snapshot = runtime.getThreadTree(threadId).get(0);
 
-    assertEquals(ThreadRuntimeStatus.IDLE, snapshot.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.IDLE, snapshot.status());
     assertEquals(TurnEndOutcome.COMPLETED, snapshot.outcome());
-    assertEquals(3, snapshot.turnCount());
-    assertEquals(2, snapshot.toolCallCount());
+    assertEquals(3, snapshot.metrics().turnCount());
+    assertEquals(2, snapshot.metrics().toolCallCount());
     assertEquals(0L, snapshot.thread().version());
   }
 
@@ -200,7 +199,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
             .filter(snapshot -> snapshot.thread().id().equals(tree.earlySiblingId()))
             .findFirst()
             .orElseThrow()
-            .runtimeStatus());
+            .status());
   }
 
   @Test
@@ -217,19 +216,17 @@ public abstract class HarnessRuntimeThreadTreeContract {
         HarnessRuntimeTestSupport.runtime(
             recordingStore(store, locks), Clock.fixed(T3, ZoneOffset.UTC));
 
-    List<ThreadSnapshot> snapshots = recording.getThreadTree(tree.rootId());
+    List<ThreadTreeNode> snapshots = recording.getThreadTree(tree.rootId());
 
     for (UUID id : List.of(tree.childId(), secondThread)) {
-      ThreadSnapshot snapshot =
+      ThreadTreeNode snapshot =
           snapshots.stream()
               .filter(item -> item.thread().id().equals(id))
               .findFirst()
               .orElseThrow();
-      assertEquals(ThreadLiveState.DRIVER_ACTIVE, snapshot.liveState());
-      assertEquals(
-          snapshot.entryPath().openTurnStart().orElseThrow().id(),
-          snapshot.generation().turnStartEntryId());
+      assertEquals(ThreadRuntimeStatus.RUNNING, snapshot.status());
       assertTrue(locks.contains("findModelInvocationByTurn:" + id));
+      assertTrue(locks.stream().noneMatch(lock -> lock.startsWith("entries.loadPath:")));
     }
   }
 
@@ -748,7 +745,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
         createdAt);
   }
 
-  private static List<UUID> ids(List<ThreadSnapshot> snapshots) {
+  private static List<UUID> ids(List<ThreadTreeNode> snapshots) {
     return snapshots.stream().map(snapshot -> snapshot.thread().id()).toList();
   }
 

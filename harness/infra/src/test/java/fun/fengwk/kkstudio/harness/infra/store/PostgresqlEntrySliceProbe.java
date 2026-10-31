@@ -23,6 +23,12 @@ final class PostgresqlEntrySliceProbe {
   private PostgresqlEntrySliceProbe() {}
 
   static DataSource probingDataSource(DataSource target, AtomicReference<String> plan) {
+    return probingDataSource(target, plan, "with recursive entry_slice", 2);
+  }
+
+  /** 拦截指定生产递归 SQL，并用同一绑定参数做 {@code EXPLAIN ANALYZE}。 */
+  static DataSource probingDataSource(
+      DataSource target, AtomicReference<String> plan, String marker, int parameterCount) {
     return (DataSource)
         Proxy.newProxyInstance(
             target.getClass().getClassLoader(),
@@ -30,13 +36,14 @@ final class PostgresqlEntrySliceProbe {
             (proxy, method, args) -> {
               Object result = invoke(target, method, args);
               if (result instanceof Connection connection) {
-                return probingConnection(connection, plan);
+                return probingConnection(connection, plan, marker, parameterCount);
               }
               return result;
             });
   }
 
-  private static Connection probingConnection(Connection target, AtomicReference<String> plan) {
+  private static Connection probingConnection(
+      Connection target, AtomicReference<String> plan, String marker, int parameterCount) {
     return (Connection)
         Proxy.newProxyInstance(
             target.getClass().getClassLoader(),
@@ -47,16 +54,20 @@ final class PostgresqlEntrySliceProbe {
                   && args != null
                   && args.length > 0
                   && args[0] instanceof String sql
-                  && isSliceQuery(sql)) {
-                return probingStatement(target, statement, sql, plan);
+                  && isMarkedQuery(sql, marker)) {
+                return probingStatement(target, statement, sql, plan, parameterCount);
               }
               return result;
             });
   }
 
   private static PreparedStatement probingStatement(
-      Connection connection, PreparedStatement target, String sql, AtomicReference<String> plan) {
-    UUID[] bound = new UUID[2];
+      Connection connection,
+      PreparedStatement target,
+      String sql,
+      AtomicReference<String> plan,
+      int parameterCount) {
+    UUID[] bound = new UUID[parameterCount];
     return (PreparedStatement)
         Proxy.newProxyInstance(
             target.getClass().getClassLoader(),
@@ -94,9 +105,9 @@ final class PostgresqlEntrySliceProbe {
     }
   }
 
-  private static boolean isSliceQuery(String sql) {
+  private static boolean isMarkedQuery(String sql, String marker) {
     String normalized = sql.toLowerCase(Locale.ROOT);
-    return normalized.contains("with recursive entry_slice") && !normalized.contains("explain");
+    return normalized.contains(marker) && !normalized.contains("explain");
   }
 
   private static String withoutTrailingSemicolon(String sql) {

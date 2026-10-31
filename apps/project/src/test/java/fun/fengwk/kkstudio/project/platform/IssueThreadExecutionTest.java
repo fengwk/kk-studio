@@ -79,7 +79,7 @@ class IssueThreadExecutionTest {
     when(thread.nextCommandSequence()).thenReturn(9L);
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
-    when(snapshot.entryPath()).thenReturn(entryPath);
+    when(snapshot.requireFullPath()).thenReturn(entryPath);
     when(snapshot.executionFacts()).thenReturn(facts);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
 
