@@ -40,8 +40,8 @@ import java.util.function.BooleanSupplier;
 /**
  * 承载数据面 HTTP 交换与 extended CONNECT WebSocket 隧道的 {@link EnvironmentTunnel} 实现。
  *
- * <p>遵循隧道窄契约：单流每个方向最多一个未完成操作；正常 EOF 持续完成 {@code null}；写操作成功时推进 position 到 limit； {@link
- * #openWebSocket} 仅允许 GET 并映射为 extended CONNECT。
+ * <p>遵循隧道窄契约：单流每个方向最多一个未完成操作；严格按需需求（未挂起 read 时不主动 demand），杜绝无界预读； 针对流尚未 attach 时的写与半关闭支持按序排队；跳过 1xx
+ * 信息响应；EOF 重复返回 {@code null}；写成功推进 position 到 limit。
  */
 public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
 
@@ -179,33 +179,44 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
 
     private final CompletableFuture<Response> responseHeadersFuture = new CompletableFuture<>();
     private final Object streamLock = new Object();
-    private final Queue<ByteBuffer> inboundQueue = new ArrayDeque<>();
+    private final Queue<PendingWrite> pendingWrites = new ArrayDeque<>();
 
     private Stream stream;
     private Throwable streamFailure;
     private boolean streamClosed;
     private boolean eof;
     private boolean outputEnded;
+    private boolean writing;
+
     private CompletableFuture<ByteBuffer> pendingRead;
-    private CompletableFuture<Void> pendingWrite;
+    private ByteBuffer unreadBuffer;
+    private CompletableFuture<Void> activeWriteFuture;
     private CompletableFuture<Void> endOutputFuture;
 
     void attachStream(Stream stream) {
+      boolean shouldDemand = false;
       synchronized (streamLock) {
         this.stream = stream;
         if (streamClosed) {
-          try {
-            stream.reset(
-                new ResetFrame(stream.getId(), ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
-          } catch (Throwable ignored) {
-          }
+          stream.reset(
+              new ResetFrame(stream.getId(), ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
+          return;
         }
+        if (pendingRead != null) {
+          shouldDemand = true;
+        }
+        if (!pendingWrites.isEmpty()) {
+          triggerFlushWritesLocked();
+        }
+      }
+      if (shouldDemand) {
+        stream.demand();
       }
     }
 
     void failStream(Throwable failure) {
       CompletableFuture<ByteBuffer> readToFail = null;
-      CompletableFuture<Void> writeToFail = null;
+      List<CompletableFuture<Void>> writesToFail = new ArrayList<>();
       synchronized (streamLock) {
         if (streamFailure != null) {
           return;
@@ -214,15 +225,21 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         streamClosed = true;
         readToFail = pendingRead;
         pendingRead = null;
-        writeToFail = pendingWrite;
-        pendingWrite = null;
+        if (activeWriteFuture != null) {
+          writesToFail.add(activeWriteFuture);
+          activeWriteFuture = null;
+        }
+        while (!pendingWrites.isEmpty()) {
+          writesToFail.add(pendingWrites.poll().future);
+        }
       }
+
       responseHeadersFuture.completeExceptionally(failure);
       if (readToFail != null) {
         readToFail.completeExceptionally(failure);
       }
-      if (writeToFail != null) {
-        writeToFail.completeExceptionally(failure);
+      for (CompletableFuture<Void> wf : writesToFail) {
+        wf.completeExceptionally(failure);
       }
       if (endOutputFuture != null) {
         endOutputFuture.completeExceptionally(failure);
@@ -242,6 +259,11 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         public void onHeaders(Stream source, HeadersFrame frame) {
           MetaData metaData = frame.getMetaData();
           if (metaData instanceof MetaData.Response response) {
+            int status = response.getStatus();
+            if (status >= 100 && status < 200) {
+              // 跳过 1xx 信息响应（如 100 Continue）
+              return;
+            }
             Map<String, List<String>> headers = new LinkedHashMap<>();
             response
                 .getHttpFields()
@@ -251,36 +273,42 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
                             .computeIfAbsent(
                                 field.getName().toLowerCase(Locale.ROOT), k -> new ArrayList<>())
                             .add(field.getValue()));
-            responseHeadersFuture.complete(new Response(response.getStatus(), headers));
+            responseHeadersFuture.complete(new Response(status, headers));
           }
           if (frame.isEndStream()) {
             onInboundEof();
-          } else {
-            source.demand();
           }
         }
 
         @Override
         public void onDataAvailable(Stream source) {
-          while (true) {
-            Stream.Data data = source.readData();
-            if (data == null) {
-              source.demand();
-              return;
-            }
-            ByteBuffer buffer = data.frame().getByteBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            boolean endStream = data.frame().isEndStream();
-            data.release();
+          Stream.Data data = source.readData();
+          if (data == null) {
+            return;
+          }
+          ByteBuffer buffer = data.frame().getByteBuffer();
+          byte[] bytes = new byte[buffer.remaining()];
+          buffer.get(bytes);
+          boolean endStream = data.frame().isEndStream();
+          data.release();
 
-            if (bytes.length > 0) {
-              onInboundBytes(ByteBuffer.wrap(bytes));
+          CompletableFuture<ByteBuffer> toComplete = null;
+          ByteBuffer payload = ByteBuffer.wrap(bytes);
+
+          synchronized (streamLock) {
+            if (pendingRead != null) {
+              toComplete = pendingRead;
+              pendingRead = null;
+            } else {
+              unreadBuffer = payload;
             }
             if (endStream) {
-              onInboundEof();
-              return;
+              eof = true;
             }
+          }
+
+          if (toComplete != null) {
+            toComplete.complete(payload);
           }
         }
 
@@ -299,32 +327,17 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
       };
     }
 
-    private void onInboundBytes(ByteBuffer data) {
-      CompletableFuture<ByteBuffer> readToComplete = null;
-      synchronized (streamLock) {
-        if (pendingRead != null) {
-          readToComplete = pendingRead;
-          pendingRead = null;
-        } else {
-          inboundQueue.add(data);
-        }
-      }
-      if (readToComplete != null) {
-        readToComplete.complete(data);
-      }
-    }
-
     private void onInboundEof() {
-      CompletableFuture<ByteBuffer> readToComplete = null;
+      CompletableFuture<ByteBuffer> toComplete = null;
       synchronized (streamLock) {
         eof = true;
-        if (pendingRead != null && inboundQueue.isEmpty()) {
-          readToComplete = pendingRead;
+        if (pendingRead != null && unreadBuffer == null) {
+          toComplete = pendingRead;
           pendingRead = null;
         }
       }
-      if (readToComplete != null) {
-        readToComplete.complete(null);
+      if (toComplete != null) {
+        toComplete.complete(null);
       }
     }
 
@@ -340,6 +353,7 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
 
     @Override
     public CompletionStage<ByteBuffer> read() {
+      Stream s = null;
       synchronized (streamLock) {
         if (streamFailure != null) {
           return CompletableFuture.failedFuture(streamFailure);
@@ -350,18 +364,23 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         if (pendingRead != null) {
           throw new IllegalStateException("a read operation is already pending");
         }
-        if (!inboundQueue.isEmpty()) {
-          return CompletableFuture.completedFuture(inboundQueue.poll());
+        if (unreadBuffer != null) {
+          ByteBuffer data = unreadBuffer;
+          unreadBuffer = null;
+          return CompletableFuture.completedFuture(data);
         }
         if (eof) {
           return CompletableFuture.completedFuture(null);
         }
+
         pendingRead = new CompletableFuture<>();
-        if (stream != null) {
-          stream.demand();
-        }
-        return pendingRead;
+        s = stream;
       }
+
+      if (s != null) {
+        s.demand();
+      }
+      return pendingRead;
     }
 
     @Override
@@ -369,6 +388,7 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
       if (source == null || !source.hasRemaining()) {
         throw new IllegalArgumentException("source must not be null and must have remaining bytes");
       }
+      CompletableFuture<Void> writeFuture = new CompletableFuture<>();
       synchronized (streamLock) {
         if (streamFailure != null) {
           return CompletableFuture.failedFuture(streamFailure);
@@ -379,44 +399,21 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         if (outputEnded || endOutputFuture != null) {
           throw new IllegalStateException("output direction has already been closed");
         }
-        if (pendingWrite != null) {
+        if (activeWriteFuture != null || !pendingWrites.isEmpty()) {
           throw new IllegalStateException("a write operation is already pending");
         }
-        if (stream == null) {
-          pendingWrite = new CompletableFuture<>();
-          // stream 异步建立中，等待附加
-          return pendingWrite;
-        }
 
-        pendingWrite = new CompletableFuture<>();
         int remaining = source.remaining();
         byte[] copy = new byte[remaining];
-        source.get(copy);
-        stream.data(
-            new DataFrame(stream.getId(), ByteBuffer.wrap(copy), false),
-            Callback.from(
-                () -> {
-                  CompletableFuture<Void> future;
-                  synchronized (streamLock) {
-                    future = pendingWrite;
-                    pendingWrite = null;
-                  }
-                  if (future != null) {
-                    future.complete(null);
-                  }
-                },
-                failure -> {
-                  CompletableFuture<Void> future;
-                  synchronized (streamLock) {
-                    future = pendingWrite;
-                    pendingWrite = null;
-                  }
-                  if (future != null) {
-                    future.completeExceptionally(failure);
-                  }
-                  failStream(failure);
-                }));
-        return pendingWrite;
+        source.get(copy); // 成功推进 position 到 limit
+
+        PendingWrite pw = new PendingWrite(ByteBuffer.wrap(copy), writeFuture, false);
+        pendingWrites.add(pw);
+
+        if (stream != null && !writing) {
+          triggerFlushWritesLocked();
+        }
+        return writeFuture;
       }
     }
 
@@ -437,50 +434,62 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         }
 
         endOutputFuture = new CompletableFuture<>();
-        CompletableFuture<Void> current = pendingWrite;
-        if (current != null) {
-          current.whenComplete(
-              (res, err) -> {
-                if (err != null) {
-                  endOutputFuture.completeExceptionally(err);
-                } else {
-                  sendEndStreamData();
-                }
-              });
-        } else {
-          sendEndStreamData();
+        PendingWrite pw = new PendingWrite(BufferUtil.EMPTY_BUFFER, endOutputFuture, true);
+        pendingWrites.add(pw);
+
+        if (stream != null && !writing) {
+          triggerFlushWritesLocked();
         }
         return endOutputFuture;
       }
     }
 
-    private void sendEndStreamData() {
-      synchronized (streamLock) {
-        if (stream == null) {
-          outputEnded = true;
-          endOutputFuture.complete(null);
-          return;
-        }
-        stream.data(
-            new DataFrame(stream.getId(), BufferUtil.EMPTY_BUFFER, true),
-            Callback.from(
-                () -> {
-                  synchronized (streamLock) {
+    private void triggerFlushWritesLocked() {
+      if (writing || pendingWrites.isEmpty() || stream == null) {
+        return;
+      }
+      writing = true;
+      PendingWrite pw = pendingWrites.poll();
+      activeWriteFuture = pw.future;
+
+      stream.data(
+          new DataFrame(stream.getId(), pw.buffer, pw.isEndStream),
+          Callback.from(
+              () -> {
+                CompletableFuture<Void> done;
+                synchronized (streamLock) {
+                  writing = false;
+                  done = activeWriteFuture;
+                  activeWriteFuture = null;
+                  if (pw.isEndStream) {
                     outputEnded = true;
                   }
-                  endOutputFuture.complete(null);
-                },
-                err -> {
-                  endOutputFuture.completeExceptionally(err);
-                  failStream(err);
-                }));
-      }
+                  if (!pendingWrites.isEmpty()) {
+                    triggerFlushWritesLocked();
+                  }
+                }
+                if (done != null) {
+                  done.complete(null);
+                }
+              },
+              error -> {
+                CompletableFuture<Void> fail;
+                synchronized (streamLock) {
+                  writing = false;
+                  fail = activeWriteFuture;
+                  activeWriteFuture = null;
+                }
+                if (fail != null) {
+                  fail.completeExceptionally(error);
+                }
+                failStream(error);
+              }));
     }
 
     @Override
     public void close() {
       CompletableFuture<ByteBuffer> readToCancel = null;
-      CompletableFuture<Void> writeToCancel = null;
+      List<CompletableFuture<Void>> writesToCancel = new ArrayList<>();
       Stream s = null;
       synchronized (streamLock) {
         if (streamClosed) {
@@ -489,30 +498,35 @@ public class DaemonEnvironmentTunnel implements EnvironmentTunnel {
         streamClosed = true;
         readToCancel = pendingRead;
         pendingRead = null;
-        writeToCancel = pendingWrite;
-        pendingWrite = null;
+        if (activeWriteFuture != null) {
+          writesToCancel.add(activeWriteFuture);
+          activeWriteFuture = null;
+        }
+        while (!pendingWrites.isEmpty()) {
+          writesToCancel.add(pendingWrites.poll().future);
+        }
         s = stream;
       }
 
-      CancellationException cancel = new CancellationException("tunnel closed");
+      CancellationException cancel = new CancellationException("tunnel stream closed");
       responseHeadersFuture.completeExceptionally(cancel);
       if (readToCancel != null) {
         readToCancel.completeExceptionally(cancel);
       }
-      if (writeToCancel != null) {
-        writeToCancel.completeExceptionally(cancel);
+      for (CompletableFuture<Void> wf : writesToCancel) {
+        wf.completeExceptionally(cancel);
       }
       if (endOutputFuture != null) {
         endOutputFuture.completeExceptionally(cancel);
       }
 
       if (s != null) {
-        try {
-          s.reset(new ResetFrame(s.getId(), ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
-        } catch (Throwable ignored) {
-        }
+        s.reset(new ResetFrame(s.getId(), ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
       }
       removeActive();
     }
   }
+
+  private record PendingWrite(
+      ByteBuffer buffer, CompletableFuture<Void> future, boolean isEndStream) {}
 }

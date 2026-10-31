@@ -42,6 +42,7 @@ import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class DaemonEnvironmentTunnelTest {
 
@@ -59,7 +60,7 @@ class DaemonEnvironmentTunnelTest {
   }
 
   @Test
-  void openHttpStreamsRequestAndResponse() throws Exception {
+  void openHttpStreamsRequestAndResponseAndSkipsInformational1xx() throws Exception {
     TunnelHttpRequest request =
         new TunnelHttpRequest("POST", "/test", Map.of("x-custom", List.of("v1")));
     TunnelExchange exchange = tunnel.openHttp(request);
@@ -68,7 +69,13 @@ class DaemonEnvironmentTunnelTest {
     TestStream stream = session.streamsCreated.get(0);
     assertNotNull(stream);
 
-    // 模拟服务端响应 200 与响应头
+    // 1. 发送 100 Continue 信息响应，不应该使 responseHeaders 完成
+    MetaData.Response info100 =
+        new MetaData.Response(100, "Continue", HttpVersion.HTTP_2, HttpFields.build());
+    stream.listener.onHeaders(stream, new HeadersFrame(info100, null, false));
+    assertFalse(exchange.responseHeaders().toCompletableFuture().isDone());
+
+    // 2. 发送最终 200 响应
     HttpFields.Mutable respFields = HttpFields.build();
     respFields.add("content-type", "application/json");
     MetaData.Response respMeta = new MetaData.Response(200, "OK", HttpVersion.HTTP_2, respFields);
@@ -86,10 +93,16 @@ class DaemonEnvironmentTunnelTest {
     stream.completeLatestData();
     writeStage.get();
 
-    // 读响应体
+    // 3. 验证未 read 时不 demand（严格反压，杜绝无界预读）
+    assertEquals(0, stream.demandCount.get());
+    CompletableFuture<ByteBuffer> readStage = tunnelStream.read().toCompletableFuture();
+    // 挂起 read 后才 demand 一次
+    assertEquals(1, stream.demandCount.get());
+
+    // 对端提供数据
     stream.inboundQueue.add(new TestData(ByteBuffer.wrap(new byte[] {9, 8}), false));
     stream.listener.onDataAvailable(stream);
-    ByteBuffer readBuf = tunnelStream.read().toCompletableFuture().get();
+    ByteBuffer readBuf = readStage.get();
     assertEquals(2, readBuf.remaining());
     assertEquals(9, readBuf.get());
     assertEquals(8, readBuf.get());
@@ -97,13 +110,72 @@ class DaemonEnvironmentTunnelTest {
     // 读端正常 EOF
     stream.listener.onHeaders(stream, new HeadersFrame(1, null, null, true));
     assertNull(tunnelStream.read().toCompletableFuture().get());
-    // 后续继续完成 null
     assertNull(tunnelStream.read().toCompletableFuture().get());
   }
 
   @Test
+  void writesAndEndOutputBeforeStreamAttachQueueAndExecuteInOrder() throws Exception {
+    session.autoAttach = false; // 延迟 attach
+
+    TunnelHttpRequest request = new TunnelHttpRequest("POST", "/delayed", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TunnelStream tunnelStream = exchange.stream();
+
+    // 在 stream 尚未 attach 前调用 write
+    ByteBuffer buf = ByteBuffer.wrap(new byte[] {10, 20});
+    CompletableFuture<Void> writeStage = tunnelStream.write(buf).toCompletableFuture();
+    assertEquals(2, buf.position()); // 必须推进 position
+    assertFalse(writeStage.isDone());
+
+    // 在 stream 尚未 attach 前调用 endOutput
+    CompletableFuture<Void> endStage = tunnelStream.endOutput().toCompletableFuture();
+    assertFalse(endStage.isDone());
+
+    // 此时 attach stream
+    TestStream stream = session.pendingStream;
+    session.pendingPromise.succeeded(stream);
+
+    // 此时第一个 write 已被发出
+    assertEquals(1, stream.sentFrames.size());
+    assertFalse(stream.sentFrames.get(0).isEndStream());
+    stream.completeLatestData();
+    writeStage.get(); // write 成功完成
+
+    // 随后 endOutput 发送 END_STREAM 帧
+    assertEquals(2, stream.sentFrames.size());
+    assertTrue(stream.sentFrames.get(1).isEndStream());
+    stream.completeLatestData();
+    endStage.get(); // endOutput 成功完成
+  }
+
+  @Test
+  void largeDataStreamingRoundtrip() throws Exception {
+    TunnelHttpRequest request = new TunnelHttpRequest("POST", "/large", Map.of());
+    TunnelExchange exchange = tunnel.openHttp(request);
+    TestStream stream = session.streamsCreated.get(0);
+    TunnelStream tunnelStream = exchange.stream();
+
+    // 发送 500 KiB 数据
+    byte[] bigData = new byte[500 * 1024];
+    for (int i = 0; i < bigData.length; i++) {
+      bigData[i] = (byte) (i & 0xff);
+    }
+    ByteBuffer buf = ByteBuffer.wrap(bigData);
+    CompletableFuture<Void> writeFuture = tunnelStream.write(buf).toCompletableFuture();
+    assertEquals(bigData.length, buf.position());
+    stream.completeLatestData();
+    writeFuture.get();
+
+    // 接收 500 KiB 数据
+    CompletableFuture<ByteBuffer> readFuture = tunnelStream.read().toCompletableFuture();
+    stream.inboundQueue.add(new TestData(ByteBuffer.wrap(bigData), false));
+    stream.listener.onDataAvailable(stream);
+    ByteBuffer received = readFuture.get();
+    assertEquals(bigData.length, received.remaining());
+  }
+
+  @Test
   void openWebSocketRequiresGetAndConnectProtocol() throws Exception {
-    // 非 GET 应抛出 IllegalArgumentException
     assertThrows(
         IllegalArgumentException.class,
         () -> tunnel.openWebSocket(new TunnelHttpRequest("POST", "/ws", Map.of())));
@@ -118,7 +190,6 @@ class DaemonEnvironmentTunnelTest {
     assertEquals("websocket", connect.getProtocol());
     assertEquals("CONNECT", connect.getMethod());
 
-    // 200 响应建立隧道
     MetaData.Response respMeta =
         new MetaData.Response(200, "OK", HttpVersion.HTTP_2, HttpFields.build());
     stream.listener.onHeaders(stream, new HeadersFrame(respMeta, null, false));
@@ -131,18 +202,12 @@ class DaemonEnvironmentTunnelTest {
     TunnelExchange exchange = tunnel.openHttp(request);
     TunnelStream stream = exchange.stream();
 
-    // 第一个 read pending
     CompletableFuture<ByteBuffer> r1 = stream.read().toCompletableFuture();
     assertFalse(r1.isDone());
-
-    // 第二个 read 同步抛 IllegalStateException
     assertThrows(IllegalStateException.class, stream::read);
 
-    // 写一个 pending
     ByteBuffer buf = ByteBuffer.wrap(new byte[] {1});
     CompletableFuture<Void> w1 = stream.write(buf).toCompletableFuture();
-
-    // 第二个 write 同步抛 IllegalStateException
     assertThrows(IllegalStateException.class, () -> stream.write(ByteBuffer.wrap(new byte[] {2})));
   }
 
@@ -154,7 +219,6 @@ class DaemonEnvironmentTunnelTest {
 
     CompletableFuture<ByteBuffer> r1 = stream.read().toCompletableFuture();
     exchange.close();
-
     assertThrows(CancellationException.class, r1::get);
   }
 
@@ -174,12 +238,20 @@ class DaemonEnvironmentTunnelTest {
 
   private static final class TestSession implements Session {
     private final List<TestStream> streamsCreated = new ArrayList<>();
+    private boolean autoAttach = true;
+    private TestStream pendingStream;
+    private Promise<Stream> pendingPromise;
 
     @Override
     public void newStream(HeadersFrame frame, Promise<Stream> promise, Stream.Listener listener) {
       TestStream stream = new TestStream(frame, listener);
       streamsCreated.add(stream);
-      promise.succeeded(stream);
+      if (autoAttach) {
+        promise.succeeded(stream);
+      } else {
+        pendingStream = stream;
+        pendingPromise = promise;
+      }
     }
 
     @Override
@@ -245,6 +317,8 @@ class DaemonEnvironmentTunnelTest {
     private final Stream.Listener listener;
     private final Queue<TestData> inboundQueue = new ArrayDeque<>();
     private final Queue<Callback> writeCallbacks = new ArrayDeque<>();
+    private final List<DataFrame> sentFrames = new ArrayList<>();
+    private final AtomicInteger demandCount = new AtomicInteger();
 
     TestStream(HeadersFrame headersFrame, Stream.Listener listener) {
       this.headersFrame = headersFrame;
@@ -262,10 +336,13 @@ class DaemonEnvironmentTunnelTest {
     }
 
     @Override
-    public void demand() {}
+    public void demand() {
+      demandCount.incrementAndGet();
+    }
 
     @Override
     public void data(DataFrame frame, Callback callback) {
+      sentFrames.add(frame);
       writeCallbacks.add(callback);
     }
 
