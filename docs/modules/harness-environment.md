@@ -70,9 +70,14 @@ EnvironmentCapabilityExecutionHandle invoke(
     EnvironmentId environmentId,
     EnvironmentCapabilityExecutionRequest request,
     EnvironmentCapabilityExecutionListener listener);
+
+EnvironmentCapabilityExecutionHandle attach(
+    EnvironmentId environmentId,
+    UUID invocationId,
+    EnvironmentCapabilityExecutionListener listener);
 ```
 
-传输外壳只携带冻结的 `environmentId`，不携带第二份 workdir。发送阶段的异常具有固定语义：
+传输外壳只携带冻结的 `environmentId`，不携带第二份 workdir。`attach` 用于接管已经在其他节点或原执行中发出的远端调用：它为指定的 `invocationId` 登记在途记录而不发送 `INVOKE`；连接处于 READY 时立即下发 `RECOVER`，未 READY 时随下次 READY 恢复；本节点不持有 READY 租约时抛 [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java)；同一 `invocationId` 已存在时抛 `IllegalArgumentException`。事件契约与 `invoke` 一致：`PROGRESS* -> exactly one terminal`，`RECOVER_NOT_FOUND` 以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 结束。发送阶段的异常具有固定语义：
 
 | 异常 | 语义 |
 | --- | --- |
@@ -300,10 +305,16 @@ COMPLETED
 - `onExitConfirmed()` 的回调交付不等于退出账本已提交。回调失败只记录固定阶段与异常类名，不记录原始异常正文或凭据，也不阻断后续回调；重复 ACK 不重试失败写入，不补造持久退出事实。
 - 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后，旧代际或初次递交结果不确定的调用以相同 `invocationId` 发送 `RECOVER`，绝不重发 `INVOKE`；Daemon 命中 journal 时回放 STARTED 并继续执行，或重放既有终态/退出事实；只有调用方已表达取消意图的调用才重放 `CANCEL` 并停止 scope。控制连接的一次抖动因此不会停止仍在运行的命令，调用仍由原 listener 收敛。
 - 身份不同的新 Daemon 接管 Environment 时，旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放其上传；新进程从自己的实例事实开始接受调用。旧主机副作用的停止或回滚仍需独立核查。
-- 已终结 invocation 的迟到或重放 `COMPLETED`/`FAILED`/`CANCELLED` 由 tombstone 吸收并静默丢弃，`STARTED`/`PROGRESS` 同样不回调；未知 `invocationId` 的回调按协议违规关闭连接，因为回调只按 `invocationId` 归属，不按连接代际。
+- 已终结 invocation 的迟到或重放 `COMPLETED`/`FAILED`/`CANCELLED` 由 tombstone 吸收并静默丢弃，`STARTED`/`PROGRESS` 同样不回调；完全未知的调用帧（既不在活跃在途表也不在 tombstone 中）安全忽略并记录 DEBUG 日志，连接保持打开，Daemon 的 journal 随后在 `RECOVER` 中重放事实。
 - `STARTED` 的可选 replayed 字段仅允许 true，表示已有 journal 记录的重放。
 
 资源上传控制帧与终态的先后顺序由两端共同保证：Daemon 只在「调用仍活动」与「发送」的临界区内出站控制帧，核心则在终态核对前拒绝一切未就绪、伪造、重复或与申请不符的上传引用。
+
+#### 优雅排空与路由释放
+
+[`DaemonControlChannel`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
+
+[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。`drain()` 操作保证幂等。
 
 #### 回调顺序与背压上界
 

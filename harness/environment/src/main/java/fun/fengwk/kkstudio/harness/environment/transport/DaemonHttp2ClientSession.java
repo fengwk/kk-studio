@@ -219,7 +219,11 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
           public void succeeded(Stream stream) {
             DaemonControlStream ctrl =
                 new DaemonControlStream(
-                    identity, stream, DaemonHttp2ClientSession.this::close, scheduler);
+                    identity,
+                    stream,
+                    DaemonHttp2ClientSession.this::close,
+                    DaemonHttp2ClientSession.this::drain,
+                    scheduler);
             controlStream = ctrl;
           }
 

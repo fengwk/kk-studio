@@ -170,6 +170,10 @@ final class DaemonConnectionSession implements DaemonSession {
     return stateLock;
   }
 
+  void drain() {
+    control.drain();
+  }
+
   DaemonOfferResult offerResult(Envelope envelope) {
     DaemonOfferResult outcome;
     synchronized (stateLock) {
@@ -231,7 +235,7 @@ final class DaemonConnectionSession implements DaemonSession {
             case RECOVER_NOT_FOUND -> handleRecoverNotFound(envelope, deferred);
             case RESOURCE_UPLOAD_REQUEST -> {
               requireReady();
-              UUID invocationId = UUID.fromString(envelope.getInvocationId());
+              UUID invocationId = requireCanonicalInvocationId(envelope);
               ActiveInvocation active =
                   invocationTracker.registeredInvocation(environmentId, invocationId);
               if (active == null) {
@@ -248,7 +252,7 @@ final class DaemonConnectionSession implements DaemonSession {
             }
             case RESOURCE_UPLOAD_COMMIT -> {
               requireReady();
-              UUID invocationId = UUID.fromString(envelope.getInvocationId());
+              UUID invocationId = requireCanonicalInvocationId(envelope);
               ActiveInvocation active =
                   invocationTracker.registeredInvocation(environmentId, invocationId);
               if (active == null) {
@@ -267,7 +271,7 @@ final class DaemonConnectionSession implements DaemonSession {
             }
             case IDE_RESULT -> {
               requireReady();
-              UUID invocationId = UUID.fromString(envelope.getInvocationId());
+              UUID invocationId = requireCanonicalInvocationId(envelope);
               ideCoordinator.handleIdeResult(invocationId, envelope.getIdeResult(), this, deferred);
             }
             case ERROR -> handleError(envelope);
@@ -384,82 +388,125 @@ final class DaemonConnectionSession implements DaemonSession {
     if (envelope.getStarted().hasReplayed() && !envelope.getStarted().getReplayed()) {
       throw new ControlProtocolException("started.replayed must be true when present");
     }
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
-    invocationTracker.callbackTarget(environmentId, invocationId);
+    UUID invocationId = requireCanonicalInvocationId(envelope);
+    ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
+    if (active == null && !invocationTracker.hasTombstone(environmentId, invocationId)) {
+      LOG.log(
+          Level.DEBUG,
+          "ignoring STARTED for unknown invocation {0} on {1}",
+          invocationId,
+          environmentId);
+    }
   }
 
   private void handleProgress(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
-    EnvironmentCapabilityResult result = toDomainResult(envelope.getProgress().getResult());
-    if (active != null) {
-      deferred.add(
-          () -> {
-            if (invocationTracker.isActive(active)) {
-              active.listener.onPartial(result);
-            }
-          });
+    if (active == null) {
+      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+        LOG.log(
+            Level.DEBUG,
+            "ignoring PROGRESS for unknown invocation {0} on {1}",
+            invocationId,
+            environmentId);
+      }
+      return;
     }
+    EnvironmentCapabilityResult result = toDomainResult(envelope.getProgress().getResult());
+    deferred.add(
+        () -> {
+          if (invocationTracker.isActive(active)) {
+            active.listener.onPartial(result);
+          }
+        });
   }
 
   private void handleCompleted(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
-    EnvironmentCapabilityResult result = toDomainResult(envelope.getCompleted().getResult());
-    ActiveInvocation registered =
-        invocationTracker.registeredInvocation(environmentId, invocationId);
-    Set<UUID> referenced = transferCoordinator.requireCompletedUploads(registered, result);
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
-    if (active != null) {
-      deferred.add(() -> active.listener.onComplete(result));
-      deferred.add(
-          () ->
-              transferCoordinator.releaseUnreferencedTransfers(active, referenced, ticketService));
+    if (active == null) {
+      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+        LOG.log(
+            Level.DEBUG,
+            "ignoring COMPLETED for unknown invocation {0} on {1}",
+            invocationId,
+            environmentId);
+      }
+      return;
     }
+    EnvironmentCapabilityResult result = toDomainResult(envelope.getCompleted().getResult());
+    Set<UUID> referenced = transferCoordinator.requireCompletedUploads(active, result);
+    deferred.add(() -> active.listener.onComplete(result));
+    deferred.add(
+        () -> transferCoordinator.releaseUnreferencedTransfers(active, referenced, ticketService));
   }
 
   private void handleFailed(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
-    String message = envelope.getFailed().getMessage();
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
-    if (active != null) {
-      deferred.add(
-          () -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
-      deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
+    if (active == null) {
+      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+        LOG.log(
+            Level.DEBUG,
+            "ignoring FAILED for unknown invocation {0} on {1}",
+            invocationId,
+            environmentId);
+      }
+      return;
     }
+    String message = envelope.getFailed().getMessage();
+    deferred.add(() -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
+    deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
   }
 
   private void handleCancelled(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
-    String reason = envelope.getCancelled().getReason();
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
-    if (active != null) {
-      deferred.add(
-          () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
-      deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
+    if (active == null) {
+      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+        LOG.log(
+            Level.DEBUG,
+            "ignoring CANCELLED for unknown invocation {0} on {1}",
+            invocationId,
+            environmentId);
+      }
+      return;
     }
+    String reason = envelope.getCancelled().getReason();
+    deferred.add(
+        () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
+    deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
   }
 
   private void handleRecoverNotFound(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
-    if (active != null) {
-      deferred.add(
-          () ->
-              active.listener.onError(
-                  new EnvironmentCapabilitySendUncertainException(
-                      "invocation was not found on daemon; capability invocation outcome is uncertain.")));
-      deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
+    if (active == null) {
+      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+        LOG.log(
+            Level.DEBUG,
+            "ignoring RECOVER_NOT_FOUND for unknown invocation {0} on {1}",
+            invocationId,
+            environmentId);
+      }
+      return;
     }
+    deferred.add(
+        () ->
+            active.listener.onError(
+                new EnvironmentCapabilitySendUncertainException(
+                    "invocation was not found on daemon; capability invocation outcome is uncertain.")));
+    deferred.add(() -> transferCoordinator.releaseAllTransfers(active, ticketService));
   }
 
   private void handleExecutionExited(Envelope envelope, List<Runnable> deferred) {
     requireReady();
-    UUID invocationId = UUID.fromString(envelope.getInvocationId());
+    UUID invocationId = requireCanonicalInvocationId(envelope);
     Optional<ExitConfirmation> confirmation =
         invocationTracker.claimExitConfirmation(environmentId, invocationId, daemonInstanceId);
     boolean known =
@@ -478,8 +525,11 @@ final class DaemonConnectionSession implements DaemonSession {
       return;
     }
     if (!known) {
-      throw new ControlProtocolException(
-          "daemon exit confirmation does not own invocationId: " + envelope.getInvocationId());
+      LOG.log(
+          Level.DEBUG,
+          "ignoring EXECUTION_EXITED for unknown invocation {0} on {1}",
+          invocationId,
+          environmentId);
     }
   }
 
@@ -918,5 +968,25 @@ final class DaemonConnectionSession implements DaemonSession {
       builder.addContents(cb.build());
     }
     return builder.build();
+  }
+
+  private static UUID requireCanonicalInvocationId(Envelope envelope) {
+    if (!envelope.hasInvocationId()) {
+      throw new ControlProtocolException("invocationId is required");
+    }
+    String text = envelope.getInvocationId();
+    if (text == null || text.isBlank()) {
+      throw new ControlProtocolException("invocationId must not be blank");
+    }
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
+      throw new ControlProtocolException("invocationId must be a canonical lowercase UUID", error);
+    }
+    if (!parsed.toString().equals(text)) {
+      throw new ControlProtocolException("invocationId must be a canonical lowercase UUID");
+    }
+    return parsed;
   }
 }

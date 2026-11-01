@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
 import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
 import fun.fengwk.kkstudio.harness.environment.protocol.Invoke;
 import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
+import fun.fengwk.kkstudio.harness.environment.protocol.Recover;
 import fun.fengwk.kkstudio.harness.environment.protocol.ResourceBudgets;
 import fun.fengwk.kkstudio.harness.environment.protocol.Settings;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -74,6 +76,7 @@ public final class EnvironmentDaemonServer
   private final Map<DaemonAdmission.Admitted, PendingAdmission> pendingAdmissions =
       new ConcurrentHashMap<>();
   private final AtomicLong connectionGenerations = new AtomicLong();
+  private volatile boolean draining;
 
   public EnvironmentDaemonServer(
       DaemonLeaseStore leaseStore,
@@ -100,6 +103,9 @@ public final class EnvironmentDaemonServer
   @Override
   public DaemonAdmission admit(DaemonHandshake handshake) {
     Objects.requireNonNull(handshake, "handshake");
+    if (draining) {
+      return new DaemonAdmission.RetryLater(Duration.ofSeconds(5));
+    }
     String token = requireNonBlank(handshake.registrationToken(), "registrationToken");
     String instanceId = requireNonBlank(handshake.daemonInstanceId(), "daemonInstanceId");
 
@@ -351,6 +357,105 @@ public final class EnvironmentDaemonServer
           "daemon outbound queue is full for environment " + environmentId);
     }
     throw unavailable(environmentId, descriptor.id().value());
+  }
+
+  @Override
+  public EnvironmentCapabilityExecutionHandle attach(
+      EnvironmentId environmentId,
+      UUID invocationId,
+      EnvironmentCapabilityExecutionListener listener) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(listener, "listener");
+
+    if (draining) {
+      throw unavailable(environmentId, "invocation " + invocationId);
+    }
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null || !session.isReady()) {
+      throw unavailable(environmentId, "invocation " + invocationId);
+    }
+    UUID leaseToken = session.leaseToken();
+    if (leaseToken == null) {
+      throw unavailable(environmentId, "invocation " + invocationId);
+    }
+    boolean holdsReady;
+    try {
+      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      throw new EnvironmentCapabilityUnavailableException(
+          "database unavailable: " + error.getMessage(), error);
+    }
+    if (!holdsReady) {
+      throw unavailable(environmentId, "invocation " + invocationId);
+    }
+
+    ActiveInvocation active =
+        new ActiveInvocation(
+            environmentId,
+            invocationId,
+            listener,
+            settings().heartbeatTimeout(),
+            session.daemonInstanceId(),
+            this::expire,
+            () -> sessionOf(environmentId));
+
+    DaemonOfferResult outcome = null;
+    RuntimeException sendFailure = null;
+    synchronized (session.stateLock()) {
+      if (!session.isReady() || !leaseToken.equals(session.leaseToken())) {
+        throw unavailable(environmentId, "invocation " + invocationId);
+      }
+      invocationTracker.register(active);
+
+      Envelope recoverEnvelope =
+          Envelope.newBuilder()
+              .setMessageType(MessageType.RECOVER)
+              .setEnvironmentId(environmentId.value().toString())
+              .setInvocationId(invocationId.toString())
+              .setRecover(Recover.getDefaultInstance())
+              .build();
+      try {
+        outcome = session.offerResult(recoverEnvelope);
+        if (outcome == DaemonOfferResult.ACCEPTED) {
+          active.deliveredGeneration = session.generation();
+        }
+      } catch (RuntimeException error) {
+        outcome = DaemonOfferResult.CLOSED;
+        sendFailure = error;
+      }
+    }
+
+    if (sendFailure != null
+        || outcome == DaemonOfferResult.CLOSED
+        || outcome == DaemonOfferResult.BUSY) {
+      session.close();
+      return active;
+    }
+    return active;
+  }
+
+  public void drain() {
+    draining = true;
+    List<DaemonConnectionSession> activeSessions;
+    synchronized (inventory) {
+      activeSessions = new ArrayList<>(sessions.values());
+    }
+    for (DaemonConnectionSession session : activeSessions) {
+      try {
+        session.drain();
+      } catch (RuntimeException error) {
+        logFailure("control drain", error);
+      }
+      UUID leaseToken = session.leaseToken();
+      if (leaseToken != null) {
+        try {
+          leaseStore.release(session.environmentId(), leaseToken);
+        } catch (RuntimeException error) {
+          logFailure("lease release", error);
+        }
+      }
+    }
   }
 
   public void expire(EnvironmentCapabilityExecutionHandle handle) {

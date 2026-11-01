@@ -44,6 +44,7 @@ class DaemonControlStreamTest {
   private TestStream stream;
   private TestScheduler scheduler;
   private AtomicBoolean sessionClosed;
+  private AtomicBoolean sessionDrained;
   private TestDaemonSession daemonSession;
   private DaemonControlStream controlStream;
 
@@ -52,9 +53,15 @@ class DaemonControlStreamTest {
     stream = new TestStream();
     scheduler = new TestScheduler();
     sessionClosed = new AtomicBoolean(false);
+    sessionDrained = new AtomicBoolean(false);
     daemonSession = new TestDaemonSession();
     controlStream =
-        new DaemonControlStream(IDENTITY, stream, () -> sessionClosed.set(true), scheduler);
+        new DaemonControlStream(
+            IDENTITY,
+            stream,
+            () -> sessionClosed.set(true),
+            () -> sessionDrained.set(true),
+            scheduler);
   }
 
   private Envelope createCancelEnvelope(String invocationId) {
@@ -237,6 +244,13 @@ class DaemonControlStreamTest {
     stream.inboundDataQueue.add(new TestData(ByteBuffer.allocate(0), true));
     controlStream.listener().onDataAvailable(stream);
     assertTrue(daemonSession.closed);
+  }
+
+  @Test
+  void drainDelegatesToSessionDrainer() {
+    assertFalse(sessionDrained.get());
+    controlStream.drain();
+    assertTrue(sessionDrained.get());
   }
 
   private static final class TestScheduler extends ScheduledExecutorScheduler {

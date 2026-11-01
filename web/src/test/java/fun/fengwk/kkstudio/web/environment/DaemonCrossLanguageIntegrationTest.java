@@ -112,6 +112,8 @@ class DaemonCrossLanguageIntegrationTest {
   private FakeLeaseStore leaseStore;
   private EnvironmentDaemonServer daemonServer;
   private RecordingSessions recordingSessions;
+  private DaemonRegistrationDirectory registrationDirectory;
+  private EnvironmentSessionListener sessionListener;
 
   private CountDownLatch readyLatch;
   private CountDownLatch heartbeatLatch;
@@ -132,7 +134,7 @@ class DaemonCrossLanguageIntegrationTest {
     heartbeatLatch = new CountDownLatch(1);
     lastHeartbeatSnapshot = new AtomicReference<>();
 
-    DaemonRegistrationDirectory registrationDirectory =
+    registrationDirectory =
         token -> {
           if (VALID_TOKEN.equals(token)) {
             return Optional.of(new DaemonRegistration(ENVIRONMENT_ID, "env-crosslang"));
@@ -140,7 +142,7 @@ class DaemonCrossLanguageIntegrationTest {
           return Optional.empty();
         };
 
-    EnvironmentSessionListener sessionListener =
+    sessionListener =
         new EnvironmentSessionListener() {
           @Override
           public void onEnvironmentReady(EnvironmentId environmentId) {
@@ -525,6 +527,86 @@ class DaemonCrossLanguageIntegrationTest {
     assertEquals(DAEMON_VERSION, snapshot.status().daemonVersion());
   }
 
+  /**
+   * 范围 7：跨实例 attach 恢复。 Node Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
+   * 实例与第一个实例共用同一个 leaseStore 接管路由准入并进入 READY； 第二个 server 实例通过 attach(environmentId, invocationId,
+   * listener) 挂接在途调用， 触发 RECOVER，真实 Node Daemon 查找到 journal 并重新交付 COMPLETED 终态。
+   */
+  @Test
+  void crossInstanceAttachReattachesInFlightCallAndCompletes() throws Exception {
+    startDaemon(VALID_TOKEN);
+    awaitReady();
+
+    UUID inFlightInvocationId = UUID.randomUUID();
+    EnvironmentCapabilityExecutionRequest sleepRequest =
+        new EnvironmentCapabilityExecutionRequest(
+            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
+            new EnvironmentCapabilityCall(
+                inFlightInvocationId.toString(),
+                "{\"command\":\"sleep 3\",\"workdir\":\""
+                    + escapeJson(testDataDir.toAbsolutePath().toString())
+                    + "\"}"),
+            Duration.ofSeconds(15));
+
+    TestListener initialListener = new TestListener();
+    CountDownLatch startedLatch = new CountDownLatch(1);
+    recordingSessions.addInboundListener(
+        env -> {
+          if (env.getMessageType() == MessageType.STARTED
+              && inFlightInvocationId.toString().equals(env.getInvocationId())) {
+            startedLatch.countDown();
+          }
+        });
+
+    daemonServer.invoke(ENVIRONMENT_ID, sleepRequest, initialListener);
+
+    assertTrue(
+        startedLatch.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS),
+        "Sleep call must start before drain/handoff");
+
+    // 新 server 实例与第一个实例共用同一个 leaseStore，但自身内存无旧调用记录
+    EnvironmentDaemonServer newServer =
+        new EnvironmentDaemonServer(
+            leaseStore,
+            registrationDirectory,
+            sessionListener,
+            (envId, res) -> {},
+            new FakeTicketService(),
+            () ->
+                new EnvironmentServerSettings(
+                    Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L));
+    recordingSessions.setDelegate(newServer);
+
+    // 第一个 server 实例执行 drain()：排空控制流并释放 FakeLeaseStore 租约
+    readyLatch = new CountDownLatch(1);
+    daemonServer.drain();
+    disconnectAllConnections();
+
+    // 等待 Daemon 重新连接并被新 server 准入与进入 READY
+    awaitReady();
+
+    // 在新 server 上发起 attach
+    TestListener attachListener = new TestListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        newServer.attach(ENVIRONMENT_ID, inFlightInvocationId, attachListener);
+    assertNotNull(handle);
+
+    // 验证新 server 向 Node daemon 发送了 RECOVER
+    boolean sentRecover =
+        recordingSessions.outboundEnvelopes().stream()
+            .anyMatch(
+                env ->
+                    env.getMessageType() == MessageType.RECOVER
+                        && inFlightInvocationId.toString().equals(env.getInvocationId()));
+    assertTrue(sentRecover, "New server must emit RECOVER upon attach");
+
+    // 真实 Node daemon 收到 RECOVER 后完成并交付 COMPLETED
+    EnvironmentCapabilityResult result = attachListener.awaitCompleted(TIMEOUT);
+    assertNotNull(result, "In-flight invocation must complete via attach on new server");
+    assertFalse(result.error());
+    assertEquals(1, attachListener.completedCount.get());
+  }
+
   private void startDaemon(String token) throws IOException {
     testDataDir = Files.createTempDirectory("kk-daemon-crosslang-");
     daemonProcess = DaemonProcess.start(repoRoot(), connector.getLocalPort(), token, testDataDir);
@@ -749,13 +831,17 @@ class DaemonCrossLanguageIntegrationTest {
   /** 包装 DaemonSessions 以捕获双向 Envelope 和支持重连断言。 */
   private static final class RecordingSessions implements DaemonSessions {
 
-    private final EnvironmentDaemonServer delegate;
+    private volatile EnvironmentDaemonServer delegate;
     private final List<Envelope> inboundEnvelopes = new CopyOnWriteArrayList<>();
     private final List<Envelope> outboundEnvelopes = new CopyOnWriteArrayList<>();
     private final List<Consumer<Envelope>> inboundListeners = new CopyOnWriteArrayList<>();
     private final List<Consumer<Envelope>> outboundListeners = new CopyOnWriteArrayList<>();
 
     RecordingSessions(EnvironmentDaemonServer delegate) {
+      this.delegate = delegate;
+    }
+
+    void setDelegate(EnvironmentDaemonServer delegate) {
       this.delegate = delegate;
     }
 
@@ -805,6 +891,11 @@ class DaemonCrossLanguageIntegrationTest {
             }
 
             @Override
+            public void drain() {
+              control.drain();
+            }
+
+            @Override
             public void closeAfterFlush() {
               control.closeAfterFlush();
             }
@@ -846,6 +937,8 @@ class DaemonCrossLanguageIntegrationTest {
 
     private final AtomicInteger heartbeatCalls = new AtomicInteger(0);
     private volatile DaemonCapabilities readyCapabilities;
+    private volatile UUID currentLeaseToken;
+    private volatile boolean released;
 
     DaemonCapabilities readyCapabilities() {
       return readyCapabilities;
@@ -857,7 +950,10 @@ class DaemonCrossLanguageIntegrationTest {
       if (!VALID_TOKEN.equals(registrationToken)) {
         return new LeaseBindResult.Rejected("Invalid token");
       }
-      return new LeaseBindResult.Acquired(UUID.randomUUID());
+      UUID token = UUID.randomUUID();
+      this.currentLeaseToken = token;
+      this.released = false;
+      return new LeaseBindResult.Acquired(token);
     }
 
     @Override
@@ -889,12 +985,22 @@ class DaemonCrossLanguageIntegrationTest {
 
     @Override
     public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {
-      return true;
+      return currentLeaseToken != null && currentLeaseToken.equals(leaseToken) && !released;
     }
 
     @Override
     public boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken) {
-      return true;
+      return currentLeaseToken != null && currentLeaseToken.equals(leaseToken) && !released;
+    }
+
+    @Override
+    public boolean release(EnvironmentId environmentId, UUID leaseToken) {
+      if (currentLeaseToken != null && currentLeaseToken.equals(leaseToken)) {
+        released = true;
+        currentLeaseToken = null;
+        return true;
+      }
+      return false;
     }
   }
 

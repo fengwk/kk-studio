@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,7 +27,8 @@ final class DaemonInvocationTracker {
       LinkedHashMap<UUID, ActiveInvocation> invocations =
           invocationsByEnvironment.computeIfAbsent(
               active.environmentId, ignored -> new LinkedHashMap<>());
-      if (invocations.containsKey(active.invocationId)) {
+      if (invocations.containsKey(active.invocationId)
+          || hasTombstoneLocked(active.environmentId, active.invocationId)) {
         throw new IllegalArgumentException(
             "invocationId is already active for environment "
                 + active.environmentId
@@ -92,11 +92,7 @@ final class DaemonInvocationTracker {
       if (active != null) {
         return active;
       }
-      if (hasTombstoneLocked(environmentId, invocationId)) {
-        return null;
-      }
-      throw new ControlProtocolException(
-          "daemon callback does not own invocationId: " + invocationId);
+      return null;
     }
   }
 
@@ -107,11 +103,7 @@ final class DaemonInvocationTracker {
         addTombstoneLocked(active);
         return active;
       }
-      if (hasTombstoneLocked(environmentId, invocationId)) {
-        return null;
-      }
-      throw new ControlProtocolException(
-          "daemon terminal callback does not own invocationId: " + invocationId);
+      return null;
     }
   }
 

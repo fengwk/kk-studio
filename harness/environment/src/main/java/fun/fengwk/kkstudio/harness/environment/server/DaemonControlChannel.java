@@ -20,6 +20,9 @@ public interface DaemonControlChannel {
    */
   DaemonOfferResult offer(Envelope envelope);
 
+  /** 触发信道与所属底层传输会话的排空流程。 */
+  void drain();
+
   /** 触发通道在排空当前所有在途出站帧后优雅关闭。 */
   void closeAfterFlush();
 

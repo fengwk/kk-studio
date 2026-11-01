@@ -604,6 +604,25 @@ final class ToolGatewayTestSupport {
       return returnNullHandle ? null : newReturnedHandle();
     }
 
+    @Override
+    public EnvironmentCapabilityExecutionHandle attach(
+        EnvironmentId environmentId,
+        UUID invocationId,
+        EnvironmentCapabilityExecutionListener listener) {
+      switch (action) {
+        case THROW_UNAVAILABLE:
+          throw new EnvironmentCapabilityUnavailableException("environment offline");
+        case THROW_INVALID:
+          throw new IllegalArgumentException("invalid request");
+        case THROW_GENERIC:
+          throw new IllegalStateException("transport broken");
+        case RETURN_HANDLE:
+        default:
+          break;
+      }
+      return returnNullHandle ? null : newReturnedHandle();
+    }
+
     private static EnvironmentCapabilityResult toCapabilityResult(
         String callId, ToolResult result) {
       if (result == null) {

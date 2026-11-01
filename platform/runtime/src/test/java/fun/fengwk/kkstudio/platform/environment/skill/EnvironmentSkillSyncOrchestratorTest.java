@@ -530,11 +530,25 @@ class EnvironmentSkillSyncOrchestratorTest {
       EnvironmentCapabilityExecutionHandle handle =
           mock(EnvironmentCapabilityExecutionHandle.class);
       EnvironmentCapabilityTransport pending =
-          (environment, request, callback) -> {
-            assertEquals(Duration.ZERO, request.timeout());
-            listener.set(callback);
-            invoked.countDown();
-            return handle;
+          new EnvironmentCapabilityTransport() {
+            @Override
+            public EnvironmentCapabilityExecutionHandle invoke(
+                EnvironmentId environment,
+                EnvironmentCapabilityExecutionRequest request,
+                EnvironmentCapabilityExecutionListener callback) {
+              assertEquals(Duration.ZERO, request.timeout());
+              listener.set(callback);
+              invoked.countDown();
+              return handle;
+            }
+
+            @Override
+            public EnvironmentCapabilityExecutionHandle attach(
+                EnvironmentId environmentId,
+                UUID invocationId,
+                EnvironmentCapabilityExecutionListener callback) {
+              throw new UnsupportedOperationException();
+            }
           };
       ExecutorService executor = Executors.newSingleThreadExecutor();
       try {
@@ -569,11 +583,25 @@ class EnvironmentSkillSyncOrchestratorTest {
     AtomicReference<EnvironmentCapabilityExecutionRequest> request = new AtomicReference<>();
     EnvironmentCapabilityExecutionHandle handle = mock(EnvironmentCapabilityExecutionHandle.class);
     EnvironmentCapabilityTransport pending =
-        (environment, call, callback) -> {
-          request.set(call);
-          listener.set(callback);
-          invoked.countDown();
-          return handle;
+        new EnvironmentCapabilityTransport() {
+          @Override
+          public EnvironmentCapabilityExecutionHandle invoke(
+              EnvironmentId environment,
+              EnvironmentCapabilityExecutionRequest call,
+              EnvironmentCapabilityExecutionListener callback) {
+            request.set(call);
+            listener.set(callback);
+            invoked.countDown();
+            return handle;
+          }
+
+          @Override
+          public EnvironmentCapabilityExecutionHandle attach(
+              EnvironmentId environmentId,
+              UUID invocationId,
+              EnvironmentCapabilityExecutionListener callback) {
+            throw new UnsupportedOperationException();
+          }
         };
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -903,6 +931,14 @@ class EnvironmentSkillSyncOrchestratorTest {
         inFlight.decrementAndGet();
       }
       return new Handle();
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle attach(
+        EnvironmentId environmentId,
+        UUID invocationId,
+        EnvironmentCapabilityExecutionListener listener) {
+      throw new UnsupportedOperationException();
     }
   }
 
