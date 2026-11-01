@@ -246,9 +246,10 @@ describe('ide-tunnel unit tests', () => {
         ide,
       )
 
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(502)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(502)
+        expect(released).toBe(true)
+      })
     })
 
     it('closes stream on upstreamReq error when headers are already sent', async () => {
@@ -260,10 +261,11 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.closed).toBe(true)
-      expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.closed).toBe(true)
+        expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
+        expect(released).toBe(true)
+      })
     })
 
     it('handles successful upstream response and end event', async () => {
@@ -281,14 +283,17 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
     it('destroys upstreamRes and releases upstream if stream is closed before response', async () => {
       let resolveUpstreamRes: () => void = () => {}
+      let serverReceived = false
       const server = http.createServer((_req, res) => {
+        serverReceived = true
         new Promise<void>((r) => { resolveUpstreamRes = r }).then(() => {
           res.writeHead(200)
           res.end('ok')
@@ -303,12 +308,15 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       const p = handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => {
+        expect(serverReceived).toBe(true)
+      })
       stream.closed = true
       resolveUpstreamRes()
       await p
-      await new Promise((r) => setTimeout(r, 50))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -327,8 +335,9 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 50))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -347,8 +356,9 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -357,7 +367,11 @@ describe('ide-tunnel unit tests', () => {
       let released = false
 
       // 启动一个挂起的 http server
+      let connected = false
       const server = http.createServer(() => {})
+      server.on('connection', () => {
+        connected = true
+      })
       const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
 
       const stream = new MockServerHttp2Stream()
@@ -371,14 +385,16 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => {
+        expect(connected).toBe(true)
+      })
 
       abortCtrl.abort()
-      await new Promise((r) => setTimeout(r, 50))
-
-      expect(stream.closed).toBe(true)
-      expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.closed).toBe(true)
+        expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -422,8 +438,10 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+        expect(receivedHeaders).not.toBeNull()
+      })
       expect(receivedHeaders!['cookie']).toBe('session=abc')
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -475,9 +493,10 @@ describe('ide-tunnel unit tests', () => {
         ide,
       )
 
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(502)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(502)
+        expect(released).toBe(true)
+      })
     })
 
     it('closes stream on upgradeReq error when headers are already sent', async () => {
@@ -489,10 +508,11 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.closed).toBe(true)
-      expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.closed).toBe(true)
+        expect(stream.closeCode).toBe(NGHTTP2_INTERNAL_ERROR)
+        expect(released).toBe(true)
+      })
     })
 
     it('handles non-101 ordinary response from upstream (e.g. 403 Forbidden)', async () => {
@@ -509,11 +529,11 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-
-      expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(403)
-      expect(stream.respondedHeaders?.['x-err']).toBe('forbidden')
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(403)
+        expect(stream.respondedHeaders?.['x-err']).toBe('forbidden')
+        expect(released).toBe(true)
+      })
 
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -532,10 +552,10 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-
-      expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(400)
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(400)
+        expect(released).toBe(true)
+      })
 
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -573,15 +593,18 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
-      expect(receivedCookie).toBe('token=xyz')
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+        expect(receivedCookie).toBe('token=xyz')
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
     it('destroys upstreamRes and releases upstream if stream is closed before non-upgrade response', async () => {
       let resolveRes: () => void = () => {}
+      let serverReceived = false
       const server = http.createServer((_req, res) => {
+        serverReceived = true
         new Promise<void>((r) => { resolveRes = r }).then(() => {
           res.writeHead(403)
           res.end('forbidden')
@@ -596,12 +619,15 @@ describe('ide-tunnel unit tests', () => {
       } as unknown as IdeService
 
       const p = handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await new Promise((r) => setTimeout(r, 50))
+      await vi.waitFor(() => {
+        expect(serverReceived).toBe(true)
+      })
       stream.closed = true
       resolveRes()
       await p
-      await new Promise((r) => setTimeout(r, 50))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -629,9 +655,10 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.headersSent).toBe(true)
-      expect(stream.respondedHeaders?.['sec-websocket-extensions']).toBeDefined()
+      await vi.waitFor(() => {
+        expect(stream.headersSent).toBe(true)
+        expect(stream.respondedHeaders?.['sec-websocket-extensions']).toBeDefined()
+      })
       stream.emit('close')
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -665,18 +692,18 @@ describe('ide-tunnel unit tests', () => {
         ide,
       )
 
-      await new Promise((r) => setTimeout(r, 100))
-
-      expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(200)
+      await vi.waitFor(() => {
+        expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(200)
+      })
 
       // 测试半关闭
       stream.end()
-      await new Promise((r) => setTimeout(r, 50))
 
       // 测试关闭
       stream.emit('close')
-      await new Promise((r) => setTimeout(r, 50))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
 
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -705,8 +732,9 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
 
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -734,8 +762,9 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.headersSent).toBe(true)
+      await vi.waitFor(() => {
+        expect(stream.headersSent).toBe(true)
+      })
 
       // 触发 stream error
       stream.emit('error', new Error('stream error'))
@@ -769,8 +798,9 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -800,13 +830,15 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(wsClient).not.toBeNull()
+      await vi.waitFor(() => {
+        expect(wsClient).not.toBeNull()
+      })
 
       // 服务端关闭 WebSocket
       wsClient.terminate()
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
 
       await new Promise<void>((r) => server.close(() => r()))
     })
@@ -833,9 +865,10 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(stream.headersSent).toBe(true)
-      expect(receivedHead).toContain('initial-head-bytes')
+      await vi.waitFor(() => {
+        expect(stream.headersSent).toBe(true)
+        expect(receivedHead).toContain('initial-head-bytes')
+      })
       stream.emit('close')
       await rawServer.close()
     })
@@ -858,8 +891,9 @@ describe('ide-tunnel unit tests', () => {
         },
         ide,
       )
-      await new Promise((r) => setTimeout(r, 100))
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
       await rawServer.close()
     })
   })

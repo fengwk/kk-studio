@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isAbsolute } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
@@ -759,8 +759,9 @@ describe('environment detection helpers', () => {
 
     const failures: unknown[] = []
     releaseStep(failures, 'async-phase', () => Promise.reject(new Error('async fail')))
-    await new Promise((r) => setTimeout(r, 20))
-    expect(failures.length).toBe(1)
+    await vi.waitFor(() => {
+      expect(failures.length).toBe(1)
+    })
 
     releaseStep(failures, 'sync-phase', () => {
       throw new Error('sync fail')
