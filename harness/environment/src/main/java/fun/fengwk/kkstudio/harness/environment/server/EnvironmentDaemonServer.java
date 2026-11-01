@@ -361,11 +361,9 @@ public final class EnvironmentDaemonServer
     synchronized (active) {
       active.cancelled = true;
     }
-    if (!invocationTracker.unregister(active)) {
+    if (!invocationTracker.retire(active)) {
       return;
     }
-    active.markTerminal();
-    invocationTracker.addTombstone(active);
     DaemonConnectionSession session = sessionOf(active.environmentId);
     if (session != null) {
       active.deliverCancel(session);

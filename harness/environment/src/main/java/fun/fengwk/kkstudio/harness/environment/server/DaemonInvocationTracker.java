@@ -53,9 +53,20 @@ final class DaemonInvocationTracker {
     }
   }
 
-  ActiveInvocation takeRegistered(EnvironmentId environmentId, UUID invocationId) {
+  /**
+   * 调用方放弃一个在途调用：在同一把锁内注销、标记终态并写入 tombstone。
+   *
+   * <p>原子迁移保证与之竞争的远端终态帧要么先拿到调用并成为唯一终态，要么看到 tombstone 而被忽略，不会被判为未知调用。
+   *
+   * @return 本次调用完成了迁移时为 {@code true}；调用已由其他路径终结时为 {@code false}
+   */
+  boolean retire(ActiveInvocation active) {
     synchronized (lock) {
-      return takeRegisteredLocked(environmentId, invocationId);
+      if (takeRegisteredLocked(active.environmentId, active.invocationId) == null) {
+        return false;
+      }
+      addTombstoneLocked(active);
+      return true;
     }
   }
 
@@ -101,12 +112,6 @@ final class DaemonInvocationTracker {
       }
       throw new ControlProtocolException(
           "daemon terminal callback does not own invocationId: " + invocationId);
-    }
-  }
-
-  void addTombstone(ActiveInvocation active) {
-    synchronized (lock) {
-      addTombstoneLocked(active);
     }
   }
 
