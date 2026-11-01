@@ -27,9 +27,11 @@ import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
@@ -191,6 +193,142 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
+  /** 关闭受管视图：REST 关闭必须成功。 */
+  @Test
+  @Order(2)
+  void closesTheManagedViewThroughTheRestApi() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+      long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String cookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"),
+          "the opened view must serve the workbench before close");
+
+      closeView(environmentId, viewId, documentId, bindingEpoch);
+      assertViewRejected(
+          environmentId, viewId, cookie, "the closed view must reject further requests");
+
+      boolean existsInSnapshot =
+          localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().stream()
+              .anyMatch(view -> viewId.toString().equals(view.getViewId()));
+      assertFalse(
+          existsInSnapshot, "the authoritative snapshot must no longer include the closed view");
+    }
+  }
+
+  /** detach 冻结旧 epoch，resume 换代：旧 cookie / 旧 epoch 必须失效，新 epoch 必须可服务。 */
+  @Test
+  @Order(3)
+  void detachFreezesTheOldEpochAndResumeIssuesANewBinding() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID firstClaim = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
+
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, firstClaim);
+      long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String firstCookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, firstCookie, "/").toLowerCase().contains("<html"),
+          "the freshly opened view must serve the workbench");
+
+      detachView(environmentId, viewId, documentId, firstEpoch);
+      assertViewRejected(
+          environmentId, viewId, firstCookie, "a detached epoch must stop authorizing its cookie");
+
+      UUID secondClaim = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 2L, List.of(new IntentView(environmentId, viewId, secondClaim, null)));
+      JsonNode resumed =
+          openView(environmentId, viewId, documentId, identity, secondClaim, "resume");
+      long secondEpoch = Long.parseLong(resumed.path("bindingEpoch").asText());
+      assertTrue(
+          secondEpoch > firstEpoch,
+          "resume must allocate a newer binding epoch (" + firstEpoch + " -> " + secondEpoch + ")");
+      String secondCookie = bootstrap(environmentId, viewId, resumed.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, secondCookie, "/").toLowerCase().contains("<html"),
+          "the resumed epoch must serve the workbench");
+
+      Response staleClose = deleteView(environmentId, viewId, documentId, firstEpoch);
+      try (staleClose) {
+        assertEquals(409, staleClose.code(), "closing with the detached epoch must be rejected");
+      }
+      assertViewRejected(
+          environmentId, viewId, firstCookie, "the detached epoch cookie must stay rejected");
+
+      closeView(environmentId, viewId, documentId, secondEpoch);
+      assertViewRejected(
+          environmentId, viewId, secondCookie, "the closed resumed view must stop serving");
+    }
+  }
+
+  /** 受管 code-server 崩溃后：daemon 必须恢复出新的可绑定实例，旧绑定必须判为 VIEW_GONE。 */
+  @Test
+  @Order(4)
+  void invalidatesTheOldBindingAfterTheManagedCodeServerCrashes() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID firstClaim = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, firstClaim, null)));
+
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, firstClaim);
+      long firstEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String firstCookie = bootstrap(environmentId, viewId, opened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, viewId, firstCookie, "/").toLowerCase().contains("<html"),
+          "the opened view must serve the workbench before the crash");
+
+      daemon.crashCodeServer();
+      awaitViewReleased(environmentId, viewId);
+
+      Response staleClose = deleteView(environmentId, viewId, documentId, firstEpoch);
+      try (staleClose) {
+        String text = staleClose.body().string();
+        assertEquals(
+            409, staleClose.code(), "the crashed binding must be gone, not still closable");
+        assertTrue(
+            text.contains("IDE view is gone"),
+            "the pre-crash binding must be reported as VIEW_GONE");
+      }
+      assertViewRejected(
+          environmentId, viewId, firstCookie, "the pre-crash cookie must stop authorizing");
+
+      UUID freshView = UUID.randomUUID();
+      UUID freshClaim = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 2L, List.of(new IntentView(environmentId, freshView, freshClaim, null)));
+      JsonNode reopened = openView(environmentId, freshView, documentId, identity, freshClaim);
+      long freshEpoch = Long.parseLong(reopened.path("bindingEpoch").asText("0"));
+      assertTrue(freshEpoch > 0, "a new view after the crash must carry a binding epoch");
+      assertTrue(
+          daemon.hasCodeServer(),
+          "the daemon must have started a replacement code-server for the new view");
+      String freshCookie = bootstrap(environmentId, freshView, reopened.path("entryUrl").asText());
+      assertTrue(
+          fetchView(environmentId, freshView, freshCookie, "/").toLowerCase().contains("<html"),
+          "the replacement code-server must serve the new view");
+      closeView(environmentId, freshView, documentId, freshEpoch);
+    }
+  }
+
   private String startEnvironmentAndDaemon() throws Exception {
     Path release = explicitCodeServerRelease();
     JsonNode created =
@@ -332,6 +470,51 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           response.code() == 200 || response.code() == 204,
           "closing the view must succeed (status " + response.code() + "): " + text);
     }
+  }
+
+  private Response deleteView(String environmentId, UUID viewId, UUID documentId, long bindingEpoch)
+      throws IOException {
+    String body =
+        "{\"documentId\":\""
+            + documentId
+            + "\",\"bindingEpoch\":\""
+            + bindingEpoch
+            + "\",\"discard\":true}";
+    return browser
+        .newCall(
+            new Request.Builder()
+                .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views/" + viewId)
+                .delete(RequestBody.create(body, JSON))
+                .build())
+        .execute();
+  }
+
+  private void detachView(String environmentId, UUID viewId, UUID documentId, long bindingEpoch) {
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+    binding.setDocumentId(documentId.toString());
+    binding.setBindingEpoch(Long.toString(bindingEpoch));
+    localIdeService.detachView(EnvironmentId.parse(environmentId), viewId.toString(), binding);
+  }
+
+  private void awaitViewReleased(String environmentId, UUID viewId) throws Exception {
+    long deadline = System.nanoTime() + RECOVERY_TIMEOUT.toNanos();
+    boolean released = false;
+    while (System.nanoTime() < deadline) {
+      assertTrue(
+          daemon.alive(), "the daemon exited during crash recovery; see " + daemon.stderrLog());
+      try {
+        released =
+            localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().stream()
+                .noneMatch(view -> viewId.toString().equals(view.getViewId()));
+      } catch (RuntimeException unavailable) {
+        released = false;
+      }
+      if (released) {
+        return;
+      }
+      Thread.sleep(200);
+    }
+    throw new AssertionError("the daemon never released the crashed view " + viewId);
   }
 
   private void assertViewRejected(
