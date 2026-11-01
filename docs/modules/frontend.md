@@ -31,7 +31,7 @@ PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸�
 i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 前缀保持不变。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
 把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
-重复 extension/contribution id 在组装时拒绝，运行时不再注册、覆盖或订阅。
+重复 extension/contribution id 在组装时拒绝，运行时不动态注册、覆盖或订阅。
 扩展是编译期受信任 React module，安装集合由应用组装确定。
 tool renderer id 对应后端冻结 rendererKey，缺失时使用默认展示。
 
@@ -226,7 +226,7 @@ NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键�
 Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属父 Agent 入口（直接导航到
 `/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
-执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
+执行结果与任务回执始终交给直接派发的父 Agent，不走根订阅。
 子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
@@ -312,7 +312,7 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
 （input + cacheRead + cacheWrite），绝不用分支累计量替代。
-输出 `outputTokens` 已包含推理 token，测速仅用该输出量除以解码耗时；不再额外累加推理。
+输出 `outputTokens` 已包含推理 token，测速仅用该输出量除以解码耗时；不额外累加推理。
 缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶。
 usage 必须报告四个非负安全整数：inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens。
 缺失或非法时不合成读数；reasoningTokens 和 providerTotalTokens 未报告时保留未知，聚合时也不补零。
