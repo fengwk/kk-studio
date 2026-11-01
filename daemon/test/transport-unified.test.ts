@@ -994,17 +994,29 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       const conn = await connectPromise
       expect(conn.isOpen()).toBe(true)
 
+      const dummyEnvelope = create(EnvelopeSchema, {
+        messageType: MessageType.READY,
+        environmentId: '11111111-1111-4111-8111-111111111111',
+        payload: { case: 'ready', value: create(ReadySchema, {}) },
+      })
+
+      // 测试 controlStream.write 报错时 send 返回 false
+      const rawStream = (conn as any).controlStream
+      if (rawStream) {
+        const origWrite = rawStream.write
+        rawStream.write = () => {
+          throw new Error('stream write error')
+        }
+        expect(conn.send(dummyEnvelope)).toBe(false)
+        rawStream.write = origWrite
+      }
+
       // 关闭连接
       conn.close()
       await new Promise((r) => setTimeout(r, 50))
       expect(conn.isOpen()).toBe(false)
 
       // 已关闭连接调用 send 返回 false
-      const dummyEnvelope = create(EnvelopeSchema, {
-        messageType: MessageType.READY,
-        environmentId: '11111111-1111-4111-8111-111111111111',
-        payload: { case: 'ready', value: create(ReadySchema, {}) },
-      })
       expect(conn.send(dummyEnvelope)).toBe(false)
 
       await transport.close()

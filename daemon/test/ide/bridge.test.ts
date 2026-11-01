@@ -649,6 +649,10 @@ describe('loopback IDE bridge', () => {
     await expect(
       instance.request(viewId, { op: 'restore', documents: tooManyDocs } as any, signal()),
     ).rejects.toThrow('too many recovery documents')
+
+    // expectedEpoch 不匹配时 revoke 忽略
+    instance.revoke(viewId, '999')
+    expect(instance.isConnected(viewId)).toBe(true)
   })
 
   it('releases a pending connection wait on close', async () => {
