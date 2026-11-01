@@ -2,7 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -119,6 +123,7 @@ public final class ToolProcessor implements AutoCloseable {
             null,
             ticket);
         case Prepare.Dispatched dispatched -> launch(claim, dispatched, ticket);
+        case Prepare.Reattach reattach -> launchReattach(claim, reattach, ticket);
       };
     } catch (ClaimLostSignal ignored) {
       return ProcessResult.LOST_OWNERSHIP;
@@ -168,7 +173,7 @@ public final class ToolProcessor implements AutoCloseable {
     return switch (tool.status()) {
       case READY -> prepareReady(tx, claim, thread, tool);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
-      case RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
+      case RUNNING -> prepareRunning(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };
   }
@@ -215,6 +220,42 @@ public final class ToolProcessor implements AutoCloseable {
     }
     tx.work().complete(claim);
     return new Prepare.Terminated();
+  }
+
+  /**
+   * RUNNING 判定在途远端执行： 1) 工具有冻结 binding 且带 environmentId； 2) loadRemote(invocationId, attempt)
+   * 恰好返回一条事实； 3) 该事实状态为 UNCONFIRMED 或 REMOTE_ACKNOWLEDGED。 满足条件则进入重新挂接（reattach）流程；否则沿用
+   * recoverUnknown 收敛为 UNKNOWN。
+   */
+  private Prepare prepareRunning(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      ToolInvocation tool,
+      Instant now) {
+    if (tool.binding().environmentId() != null) {
+      List<ExecutionExitFact> remotes = tx.exits().loadRemote(tool.id(), tool.attempt());
+      if (remotes.size() == 1) {
+        ExecutionExitFact remoteFact = remotes.getFirst();
+        if (remoteFact.state() == ExecutionExitState.UNCONFIRMED
+            || remoteFact.state() == ExecutionExitState.REMOTE_ACKNOWLEDGED) {
+          Optional<Work> claimed = tx.work().lockClaimed(claim);
+          if (claimed.isEmpty()) {
+            return new Prepare.Lost();
+          }
+          executions.ensureLeaseMargin(tx, claim);
+          ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
+          return new Prepare.Reattach(
+              thread.id(),
+              tool.assistantEntryId(),
+              tool.attempt(),
+              request,
+              tool.binding().environmentId(),
+              remoteFact);
+        }
+      }
+    }
+    return recoverUnknown(tx, claim, thread, tool, now);
   }
 
   /**
@@ -660,6 +701,130 @@ public final class ToolProcessor implements AutoCloseable {
         : ProcessResult.LOST_OWNERSHIP;
   }
 
+  private ProcessResult launchReattach(
+      ClaimedWork claim,
+      Prepare.Reattach reattach,
+      ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
+    ToolExecution execution =
+        newReattachExecution(claim, reattach.threadId(), reattach.attempt(), reattach.request());
+    if (!ticket.attach(execution)) {
+      execution.abandon();
+      return executions.isClosed()
+          ? rescheduleReattachResult(claim, reattach, config.admitFailureDelay())
+          : ProcessResult.LOST_OWNERSHIP;
+    }
+    boolean started = false;
+    try {
+      if (executions.isClosed()
+          || !execution.startHeartbeat()
+          || execution.abandoned()
+          || ticket.isSuperseded()) {
+        return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+      }
+      ProcessResult outcome = reattachAndRun(claim, reattach, execution, ticket);
+      if (outcome == ProcessResult.STARTED) {
+        started = true;
+      }
+      return outcome;
+    } finally {
+      if (!started) {
+        execution.abandon();
+      }
+    }
+  }
+
+  private ProcessResult reattachAndRun(
+      ClaimedWork claim,
+      Prepare.Reattach reattach,
+      ToolExecution execution,
+      ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
+    UUID invocationId = claim.target().id();
+    ToolGateway.Run run;
+    try {
+      run =
+          gateway.reattach(
+              new ToolGateway.ReattachExecution(
+                  invocationId,
+                  reattach.threadId(),
+                  reattach.request(),
+                  reattach.environmentId(),
+                  reattach.remoteFact().executionId(),
+                  config.reattachWindow(),
+                  () -> execution.confirmReattachedRemoteExit(reattach.remoteFact())));
+    } catch (EnvironmentCapabilityUnavailableException unavailable) {
+      log.warn(
+          "tool reattach unavailable for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(unavailable));
+      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+    } catch (RuntimeException failure) {
+      log.warn(
+          "tool reattach failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+    }
+    if (run == null) {
+      log.warn("tool reattach returned null for invocation {}", invocationId);
+      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+    }
+    if (execution.abandoned() || ticket.isSuperseded()) {
+      try {
+        run.close();
+      } catch (RuntimeException failure) {
+        log.warn("cannot release tool run resources for {}", invocationId, failure);
+      }
+      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
+    }
+    return execution.startReattach(run);
+  }
+
+  private boolean rescheduleReattach(
+      ClaimedWork claim, UUID threadId, int attempt, Duration delay) {
+    return Boolean.TRUE.equals(
+        store.transaction(
+            tx -> {
+              ThreadState thread = tx.threads().lock(threadId).orElse(null);
+              if (thread == null) {
+                return false;
+              }
+              ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
+              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+                return false;
+              }
+              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+                return false;
+              }
+              tx.work().reschedule(claim, delay);
+              return true;
+            }));
+  }
+
+  private ProcessResult rescheduleReattachResult(
+      ClaimedWork claim, Prepare.Reattach reattach, Duration delay) {
+    return rescheduleReattach(claim, reattach.threadId(), reattach.attempt(), delay)
+        ? ProcessResult.RESCHEDULED
+        : ProcessResult.LOST_OWNERSHIP;
+  }
+
+  private ToolExecution newReattachExecution(
+      ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
+    return new ToolExecution(
+        store,
+        realtimeEventSink,
+        claim,
+        threadId,
+        attempt,
+        request,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        executions::release,
+        exitConfirmer,
+        toolResultHistoryMaterializer);
+  }
+
   private ToolExecution newExecution(
       ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
     return new ToolExecution(
@@ -697,6 +862,7 @@ public final class ToolProcessor implements AutoCloseable {
           Prepare.Preflight,
           Prepare.Allowed,
           Prepare.Dispatched,
+          Prepare.Reattach,
           Prepare.Terminated {
 
     record Lost() implements Prepare {}
@@ -719,6 +885,15 @@ public final class ToolProcessor implements AutoCloseable {
         int attempt,
         ToolInvocationRequest request,
         ToolApproval approval)
+        implements Prepare {}
+
+    record Reattach(
+        UUID threadId,
+        UUID assistantEntryId,
+        int attempt,
+        ToolInvocationRequest request,
+        EnvironmentId environmentId,
+        ExecutionExitFact remoteFact)
         implements Prepare {}
 
     record Terminated() implements Prepare {}
