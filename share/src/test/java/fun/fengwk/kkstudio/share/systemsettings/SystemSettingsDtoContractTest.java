@@ -40,13 +40,13 @@ class SystemSettingsDtoContractTest {
             objectMapper.readValue(
                 "{\"pattern\":\"*\",\"action\":\"ask\",\"unknown\":1}",
                 SystemSettingsToolDTO.PermissionRuleDTO.class));
-    // 旧 integrations 段已从设置合同删除：整体与残留子段都按「未知字段」硬拒绝，绝不静默忽略或兼容反序列化。
+    // 未知顶级段与未知嵌套段按未知字段硬拒绝。
     assertRejectsUnknown(
-        () -> objectMapper.readValue("{\"integrations\":{}}", SystemSettingsSectionsDTO.class));
+        () -> objectMapper.readValue("{\"unknownSection\":{}}", SystemSettingsSectionsDTO.class));
     assertRejectsUnknown(
         () ->
             objectMapper.readValue(
-                "{\"integrations\":{\"comfyui\":{}}}", SystemSettingsSectionsDTO.class));
+                "{\"unknownSection\":{\"nested\":{}}}", SystemSettingsSectionsDTO.class));
     // network 只允许两个全局字段，不接受 enabled 或模块级 override。
     assertRejectsUnknown(
         () -> objectMapper.readValue("{\"enabled\":true}", SystemSettingsNetworkDTO.class));

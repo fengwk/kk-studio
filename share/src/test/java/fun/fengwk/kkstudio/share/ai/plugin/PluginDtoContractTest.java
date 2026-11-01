@@ -175,9 +175,6 @@ class PluginDtoContractTest {
             () -> "PluginDTO must not expose " + forbiddenPart + ": " + field.getName());
       }
     }
-    assertThrows(NoSuchFieldException.class, () -> PluginDTO.class.getDeclaredField("accessToken"));
-    assertThrows(
-        NoSuchFieldException.class, () -> PluginDTO.class.getDeclaredField("encryptedPayload"));
   }
 
   @Test

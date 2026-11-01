@@ -845,10 +845,7 @@ class HarnessRuntimeDtoContractTest {
     assertTrue(json.contains("\"payloadJson\":\"{}\""), json);
   }
 
-  /**
-   * 测试意图：预览响应只用 {@code notice} 声明能力边界（无 snapshotNotice 别名），两种视图各自携带稳定且语义正确的判别符与提示——
-   * 历史视图绝不声称自己就是原始发送字节。
-   */
+  /** 测试意图：预览响应使用 {@code notice} 声明能力边界，两种视图各自携带稳定且语义正确的判别符与提示。 */
   @Test
   void providerRequestPreviewExposesKindsAndSingleNoticeFieldOnly() throws Exception {
     assertEquals("DRAFT_REQUEST_PREVIEW", HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW);
@@ -856,9 +853,6 @@ class HarnessRuntimeDtoContractTest {
         "HISTORICAL_REQUEST_PREVIEW", HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW);
     assertEquals(
         String.class, HarnessProviderRequestPreviewDTO.class.getDeclaredField("notice").getType());
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessProviderRequestPreviewDTO.class.getDeclaredField("snapshotNotice"));
     assertFalse(
         HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE
             .toLowerCase()

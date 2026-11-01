@@ -13,7 +13,7 @@ import org.jspecify.annotations.Nullable;
  * 创建型命令批次的严格 target union wire DTO。
  *
  * <p>只表达 NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 三种创建语义；既有 Thread 的继续写入使用 {@link
- * HarnessThreadCommandBatchDTO}，不再通过本 union 以 THREAD target 承载。
+ * HarnessThreadCommandBatchDTO}。
  */
 @Data
 public class HarnessCommandTargetDTO {
