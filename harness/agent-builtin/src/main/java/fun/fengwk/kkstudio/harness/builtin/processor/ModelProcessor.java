@@ -176,11 +176,6 @@ public final class ModelProcessor implements AutoCloseable {
     executions.close();
   }
 
-  /** 设置活跃 execution 释放时的回调通知（供生命周期排空条件等待复用）。 */
-  public void setExecutionReleaseListener(Runnable listener) {
-    executions.setOnRelease(listener);
-  }
-
   /** 当前 JVM 是否持有任何活跃的本地 Model execution。 */
   public boolean hasActiveExecution() {
     return executions.hasActiveExecution();

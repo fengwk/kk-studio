@@ -543,6 +543,45 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     }
   }
 
+  /** 测试意图：证明排空移交链路在中断执行线程时不发送 CANCEL 帧（drain 后 expire 不发送 CANCEL）。 */
+  @Test
+  void drainAndInterruptionTerminatesWithoutSendingCancel() throws Exception {
+    HarnessCatalog catalog = catalog();
+    LatchingTransport transport = new LatchingTransport();
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(
+            gateway, request(catalog, "call-drain-interrupt"), remoteExecutions);
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
+
+    try {
+      assertTrue(transport.invoked.await(5, TimeUnit.SECONDS), "transport must be invoked");
+      ToolGatewayTestSupport.FakeToolHandle handle = transport.delegate.returnedHandles.get(0);
+
+      // 模拟排空先发生（EnvironmentDaemonServer.drain()）
+      handle.draining = true;
+
+      // 模拟排空移交时调用 abandon() 中断执行线程
+      worker.interrupt();
+      worker.join(5_000);
+      assertFalse(worker.isAlive(), "worker must exit upon interrupt");
+
+      // 验证：handle 被以 CANCELLED 终止，但由于处于 draining 状态，未向连接发送 CANCEL 帧
+      assertEquals(
+          List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+          handle.terminations(),
+          "interrupt during execution must terminate handle with CANCELLED");
+      assertEquals(
+          0, handle.cancelCount(), "draining handle must suppress CANCEL frame delivery to daemon");
+    } finally {
+      run.close();
+    }
+  }
+
   private static ToolExecutionGateway gateway(HarnessCatalog catalog, LatchingTransport transport) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),

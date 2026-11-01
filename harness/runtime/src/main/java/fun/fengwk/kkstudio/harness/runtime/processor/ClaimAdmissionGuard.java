@@ -10,7 +10,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 /**
  * per-invocation atomic admission guard 与本地 execution registry。
@@ -80,23 +79,8 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
 
   private final ConcurrentHashMap<UUID, Entry<E>> entries = new ConcurrentHashMap<>();
   private volatile boolean closed;
-  private volatile Runnable onRelease;
 
   ClaimAdmissionGuard() {}
-
-  void setOnRelease(Runnable onRelease) {
-    this.onRelease = onRelease;
-  }
-
-  private void notifyRelease() {
-    Runnable listener = onRelease;
-    if (listener != null) {
-      try {
-        listener.run();
-      } catch (RuntimeException ignored) {
-      }
-    }
-  }
 
   Ticket<E> tryAdmit(ClaimedWork claim, BooleanSupplier claimVerifier) {
     Objects.requireNonNull(claim, "claim");
@@ -175,7 +159,6 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
           }
           return current;
         });
-    notifyRelease();
   }
 
   E getExecution(UUID invocationId) {
@@ -205,7 +188,6 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
     if (execution != null) {
       execution.abandon();
     }
-    notifyRelease();
     return cancelledEntry.get();
   }
 
@@ -222,7 +204,6 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
           }
           return current;
         });
-    notifyRelease();
   }
 
   boolean hasActiveExecution() {
@@ -232,6 +213,17 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
       }
     }
     return false;
+  }
+
+  List<E> activeExecutions() {
+    List<E> active = new ArrayList<>();
+    for (Entry<E> entry : entries.values()) {
+      E execution = entry.execution;
+      if (execution != null && !entry.superseded) {
+        active.add(execution);
+      }
+    }
+    return active;
   }
 
   boolean isClosed() {
@@ -255,27 +247,5 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
     for (E execution : toAbandon) {
       execution.abandon();
     }
-    notifyRelease();
-  }
-
-  void drain(Consumer<E> drainAction) {
-    Objects.requireNonNull(drainAction, "drainAction");
-    closed = true;
-    List<E> active = new ArrayList<>();
-    for (UUID id : List.copyOf(entries.keySet())) {
-      entries.computeIfPresent(
-          id,
-          (key, current) -> {
-            current.superseded = true;
-            if (current.execution != null) {
-              active.add(current.execution);
-            }
-            return null;
-          });
-    }
-    for (E execution : active) {
-      drainAction.accept(execution);
-    }
-    notifyRelease();
   }
 }

@@ -14,10 +14,14 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
+import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -29,6 +33,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor#drain()} 移交方法单元测试：
@@ -179,13 +184,13 @@ class ToolProcessorDrainTest {
     assertTrue(reClaim.isEmpty(), "unreleased work must not be immediately claimable");
   }
 
-  /** 测试意图：远端调用未真正发出（例如 confirmNotStarted）时不满足等待远端结果判定，走普通 close 语义。 */
+  /** 测试意图：等待远端结果的执行体在 join 超时时记录警告并仍然 release claim，此时 TOOL 退出事实保持 UNCONFIRMED。 */
   @Test
-  void drainAbandonsRemoteNotStartedWithoutRelease() throws Exception {
+  void drainHandsOverEvenIfThreadJoinTimesOutAndLeavesFactUnconfirmed() throws Exception {
     Fixture fixture = approvedFixture();
     UUID remoteExecutionId = UUID.randomUUID();
-    CountDownLatch enteredLatch = new CountDownLatch(1);
-    CountDownLatch waitInterruptedLatch = new CountDownLatch(1);
+    CountDownLatch remoteStartedLatch = new CountDownLatch(1);
+    AtomicBoolean stopLoop = new AtomicBoolean();
 
     FakeRun run =
         fixture.gateway.queueRun(
@@ -193,27 +198,65 @@ class ToolProcessorDrainTest {
               ToolGateway.RemoteExecutionObserver observer =
                   fixture.gateway.executions.getFirst().remoteExecutions();
               observer.tryStart(remoteExecutionId, TEST_ENV);
-              // 模拟未真正发出
-              observer.confirmNotStarted(remoteExecutionId);
-              enteredLatch.countDown();
-              try {
-                Thread.sleep(60_000);
-              } catch (InterruptedException e) {
-                waitInterruptedLatch.countDown();
+              remoteStartedLatch.countDown();
+              // 忽略中断，模拟无法在 deadline 内退出的线程
+              while (!stopLoop.get()) {
+                try {
+                  Thread.sleep(50);
+                } catch (InterruptedException ignored) {
+                }
               }
               return ToolProcessorTestSupport.succeeded("call-1");
             });
 
-    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
-    assertTrue(enteredLatch.await(5, TimeUnit.SECONDS));
+    ProcessorLeaseConfig shortLease =
+        new ProcessorLeaseConfig(Duration.ofMillis(50), Duration.ofMillis(20));
+    ToolProcessor shortLeaseProcessor =
+        new ToolProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                shortLease,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
+            ToolProcessorTestSupport.STABLE_MATERIALIZER);
 
-    fixture.processor.drain();
+    assertEquals(ProcessResult.STARTED, shortLeaseProcessor.process(claim(fixture)));
+    assertTrue(remoteStartedLatch.await(5, TimeUnit.SECONDS));
 
-    assertTrue(waitInterruptedLatch.await(5, TimeUnit.SECONDS));
-    assertTrue(run.awaitExited());
+    ExecutionExitFact localFactBeforeDrain =
+        fixture.store.transaction(
+            tx ->
+                tx.exits().loadUnconfirmed(fixture.baseline.threadId()).stream()
+                    .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
+                    .findFirst()
+                    .orElseThrow());
 
+    // 触发排空移交，50ms 租约 deadline 会超时
+    shortLeaseProcessor.drain();
+
+    // 超时下 Work 租约依然被 release
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
     Work work = fixture.store.transaction(tx -> tx.work().find(toolTarget).orElseThrow());
-    assertNotNull(work.leaseToken(), "not-started remote must not release work lease on drain");
+    assertNull(work.leaseToken(), "work leaseToken must still be cleared even if thread timed out");
+
+    // TOOL 退出事实保持 UNCONFIRMED（因为执行线程尚未退出）
+    ExecutionExitFact factAfterDrain =
+        fixture.store.transaction(
+            tx -> tx.exits().find(localFactBeforeDrain.executionId()).orElseThrow());
+    assertEquals(
+        ExecutionExitState.UNCONFIRMED,
+        factAfterDrain.state(),
+        "tool fact must remain UNCONFIRMED when body thread did not exit");
+
+    // 释放循环以便线程退出
+    stopLoop.set(true);
+    assertTrue(run.awaitExited());
   }
 }

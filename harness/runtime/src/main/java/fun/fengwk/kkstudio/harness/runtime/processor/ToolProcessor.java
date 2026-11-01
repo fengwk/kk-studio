@@ -140,16 +140,15 @@ public final class ToolProcessor implements AutoCloseable {
     executions.close();
   }
 
-  /** 设置活跃 execution 释放时的回调通知（供生命周期排空条件等待复用）。 */
-  public void setExecutionReleaseListener(Runnable listener) {
-    executions.setOnRelease(listener);
-  }
-
-  /**
-   * 排空并移交活跃执行：对仍在等待远端结果的工具执行停止本地执行体（等待线程退出后确认 STUDIO_EXITED 并 release Work）， 其余活跃执行沿用现有 close 语义。
-   */
+  /** 排空并移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用 deadline），然后调用 close 处理其余执行。 */
   public void drain() {
-    executions.drain(ToolExecution::drain);
+    Instant deadline = Instant.now().plus(config.leaseConfig().leaseDuration());
+    List<ToolExecution> awaiting =
+        executions.activeExecutions().stream().filter(ToolExecution::isAwaitingRemote).toList();
+    for (ToolExecution execution : awaiting) {
+      execution.handover(deadline);
+    }
+    close();
   }
 
   /** 当前 JVM 是否持有任何活跃的本地 Tool execution。 */
