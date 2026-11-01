@@ -1,4 +1,4 @@
-import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
+import { assert, assertExactFields, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, encodePathTail, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloEnabled,
@@ -385,9 +385,18 @@ registerCase({
           && group.providerName == null
           && group.modelId == null
           && group.group?.members?.length === 2
+          && group.group.members[0].modelName === models[0].name
+          && group.group.members[0].variant === 'default'
+          && group.group.members[1].modelName === models[1].name
+          && group.group.members[1].variant === 'review'
           && JSON.stringify(group.group.fallbackStatusCodes) === JSON.stringify([429, 503])
           && group.group.cooldownSeconds === 30,
         JSON.stringify(group),
+      )
+      assertExactFields(
+        group,
+        ['name', 'kind', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
+        'AgentModelDTO(GROUP)',
       )
       assert(
         group.config?.limit?.context === 4096

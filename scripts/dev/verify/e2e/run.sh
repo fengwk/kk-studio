@@ -54,7 +54,7 @@ Options:
   --real            Enable real provider cases (requires every TEST_*_BASE_URL/API_KEY credential)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
-  --with-canvas-storage  Enable Canvas Resource/Blob storage contract (backend S3 config required; also a precondition of real tool.read_turn)
+  --with-canvas-storage  Enable Canvas Resource/Blob contract cases (backend S3 readiness is required in all modes; also a precondition of real tool.read_turn)
   --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
   --distributed     Run the two-node distributed mock topology (free; no real provider)
   --ui              Enable Playwright UI E2E (screenshots in report)

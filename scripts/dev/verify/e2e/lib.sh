@@ -47,6 +47,12 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-6.0.0.jar"}
+STORAGE_S3_ENDPOINT=${KK_STUDIO_STORAGE_S3_ENDPOINT:-http://127.0.0.1:9000}
+STORAGE_S3_PUBLIC_ENDPOINT=${KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
+STORAGE_S3_REGION=${KK_STUDIO_STORAGE_S3_REGION:-us-east-1}
+STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio}
+STORAGE_S3_ACCESS_KEY=${KK_STUDIO_STORAGE_S3_ACCESS_KEY:-kk-studio}
+STORAGE_S3_SECRET_KEY=${KK_STUDIO_STORAGE_S3_SECRET_KEY:-kk-studio}
 DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
 # 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
 DAEMON_NODE=${DAEMON_NODE:-}
@@ -188,10 +194,23 @@ package_daemon() {
   [ -s "$DAEMON_DIST/main.js" ] || die "daemon entry missing: $DAEMON_DIST/main.js"
 }
 
+ensure_s3_storage() {
+  local s3_endpoint="$STORAGE_S3_ENDPOINT"
+  if [ "$s3_endpoint" = "http://127.0.0.1:9000" ] || [ "$s3_endpoint" = "http://localhost:9000" ]; then
+    if ! curl -fsS "http://127.0.0.1:9000/minio/health/live" >/dev/null 2>&1; then
+      step "Ensuring local MinIO dependency (deploy/local/compose.yaml)"
+      command -v docker >/dev/null 2>&1 || die "docker is required to run local MinIO dependency"
+      docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" up -d minio minio-init
+      wait_http "http://127.0.0.1:9000/minio/health/live" "minio" 30
+    fi
+  fi
+}
+
 start_backend() {
   local java_home=$1
   mkdir -p "$WORK_DIR"
   kill_port "$BACKEND_PORT"
+  ensure_s3_storage
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
@@ -204,6 +223,12 @@ start_backend() {
     ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
     ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
     ${KK_STUDIO_DB_PASSWORD:+KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD"} \
+    KK_STUDIO_STORAGE_S3_ENDPOINT="$STORAGE_S3_ENDPOINT" \
+    KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT="$STORAGE_S3_PUBLIC_ENDPOINT" \
+    KK_STUDIO_STORAGE_S3_REGION="$STORAGE_S3_REGION" \
+    KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET" \
+    KK_STUDIO_STORAGE_S3_ACCESS_KEY="$STORAGE_S3_ACCESS_KEY" \
+    KK_STUDIO_STORAGE_S3_SECRET_KEY="$STORAGE_S3_SECRET_KEY" \
     "$java_home/bin/java" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \

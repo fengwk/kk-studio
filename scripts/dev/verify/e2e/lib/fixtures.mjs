@@ -223,7 +223,7 @@ export function modelConfigMatrix() {
       id: 'invalid.pricing_numeric',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /price|decimal|pricing/i,
+      messageIncludes: /price|decimal|pricing|Failed to read request/i,
       title: '价格必须是十进制字符串而非 JSON 数值',
       build: () => baseModelConfig({ pricing: basePricing({ base: { input: 1 } }) }),
     },

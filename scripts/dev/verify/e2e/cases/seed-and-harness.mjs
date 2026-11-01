@@ -85,18 +85,30 @@ registerCase({
       })}`,
     )
     for (const model of models) {
-      assertExactFields(
-        model,
-        ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
-        'AgentModelDTO',
-      )
-      assert(model.kind === 'MODEL' && model.providerName && model.name, JSON.stringify(model))
-      assert(model.config?.defaultVariant, JSON.stringify(model.config))
-      assert(
-        Array.isArray(model.config?.variants) && model.config.variants.length > 0,
-        JSON.stringify(model.config),
-      )
-      assert(Number(model.config?.limit?.context || 0) > 0, JSON.stringify(model.config))
+      if (model.kind === 'MODEL') {
+        assertExactFields(
+          model,
+          ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
+          'AgentModelDTO(MODEL)',
+        )
+        assert(model.group === undefined, 'MODEL wire contract must omit group')
+        assert(model.providerName && model.name, JSON.stringify(model))
+        assert(model.config?.defaultVariant, JSON.stringify(model.config))
+        assert(
+          Array.isArray(model.config?.variants) && model.config.variants.length > 0,
+          JSON.stringify(model.config),
+        )
+        assert(Number(model.config?.limit?.context || 0) > 0, JSON.stringify(model.config))
+      } else if (model.kind === 'GROUP') {
+        assertExactFields(
+          model,
+          ['name', 'kind', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
+          'AgentModelDTO(GROUP)',
+        )
+        assert(model.group && Array.isArray(model.group.members), 'GROUP wire contract must include group with members')
+      } else {
+        throw new Error(`unknown model kind: ${model.kind}`)
+      }
     }
     ctx.vars.seedModel = models.find(
       (model) => model.providerName === 'minimax' && model.name === 'MiniMax-M2.7',
@@ -2480,9 +2492,10 @@ registerCase({
     assert(model?.kind === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
     assertExactFields(
       model,
-      ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
-      'AgentModelDTO',
+      ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
+      'AgentModelDTO(MODEL)',
     )
+    assert(model.group === undefined, 'MODEL wire contract must omit group')
   },
 })
 
