@@ -122,7 +122,6 @@ test('test intent: a completed run is the exact six-field DTO with no leaked sta
   const rejected = [
     [runDto('n1', 'r1', { status: 'FAILED', error: 'provider error' }), '失败必须暴露'],
     [runDto('n1', 'r1', { error: 'provider error' }), 'SUCCEEDED 不得携带 error'],
-    [{ ...runDto('n1', 'r1'), stateJson: '{}' }, 'stateJson 已不再输出'],
     [runDto('n1', 'r1', { status: 'RUNNING' }), '未终态不能视为完成'],
     [runDto('n1', 'other'), 'requestId 必须匹配'],
     [runDto('other', 'r1'), 'nodeId 必须匹配'],

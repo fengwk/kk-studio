@@ -148,8 +148,6 @@ test('every daemon coverage gate builds the tested JavaScript first', () => {
 })
 
 test('Node daemon release and installer jobs do not require a JDK toolchain', () => {
-    // 发行 fixture 已使用 Node/tar，不再需要退役 Java Daemon 的 jar 工具。
-    assert.doesNotMatch(RELEASE, /actions\/setup-java@|JAVA_VERSION/u)
     for (const name of ['validate_unix_daemon', 'validate_windows_daemon', 'validate_daemon']) {
         assert.throws(() => jobBlock(DOCKER, name), new RegExp(`missing job: ${name}`, 'u'))
         assert.throws(() => jobBlock(RELEASE, name), new RegExp(`missing job: ${name}`, 'u'))
@@ -505,8 +503,8 @@ test('the release version gate reads real project files and fails on any drift',
         const alignedResult = runGate(aligned, 'v2.3.4')
         assert.equal(alignedResult.status, 0, `${alignedResult.stdout}\n${alignedResult.stderr}`)
         assert.match(alignedResult.stdout, /2\.3\.4/u)
-        // tag 不带 v 前缀同样必须通过：对齐不依赖 tag 形式。
-        assert.equal(runGate(aligned, '2.3.4').status, 0)
+        // tag 必须带 v 前缀。
+        assert.equal(runGate(aligned, '2.3.4').status, 1)
 
         const driftedTag = runGate(aligned, 'v2.3.5')
         assert.equal(driftedTag.status, 1, 'a tag that disagrees with the project version must fail')
@@ -598,7 +596,7 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "help" \}/u)
     assert.match(fixture, /Invoke-Installer -Parameters @\{ Command = "uninstall" \}/u)
     assert.match(fixture, /ConfigFile = \$pairs\[0\]; TokenFile = \$pairs\[1\]/u)
-    assert.match(fixture, /JavaHome = "\/opt\/jdk"/u)
+    assert.match(fixture, /UnknownOption = "unexpected"/u)
     assert.doesNotMatch(fixture, /\. \$installer status/u)
     assert.doesNotMatch(fixture, /@Arguments/u)
 

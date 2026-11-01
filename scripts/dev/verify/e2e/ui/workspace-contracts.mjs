@@ -234,14 +234,12 @@ export async function runWorkspaceContractMatrix(ui) {
           await bindThreadComposer(page, goto, fixture)
           const footer = page.getByLabel('会话状态')
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
-          // 只读单行 Footer：组分隔符固定为 U+2223（∣），组内统计项固定为 U+00B7（·），
-          // Environment 不再带 env: 前缀；不再有独立的 meta/usage 行或 Git 事实。
+          // 只读单行 Footer：组分隔符固定为 U+2223（∣），组内统计项固定为 U+00B7（·）。
           const line = footer.locator('.thread-status-line')
           assert(await line.count() === 1, `Footer must render exactly one status line: ${await footer.innerText()}`)
           const environmentText = `${fixture.otherEnvironment.name}（不可用）`
           // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
-          // Footer 必须投影该 Environment（无 daemon 连接 => unavailable），
-          // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
+          // Footer 必须投影该 Environment（无 daemon 连接 => unavailable）。
           const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
           assert(
             lineText === `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s`,
