@@ -1356,7 +1356,10 @@ export class Runtime {
       eventNodeId: protoCmd.eventNodeId ?? undefined,
       connectionId: protoCmd.connectionId ?? undefined,
       claimId: protoCmd.claimId ?? undefined,
+      bindingEpoch: protoCmd.bindingEpoch !== undefined ? protoCmd.bindingEpoch.toString() : undefined,
       mode: toIdeMode(protoCmd.mode),
+      directory: protoCmd.directory ?? undefined,
+      discard: protoCmd.discard ?? undefined,
     }
     const admission = admitIdeCommand({
       invocationId,
