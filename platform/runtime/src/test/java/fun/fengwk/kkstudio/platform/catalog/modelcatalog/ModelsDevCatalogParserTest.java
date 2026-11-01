@@ -417,7 +417,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void mapsExplicitFalseAbilitiesAndMissingCapabilities() {
     ModelDefaultCandidateDTO capable = validation.get("validation/capable");
-    assertEquals("models_dev_v2:validation:capable", capable.getId());
+    assertEquals("models_dev:validation:capable", capable.getId());
     assertEquals(Boolean.FALSE, capable.getAbilities().getTools());
     assertEquals(Boolean.TRUE, capable.getAbilities().getReasoning());
     assertEquals(

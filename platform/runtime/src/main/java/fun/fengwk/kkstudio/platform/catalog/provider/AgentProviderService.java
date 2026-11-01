@@ -226,14 +226,14 @@ public class AgentProviderService {
 
   private Mutation mutation(
       AgentProviderEditablePropertiesDTO properties,
-      String fallbackName,
+      String canonicalName,
       String existingCredential,
       String existingConfigJson,
       boolean preserveMissingEdits) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = requireName(fallbackName);
+    String name = requireName(canonicalName);
     String providerType = properties.getProviderType();
     if (providerType == null || providerType.isBlank()) {
       throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");

@@ -243,13 +243,12 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(AnthropicThinkingMode.BUDGET, adapter.configuration().anthropicThinkingMode());
   }
 
-  /** 意图：验证 Anthropic 工厂只解析 thinking mode，已被删除的 modelAliases 字段不再保留任何状态。 */
+  /** 意图：验证 Anthropic 工厂只解析 thinking mode，未知配置字段不影响默认配置。 */
   @Test
-  void anthropicFactoryIgnoresRemovedModelAliasConfiguration() {
-    // 别名映射不再是配置能力：解析成功后配置对象与默认值完全相等，不保留任何别名状态。
+  void anthropicFactoryIgnoresUnknownConfiguration() {
     assertEquals(
         AnthropicConfiguration.defaults(),
-        AnthropicConfiguration.parse("{\"modelAliases\":{\"MiniMax-M3\":\"wire-name\"}}"));
+        AnthropicConfiguration.parse("{\"unknownField\":\"unknownValue\"}"));
   }
 
   /** 意图：验证 Anthropic 工厂拒绝非法配置且不回显配置内容与敏感信息，因果链无暴露。 */
@@ -272,11 +271,11 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exMalformed.kind());
     assertNull(exMalformed.getCause());
 
-    // 未知 provider 配置字段（含已删除的 modelAliases）必须被忽略，且配置对象绝不回显原始 payload。
-    AnthropicConfiguration aliasIgnored =
-        AnthropicConfiguration.parse("{\"modelAliases\":{\"key\":\" SUPER_SECRET_PAYLOAD \"}}");
-    assertEquals(AnthropicConfiguration.defaults(), aliasIgnored);
-    assertFalse(aliasIgnored.toString().contains("SUPER_SECRET_PAYLOAD"));
+    // 未知 provider 配置字段必须被忽略，且配置对象绝不回显原始 payload。
+    AnthropicConfiguration unknownIgnored =
+        AnthropicConfiguration.parse("{\"unknownField\":{\"key\":\" SUPER_SECRET_PAYLOAD \"}}");
+    assertEquals(AnthropicConfiguration.defaults(), unknownIgnored);
+    assertFalse(unknownIgnored.toString().contains("SUPER_SECRET_PAYLOAD"));
 
     String sensitiveValue = "{\"anthropicThinkingMode\":\" SENSITIVE_VALUE \"}";
     ProviderException exValue =

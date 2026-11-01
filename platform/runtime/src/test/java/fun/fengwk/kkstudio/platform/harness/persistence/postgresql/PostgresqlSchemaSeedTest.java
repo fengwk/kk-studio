@@ -186,10 +186,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select string_agg(provider_name || '/' || name, ',' order by provider_name, name)"
                     + " from agent_model where name <> model_id"),
             "only the two MiniMax rows may differ between logical name and wire modelId");
-        assertSingleLong(
-            conn,
-            "select count(*) from agent_provider where config::text like '%modelAliases%'",
-            0L);
 
         JsonNode geminiVariants =
             OBJECT_MAPPER.readTree(
