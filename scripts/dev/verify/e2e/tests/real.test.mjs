@@ -5,6 +5,8 @@ import { ALL_CASES } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
   MINIMAX_ANTHROPIC_M3,
+} from '../lib/real-models.mjs'
+import {
   MIN_CACHE_PREFIX_BYTES,
   buildCachePrefix,
   buildTextCacheSystemPrompt,

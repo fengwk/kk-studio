@@ -235,21 +235,17 @@ async function expectStatus(fn, status) {
 
 /**
  * 解析 install code 的真实 wire 时刻：全局 Jackson 开启 `WRITE_DATES_AS_TIMESTAMPS`，`Instant` 序列化为 epoch
- * seconds 数字（可为小数），因此数字按秒换算成毫秒；同时兼容显式 ISO 字符串。
+ * seconds 数字（可为小数），按秒换算成毫秒。
  */
 function instantMillis(value) {
-  if (typeof value === 'number') {
-    assert(Number.isFinite(value) && value >= 0, `invalid epoch-second instant: ${value}`)
-    return value * 1000
-  }
   assert(
-    typeof value === 'string' && Number.isFinite(Date.parse(value)),
-    `invalid ISO instant: ${JSON.stringify(value)}`,
+    typeof value === 'number' && Number.isFinite(value) && value >= 0,
+    `invalid epoch-second instant: ${value}`,
   )
-  return Date.parse(value)
+  return value * 1000
 }
 
-/** 校验 code 严格在签发后约五分钟过期（有限时刻 + ±skew），同时接受 epoch seconds 与 ISO 两种 wire 形态。 */
+/** 校验 code 严格在签发后约五分钟过期（有限时刻 + ±skew）。 */
 export function assertExpiresNearFiveMinutes(expiresAt, issuedAtMs) {
   const expiresMs = instantMillis(expiresAt)
   assert(Number.isFinite(expiresMs), 'install code expiresAt must be parseable')

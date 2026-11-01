@@ -306,21 +306,13 @@ test('install code expiresAt accepts epoch seconds from the real wire, including
   assert.doesNotThrow(() => assertExpiresNearFiveMinutes(issuedAtMs / 1000 + 300.5, issuedAtMs))
 })
 
-test('install code expiresAt also accepts an ISO string', () => {
-  // 测试意图：兼容显式 ISO wire 形态，语义与 epoch seconds 数字保持一致。
-  const issuedAtMs = Date.parse('2026-01-01T00:00:00.000Z')
-  assert.doesNotThrow(() =>
-    assertExpiresNearFiveMinutes(new Date(issuedAtMs + INSTALL_TTL_MS).toISOString(), issuedAtMs),
-  )
-})
-
 test('install code expiresAt rejects unparseable instants and out-of-window expiry', () => {
   // 测试意图：非数字/负/非法字符串等不可解析 wire 必须报“无法解析”，偏离五分钟超过 ±skew 的过期值必须报“约五分钟”，不静默通过。
   const issuedAtMs = 1_700_000_000_000
   for (const invalid of [undefined, null, 'not-a-time', -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(
       () => assertExpiresNearFiveMinutes(invalid, issuedAtMs),
-      /invalid (epoch-second|ISO) instant/,
+      /invalid epoch-second instant/,
     )
   }
   // ±skew（30s）内视为同一约五分钟到期。
