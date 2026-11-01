@@ -32,6 +32,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
@@ -164,6 +167,11 @@ public final class ToolProcessorTestSupport {
   /** 普通 host 工具场景（contributor core）。 */
   static Scenario bashScenario(ToolSideEffect sideEffect) {
     return new Scenario("bash", "{}", sideEffect, hostBinding(sideEffect));
+  }
+
+  /** 远端工具场景（contributor core + EnvironmentSupport.REQUIRED）。 */
+  static Scenario remoteScenario(ToolSideEffect sideEffect) {
+    return new Scenario("bash", "{}", sideEffect, remoteBinding(sideEffect));
   }
 
   /**
@@ -822,6 +830,60 @@ public final class ToolProcessorTestSupport {
         EnvironmentSupport.NONE,
         null,
         null);
+  }
+
+  static ToolBinding remoteBinding(ToolSideEffect sideEffect) {
+    return new ToolBinding(
+        new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
+        new ContributorBinding("core", "bash", List.of()),
+        EnvironmentSupport.REQUIRED,
+        ENV_ID,
+        "env-1");
+  }
+
+  static ExecutionExitFact registerOldToolExit(
+      InMemoryBuiltinHarnessStore store,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String ownerLeaseToken) {
+    return store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          return ExecutionExitLedger.register(
+              tx,
+              UUID.randomUUID(),
+              threadId,
+              invocationId,
+              attempt,
+              ownerLeaseToken,
+              ExecutionExitKind.TOOL,
+              null);
+        });
+  }
+
+  static ExecutionExitFact registerRemoteExit(
+      InMemoryBuiltinHarnessStore store,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String ownerLeaseToken,
+      UUID parentExecutionId,
+      EnvironmentId environmentId) {
+    return store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          return ExecutionExitLedger.register(
+              tx,
+              UUID.randomUUID(),
+              threadId,
+              invocationId,
+              attempt,
+              ownerLeaseToken,
+              ExecutionExitKind.REMOTE,
+              parentExecutionId,
+              environmentId);
+        });
   }
 
   private static ToolDescriptor toolDescriptor(ToolSideEffect sideEffect) {

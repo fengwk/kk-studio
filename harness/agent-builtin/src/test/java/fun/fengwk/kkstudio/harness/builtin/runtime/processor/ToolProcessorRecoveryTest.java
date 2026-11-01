@@ -12,6 +12,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -1108,5 +1112,465 @@ class ToolProcessorRecoveryTest {
     assertTrue(ToolExecutionTestSupport.isAbandoned(execution));
     assertEquals(1, releases.get());
     assertTrue(run.awaitExited());
+  }
+
+  /** 远端工具 RUNNING 但 exit ledger 中没有任何 REMOTE 事实：降级为 UNKNOWN 恢复，不重放。 */
+  @Test
+  void remoteToolRunningWithoutRemoteFactTerminatesUnknown() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+    assertEquals(1, tool.attempt());
+    assertEquals("LEASE_EXPIRED", tool.error().kind());
+    assertEquals(0, fixture.gateway.admitCalls);
+    assertEquals(0, fixture.gateway.reattachCalls);
+  }
+
+  /** 远端工具 RUNNING 但 exit ledger 存在多条 REMOTE 事实（歧义）：降级为 UNKNOWN 恢复。 */
+  @Test
+  void remoteToolRunningWithMultipleRemoteFactsTerminatesUnknown() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID toolFactId =
+        ToolProcessorTestSupport.registerOldToolExit(
+                fixture.store,
+                fixture.baseline.threadId(),
+                fixture.toolInvocationId,
+                1,
+                "old-token")
+            .executionId();
+    ToolProcessorTestSupport.registerRemoteExit(
+        fixture.store,
+        fixture.baseline.threadId(),
+        fixture.toolInvocationId,
+        1,
+        "old-token",
+        toolFactId,
+        ToolProcessorTestSupport.ENV_ID);
+    ToolProcessorTestSupport.registerRemoteExit(
+        fixture.store,
+        fixture.baseline.threadId(),
+        fixture.toolInvocationId,
+        1,
+        "old-token",
+        toolFactId,
+        ToolProcessorTestSupport.ENV_ID);
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+    assertEquals(1, tool.attempt());
+    assertEquals(0, fixture.gateway.reattachCalls);
+  }
+
+  /** 远端工具 RUNNING 且 REMOTE 事实状态为 NOT_STARTED（已确定未启动）：降级为 UNKNOWN 恢复。 */
+  @Test
+  void remoteToolRunningWithNotStartedRemoteFactTerminatesUnknown() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID toolFactId =
+        ToolProcessorTestSupport.registerOldToolExit(
+                fixture.store,
+                fixture.baseline.threadId(),
+                fixture.toolInvocationId,
+                1,
+                "old-token")
+            .executionId();
+    ExecutionExitFact remoteFact =
+        ToolProcessorTestSupport.registerRemoteExit(
+            fixture.store,
+            fixture.baseline.threadId(),
+            fixture.toolInvocationId,
+            1,
+            "old-token",
+            toolFactId,
+            ToolProcessorTestSupport.ENV_ID);
+    TestExecutionExitConfirmer.create(fixture.store, fixture.clock)
+        .confirm(remoteFact, ExecutionExitState.NOT_STARTED);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+    assertEquals(0, fixture.gateway.reattachCalls);
+  }
+
+  /**
+   * 远端工具 RUNNING 正常重新挂接： - 绝不重发 INVOKE（admitCalls == 0, reattachCalls == 1）； - attempt 保持不变（1）； -
+   * 交付真实结果； - 旧 REMOTE 事实通过 loadRemote 原始身份确认为 REMOTE_ACKNOWLEDGED； - 旧 owner TOOL 事实保持
+   * UNCONFIRMED； - 新 owner 登记的挂接 TOOL 事实以 STUDIO_EXITED 确认。
+   */
+  @Test
+  void remoteToolRunningReattachesSuccessfullyAndConfirmsExitFacts() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    ExecutionExitFact oldToolFact =
+        ToolProcessorTestSupport.registerOldToolExit(
+            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+    ExecutionExitFact oldRemoteFact =
+        ToolProcessorTestSupport.registerRemoteExit(
+            fixture.store,
+            fixture.baseline.threadId(),
+            fixture.toolInvocationId,
+            1,
+            "old-token",
+            oldToolFact.executionId(),
+            ToolProcessorTestSupport.ENV_ID);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueReattachRun(
+            progress -> {
+              fixture.gateway.reattachExecutions.getFirst().onRemoteExitConfirmed().run();
+              return ToolProcessorTestSupport.succeeded("call-1");
+            });
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(recovered));
+    assertTrue(run.awaitExited());
+    ToolProcessorTestSupport.awaitTrue(
+        () ->
+            ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                == ToolInvocationStatus.SUCCEEDED,
+        Duration.ofSeconds(5));
+    ToolProcessorTestSupport.awaitTrue(
+        () -> !fixture.processor.hasActiveExecution(), Duration.ofSeconds(5));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
+    assertEquals(1, tool.attempt(), "attempt must remain unchanged");
+    assertEquals(0, fixture.gateway.admitCalls, "must never admit/invoke again");
+    assertEquals(1, fixture.gateway.reattachCalls, "must reattach once");
+
+    // Exit ledger facts verification
+    ExecutionExitFact loadedRemote =
+        fixture.store.transaction(tx -> tx.exits().find(oldRemoteFact.executionId())).orElseThrow();
+    assertEquals(
+        ExecutionExitState.REMOTE_ACKNOWLEDGED,
+        loadedRemote.state(),
+        "old remote fact must be confirmed as REMOTE_ACKNOWLEDGED");
+
+    ExecutionExitFact loadedOldTool =
+        fixture.store.transaction(tx -> tx.exits().find(oldToolFact.executionId())).orElseThrow();
+    assertEquals(
+        ExecutionExitState.UNCONFIRMED,
+        loadedOldTool.state(),
+        "old tool fact must remain UNCONFIRMED");
+
+    List<ExecutionExitFact> allFacts =
+        fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
+    assertTrue(allFacts.stream().anyMatch(f -> f.executionId().equals(oldToolFact.executionId())));
+
+    List<ExecutionExitFact> reattachedToolFacts =
+        fixture.store.transaction(
+            tx ->
+                tx.exits().loadUnconfirmed(fixture.baseline.threadId()).stream()
+                    .filter(f -> f.kind() == ExecutionExitKind.TOOL)
+                    .filter(f -> !f.executionId().equals(oldToolFact.executionId()))
+                    .toList());
+    assertTrue(
+        reattachedToolFacts.isEmpty(), "new tool fact must have been confirmed as STUDIO_EXITED");
+  }
+
+  /** 远端工具 RUNNING 在 REMOTE 事实已是 REMOTE_ACKNOWLEDGED 时仍可正常挂接。 */
+  @Test
+  void remoteToolRunningReattachesWhenRemoteFactAlreadyAcknowledged() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    ExecutionExitFact oldToolFact =
+        ToolProcessorTestSupport.registerOldToolExit(
+            fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+    ExecutionExitFact oldRemoteFact =
+        ToolProcessorTestSupport.registerRemoteExit(
+            fixture.store,
+            fixture.baseline.threadId(),
+            fixture.toolInvocationId,
+            1,
+            "old-token",
+            oldToolFact.executionId(),
+            ToolProcessorTestSupport.ENV_ID);
+    TestExecutionExitConfirmer.create(fixture.store, fixture.clock)
+        .confirm(oldRemoteFact, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueReattachRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(recovered));
+    assertTrue(run.awaitExited());
+    ToolProcessorTestSupport.awaitTrue(
+        () ->
+            ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                == ToolInvocationStatus.SUCCEEDED,
+        Duration.ofSeconds(5));
+    ToolProcessorTestSupport.awaitTrue(
+        () -> !fixture.processor.hasActiveExecution(), Duration.ofSeconds(5));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
+    assertEquals(1, tool.attempt());
+    assertEquals(1, fixture.gateway.reattachCalls);
+  }
+
+  /** 远端工具重新挂接抛 Unavailable 异常时：仅 reschedule TOOL Work，不修改 Tool 状态，不推进 attempt。 */
+  @Test
+  void remoteToolRunningReschedulesWhenReattachUnavailable() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID toolFactId =
+        ToolProcessorTestSupport.registerOldToolExit(
+                fixture.store,
+                fixture.baseline.threadId(),
+                fixture.toolInvocationId,
+                1,
+                "old-token")
+            .executionId();
+    ToolProcessorTestSupport.registerRemoteExit(
+        fixture.store,
+        fixture.baseline.threadId(),
+        fixture.toolInvocationId,
+        1,
+        "old-token",
+        toolFactId,
+        ToolProcessorTestSupport.ENV_ID);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    fixture.gateway.queueReattach(
+        new EnvironmentCapabilityUnavailableException("remote unavailable"));
+
+    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.RUNNING, tool.status(), "status must remain RUNNING");
+    assertEquals(1, tool.attempt(), "attempt must remain unchanged");
+    assertEquals(
+        0,
+        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version(),
+        "thread version must not change");
+    Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
+    assertNotNull(toolWork, "tool work must be rescheduled");
+    assertNull(toolWork.leaseToken(), "tool work must not be claimed");
+  }
+
+  /** 远端工具挂接后终态为 UNKNOWN（如超时或 NOT_FOUND）：收敛为 UNKNOWN，attempt 不变。 */
+  @Test
+  void remoteToolRunningReattachConvergesUnknownOnGatewayUnknown() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID toolFactId =
+        ToolProcessorTestSupport.registerOldToolExit(
+                fixture.store,
+                fixture.baseline.threadId(),
+                fixture.toolInvocationId,
+                1,
+                "old-token")
+            .executionId();
+    ToolProcessorTestSupport.registerRemoteExit(
+        fixture.store,
+        fixture.baseline.threadId(),
+        fixture.toolInvocationId,
+        1,
+        "old-token",
+        toolFactId,
+        ToolProcessorTestSupport.ENV_ID);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueReattachRun(
+            progress ->
+                new ToolGateway.Unknown(
+                    new ToolInvocationError("TIMEOUT", "remote capability execution timed out")));
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(recovered));
+    assertTrue(run.awaitExited());
+    ToolProcessorTestSupport.awaitTrue(
+        () ->
+            ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                == ToolInvocationStatus.UNKNOWN,
+        Duration.ofSeconds(5));
+    ToolProcessorTestSupport.awaitTrue(
+        () -> !fixture.processor.hasActiveExecution(), Duration.ofSeconds(5));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+    assertEquals(1, tool.attempt(), "attempt must remain unchanged");
+    assertEquals("TIMEOUT", tool.error().kind());
+  }
+
+  /** 远端工具挂接等待期间被取消：收敛为 CANCELLED，attempt 不变。 */
+  @Test
+  void remoteToolRunningReattachConvergesCancelledOnGatewayCancelled() throws Exception {
+    ScheduledExecutorService scheduler = ToolProcessorTestSupport.newScheduler();
+    schedulers.add(scheduler);
+    ToolProcessorTestSupport.Fixture fixture =
+        new ToolProcessorTestSupport.Fixture(
+            ToolProcessorTestSupport.NO_RETRY,
+            false,
+            0,
+            scheduler,
+            ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+            false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    UUID toolFactId =
+        ToolProcessorTestSupport.registerOldToolExit(
+                fixture.store,
+                fixture.baseline.threadId(),
+                fixture.toolInvocationId,
+                1,
+                "old-token")
+            .executionId();
+    ToolProcessorTestSupport.registerRemoteExit(
+        fixture.store,
+        fixture.baseline.threadId(),
+        fixture.toolInvocationId,
+        1,
+        "old-token",
+        toolFactId,
+        ToolProcessorTestSupport.ENV_ID);
+
+    ToolProcessorTestSupport.claim(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered =
+        ToolProcessorTestSupport.claim(
+            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueReattachRun(
+            progress ->
+                new ToolGateway.Cancelled(
+                    new ToolInvocationError("CANCELLED", "execution cancelled")));
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(recovered));
+    assertTrue(run.awaitExited());
+    ToolProcessorTestSupport.awaitTrue(
+        () ->
+            ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                == ToolInvocationStatus.CANCELLED,
+        Duration.ofSeconds(5));
+    ToolProcessorTestSupport.awaitTrue(
+        () -> !fixture.processor.hasActiveExecution(), Duration.ofSeconds(5));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
+    assertEquals(1, tool.attempt(), "attempt must remain unchanged");
   }
 }
