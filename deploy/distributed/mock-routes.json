@@ -1,0 +1,22 @@
+{
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "bodyIncludes": "\"role\":\"tool\"",
+      "headers": {
+        "Content-Type": "text/event-stream"
+      },
+      "body": "data: {\"id\":\"chatcmpl-dist-2\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Command completed successfully: handover-done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":25,\"completion_tokens\":10,\"total_tokens\":35}}\n\ndata: [DONE]\n\n"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "bodyIncludes": "sleep 20",
+      "headers": {
+        "Content-Type": "text/event-stream"
+      },
+      "body": "data: {\"id\":\"chatcmpl-dist-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_exec_1\",\"type\":\"function\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"sleep 20 && echo handover-done\\\",\\\"workdir\\\":\\\"/workspace\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":15,\"completion_tokens\":10,\"total_tokens\":25}}\n\ndata: [DONE]\n\n"
+    }
+  ]
+}

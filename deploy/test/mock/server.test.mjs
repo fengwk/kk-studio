@@ -214,3 +214,67 @@ test('test intent: protected endpoints serve the fake Hub flow with a valid bear
     await mock.close()
   }
 })
+
+test('test intent: route with bodyIncludes takes precedence over built-in chat completions stub', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'kk-mock-routes-'))
+  const routesPath = path.join(directory, 'routes.json')
+  writeFileSync(
+    routesPath,
+    JSON.stringify({
+      routes: [
+        {
+          method: 'POST',
+          path: '/v1/chat/completions',
+          bodyIncludes: '"role":"tool"',
+          headers: { 'Content-Type': 'text/event-stream' },
+          body: 'data: {"custom":"tool-result-response"}\n\ndata: [DONE]\n\n',
+        },
+        {
+          method: 'POST',
+          path: '/v1/chat/completions',
+          bodyIncludes: 'call-tool-trigger',
+          headers: { 'Content-Type': 'text/event-stream' },
+          body: 'data: {"custom":"tool-call-response"}\n\ndata: [DONE]\n\n',
+        },
+      ],
+    }),
+  )
+  const server = await buildServer(routesPath, null, 'token', { host: '127.0.0.1', port: 0 })
+  const base = `http://127.0.0.1:${server.address().port}`
+  try {
+    // 1. Matches first route with tool result
+    let res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'tool', content: 'ok' }] }),
+    })
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('content-type'), 'text/event-stream')
+    let body = await res.text()
+    assert.ok(body.includes('"custom":"tool-result-response"'))
+
+    // 2. Matches second route with call-tool-trigger
+    res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'please call-tool-trigger now' }] }),
+    })
+    assert.equal(res.status, 200)
+    body = await res.text()
+    assert.ok(body.includes('"custom":"tool-call-response"'))
+
+    // 3. Fallback to built-in stub when neither route matches
+    res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hello regular' }] }),
+    })
+    assert.equal(res.status, 200)
+    body = await res.text()
+    assert.ok(body.includes('offline acceptance stub response.'))
+  } finally {
+    server.closeAllConnections()
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

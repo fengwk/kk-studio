@@ -33,6 +33,9 @@ export function loadRoutes(routesPath) {
     if (!route.path.startsWith('/')) {
       throw new ValueError("route paths must start with '/'")
     }
+    if ('bodyIncludes' in route && typeof route.bodyIncludes !== 'string') {
+      throw new ValueError("route 'bodyIncludes' must be a string")
+    }
   }
   return routes
 }
@@ -275,6 +278,56 @@ class Mock {
       return
     }
 
+    let routes
+    try {
+      routes = loadRoutes(this.routesPath)
+    } catch (error) {
+      this.sendJson(response, request, 500, { error: `invalid route configuration: ${error.message}` })
+      return
+    }
+
+    const bodyText = body.toString('utf8')
+    const route = routes.find((candidate) => {
+      if (candidate.method.toUpperCase() !== request.method || candidate.path !== requestPath) {
+        return false
+      }
+      if (typeof candidate.bodyIncludes === 'string' && !bodyText.includes(candidate.bodyIncludes)) {
+        return false
+      }
+      return true
+    })
+
+    if (route !== undefined) {
+      const status = Number.parseInt(route.status ?? 200, 10)
+      let headers = route.headers ?? {}
+      if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
+        this.sendJson(response, request, 500, { error: 'route headers must be an object' })
+        return
+      }
+
+      let routeBody
+      if ('json' in route) {
+        routeBody = Buffer.from(JSON.stringify(route.json))
+        headers = { 'Content-Type': 'application/json', ...headers }
+      } else {
+        const bodyValue = route.body ?? ''
+        if (typeof bodyValue !== 'string') {
+          this.sendJson(response, request, 500, { error: 'route body must be a string' })
+          return
+        }
+        routeBody = Buffer.from(bodyValue)
+      }
+
+      const contentType =
+        Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] || ''
+      if (typeof contentType === 'string' && contentType.startsWith('text/event-stream')) {
+        this.sendSse(response, request, status, routeBody.toString('utf8'))
+      } else {
+        this.sendBytes(response, request, status, headers, routeBody)
+      }
+      return
+    }
+
     try {
       if (this.handleChatCompletions(request, response, requestPath, body)) {
         return
@@ -293,42 +346,7 @@ class Mock {
       return
     }
 
-    let routes
-    try {
-      routes = loadRoutes(this.routesPath)
-    } catch (error) {
-      this.sendJson(response, request, 500, { error: `invalid route configuration: ${error.message}` })
-      return
-    }
-
-    const route = routes.find(
-      (candidate) => candidate.method.toUpperCase() === request.method && candidate.path === requestPath,
-    )
-    if (route === undefined) {
-      this.sendJson(response, request, 404, { error: 'no mock route', method: request.method, path: requestPath })
-      return
-    }
-
-    const status = Number.parseInt(route.status ?? 200, 10)
-    let headers = route.headers ?? {}
-    if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
-      this.sendJson(response, request, 500, { error: 'route headers must be an object' })
-      return
-    }
-
-    let routeBody
-    if ('json' in route) {
-      routeBody = Buffer.from(JSON.stringify(route.json))
-      headers = { 'Content-Type': 'application/json', ...headers }
-    } else {
-      const bodyValue = route.body ?? ''
-      if (typeof bodyValue !== 'string') {
-        this.sendJson(response, request, 500, { error: 'route body must be a string' })
-        return
-      }
-      routeBody = Buffer.from(bodyValue)
-    }
-    this.sendBytes(response, request, status, headers, routeBody)
+    this.sendJson(response, request, 404, { error: 'no mock route', method: request.method, path: requestPath })
   }
 }
 
