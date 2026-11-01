@@ -1,14 +1,19 @@
 package fun.fengwk.kkstudio.platform.harness.configuration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 class HarnessRuntimePropertiesTest {
 
-  /** 纯 bootstrap 默认值只包含 worker 开关：Backend 不持有默认 cwd、资源目录或 Environment 根。 */
+  /** 纯 bootstrap 默认值包含 worker 开关与优雅关闭排空超时：默认启动 worker，排空超时 60s。 */
   @Test
   void providesBootstrapDeploymentDefaults() {
-    assertTrue(new HarnessRuntimeProperties().isWorkersEnabled());
+    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
+    assertTrue(properties.isWorkersEnabled());
+    assertEquals(Duration.ofSeconds(60), properties.getDrainTimeout());
   }
 }

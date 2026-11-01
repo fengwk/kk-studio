@@ -479,7 +479,7 @@ class EnvironmentDaemonServerTest {
     assertFalse(channel.closed());
     assertTrue(channel.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
-    // 只有 WELCOME：被拒绝的 INVOKE 没有产生任何 wire 帧。
+    // 只有 SETTINGS：被拒绝的 INVOKE 没有产生任何 wire 帧。
     assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
 
     // 同一 invocationId 立即重试成功，证明拒绝未留下任何在途残留。
@@ -735,6 +735,32 @@ class EnvironmentDaemonServerTest {
     fixture.close(channel.connectionId());
     FakeControlChannel reconnected = fixture.connectReady("channel-expire-retry");
     assertEquals(List.of(MessageType.SETTINGS, MessageType.CANCEL), reconnected.messageTypes());
+  }
+
+  /**
+   * 测试意图：drain 之后本节点不再代表任何 Environment，调用方 expire 只做本地 retire 与 transfer 释放， 绝不向 Daemon 发送 CANCEL
+   * 帧，使远端调用留给下一个 owner 重新挂接。
+   */
+  @Test
+  void drainCausesLaterExpireToSuppressCancelFrame() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-drain-expire");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    assertEquals(List.of(MessageType.SETTINGS, MessageType.INVOKE), channel.messageTypes());
+
+    fixture.server.drain();
+    assertTrue(channel.drainCount() > 0, "server.drain 必须调用 channel.drain");
+
+    long countBeforeExpire = channel.countOf(MessageType.CANCEL);
+    assertEquals(0L, countBeforeExpire, "drain 本身不产生 CANCEL");
+
+    fixture.server.expire(handle);
+
+    assertEquals(
+        0L, channel.countOf(MessageType.CANCEL), "drain 之后 expire 绝不得向 Daemon 连接发送 CANCEL 帧");
   }
 
   /**
@@ -1606,11 +1632,11 @@ class EnvironmentDaemonServerTest {
     }
   }
 
-  /** 测试意图：WELCOME 递交被拒绝时必须关闭该连接，不能停在已绑定但未完成握手的状态。 */
+  /** 测试意图：SETTINGS 递交被拒绝时必须关闭该连接，不能停在已绑定但未完成握手的状态。 */
   @Test
-  void rejectedWelcomeClosesTheConnection() {
+  void rejectedSettingsClosesTheConnection() {
     Fixture fixture = new Fixture();
-    FakeControlChannel channel = new FakeControlChannel("channel-welcome-busy");
+    FakeControlChannel channel = new FakeControlChannel("channel-settings-busy");
     channel.busyNextOffer = true;
     DaemonAdmission admission = fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
     if (admission instanceof DaemonAdmission.Admitted admitted) {
@@ -1661,7 +1687,7 @@ class EnvironmentDaemonServerTest {
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：旧连接代际被新 HELLO 抢占后，旧代际的迟到帧不得影响新代际。 */
+  /** 测试意图：旧连接代际被新握手准入抢占后，旧代际的迟到帧不得影响新代际。 */
   @Test
   void staleGenerationFramesAreIgnoredAfterTakeover() {
     Fixture fixture = new Fixture();
@@ -1669,7 +1695,7 @@ class EnvironmentDaemonServerTest {
     RecordingListener firstListener = new RecordingListener();
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), firstListener);
 
-    // 旧持有者被判定为已失效（例如租约过期后同一环境重新 HELLO）。
+    // 旧持有者被判定为已失效（例如租约过期后同一环境重新握手建连）。
     FakeControlChannel second = fixture.reconnectReady("channel-second");
 
     assertTrue(first.closed());
@@ -1698,7 +1724,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(MessageType.ERROR, channel.lastEnvelope().getMessageType());
   }
 
-  /** 测试意图：已 READY 连接不会再次收到 WELCOME，设置热更必须经同一控制通道在心跳上推送当前临时资源策略，且策略未变时不产生冗余帧。 */
+  /** 测试意图：已 READY 连接不会再次收到 SETTINGS，设置热更必须经同一控制通道在心跳上推送当前临时资源策略，且策略未变时不产生冗余帧。 */
   @Test
   void heartbeatPushesUpdatedTemporaryResourcePolicyToReadyConnection() {
     Fixture fixture = new Fixture();
@@ -1836,7 +1862,7 @@ class EnvironmentDaemonServerTest {
                   new RecordingListener()),
           "必须在发送前拒绝: " + arguments);
     }
-    // 全部被拒：通道上除了 WELCOME 没有任何 INVOKE 帧。
+    // 全部被拒：通道上除了 SETTINGS 没有任何 INVOKE 帧。
     assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
 
     // 显式绝对 workdir 通过校验并产生 INVOKE 帧。
@@ -1917,9 +1943,9 @@ class EnvironmentDaemonServerTest {
     }
   }
 
-  /** 测试意图：并发 HELLO 抢占同一环境时只有一个连接获得 WELCOME，另一个以 RETRY_LATER 关闭。 */
+  /** 测试意图：并发握手准入抢占同一环境时只有一个连接获得准入并收到 SETTINGS，另一个以 503 Retry-After（暂不可准入）拒绝。 */
   @Test
-  void concurrentHelloForActiveRouteIsRejectedWithRetryLater() {
+  void concurrentHandshakeForActiveRouteYieldsRetryLater() {
     Fixture fixture = new Fixture();
     FakeControlChannel first = fixture.connectReady("channel-held");
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
@@ -1933,9 +1959,9 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(MessageType.SETTINGS, MessageType.INVOKE), first.messageTypes());
   }
 
-  /** 测试意图：租约存储判定旧 leaseToken 不再活跃时，新 HELLO 必须直接接管而非 RETRY_LATER。 */
+  /** 测试意图：租约存储判定旧 leaseToken 不再活跃时，新握手建连必须直接接管而非 503 Retry-After。 */
   @Test
-  void staleHolderTokenIsTakenOverByFreshHello() {
+  void staleHolderTokenIsTakenOverByFreshHandshake() {
     Fixture fixture = new Fixture();
     fixture.connectReady("channel-stale-holder");
     FakeControlChannel takeover = fixture.reconnectReady("channel-takeover");
@@ -1943,7 +1969,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(MessageType.SETTINGS), takeover.messageTypes());
   }
 
-  /** 测试意图：未知注册凭据必须以通用 REGISTRATION_REJECTED 拒绝，不占用路由且不回显凭据。 */
+  /** 测试意图：未知注册凭据必须以 401 准入拒绝，不占用路由且不回显凭据。 */
   @Test
   void unknownRegistrationTokenIsRejected() {
     Fixture fixture = new Fixture();
@@ -1953,9 +1979,9 @@ class EnvironmentDaemonServerTest {
     assertFalse(fixture.leaseStore.acquired);
   }
 
-  /** 测试意图：租约存储判定凭据无效或路由活跃时，分别以对应错误码关闭连接。 */
+  /** 测试意图：租约存储判定凭据无效或路由活跃时，分别裁决为准入拒绝（401）与暂不可准入（503）。 */
   @Test
-  void leaseStoreRejectionAndRetryLaterMapToErrorCodes() {
+  void leaseStoreRejectionAndRetryLaterMapToAdmissionOutcomes() {
     Fixture rejected = new Fixture();
     rejected.leaseStore.rejected = true;
     DaemonAdmission rejectedAdmission =
@@ -1969,9 +1995,9 @@ class EnvironmentDaemonServerTest {
     assertInstanceOf(DaemonAdmission.RetryLater.class, retryLaterAdmission);
   }
 
-  /** 测试意图：租约存储不可用时 HELLO 必须 fail-closed 关闭连接。 */
+  /** 测试意图：租约存储不可用时握手准入必须 fail-closed 抛出异常拒绝建连。 */
   @Test
-  void helloFailsClosedWhenLeaseStoreIsUnavailable() {
+  void handshakeFailsClosedWhenLeaseStoreIsUnavailable() {
     Fixture fixture = new Fixture();
     fixture.leaseStore.databaseUnavailable = true;
     assertThrows(
@@ -1979,9 +2005,9 @@ class EnvironmentDaemonServerTest {
         () -> fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID)));
   }
 
-  /** 测试意图：注册凭据目录抛异常时 HELLO 必须关闭连接，不建立任何绑定。 */
+  /** 测试意图：注册凭据目录抛异常时握手准入必须 fail-closed 抛出异常，不建立任何绑定。 */
   @Test
-  void helloFailsClosedWhenRegistrationDirectoryFails() {
+  void handshakeFailsClosedWhenRegistrationDirectoryFails() {
     Fixture fixture = new Fixture();
     fixture.failRegistrationDirectory();
     assertThrows(
@@ -1990,9 +2016,9 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
 
-  /** 测试意图：READY 之前的心跳与 HELLO 之前的 READY 都是协议违规，必须以协议错误关闭连接。 */
+  /** 测试意图：READY 之前的心跳属于协议违规，必须以协议错误关闭连接。 */
   @Test
-  void handshakeOrderingViolationsCloseConnection() {
+  void heartbeatBeforeReadyClosesConnection() {
     Fixture heartbeatFirst = new Fixture();
     FakeControlChannel heartbeatChannel = heartbeatFirst.openSession("channel-heartbeat-first");
     heartbeatFirst.receive(
@@ -2000,9 +2026,9 @@ class EnvironmentDaemonServerTest {
     assertTrue(heartbeatChannel.closed());
   }
 
-  /** 测试意图：重复 HELLO、HELLO 声明 environmentId、协议版本、catalog 版本与实例身份非法都必须关闭连接。 */
+  /** 测试意图：重复 READY 或握手参数非法（token/实例身份非法）都必须被拒绝。 */
   @Test
-  void helloValidationRejectsMalformedHandshakes() {
+  void handshakeValidationRejectsMalformedHandshakes() {
     // 重复 READY 是协议违规：协议没有可重放的序号，READY 只能推进一次会话事实。
     Fixture duplicateReady = new Fixture();
     FakeControlChannel readyChannel = duplicateReady.connectReady("channel-duplicate-ready");
@@ -2639,11 +2665,11 @@ class EnvironmentDaemonServerTest {
         () -> fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), null));
   }
 
-  /** 测试意图：首帧不是 HELLO 的连接必须以协议错误关闭，且不推进任何会话状态。 */
+  /** 测试意图：首帧不是 READY 的连接必须以协议错误关闭，且不推进任何会话状态。 */
   @Test
-  void nonHelloFirstMessageIsProtocolViolation() {
+  void nonReadyFirstMessageIsProtocolViolation() {
     Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.openSession("channel-ready-never-hello");
+    FakeControlChannel channel = fixture.openSession("channel-ready-never-sent");
     fixture.receive(channel, progressEnvelope(CALL_ONE, "chunk"));
 
     assertTrue(channel.closed());
@@ -3177,7 +3203,7 @@ class EnvironmentDaemonServerTest {
    * <p>{@link #close()} 恢复级别与父处理器设置，避免影响其它测试。
    */
 
-  /** 意图：DATA_BIND/IDE_LEASE 只能发往当前 READY 且仍持有租约的连接；payload 严格编码且不携带 invocationId。 */
+  /** 意图：IDE_LEASE 只能发往当前 READY 且仍持有租约的连接；payload 严格编码且不携带 invocationId。 */
   @Test
   void boundRuntimeControlsRequireCurrentLeaseAndEncodeStrictPayloads() {
     Fixture fixture = new Fixture();

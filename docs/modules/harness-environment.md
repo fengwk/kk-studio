@@ -238,7 +238,7 @@ close(connectionId)
 
 [`DaemonLeaseStore`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
 
-`Rejected` 与 `RetryLater` 分别写入 `REGISTRATION_REJECTED` 与 `RETRY_LATER`。存储运行时异常使连接 fail closed，错误帧给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
+准入阶段在升级前裁决：`Rejected` 映射为 HTTP 401（注册凭据无效），`RetryLater` 映射为 HTTP 503 与 Retry-After 响应头（暂不可准入）。存储运行时异常使连接 fail closed，错误响应给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
 
 ### 调用所有权与并发
 
@@ -314,7 +314,7 @@ COMPLETED
 
 [`DaemonControlChannel`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
 
-[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。`drain()` 操作保证幂等。
+[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。此外，`drain()` 之后本节点不再代表任何 Environment，调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不再向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。`drain()` 操作保证幂等。
 
 #### 回调顺序与背压上界
 

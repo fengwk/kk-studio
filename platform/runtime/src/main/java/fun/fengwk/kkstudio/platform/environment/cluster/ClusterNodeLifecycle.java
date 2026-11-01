@@ -113,9 +113,9 @@ public final class ClusterNodeLifecycle implements SmartLifecycle {
     return running.get();
   }
 
-  /** 注册相位排在最后，使 JdbcTemplate 与相关 bean 全部就绪后才注册。 */
+  /** 相位低于 HarnessRuntimeLifecycle：启动时先注册节点再开始分派，关闭时先完成排空再反注册节点。 */
   @Override
   public int getPhase() {
-    return Integer.MAX_VALUE;
+    return Integer.MAX_VALUE - 1;
   }
 }

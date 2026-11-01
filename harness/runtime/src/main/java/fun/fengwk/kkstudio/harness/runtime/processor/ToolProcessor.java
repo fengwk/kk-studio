@@ -145,6 +145,24 @@ public final class ToolProcessor implements AutoCloseable {
     executions.close();
   }
 
+  /** 排空并移交活跃执行：先快照仍在等待远端结果的执行并逐个移交（共用 deadline），然后调用 close 处理其余执行。 */
+  public void drain() {
+    Instant deadline = Instant.now().plus(config.leaseConfig().leaseDuration());
+    List<ToolExecution> awaiting =
+        executions.activeExecutions().stream().filter(ToolExecution::isAwaitingRemote).toList();
+    for (ToolExecution execution : awaiting) {
+      try {
+        execution.handover(deadline);
+      } catch (RuntimeException failure) {
+        log.warn(
+            "Failed to handover awaiting remote tool execution for invocation {}; its claim remains until lease expiry",
+            execution.invocationId(),
+            failure);
+      }
+    }
+    close();
+  }
+
   /** 当前 JVM 是否持有任何活跃的本地 Tool execution。 */
   public boolean hasActiveExecution() {
     return executions.hasActiveExecution();

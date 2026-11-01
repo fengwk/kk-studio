@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.cluster;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -84,6 +85,11 @@ class ClusterNodeLifecycleTest {
 
     verifyNoInteractions(registry);
     verifyNoInteractions(subscriptions);
+  }
+
+  @Test
+  void phasePrecedesHarnessRuntimePhase() {
+    assertEquals(Integer.MAX_VALUE - 1, lifecycle(properties()).getPhase());
   }
 
   private ClusterNodeLifecycle lifecycle(ClusterProperties properties) {

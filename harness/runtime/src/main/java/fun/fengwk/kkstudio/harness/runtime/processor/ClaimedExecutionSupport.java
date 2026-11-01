@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -83,6 +84,11 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
   public boolean cancel(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
     return guard.cancel(invocationId);
+  }
+
+  /** 当前 JVM 活跃的本地 execution 快照列表。 */
+  public List<E> activeExecutions() {
+    return guard.activeExecutions();
   }
 
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler / executor；幂等。 */

@@ -449,6 +449,48 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     ownerRelease.accept(this);
   }
 
+  /** 当前 JVM 本地执行体是否仍在等待远端结果：处于 body 内部、未被 abandon 且已登记远端事实。 */
+  public boolean isAwaitingRemote() {
+    synchronized (monitor) {
+      return inBody && !abandoned.get() && !registeredRemotes.isEmpty();
+    }
+  }
+
+  /**
+   * 排空移交：停止本地执行体（不写 durable 状态），在 deadline 之前等待执行线程退出，再 release TOOL Work claim，使其他节点立即可以认领。
+   * 执行线程退出时由 execute() 的 finally 自行以 STUDIO_EXITED 确认 TOOL 事实；超时则保持 UNCONFIRMED。
+   *
+   * @return 若不满足移交条件返回 false，成功移交返回 true
+   */
+  public boolean handover(Instant deadline) {
+    Objects.requireNonNull(deadline, "deadline");
+    Thread targetThread;
+    synchronized (monitor) {
+      if (!inBody || abandoned.get() || registeredRemotes.isEmpty()) {
+        return false;
+      }
+      targetThread = bodyThread;
+    }
+    abandon();
+    if (targetThread != null && targetThread != Thread.currentThread()) {
+      Duration remaining = Duration.between(Instant.now(), deadline);
+      if (!remaining.isNegative() && !remaining.isZero()) {
+        try {
+          targetThread.join(remaining);
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      if (targetThread.isAlive()) {
+        log.warn(
+            "tool execution {} body thread did not terminate before drain deadline; tool exit fact remains unconfirmed",
+            executionId);
+      }
+    }
+    store.transaction(tx -> tx.work().release(claim));
+    return true;
+  }
+
   /** Gateway 已校验的非 terminal partial：直接 best-effort 发布，执行体退出或 abandon 之后丢弃。 */
   private void publishProgress(ToolResult partial) {
     if (!progressOpen || abandoned.get()) {

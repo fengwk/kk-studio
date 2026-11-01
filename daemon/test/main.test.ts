@@ -551,8 +551,8 @@ describe('daemon main real assembly', () => {
         expect(terminal.messageType, `${capabilityId} must be assembled`).toBe(MessageType.COMPLETED)
       }
 
-      // 注册被拒是终态失败：main 以非零码退出并输出安全诊断。
-      fixture.send('ERROR', { payload: { code: 'REGISTRATION_REJECTED', message: 'no lease' } })
+      // 准入被拒（401）是终态失败：main 以非零码退出并输出安全诊断。
+      fixture.rejectAndClose(401)
       expect(await harness.run).toBe(1)
       expect(harness.stderr.join('')).toContain('daemon failed')
       expect(harness.stderr.join('')).not.toContain(TOKEN)
@@ -607,14 +607,14 @@ describe('daemon main cleanup fault injection', () => {
     vi.restoreAllMocks()
   })
 
-  it('reports an AggregateError on the registration-failure path after releasing the lock', async () => {
+  it('reports an AggregateError on the admission-failure path after releasing the lock', async () => {
     const fixture = await createControlServer()
     cleans.push(() => fixture.dispose())
     await writeConfig(fixture)
     spySupervisor(() => true)
     const harness = startMain(fixture.configPath)
     await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
-    fixture.send('ERROR', { payload: { code: 'REGISTRATION_REJECTED', message: 'no lease' } })
+    fixture.rejectAndClose(401)
 
     await expect(harness.run).rejects.toBeInstanceOf(AggregateError)
     // 释放失败绝不静默：锁与 native 资源都已真实释放，可再次取得。

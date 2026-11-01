@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  * 基于 PostgreSQL 路由租约表 {@code environment_connection} 的多节点 Environment 连接注册表：Environment server core
  * 的 lease-store 适配实现。
  *
- * <p>以 canonical {@link EnvironmentId} 为键。HELLO 认证时通过单条 PostgreSQL upsert 语句原子抢占租约：缺少或过期路由以新 {@code
+ * <p>以 canonical {@link EnvironmentId} 为键。握手准入认证时通过单条 PostgreSQL upsert 语句原子抢占租约：缺少或过期路由以新 {@code
  * leaseToken} 接管；活跃路由返回 {@link LeaseBindResult.RetryLater}。断开连接时保留重连宽限期，允许原连接重新认领。
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 为围栏更新，
@@ -315,7 +315,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 在 HELLO 认证时，原子校验 registrationToken 并抢占/续约 {@code environmentId} 的路由租约。
+   * 在握手准入认证时，原子校验 registrationToken 并抢占/续约 {@code environmentId} 的路由租约。
    *
    * @param environmentId 环境 UUID
    * @param registrationToken 注册令牌
@@ -652,7 +652,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return Boolean.TRUE.equals(exists);
   }
 
-  /** 数据库现在时判定当前节点是否持有活跃的连接代币（用于 HELLO 同节点活跃连接防冲突保护）。 */
+  /** 数据库现在时判定当前节点是否持有活跃的连接代币（用于握手准入同节点活跃连接防冲突保护）。 */
   @Override
   public boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken) {
     if (environmentId == null || leaseToken == null) {

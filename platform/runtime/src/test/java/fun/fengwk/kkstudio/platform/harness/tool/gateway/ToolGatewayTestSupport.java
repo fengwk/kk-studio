@@ -491,6 +491,7 @@ final class ToolGatewayTestSupport {
     volatile Duration terminalDeliveryGrace = Duration.ZERO;
     volatile RuntimeException terminalDeliveryGraceFailure;
     volatile RuntimeException terminateFailure;
+    volatile boolean draining;
 
     @Override
     public void cancel() {
@@ -511,7 +512,9 @@ final class ToolGatewayTestSupport {
         throw failure;
       }
       terminations.add(cause);
-      cancel();
+      if (!draining) {
+        cancel();
+      }
     }
 
     @Override

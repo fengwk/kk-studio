@@ -470,7 +470,7 @@ public final class EnvironmentDaemonServer
       return;
     }
     DaemonConnectionSession session = sessionOf(active.environmentId);
-    if (session != null) {
+    if (!draining && session != null) {
       active.deliverCancel(session);
     }
     transferCoordinator.releaseAllTransfers(active, ticketService);

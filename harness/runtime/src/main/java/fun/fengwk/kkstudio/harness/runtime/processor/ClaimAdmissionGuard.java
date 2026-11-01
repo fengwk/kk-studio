@@ -215,6 +215,17 @@ public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExec
     return false;
   }
 
+  List<E> activeExecutions() {
+    List<E> active = new ArrayList<>();
+    for (Entry<E> entry : entries.values()) {
+      E execution = entry.execution;
+      if (execution != null && !entry.superseded) {
+        active.add(execution);
+      }
+    }
+    return active;
+  }
+
   boolean isClosed() {
     return closed;
   }

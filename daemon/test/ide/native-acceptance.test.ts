@@ -16,7 +16,7 @@ import { awaitGone, isAlive } from '../native/process-test-util.js'
  *
  * Set KK_STUDIO_IDE_ACCEPTANCE_DIR to the extracted code-server 4.141.0 distribution. This
  * exercises the real manager/bridge stack, real HTTP and WebSocket exchanges (via
- * `resolveView`), per-view close and native scope convergence on shutdown. The mux transport
+ * `resolveView`), per-view close and native scope convergence on shutdown. The data-plane tunnel transport
  * and browser flow are covered by their own slices.
  */
 

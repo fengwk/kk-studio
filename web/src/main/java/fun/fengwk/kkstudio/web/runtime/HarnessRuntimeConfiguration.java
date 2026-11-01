@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
@@ -247,7 +249,17 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public SmartLifecycle harnessRuntimeLifecycle(
-      HarnessRuntimeProperties properties, HarnessWorkDispatcher dispatcher) {
-    return new HarnessRuntimeLifecycle(properties.isWorkersEnabled(), dispatcher);
+      HarnessRuntimeProperties properties,
+      HarnessWorkDispatcher dispatcher,
+      ModelProcessor modelProcessor,
+      ToolProcessor toolProcessor,
+      ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
+    return new HarnessRuntimeLifecycle(
+        properties.isWorkersEnabled(),
+        dispatcher,
+        modelProcessor,
+        toolProcessor,
+        daemonServerProvider,
+        properties.getDrainTimeout());
   }
 }
