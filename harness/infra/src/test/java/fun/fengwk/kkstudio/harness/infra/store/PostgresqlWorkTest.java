@@ -538,6 +538,54 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertEquals(claim.claimedWakeVersion(), newClaim.claimedWakeVersion());
   }
 
+  /** 测试意图：release(ClaimedWork) 释放 TOOL Work 租约并使其立即可被具备该环境连接的节点重新认领。 */
+  @Test
+  void releaseToolWorkMakesItImmediatelyClaimableWithAffinityPreserved() {
+    UUID node = UUID.randomUUID();
+    EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    seedEnvironmentConnection(jdbc, env, "daemon-1", node, "READY");
+
+    SeededTool seededTool = seedTool(store);
+    UUID toolId = seededTool.toolId();
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, toolId);
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(seededTool.threadId()).orElseThrow();
+          tx.work().request(target, env);
+          return null;
+        });
+
+    ClaimedWork claim =
+        store
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-1", LEASE_30S, node))
+            .orElseThrow();
+    assertEquals(target, claim.target());
+    assertEquals("lease-token-1", claim.leaseToken());
+
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node))
+            .isEmpty());
+
+    store.transaction(
+        tx -> {
+          assertTrue(tx.work().release(claim));
+          return null;
+        });
+
+    ClaimedWork reClaim =
+        store
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node))
+            .orElseThrow();
+    assertEquals(target, reClaim.target());
+    assertEquals("lease-token-2", reClaim.leaseToken());
+    assertEquals(env, reClaim.requiredEnvironmentId());
+  }
+
   private static void seedEnvironment(JdbcTemplate jdbc, EnvironmentId env) {
     jdbc.update(
         """

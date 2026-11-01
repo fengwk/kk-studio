@@ -38,6 +38,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -83,6 +84,18 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   /** 本代次已成功登记的远端事实；发送前写入，确认时直接复用原始 registeredAt，不在确认事务中重新拼接。 */
   private final ConcurrentMap<UUID, ExecutionExitFact> registeredRemotes =
       new ConcurrentHashMap<>();
+
+  /** 已确认未发送的远端调用 ID，不计入仍在等待远端结果判定。 */
+  private final Set<UUID> notStartedRemotes = ConcurrentHashMap.newKeySet();
+
+  /** 执行体虚拟线程引用，供移交时等待线程安全退出。 */
+  private volatile Thread executionThread;
+
+  /** monitor 保护：是否已决议/提交终态。一旦终结或正在终结，不再进入排空移交。 */
+  private final AtomicBoolean terminalReached = new AtomicBoolean();
+
+  /** 保证 STUDIO_EXITED 事实单次确认。 */
+  private final AtomicBoolean studioExitConfirmed = new AtomicBoolean();
 
   private final ToolInvocationRequest request;
   private final ToolProcessorConfig config;
@@ -193,6 +206,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
     @Override
     public void confirmNotStarted(UUID remoteExecutionId) {
+      notStartedRemotes.add(remoteExecutionId);
       confirmRemote(remoteExecutionId, ExecutionExitState.NOT_STARTED);
     }
 
@@ -256,7 +270,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       return ProcessResult.LOST_OWNERSHIP;
     }
     try {
-      Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
+      Thread thread =
+          Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
+      this.executionThread = thread;
     } catch (RuntimeException | Error failure) {
       if (closeStrict(run)) {
         confirmNotStarted();
@@ -288,7 +304,12 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
           exitBody();
         }
       }
-      if (completion != null && !abandoned.get()) {
+      synchronized (monitor) {
+        if (completion != null && !abandoned.get()) {
+          terminalReached.set(true);
+        }
+      }
+      if (terminalReached.get() && !abandoned.get()) {
         apply(completion);
       }
     } finally {
@@ -329,7 +350,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
   /** body 与本地资源释放之后才确认 Studio 退出。持久化失败保持未确认，不能把清理失败当成退出。 */
   private void confirmStudioExit() {
-    confirm(ExecutionExitState.STUDIO_EXITED);
+    if (studioExitConfirmed.compareAndSet(false, true)) {
+      confirm(ExecutionExitState.STUDIO_EXITED);
+    }
   }
 
   private void confirm(ExecutionExitState state) {
@@ -398,6 +421,54 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       }
     }
     ownerRelease.accept(this);
+  }
+
+  /** 当前 JVM 本地执行体是否仍在等待远端结果： 已经登记 REMOTE 事实并发出远端调用，且尚未决议终态或被 abandon。 */
+  public boolean isAwaitingRemote() {
+    synchronized (monitor) {
+      if (abandoned.get() || terminalReached.get()) {
+        return false;
+      }
+      for (UUID remoteId : registeredRemotes.keySet()) {
+        if (!notStartedRemotes.contains(remoteId)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
+  /**
+   * 排空移交：停止本地执行体（不写 durable 状态），等待执行线程真正退出后以 STUDIO_EXITED 确认 TOOL 事实， 最后 release TOOL Work
+   * claim，使其他节点可立即认领。
+   *
+   * @return 若不满足移交条件返回 false，成功移交返回 true
+   */
+  public boolean handover() {
+    if (!isAwaitingRemote()) {
+      return false;
+    }
+    abandon();
+    Thread thread = executionThread;
+    if (thread != null && thread != Thread.currentThread()) {
+      try {
+        thread.join();
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    confirmStudioExit();
+    store.transaction(tx -> tx.work().release(claim));
+    return true;
+  }
+
+  /** 排空时调用：若在等待远端结果则移交，否则按现有 close 语义本地收敛。 */
+  public void drain() {
+    if (isAwaitingRemote()) {
+      handover();
+    } else {
+      abandon();
+    }
   }
 
   /** Gateway 已校验的非 terminal partial：直接 best-effort 发布，执行体退出或 abandon 之后丢弃。 */

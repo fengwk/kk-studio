@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * 已认领执行骨架：Target Processor 组合复用的最小进程内执行治理。
@@ -85,9 +86,19 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
     return guard.cancel(invocationId);
   }
 
+  /** 设置活跃 execution 释放时的回调通知。 */
+  public void setOnRelease(Runnable onRelease) {
+    guard.setOnRelease(onRelease);
+  }
+
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler / executor；幂等。 */
   public void close() {
     guard.close();
+  }
+
+  /** 排空全部本地 execution：标记关闭，对每个活跃 execution 执行排空动作，并停止各自 heartbeat；幂等。 */
+  public void drain(Consumer<E> drainAction) {
+    guard.drain(drainAction);
   }
 
   /** 是否已关闭：关闭后不再准入新 claim。 */
