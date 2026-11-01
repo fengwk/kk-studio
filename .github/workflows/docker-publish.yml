@@ -146,6 +146,10 @@ jobs:
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify
+      - name: Verify the generated control protocol code
+        # The Maven protobuf build above resolved the pinned protoc into ~/.m2; the committed
+        # daemon/src/generated/control_pb.ts must equal protoc-gen-es output for control.proto.
+        run: npm --prefix daemon run check:control
       - name: Resolve the distribution Fat JAR
         id: distribution
         run: |
