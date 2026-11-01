@@ -314,7 +314,7 @@ COMPLETED
 
 [`DaemonControlChannel`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
 
-[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。`drain()` 操作保证幂等。
+[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。此外，`drain()` 之后本节点不再代表任何 Environment，调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不再向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。`drain()` 操作保证幂等。
 
 #### 回调顺序与背压上界
 

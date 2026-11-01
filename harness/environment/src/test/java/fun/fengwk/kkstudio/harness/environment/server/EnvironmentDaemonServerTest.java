@@ -738,6 +738,32 @@ class EnvironmentDaemonServerTest {
   }
 
   /**
+   * 测试意图：drain 之后本节点不再代表任何 Environment，调用方 expire 只做本地 retire 与 transfer 释放， 绝不向 Daemon 发送 CANCEL
+   * 帧，使远端调用留给下一个 owner 重新挂接。
+   */
+  @Test
+  void drainCausesLaterExpireToSuppressCancelFrame() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-drain-expire");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    assertEquals(List.of(MessageType.SETTINGS, MessageType.INVOKE), channel.messageTypes());
+
+    fixture.server.drain();
+    assertTrue(channel.drainCount() > 0, "server.drain 必须调用 channel.drain");
+
+    long countBeforeExpire = channel.countOf(MessageType.CANCEL);
+    assertEquals(0L, countBeforeExpire, "drain 本身不产生 CANCEL");
+
+    fixture.server.expire(handle);
+
+    assertEquals(
+        0L, channel.countOf(MessageType.CANCEL), "drain 之后 expire 绝不得向 Daemon 连接发送 CANCEL 帧");
+  }
+
+  /**
    * 测试意图（C03 反证）：`expire` 与 daemon 终态帧在同一 inventory 临界区竞争时，至多产生 0 或 1 个 listener 终态回调； 已经收敛的
    * invocation 其后续重放终态既不得再触发回调，也不得被判为协议错误关闭连接。
    *
