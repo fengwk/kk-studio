@@ -281,15 +281,20 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       return;
     }
     cancelAbandonTimer();
+    DaemonSession opened;
     try {
-      daemonSession = sessions.open(admitted, controlStream, tunnel);
-      controlStream.bindSession(daemonSession);
-      sessionEstablished.complete(daemonSession);
-    } catch (Exception error) {
+      opened = sessions.open(admitted, controlStream, tunnel);
+    } catch (RuntimeException error) {
+      // 核心未建立会话：先释放准入并关闭连接，建立结果失败时调用方看到的已是关闭状态。
       log.error("Failed to open daemon session in core for {}", identity, error);
-      sessionEstablished.completeExceptionally(error);
+      doAbandon();
       onSessionFailed(error);
+      sessionEstablished.completeExceptionally(error);
+      return;
     }
+    daemonSession = opened;
+    controlStream.bindSession(opened);
+    sessionEstablished.complete(opened);
   }
 
   /** 发送 NO_ERROR 的 GOAWAY，让隧道拒绝新建流并优雅排空控制流。 */

@@ -342,7 +342,9 @@ class DaemonHttp2SessionLoopbackTest {
     assertThrows(
         ExecutionException.class,
         () -> clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS));
+    // 建立结果失败时连接已关闭，准入分配也已释放。
     assertTrue(clientSession.isClosed());
+    assertEquals(List.of(ADMITTED), faultySessions.abandoned);
   }
 
   private LoopbackFixture startFixture(
