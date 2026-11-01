@@ -392,6 +392,7 @@ final class ToolGatewayTestSupport {
   static final class RecordingRemoteExecutions implements ToolGateway.RemoteExecutionObserver {
     final List<UUID> startAttempts = new CopyOnWriteArrayList<>();
     final List<UUID> started = new CopyOnWriteArrayList<>();
+    final List<EnvironmentId> startedEnvironments = new CopyOnWriteArrayList<>();
     final List<UUID> exitConfirmed = new CopyOnWriteArrayList<>();
     final List<UUID> notStartedConfirmed = new CopyOnWriteArrayList<>();
     volatile boolean allowStart = true;
@@ -400,13 +401,16 @@ final class ToolGatewayTestSupport {
     volatile Consumer<UUID> tryStartHook = remoteExecutionId -> {};
 
     @Override
-    public boolean tryStart(UUID remoteExecutionId) {
+    public boolean tryStart(UUID remoteExecutionId, EnvironmentId environmentId) {
       startAttempts.add(remoteExecutionId);
       tryStartHook.accept(remoteExecutionId);
       if (!allowStart) {
         return false;
       }
       started.add(remoteExecutionId);
+      if (environmentId != null) {
+        startedEnvironments.add(environmentId);
+      }
       return true;
     }
 

@@ -147,6 +147,23 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
         and lease_until > statement_timestamp()
       """;
 
+  private static final String RELEASE_SQL =
+      """
+      update environment_connection
+      set status = 'CONNECTING',
+          recent_events = case
+              when jsonb_array_length(recent_events) >= :maxRecentEvents
+                  then (recent_events - 0) || :releasedEvent::jsonb
+                  else recent_events || :releasedEvent::jsonb
+              end,
+          last_seen_at = statement_timestamp() - interval '1 millisecond',
+          lease_until = statement_timestamp()
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
+        and lease_until > statement_timestamp()
+      """;
+
   private static final String FIND_SQL =
       """
       select environment_id, owner_node_id, lease_token,
@@ -458,6 +475,39 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   .update());
     } catch (DataAccessException ignored) {
       // 捕获在事务边界之外：失败时围栏写已随短事务回滚，绝不留下「租约已提交、通知失败」的中间态。
+      return false;
+    }
+  }
+
+  /**
+   * 持有者主动放弃路由租约，围栏校验通过后清除活跃租约（lease_until 置为当前时刻），使任何节点都可立即抢占。
+   *
+   * @return 围栏校验成功且更新 1 行返回 true；若已释放或 token 不匹配返回 false
+   */
+  @Override
+  public boolean release(EnvironmentId environmentId, UUID leaseToken) {
+    if (environmentId == null || leaseToken == null) {
+      return false;
+    }
+    String releasedEvent =
+        stateCodec.encodeEvent(
+            lifecycleEvent(
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_DISCONNECTED,
+                "daemon connection released"));
+    try {
+      return fencedWrite(
+          environmentId,
+          () ->
+              jdbcClient
+                  .sql(RELEASE_SQL)
+                  .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                  .param("releasedEvent", releasedEvent)
+                  .param("environmentId", environmentId.value())
+                  .param("ownerNodeId", ownerNodeId)
+                  .param("leaseToken", leaseToken)
+                  .update());
+    } catch (DataAccessException ignored) {
       return false;
     }
   }

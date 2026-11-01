@@ -501,7 +501,7 @@ public final class ToolExecutionGateway implements ToolGateway {
               remoteExecutions.confirmExit(remoteExecutionId);
             }
           };
-      if (!remoteExecutions.tryStart(remoteExecutionId)) {
+      if (!remoteExecutions.tryStart(remoteExecutionId, environmentId)) {
         throw new EnvironmentCapabilityCancelledException(
             "remote execution was not started because the tool generation is stopped or no"
                 + " longer owned");

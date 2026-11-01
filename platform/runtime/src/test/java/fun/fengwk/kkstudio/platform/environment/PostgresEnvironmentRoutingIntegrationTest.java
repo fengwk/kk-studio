@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketServic
 import fun.fengwk.kkstudio.harness.environment.server.DaemonSession;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -355,6 +356,48 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(node1, reconnectedEnv.ownerNodeId());
     assertNotEquals(readyEnv.leaseToken(), reconnectedEnv.leaseToken());
     assertEquals(LiveEnvironmentStatus.CONNECTING, reconnectedEnv.status());
+  }
+
+  /**
+   * 测试意图：release 严格带 token 围栏，成功释放后其他节点可立即 tryAcquire； 对已释放或 token 不匹配的情况返回 false，不改动任何行，且保留
+   * runtime_info 等宿主元数据。
+   */
+  @Test
+  void releaseFencesByTokenAllowsImmediateAcquisitionByOtherNodesAndPreservesMetadata() {
+    var bindResult = registryNode1.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.Acquired.class, bindResult);
+    UUID leaseToken = ((LeaseBindResult.Acquired) bindResult).leaseToken();
+    assertTrue(registryNode1.markReady(DEV, leaseToken, CAPABILITIES, LEASE_DURATION));
+
+    EnvironmentConnection beforeRelease = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, beforeRelease.status());
+    assertNotNull(beforeRelease.daemonCapabilities());
+
+    // 异节点或错误 token 释放被围栏拒绝
+    UUID foreignToken = UUID.randomUUID();
+    assertFalse(registryNode1.release(DEV, foreignToken), "token 不匹配应返回 false");
+    assertFalse(registryNode2.release(DEV, leaseToken), "非持有者节点尝试 release 应返回 false");
+
+    // 持有者 release 成功
+    assertTrue(registryNode1.release(DEV, leaseToken), "持有者 release 应成功");
+
+    // 已释放的租约重复 release 返回 false
+    assertFalse(registryNode1.release(DEV, leaseToken), "已释放的租约重复 release 应返回 false");
+
+    // 释放后状态回退为 CONNECTING，但保留原有的 runtime_info
+    EnvironmentConnection afterRelease = registryNode1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, afterRelease.status());
+    assertNotNull(afterRelease.daemonCapabilities(), "释放后应保留原有的 runtime_info 元数据");
+
+    // 其他节点立即 tryAcquire 成功
+    var node2Bind = registryNode2.tryAcquire(DEV, REGISTRATION_TOKEN, LEASE_DURATION);
+    assertInstanceOf(LeaseBindResult.Acquired.class, node2Bind);
+    UUID node2Token = ((LeaseBindResult.Acquired) node2Bind).leaseToken();
+    assertNotNull(node2Token);
+    assertNotEquals(leaseToken, node2Token);
+
+    EnvironmentConnection node2Env = registryNode2.find(DEV).orElseThrow();
+    assertEquals(node2, node2Env.ownerNodeId());
   }
 
   private static Envelope readyEnvelope(EnvironmentId environmentId) {
