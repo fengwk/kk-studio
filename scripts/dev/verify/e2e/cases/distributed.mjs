@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { assert, assertDecimalVersion, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
-import { assertDistributedContext } from '../lib/distributed.mjs'
+import {
+  assertDistributedContext,
+  ENV_A_ID,
+  ENV_B_ID,
+  ENV_C_ID,
+  queryDistributedEnvironmentOwners,
+} from '../lib/distributed.mjs'
 import { registerCase } from '../lib/registry.mjs'
 import { createDurationTimer } from '../lib/time.mjs'
 import {
@@ -12,9 +18,6 @@ import {
 } from '../lib/harness.mjs'
 import { baseModelConfig } from '../lib/fixtures.mjs'
 
-const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
-const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
-const ENV_C_ID = '55555555-5555-5555-5555-555555555555'
 const ENV_C_NAME = 'distributed-c'
 
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) {
@@ -31,6 +34,45 @@ async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) 
     await sleep(500)
   }
   throw new Error(`environment '${envId}' on node '${node}' did not reach READY within timeout`)
+}
+
+/**
+ * 确定性地将 distributed-c 路由放到指定目标节点（缺省为 'a'）。
+ * 若当前持有者为对端节点，通过优雅停止（drain）对端节点立即主动释放路由租约，
+ * 引导 daemon-ingress 将 daemon-c 重连至目标节点，随后重启对端节点；
+ * 全程利用产品自身优雅排空，避免异节点准入等待约 60s 路由宽限期。
+ */
+export async function ensureDistributedCRouteOwner(ctx, targetNode = 'a') {
+  const otherNode = targetNode === 'a' ? 'b' : 'a'
+  try {
+    ctx.runDistributedCommand('start-app-a')
+  } catch {}
+  try {
+    ctx.runDistributedCommand('start-app-b')
+  } catch {}
+  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID, 60)
+  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID, 60)
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { envCOwner, statusC } = queryDistributedEnvironmentOwners()
+    if (envCOwner === targetNode && statusC === 'READY') {
+      return targetNode
+    }
+    if (envCOwner === otherNode && statusC === 'READY') {
+      ctx.runDistributedCommand(`stop-app-${otherNode}`)
+      await waitForEnvironmentReady(ctx.callNode, targetNode, ENV_C_ID, 60)
+      ctx.runDistributedCommand(`start-app-${otherNode}`)
+      await waitForEnvironmentReady(
+        ctx.callNode,
+        otherNode,
+        otherNode === 'a' ? ENV_A_ID : ENV_B_ID,
+        60,
+      )
+      return targetNode
+    }
+    await sleep(500)
+  }
+  return targetNode
 }
 
 registerCase({
@@ -493,11 +535,10 @@ async function restoreDistributedStack(ctx) {
   } catch {
     // ignore if already started
   }
-  // 保证用例结束后恢复栈，后续用例开始时三个 Environment 在两节点上都是 READY
   await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID, 120)
   await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID, 120)
-  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID, 120)
-  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID, 120)
+  // 确定性地将 distributed-c 路由恢复到 node a
+  await ensureDistributedCRouteOwner(ctx, 'a')
 }
 
 registerCase({
@@ -505,11 +546,13 @@ registerCase({
   level: 'L5',
   title: '双节点滚动发布优雅排空与工具挂接接管',
   requires: ['distributed'],
-  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后优雅停止 app-a（SIGTERM）；验证 app-b 重新挂接并在 attempt=1 下交付 SUCCEEDED，全程无 UNKNOWN，unconfirmedExecutions 最终为空',
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后优雅停止持有节点（SIGTERM）；验证对端节点重新挂接并在 attempt=1 下交付 SUCCEEDED，全程无 UNKNOWN，unconfirmedExecutions 最终为空',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
-    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+    await ensureDistributedCRouteOwner(ctx, 'a')
+    const { envCOwner } = queryDistributedEnvironmentOwners()
+    const ownerNode = envCOwner || 'a'
+    const takeoverNode = ownerNode === 'a' ? 'b' : 'a'
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
@@ -546,7 +589,7 @@ registerCase({
 
       let toolId = null
       for (let i = 0; i < 60; i++) {
-        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, ownerNode, threadId)
         const tool = snap.toolInvocations?.[0]
         if (tool && tool.status === 'RUNNING') {
           toolId = tool.id
@@ -556,15 +599,15 @@ registerCase({
       }
       assert(toolId, 'tool invocation did not enter RUNNING')
 
-      // 优雅停止 app-a：触发排空、release claim 并让出路由租约
-      ctx.runDistributedCommand('stop-app-a')
+      // 优雅停止当前持有节点：触发排空、release claim 并让出路由租约
+      ctx.runDistributedCommand(`stop-app-${ownerNode}`)
 
       let finalSnapshot = null
       let finalTool = null
       let sawUnknown = false
       for (let i = 0; i < 90; i++) {
         try {
-          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, takeoverNode, threadId)
           const tool = extractToolExecution(snap)
           if (tool?.status === 'UNKNOWN' || snap.toolInvocations?.some((t) => t.status === 'UNKNOWN')) {
             sawUnknown = true
@@ -575,12 +618,12 @@ registerCase({
             break
           }
         } catch {
-          // app-b 可能正在处理重连与状态同步
+          // 对端节点可能正在处理重连与状态同步
         }
         await sleep(1000)
       }
 
-      assert(finalSnapshot, 'thread did not reach quiescence on node B')
+      assert(finalSnapshot, `thread did not reach quiescence on takeover node ${takeoverNode}`)
       assert(!sawUnknown, 'must not observe UNKNOWN during graceful drain handover')
 
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
@@ -634,11 +677,13 @@ registerCase({
   level: 'L5',
   title: '双节点崩溃故障接管与租约超时恢复',
   requires: ['distributed'],
-  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后强杀 app-a（SIGKILL）；验证租约超时后 app-b 接管并交付 SUCCEEDED，被杀节点的 TOOL 退出事实保持未确认留在 unconfirmedExecutions 中',
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后强杀持有节点（SIGKILL）；验证租约超时后对端节点接管并交付 SUCCEEDED，被杀节点的 TOOL 退出事实保持未确认留在 unconfirmedExecutions 中',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
-    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+    await ensureDistributedCRouteOwner(ctx, 'a')
+    const { envCOwner } = queryDistributedEnvironmentOwners()
+    const ownerNode = envCOwner || 'a'
+    const takeoverNode = ownerNode === 'a' ? 'b' : 'a'
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
@@ -675,7 +720,7 @@ registerCase({
 
       let toolId = null
       for (let i = 0; i < 60; i++) {
-        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, ownerNode, threadId)
         const tool = snap.toolInvocations?.[0]
         if (tool && tool.status === 'RUNNING') {
           toolId = tool.id
@@ -685,20 +730,21 @@ registerCase({
       }
       assert(toolId, 'tool invocation did not enter RUNNING')
 
-      // 强杀 app-a（不排空，不释放租约与 Work）
+      // 强杀当前持有节点（不排空，不释放租约与 Work）
       // 崩溃接管用例受 Environment 路由断线宽限期约束（被杀节点的路由未主动释放，
-      // 必须等待约 60s 的 lease/grace 超时结束后，node B 才能在 DB 层面成功抢占 acquire 租约并接管）；
+      // 必须等待约 60s 的 lease/grace 超时结束后，接管节点才能在 DB 层面成功抢占 acquire 租约并接管）；
       // 加上工具自身 sleep 20s 及调度接管收尾，等待上限设置为 150s 以留足安全裕度，
       // 绝不为了加速而修改产品租约与宽限期配置。
-      ctx.runDistributedCommand('kill-app-a')
+      ctx.runDistributedCommand(`kill-app-${ownerNode}`)
 
       let finalSnapshot = null
       let finalTool = null
       for (let i = 0; i < 150; i++) {
         try {
-          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, takeoverNode, threadId)
           const tool = extractToolExecution(snap)
-          if (snap.executionStatus === 'IDLE' && tool?.status === 'SUCCEEDED') {
+          // 接管节点在租约过期后重新挂接，并在同一 attempt=1 下交付 SUCCEEDED 结果
+          if (tool && tool.status === 'SUCCEEDED' && tool.resultJson?.includes('handover-done')) {
             finalSnapshot = snap
             finalTool = tool
             break
@@ -709,7 +755,7 @@ registerCase({
         await sleep(1000)
       }
 
-      assert(finalSnapshot, 'thread did not reach quiescence on node B after crash failover')
+      assert(finalSnapshot, `node ${takeoverNode} did not deliver tool result after crash failover`)
 
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
       assert(
@@ -717,10 +763,17 @@ registerCase({
         `expected result to contain handover-done: ${finalTool?.resultJson}`,
       )
 
+      // 【退出事实模型预期（Exit Fact Model Invariant）】：
+      // 崩溃节点被 SIGKILL 终止，无真实退出凭据，故被杀节点的 TOOL 代次严格保持 UNCONFIRMED；
+      // 根据 ThreadActivityEvaluator 不变式，未确认代次存在时 Thread 运行时状态不虚构收敛，在显式 abandon 前严格保持 RUNNING。
       const unconfirmed = finalSnapshot.unconfirmedExecutions || []
       assert(
         unconfirmed.some((e) => e.kind === 'TOOL' && e.attempt === 1),
         `expected unconfirmedExecutions to retain killed node TOOL fact: ${JSON.stringify(unconfirmed)}`,
+      )
+      assert(
+        finalSnapshot.executionStatus === 'RUNNING',
+        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.executionStatus}`,
       )
 
       ctx.writeArtifact(
@@ -763,11 +816,12 @@ registerCase({
   level: 'L5',
   title: '双节点远端 Daemon 重启崩溃恢复收敛为 UNKNOWN',
   requires: ['distributed'],
-  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后重启 daemon-c（journal 丢失）；验证远端调用因 RECOVER_NOT_FOUND 收敛为 UNKNOWN，且 Thread 正常达到 quiescence',
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后重启 daemon-c（journal 丢失）；验证远端调用因 RECOVER_NOT_FOUND 收敛为 UNKNOWN，且 Thread 保持 UNCONFIRMED 与 RUNNING',
   async run(ctx) {
     assertDistributedContext(ctx)
-    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
-    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+    await ensureDistributedCRouteOwner(ctx, 'a')
+    const { envCOwner } = queryDistributedEnvironmentOwners()
+    const ownerNode = envCOwner || 'a'
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
@@ -804,7 +858,7 @@ registerCase({
 
       let toolId = null
       for (let i = 0; i < 60; i++) {
-        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, ownerNode, threadId)
         const tool = snap.toolInvocations?.[0]
         if (tool && tool.status === 'RUNNING') {
           toolId = tool.id
@@ -815,15 +869,22 @@ registerCase({
       assert(toolId, 'tool invocation did not enter RUNNING')
 
       // 重启 daemon-c，journal 丢失
+      // 等待上限与准入时间依据：
+      // 1. 同节点重连（daemon-ingress 首选 app-a，即原 owner 节点）：
+      //    原节点命中 environment_connection.owner_node_id = excluded.owner_node_id，
+      //    无需等待 60s 路由断开宽限期，在 1 秒内即可完成准入（日志核实：18:28:01 被 app-a 准入）。
+      // 2. 跨节点重连（若发生网络漂移由 app-b 接管）：
+      //    非原 owner 节点必须等待 60s 宽限期（lease_until 到期）才能抢占路由并准入。
+      // 因此轮询上限设置为 90s，足以覆盖同节点快速恢复（~1-5s）及跨节点宽限期超时（~60-70s）。
       ctx.runDistributedCommand('restart-daemon-c')
 
       let finalSnapshot = null
       let finalTool = null
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 90; i++) {
         try {
-          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, ownerNode, threadId)
           const tool = extractToolExecution(snap)
-          if (snap.executionStatus === 'IDLE' && tool?.status === 'UNKNOWN') {
+          if (tool?.status === 'UNKNOWN' && (snap.toolInvocations?.length || 0) === 0) {
             finalSnapshot = snap
             finalTool = tool
             break
@@ -834,9 +895,21 @@ registerCase({
         await sleep(1000)
       }
 
-      assert(finalSnapshot, 'thread did not reach quiescence with UNKNOWN tool status after daemon restart')
+      assert(finalSnapshot, 'thread did not converge with UNKNOWN tool status after daemon restart')
       assert(finalTool?.status === 'UNKNOWN', `expected tool status UNKNOWN, got ${finalTool?.status}`)
-      assert(finalSnapshot.executionStatus === 'IDLE', `expected thread to be IDLE, got ${finalSnapshot.executionStatus}`)
+
+      // 【退出事实模型预期（Exit Fact Model Invariant）】：
+      // Daemon 重启导致内存 journal 丢失，RECOVER 遇 NOT_FOUND，根据 X5 设计 §5 规则，远端代次严格保持 UNCONFIRMED（证据不足）。
+      // 依据 ThreadActivityEvaluator 不变式，未确认代次存在时 Thread 运行时状态不虚构收敛，在显式 abandon 前严格保持 RUNNING。
+      const unconfirmed = finalSnapshot.unconfirmedExecutions || []
+      assert(
+        unconfirmed.some((e) => e.kind === 'REMOTE'),
+        `expected unconfirmedExecutions to retain restarted daemon REMOTE fact: ${JSON.stringify(unconfirmed)}`,
+      )
+      assert(
+        finalSnapshot.executionStatus === 'RUNNING',
+        `expected thread to remain RUNNING while unconfirmed facts exist, got ${finalSnapshot.executionStatus}`,
+      )
 
       ctx.writeArtifact(
         'daemon-restart-unknown.json',
