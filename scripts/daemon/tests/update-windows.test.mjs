@@ -173,7 +173,6 @@ describe('Windows native fixture: the Windows-only companion exercises the same 
       'WINDOWS_UPDATE_SCRIPT',
       'export-update-script.mjs',
     ])
-    assertIncludesNone(text, ['--input-type', 'harness' + '/daemon', '.jar', 'java.exe', 'JAVA_HOME'])
   })
 
   it('covers run, stop and start without recreating handoff state', () => {

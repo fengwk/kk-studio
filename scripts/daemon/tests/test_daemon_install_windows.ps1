@@ -292,13 +292,13 @@ try {
     $rejected = $false
     try {
         Invoke-Installer -Parameters @{
-            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; JavaHome = "/opt/jdk"
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; UnknownOption = "unexpected"
         } | Out-Null
     }
     catch {
         $rejected = $true
     }
-    Assert-True -Condition $rejected -Message "unknown -JavaHome option is rejected"
+    Assert-True -Condition $rejected -Message "unknown parameter is rejected"
 
     # The real daemon.json is the bare config object; a wrapped "daemon" object must fail preflight.
     $wrapped = New-Inputs -Config '{"daemon":{"studioUrl":"https://studio.example.com"}}'

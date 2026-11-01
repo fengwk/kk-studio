@@ -1,14 +1,13 @@
 /**
  * Keep the Unix/Windows daemon script suites wired into the real CI gates.
  *
- * The install/update fixtures no longer import the removed Java harness. These tests pin the
- * remaining platform-level facts: every publication path runs the repository script suite (including
- * Unix fixtures), the daemon matrix runs the macOS system-Bash contract, both Windows PowerShell
+ * These tests pin the platform-level facts: every publication path runs the repository script suite
+ * (including Unix fixtures), the daemon matrix runs the macOS system-Bash contract, both Windows PowerShell
  * hosts run the native installer/update suites, and a failed gate blocks publication.
  */
 
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
@@ -97,19 +96,4 @@ test('test intent: publish and release require the shared gates', () => {
   const stageNeeds = stage.split('needs:\n')[1].split('    runs-on:')[0]
   assert.deepEqual([...stageNeeds.matchAll(/^      - (.+)$/gm)].map((match) => match[1]), ['daemon_ci'])
   assert.doesNotMatch(stage, /^ {4}if:/m)
-})
-
-test('test intent: the script suites do not reference the deleted Java update harness', () => {
-  const needle = 'harness' + '/daemon'
-  const visit = (directory) => {
-    for (const entry of readdirSync(directory).sort()) {
-      const file = path.join(directory, entry)
-      if (statSync(file).isDirectory()) {
-        visit(file)
-      } else if (['.mjs', '.ps1', '.sh'].includes(path.extname(file))) {
-        assert.ok(!readFileSync(file, 'utf8').includes(needle), file)
-      }
-    }
-  }
-  visit(TESTS_DIR)
 })

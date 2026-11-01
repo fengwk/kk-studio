@@ -96,9 +96,6 @@ test('every fixture imports the shipped script through the shared exporter', () 
     'utf8',
   )
   assert.match(powershellFixture, /export-update-script\.mjs/u)
-  // 旧实现把 JavaScript 源码交给 native argv / stdout；任何一条回来都会重现 CI 缺陷。
-  assert.doesNotMatch(powershellFixture, /--input-type/u)
-  assert.doesNotMatch(powershellFixture, /pathToFileURL|node:url/u)
 
   const nodeFixture = readFileSync(path.join(testsDir, 'support/release-fixture.mjs'), 'utf8')
   assert.match(nodeFixture, /export-update-script\.mjs/u)

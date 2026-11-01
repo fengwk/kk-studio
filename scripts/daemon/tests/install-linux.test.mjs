@@ -263,7 +263,7 @@ describe('install.sh on Linux', () => {
     withInstall(({ fixture, configFile, tokenFile }) => {
       const duplicate = fixture.run(['install', '--config-file', configFile, '--config-file', configFile, '--token-file', tokenFile])
       assert.notEqual(duplicate.status, 0)
-      const unknown = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile, '--java-home', '/opt/jdk'])
+      const unknown = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile, '--unknown-option', 'unknown-value'])
       assert.notEqual(unknown.status, 0)
     }))
 
@@ -374,6 +374,6 @@ describe('install.sh on Linux', () => {
   it('prints help and rejects an unknown command', () =>
     withInstall(({ fixture }) => {
       assert.equal(fixture.run(['help']).status, 0)
-      assert.notEqual(fixture.run(['upgrade']).status, 0)
+      assert.notEqual(fixture.run(['unknown-command']).status, 0)
     }))
 })

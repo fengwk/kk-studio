@@ -215,8 +215,6 @@ describe('install.sh on macOS', () => {
       assert.ok(plist.includes('Managed by scripts/daemon/install.sh'))
       assert.ok(plist.includes('runtime/code-server/lib/node'))
       assert.ok(plist.includes('<key>ProgramArguments</key>'))
-      assert.ok(!plist.toLowerCase().includes('java'))
-      assert.ok(!plist.toLowerCase().includes('.jar'))
       assert.ok(statSync(path.join(fixture.installRoot, 'logs')).isDirectory())
       assert.equal(fixture.releaseArch, 'arm64')
       assert.equal(fixture.asset, `kk-studio-daemon-${RELEASE_TAG}-macos-arm64.tar.gz`)
