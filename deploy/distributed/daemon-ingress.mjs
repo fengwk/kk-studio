@@ -17,7 +17,7 @@ const TARGETS = [
   { host: 'app-a', port: 8080 },
   { host: 'app-b', port: 8080 },
 ]
-const CONNECT_TIMEOUT_MS = 2000
+const CONNECT_TIMEOUT_MS = 1000
 
 function normalizeIp(ip) {
   if (!ip) return ''
@@ -105,6 +105,9 @@ const server = net.createServer((clientSocket) => {
         return
       }
 
+      clientSocket.setKeepAlive(true, 1000)
+      targetSocket.setKeepAlive(true, 1000)
+
       for (const chunk of buffered) {
         targetSocket.write(chunk)
       }
@@ -113,8 +116,15 @@ const server = net.createServer((clientSocket) => {
       clientSocket.pipe(targetSocket)
       targetSocket.pipe(clientSocket)
 
-      clientSocket.on('error', () => targetSocket.destroy())
-      targetSocket.on('error', () => clientSocket.destroy())
+      const closeBoth = () => {
+        if (!clientSocket.destroyed) clientSocket.destroy()
+        if (!targetSocket.destroyed) targetSocket.destroy()
+      }
+
+      clientSocket.on('error', closeBoth)
+      clientSocket.on('close', closeBoth)
+      targetSocket.on('error', closeBoth)
+      targetSocket.on('close', closeBoth)
     })
     .catch(() => {
       cleanup()

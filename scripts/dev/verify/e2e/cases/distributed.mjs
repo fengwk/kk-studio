@@ -17,7 +17,7 @@ const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
 const ENV_C_ID = '55555555-5555-5555-5555-555555555555'
 const ENV_C_NAME = 'distributed-c'
 
-async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) {
+async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 60) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const res = await callNode(node, 'GET', `/api/environments/${encodeURIComponent(envId)}`)
@@ -408,19 +408,19 @@ async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
       }
     }
   }
-  if (model?.name && model?.providerName) {
+  if (model?.name) {
     try {
       await ctx.callNode(
         'a',
         'DELETE',
-        `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+        `/api/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
       )
     } catch {
       try {
         await ctx.callNode(
           'b',
           'DELETE',
-          `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } catch {
         // best effort
@@ -448,19 +448,56 @@ async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
   }
 }
 
+function extractToolExecution(snapshot) {
+  if (snapshot?.toolInvocations?.length > 0) {
+    const t = snapshot.toolInvocations[0]
+    return {
+      id: t.id,
+      status: t.status,
+      resultJson: t.resultJson,
+      attempt: t.attempt,
+    }
+  }
+  for (let i = (snapshot?.entries?.length || 0) - 1; i >= 0; i--) {
+    const entry = snapshot.entries[i]
+    if (entry.entryType !== 'MESSAGE') continue
+    let payload = null
+    try {
+      payload = JSON.parse(entry.payloadJson)
+    } catch {
+      continue
+    }
+    if (payload?.message?.role === 'TOOL') {
+      const toolResult = payload.message.contents?.find((c) => c.type === 'tool_result')
+      const metadata = payload.toolResultMetadata
+      const text = toolResult?.contents?.map((c) => c.text || '').join('') || ''
+      return {
+        id: metadata?.invocationId || toolResult?.toolCallId,
+        status: metadata?.status || (toolResult?.error ? 'FAILED' : 'SUCCEEDED'),
+        resultJson: text,
+        attempt: metadata?.attempt ?? 1,
+      }
+    }
+  }
+  return null
+}
+
 async function restoreDistributedStack(ctx) {
   try {
     ctx.runDistributedCommand('start-app-a')
   } catch {
-    // ignore
+    // ignore if already started
   }
   try {
-    ctx.runDistributedCommand('restart-daemon-c')
+    ctx.runDistributedCommand('start-app-b')
   } catch {
-    // ignore
+    // ignore if already started
   }
-  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID, 60)
-  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID, 60)
+  // 保证用例结束后恢复栈，后续用例开始时三个 Environment 在两节点上都是 READY
+  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID, 120)
+  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_B_ID, 120)
+  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID, 120)
+  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID, 120)
 }
 
 registerCase({
@@ -476,6 +513,7 @@ registerCase({
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
+    let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
       const chat = await createChat(ctx, {
@@ -522,14 +560,18 @@ registerCase({
       ctx.runDistributedCommand('stop-app-a')
 
       let finalSnapshot = null
+      let finalTool = null
       let sawUnknown = false
       for (let i = 0; i < 90; i++) {
         try {
           const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
-          const tool = snap.toolInvocations?.[0]
-          if (tool?.status === 'UNKNOWN') sawUnknown = true
-          if (tool && tool.status === 'SUCCEEDED' && snap.executionStatus === 'IDLE') {
+          const tool = extractToolExecution(snap)
+          if (tool?.status === 'UNKNOWN' || snap.toolInvocations?.some((t) => t.status === 'UNKNOWN')) {
+            sawUnknown = true
+          }
+          if (snap.executionStatus === 'IDLE' && tool?.status === 'SUCCEEDED') {
             finalSnapshot = snap
+            finalTool = tool
             break
           }
         } catch {
@@ -541,7 +583,6 @@ registerCase({
       assert(finalSnapshot, 'thread did not reach quiescence on node B')
       assert(!sawUnknown, 'must not observe UNKNOWN during graceful drain handover')
 
-      const finalTool = finalSnapshot.toolInvocations?.[0]
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
       assert(
         finalTool?.resultJson?.includes('handover-done'),
@@ -565,9 +606,25 @@ registerCase({
           2,
         ),
       )
+    } catch (err) {
+      runError = err
+      console.error('[graceful_drain_handover] Inner error:', err)
+      throw err
     } finally {
-      await restoreDistributedStack(ctx)
-      if (harness) await cleanupDistributedHarness(ctx, harness)
+      try {
+        await restoreDistributedStack(ctx)
+      } catch (restoreErr) {
+        if (runError) {
+          console.error(
+            '[graceful_drain_handover] Suppressing restore error because of inner error:',
+            restoreErr,
+          )
+          throw runError
+        }
+        throw restoreErr
+      } finally {
+        if (harness) await cleanupDistributedHarness(ctx, harness)
+      }
     }
   },
 })
@@ -585,6 +642,7 @@ registerCase({
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
+    let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
       const chat = await createChat(ctx, {
@@ -628,15 +686,21 @@ registerCase({
       assert(toolId, 'tool invocation did not enter RUNNING')
 
       // 强杀 app-a（不排空，不释放租约与 Work）
+      // 崩溃接管用例受 Environment 路由断线宽限期约束（被杀节点的路由未主动释放，
+      // 必须等待约 60s 的 lease/grace 超时结束后，node B 才能在 DB 层面成功抢占 acquire 租约并接管）；
+      // 加上工具自身 sleep 20s 及调度接管收尾，等待上限设置为 150s 以留足安全裕度，
+      // 绝不为了加速而修改产品租约与宽限期配置。
       ctx.runDistributedCommand('kill-app-a')
 
       let finalSnapshot = null
-      for (let i = 0; i < 90; i++) {
+      let finalTool = null
+      for (let i = 0; i < 150; i++) {
         try {
           const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
-          const tool = snap.toolInvocations?.[0]
-          if (tool && tool.status === 'SUCCEEDED' && snap.executionStatus === 'IDLE') {
+          const tool = extractToolExecution(snap)
+          if (snap.executionStatus === 'IDLE' && tool?.status === 'SUCCEEDED') {
             finalSnapshot = snap
+            finalTool = tool
             break
           }
         } catch {
@@ -647,7 +711,6 @@ registerCase({
 
       assert(finalSnapshot, 'thread did not reach quiescence on node B after crash failover')
 
-      const finalTool = finalSnapshot.toolInvocations?.[0]
       assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
       assert(
         finalTool?.resultJson?.includes('handover-done'),
@@ -672,9 +735,25 @@ registerCase({
           2,
         ),
       )
+    } catch (err) {
+      runError = err
+      console.error('[crash_failover] Inner error:', err)
+      throw err
     } finally {
-      await restoreDistributedStack(ctx)
-      if (harness) await cleanupDistributedHarness(ctx, harness)
+      try {
+        await restoreDistributedStack(ctx)
+      } catch (restoreErr) {
+        if (runError) {
+          console.error(
+            '[crash_failover] Suppressing restore error because of inner error:',
+            restoreErr,
+          )
+          throw runError
+        }
+        throw restoreErr
+      } finally {
+        if (harness) await cleanupDistributedHarness(ctx, harness)
+      }
     }
   },
 })
@@ -692,6 +771,7 @@ registerCase({
 
     const suffix = randomUUID().slice(0, 8)
     let harness = null
+    let runError = null
     try {
       harness = await setupDistributedHarness(ctx, suffix)
       const chat = await createChat(ctx, {
@@ -738,12 +818,14 @@ registerCase({
       ctx.runDistributedCommand('restart-daemon-c')
 
       let finalSnapshot = null
+      let finalTool = null
       for (let i = 0; i < 60; i++) {
         try {
           const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
-          const tool = snap.toolInvocations?.[0]
-          if (tool && tool.status === 'UNKNOWN' && snap.executionStatus === 'IDLE') {
+          const tool = extractToolExecution(snap)
+          if (snap.executionStatus === 'IDLE' && tool?.status === 'UNKNOWN') {
             finalSnapshot = snap
+            finalTool = tool
             break
           }
         } catch {
@@ -753,7 +835,6 @@ registerCase({
       }
 
       assert(finalSnapshot, 'thread did not reach quiescence with UNKNOWN tool status after daemon restart')
-      const finalTool = finalSnapshot.toolInvocations?.[0]
       assert(finalTool?.status === 'UNKNOWN', `expected tool status UNKNOWN, got ${finalTool?.status}`)
       assert(finalSnapshot.executionStatus === 'IDLE', `expected thread to be IDLE, got ${finalSnapshot.executionStatus}`)
 
@@ -769,9 +850,25 @@ registerCase({
           2,
         ),
       )
+    } catch (err) {
+      runError = err
+      console.error('[daemon_restart_unknown] Inner error:', err)
+      throw err
     } finally {
-      await restoreDistributedStack(ctx)
-      if (harness) await cleanupDistributedHarness(ctx, harness)
+      try {
+        await restoreDistributedStack(ctx)
+      } catch (restoreErr) {
+        if (runError) {
+          console.error(
+            '[daemon_restart_unknown] Suppressing restore error because of inner error:',
+            restoreErr,
+          )
+          throw runError
+        }
+        throw restoreErr
+      } finally {
+        if (harness) await cleanupDistributedHarness(ctx, harness)
+      }
     }
   },
 })
