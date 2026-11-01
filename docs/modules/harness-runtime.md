@@ -146,6 +146,8 @@ Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`Cla
 
 `ABANDONED` 是用户显式放弃继续等待确认的独立事实，不是物理退出，也不能伪造 ACK。只有 `UNCONFIRMED` 阻止收敛；首次放弃要求 Thread 已 `STOPPED`、执行属于该 Thread 且 `expectedVersion` 精确匹配，重复放弃或已真实确认是安全 replay，容忍旧 version。真实证据到达后可以把 `ABANDONED` 升级为已确认状态并保留原 `abandonedAt`；两种时刻都不得早于 `registeredAt`，但 `confirmedAt` 可以早于 `abandonedAt`，绝不改写观测时间。退出事实行（包括放弃行）保留到 Thread 深删除，没有 TTL，也不以 lease 到期、`cluster_node` 路由记录或 journal 存在推断宿主已死亡。
 
+跨实例远端退出对账由 [`RemoteExitReconciler`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/execution/RemoteExitReconciler.java) 承载：当目标 Environment 达到 READY 状态时，它在专用虚拟线程 Executor 上异步加载该环境全部未确认的远端退出事实（`loadUnconfirmedRemote(environmentId)`），不阻塞事件回调线程。对账遍历事实并检查其对应的 ToolInvocation 状态：若工具当前为 `RUNNING` 则跳过，留给后续认领该工具的 ToolProcessor 恢复挂接；若工具非 `RUNNING`（包括工具记录已被物理清理），则通过 `EnvironmentCapabilityTransport.attach` 挂接仅确认退出的监听器。监听器在 `onExitConfirmed()` 到达时调用 `ExecutionExitConfirmer.confirm(fact, ExecutionExitState.REMOTE_ACKNOWLEDGED)`，沿用库中既有事实身份入账，不额外发起新的执行代次；终态结果与常规异常（含 `RECOVER_NOT_FOUND`）均被忽略且保持 `UNCONFIRMED`。单条挂接遇 `IllegalArgumentException`（当前节点已存在活跃执行）仅跳过该条继续处理后续事实，遇 `EnvironmentCapabilityUnavailableException`（路由不可用）则中止本轮对账。
+
 Thread 由轻量 `ThreadAdmissionGuard` 独立防重，旧 action 未结束时同 token 或异 token 均返回 LOST，不抢占。
 
 preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理：Allow、Ask、Deny 的回写失败或启动失败均停止 heartbeat 并释放本地登记；成功移交后由执行线程负责释放，不能再由 preflight 清理。两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
