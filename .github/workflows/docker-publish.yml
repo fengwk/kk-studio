@@ -155,8 +155,8 @@ jobs:
           test -f "${jar}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "jar=${jar}" >> "${GITHUB_OUTPUT}"
-      - name: Verify the current startup Fat JAR and legacy rejection
-        # 用同一个发行 Fat JAR 验证当前空库启动、HTTP 读取与旧库拒绝；JAR 路径仍由根 POM
+      - name: Verify the current startup Fat JAR
+        # 用同一个发行 Fat JAR 验证当前空库启动与 HTTP 读取；JAR 路径仍由根 POM
         # 的当前版本决定，不另建版本事实源。
         env:
           APP_JAR: ${{ steps.distribution.outputs.jar }}

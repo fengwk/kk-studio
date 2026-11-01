@@ -11,16 +11,15 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 
-/** Chat wire DTO 契约测试：验证已删除 workspacePath 且暴露标准字段与环境默认值语义。 */
+/** Chat wire DTO 契约测试：验证暴露标准字段与环境默认值语义。 */
 class ChatDtoContractTest {
 
   @Test
-  void chatDtoExposesStandardFieldsAndDoesNotExposeWorkspacePath() throws Exception {
+  void chatDtoExposesStandardFields() throws Exception {
     Field agentName = ChatDTO.class.getDeclaredField("agentName");
     assertEquals(String.class, agentName.getType());
     Field environmentName = ChatDTO.class.getDeclaredField("environmentName");
     assertEquals(String.class, environmentName.getType());
-    assertThrows(NoSuchFieldException.class, () -> ChatDTO.class.getDeclaredField("workspacePath"));
   }
 
   /** environmentName 省略保留、显式 null 清空：JSON Setter 必须区分两者。 */

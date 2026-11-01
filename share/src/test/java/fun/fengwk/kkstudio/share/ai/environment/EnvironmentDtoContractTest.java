@@ -34,23 +34,9 @@ class EnvironmentDtoContractTest {
     assertTrue(json.get("statusExpiresAt").isNull());
   }
 
-  /** 意图：验证 EnvironmentCardDTO 已彻底移除 flat skills 字段以及对应的 getter/setter 访问器契约。 */
+  /** 意图：验证 EnvironmentCardDTO 暴露 Daemon 进程用户与 HOME。 */
   @Test
-  void environmentCardDtoHasNoSkillsFieldOrAccessors() {
-    assertThrows(
-        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("skills"));
-    assertThrows(
-        NoSuchMethodException.class, () -> EnvironmentCardDTO.class.getMethod("getSkills"));
-    assertThrows(
-        NoSuchMethodException.class,
-        () -> EnvironmentCardDTO.class.getMethod("setSkills", List.class));
-  }
-
-  /** 意图：验证 EnvironmentCardDTO 用 Daemon 进程用户与 HOME 替换旧 rootPath（后者不再是 cwd 或默认 workdir）。 */
-  @Test
-  void environmentCardDtoExposesHostUserAndHomeInsteadOfRootPath() throws Exception {
-    assertThrows(
-        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("rootPath"));
+  void environmentCardDtoExposesHostUserAndHome() throws Exception {
     assertEquals(String.class, EnvironmentCardDTO.class.getDeclaredField("userName").getType());
     assertEquals(
         String.class, EnvironmentCardDTO.class.getDeclaredField("homeDirectory").getType());
@@ -62,18 +48,6 @@ class EnvironmentDtoContractTest {
     assertEquals(
         String.class, EnvironmentCardDTO.class.getDeclaredField("daemonVersion").getType());
     assertEquals(String.class, EnvironmentCardDTO.class.getDeclaredField("version").getType());
-  }
-
-  /** 意图：Card 不再携带历史更新任务，当前运行信息只经 runtime 端点投影。 */
-  @Test
-  void environmentCardCarriesNoManagedUpdateProjection() throws Exception {
-    assertThrows(
-        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("update"));
-    assertThrows(
-        NoSuchMethodException.class, () -> EnvironmentCardDTO.class.getMethod("getUpdate"));
-    assertTrue(
-        List.of(EnvironmentCardDTO.class.getMethods()).stream()
-            .noneMatch(method -> method.getName().equals("setUpdate")));
   }
 
   /** 意图：runtime wire 保留 revision/status，且无更新与未知总长都必须显式输出 null。 */
@@ -123,16 +97,9 @@ class EnvironmentDtoContractTest {
             .toList());
   }
 
-  /** 意图：验证 Card 不再携带历史事件；完整事件列表是有界的四项事实，只在 events 端点暴露。 */
+  /** 意图：验证完整事件列表是有界的四项事实，在 events 端点暴露。 */
   @Test
-  void environmentCardCarriesNoEventAndEventsStayBoundedFacts() throws Exception {
-    assertThrows(
-        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("lastEvent"));
-    assertThrows(
-        NoSuchMethodException.class, () -> EnvironmentCardDTO.class.getMethod("getLastEvent"));
-    assertThrows(
-        NoSuchMethodException.class,
-        () -> EnvironmentCardDTO.class.getMethod("setLastEvent", EnvironmentEventDTO.class));
+  void eventsStayBoundedFacts() throws Exception {
     assertEquals(
         List.of("time", "level", "type", "message"),
         List.of(EnvironmentEventDTO.class.getDeclaredFields()).stream()

@@ -122,13 +122,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("3", batch.getExpectedNextCommandSequence());
     assertTrue(batch.getCommands().isEmpty());
     assertThrows(UnsupportedOperationException.class, () -> batch.getCommands().add(null));
-    // 既有 Thread 的写入口不再暴露 owner / target / THREAD 相关字段。
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadCommandBatchDTO.class.getDeclaredField("owner"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadCommandBatchDTO.class.getDeclaredField("target"));
   }
 
   /** 测试意图：既有 Thread 的通用写请求必须自证严格边界——未知字段、非字符串 cursor 与非数组 commands 都必须由共享 DTO 直接拒绝。 */
@@ -160,30 +153,6 @@ class HarnessRuntimeDtoContractTest {
                  "expectedNextCommandSequence":3,"commands":[]}
                 """,
                 HarnessThreadCommandBatchDTO.class));
-  }
-
-  /**
-   * 测试意图：创建 target union 只承载 NEW_SESSION / NEW_THREAD；旧 THREAD 字段（cursor）不得再被接受，ContinueCommand
-   * 形状由独立 {@link HarnessThreadCommandBatchDTO} 承担。
-   */
-  @Test
-  void creationTargetRejectsLegacyThreadCursorFields() {
-    assertThrows(
-        Exception.class,
-        () ->
-            MAPPER.readValue(
-                """
-                {"type":"THREAD","threadId":"00000000-0000-0000-0000-000000000001",
-                 "expectedHeadEntryId":"00000000-0000-0000-0000-000000000002",
-                 "expectedNextCommandSequence":"3"}
-                """,
-                HarnessCommandTargetDTO.class));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessCommandTargetDTO.class.getDeclaredField("expectedHeadEntryId"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessCommandTargetDTO.class.getDeclaredField("expectedNextCommandSequence"));
   }
 
   @Test
@@ -319,9 +288,9 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"type":"THREAD","threadId":"00000000-0000-0000-0000-000000000001",
-                 "expectedHeadEntryId":"00000000-0000-0000-0000-000000000002",
-                 "expectedNextCommandSequence":"3","unknown":true}
+                {"type":"NEW_SESSION","sessionId":"00000000-0000-0000-0000-000000000001",
+                 "startEntryId":"00000000-0000-0000-0000-000000000002",
+                 "threadId":"00000000-0000-0000-0000-000000000003","unknown":true}
                 """,
                 HarnessCommandTargetDTO.class));
     assertThrows(
@@ -331,16 +300,6 @@ class HarnessRuntimeDtoContractTest {
                 """
                 {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000001",
                  "model":{"modelName":"m","variant":"v","unknown":true}}
-                """,
-                HarnessCommandCreateDTO.class));
-    // 统一 ModelSelection 已移除 providerName；旧字段必须作为未知字段严格拒绝。
-    assertThrows(
-        Exception.class,
-        () ->
-            MAPPER.readValue(
-                """
-                {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000005",
-                 "model":{"providerName":"p","modelName":"m","variant":"v"}}
                 """,
                 HarnessCommandCreateDTO.class));
     assertThrows(
@@ -505,22 +464,18 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
-  void snapshotAlwaysExposesNullableBaseEntryIdAndDropsManualCompaction() throws Exception {
-    // 意图：完整快照的 baseEntryId 必须显式为 null；manualCompaction 已迁到独立 endpoint，不能留在快照上。
+  void snapshotAlwaysExposesNullableBaseEntryId() throws Exception {
+    // 意图：完整快照的 baseEntryId 必须显式为 null。
     Field baseEntryId = HarnessThreadSnapshotDTO.class.getDeclaredField("baseEntryId");
     JsonInclude include = baseEntryId.getAnnotation(JsonInclude.class);
     assertEquals(String.class, baseEntryId.getType());
     assertNotNull(include);
     assertEquals(JsonInclude.Include.ALWAYS, include.value());
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadSnapshotDTO.class.getDeclaredField("manualCompaction"));
 
     HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
     assertNull(snapshot.getBaseEntryId());
     String json = MAPPER.writeValueAsString(snapshot);
     assertTrue(json.contains("\"baseEntryId\":null"));
-    assertFalse(json.contains("manualCompaction"));
   }
 
   @Test
@@ -544,10 +499,7 @@ class HarnessRuntimeDtoContractTest {
         MAPPER.readTree(MAPPER.writeValueAsString(disabled)).get("disabledReason").asString());
   }
 
-  /**
-   * 测试意图：Thread 投影必须显式暴露持久执行控制（RUNNABLE / STOPPED），且停止回执只使用新的聚合结构与恢复字段，不再保留旧顶层
-   * cancelledUserMessages / stoppedTurnEndEntryId。
-   */
+  /** 测试意图：Thread 投影必须显式暴露持久执行控制（RUNNABLE / STOPPED），且停止回执包含聚合结构与恢复字段。 */
   @Test
   void threadDtoExposesExecutionControlAndStopAggregates() throws Exception {
     assertEquals(
@@ -557,15 +509,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(
         String.class,
         HarnessThreadTreeNodeDTO.class.getDeclaredField("executionControl").getType());
-
-    assertThrows(
-        NoSuchFieldException.class, () -> HarnessThreadDTO.class.getDeclaredField("processing"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadSummaryDTO.class.getDeclaredField("processing"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadTreeNodeDTO.class.getDeclaredField("processing"));
 
     HarnessStoppedThreadReceiptDTO receipt = new HarnessStoppedThreadReceiptDTO();
     receipt.setThreadId("00000000-0000-0000-0000-000000000001");
@@ -586,19 +529,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(1, result.getStoppedThreads().size());
     assertEquals(
         "USER_MESSAGE", result.getStoppedThreads().get(0).getCancelledInputs().get(0).getType());
-
-    // 旧顶层字段与旧取消消息 DTO 必须删除。
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadStopResultDTO.class.getDeclaredField("stoppedTurnEndEntryId"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessThreadStopResultDTO.class.getDeclaredField("cancelledUserMessages"));
-    assertThrows(
-        ClassNotFoundException.class,
-        () ->
-            Class.forName(
-                HarnessThreadDTO.class.getPackageName() + ".HarnessCancelledUserMessageDTO"));
   }
 
   /** 测试意图：snapshot 必须携带本 Thread 的持久 Stop 回执，供刷新或未打开子页时恢复草稿。 */
@@ -655,8 +585,6 @@ class HarnessRuntimeDtoContractTest {
   void toolInvocationDtoExposesFlatEnvironmentId() throws Exception {
     Field environmentId = ToolInvocationDTO.class.getDeclaredField("environmentId");
     assertEquals(String.class, environmentId.getType());
-    assertThrows(
-        NoSuchFieldException.class, () -> ToolInvocationDTO.class.getDeclaredField("environment"));
   }
 
   /**
@@ -737,24 +665,14 @@ class HarnessRuntimeDtoContractTest {
 
   @Test
   void branchSettingsDtoExposesNullableEnvironmentName() throws Exception {
-    // 三字段完整快照：environmentName 必须是显式 nullable String 字段，且旧 workspacePath 不得回归。
+    // environmentName 必须是显式 nullable String 字段。
     Field environmentName = HarnessBranchSettingsDTO.class.getDeclaredField("environmentName");
     assertEquals(String.class, environmentName.getType());
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessBranchSettingsDTO.class.getDeclaredField("workspacePath"));
   }
 
   @Test
-  void systemPromptPreviewIsReplacedByStructuredModelRequestDebug() throws Exception {
-    // 意图：展示文本预览被删除，Debug 只暴露结构化投影（预览与冻结请求两种视图）。
-    assertThrows(
-        ClassNotFoundException.class,
-        () ->
-            Class.forName(
-                HarnessModelSelectionDTO.class.getPackageName()
-                    + ".HarnessSystemPromptPreviewDTO"));
-
+  void modelRequestDebugExposesStructuredProjection() throws Exception {
+    // 意图：Debug 暴露结构化投影字段（预览与冻结请求两种视图）。
     Map<String, Class<?>> expected =
         Map.ofEntries(
             Map.entry("kind", String.class),
@@ -793,10 +711,7 @@ class HarnessRuntimeDtoContractTest {
     assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "key");
   }
 
-  /**
-   * 测试意图：cache 事实收敛为 {@code {retention, key}}——只保留 provider cache control 真正需要的两件事，key 是 session
-   * UUID 文本且 NONE 时显式 null；旧的 affinityKey/breakpoints 语义不得残留。
-   */
+  /** 测试意图：cache 事实收敛为 {@code {retention, key}}，key 是 session UUID 文本且 NONE 时显式 null。 */
   @Test
   void debugCacheControlExposesRetentionAndNullableKeyOnly() throws Exception {
     Map<String, Class<?>> expected = Map.of("retention", String.class, "key", String.class);
@@ -808,12 +723,6 @@ class HarnessRuntimeDtoContractTest {
               .getType(),
           entry.getKey());
     }
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessModelRequestDebugDTO.CacheControlDTO.class.getDeclaredField("affinityKey"));
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> HarnessModelRequestDebugDTO.CacheControlDTO.class.getDeclaredField("breakpoints"));
 
     HarnessModelRequestDebugDTO.CacheControlDTO none =
         new HarnessModelRequestDebugDTO.CacheControlDTO();

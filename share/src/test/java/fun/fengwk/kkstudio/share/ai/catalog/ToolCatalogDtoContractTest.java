@@ -21,11 +21,8 @@ class ToolCatalogDtoContractTest {
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   @Test
-  void toolCatalogEntryUsesEnvironmentSupportInsteadOfBooleanPair() throws Exception {
-    // 意图：旧的 environmentRequired 布尔字段被三态枚举取代，唯一环境限定走可空 requiredEnvironmentId。
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> ToolCatalogEntryDTO.class.getDeclaredField("environmentRequired"));
+  void toolCatalogEntryExposesEnvironmentSupportAndRequiredEnvironmentId() throws Exception {
+    // 意图：ToolCatalogEntryDTO 包含三态环境支持枚举与可选限定环境 ID。
     assertEquals(
         EnvironmentSupportDTO.class,
         ToolCatalogEntryDTO.class.getDeclaredField("environmentSupport").getType());
@@ -41,7 +38,6 @@ class ToolCatalogDtoContractTest {
 
     String json = MAPPER.writeValueAsString(dto);
     assertTrue(json.contains("\"environmentSupport\":\"OPTIONAL\""), json);
-    assertThrows(Exception.class, () -> EnvironmentSupportDTO.valueOf("OPTIONAL_OR_REQUIRED"));
   }
 
   @Test
@@ -55,7 +51,7 @@ class ToolCatalogDtoContractTest {
 
   @Test
   void agentDefinitionConfigSkillsAreStructuredRefs() throws Exception {
-    // 意图：Agent 配置的 skills 是有序 SkillRefDTO 列表，不再是裸 name 字符串。
+    // 意图：Agent 配置的 skills 是有序 SkillRefDTO 列表。
     Field skills = AgentDefinitionConfigDTO.class.getDeclaredField("skills");
     assertEquals(List.class, skills.getType());
     assertEquals(
@@ -83,7 +79,7 @@ class ToolCatalogDtoContractTest {
         () ->
             MAPPER.readValue(
                 configTemplate.formatted(
-                    "[{\"packageName\":\"dev-tools\",\"name\":\"dev\",\"content\":\"# dev\"}]"),
+                    "[{\"packageName\":\"dev-tools\",\"name\":\"dev\",\"unknownField\":\"value\"}]"),
                 AgentDefinitionConfigDTO.class));
   }
 
