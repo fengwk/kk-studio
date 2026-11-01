@@ -24,7 +24,7 @@ import {
  *
  * <p>信息命令（`--help` / `--version` / `--check-config`）与平台无关，在所有平台都对真实编译产物断言。正常 READY
  * 启动在 Linux、macOS 与 Windows 上都走真实控制面：POSIX 用真实 OS `SIGTERM` 停机，Windows 用控制面
- * `ERROR/REGISTRATION_REJECTED` 触发正常停机（Node 的 `kill('SIGTERM')` 在 Windows 上是强制 `TerminateProcess`）。
+ * 准入拒绝（401）触发停机（Node 的 `kill('SIGTERM')` 在 Windows 上是强制 `TerminateProcess`）。
  * macOS 缺少子进程收养者不阻止这次启动。
  */
 const DIST_DIR = fileURLToPath(new URL('../dist', import.meta.url))
@@ -193,8 +193,8 @@ describe('daemon compiled CLI runtime', () => {
       // 先建立退出监听再触发停机：极快退出也绝不丢事件。
       const exited = promiseFromExit(child)
       if (process.platform === 'win32') {
-        // Windows 的 SIGTERM 是强制终止，不派发 JS 监听；用真实控制面触发正常停机。
-        fixture.send('ERROR', { payload: { code: 'REGISTRATION_REJECTED', message: 'no lease' } })
+        // Windows 的 SIGTERM 是强制终止，不派发 JS 监听；用服务端准入拒绝（401）触发停机。
+        fixture.rejectAndClose(401)
         const [code, signal] = await exited
         expect(signal).toBeNull()
         expect(code).toBe(1)

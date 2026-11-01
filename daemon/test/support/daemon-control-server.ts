@@ -29,6 +29,7 @@ export interface ControlFixture {
     typeOrEnvelope: MessageType | string | Envelope,
     options?: { invocationId?: string | null; payload?: unknown },
   ): void
+  rejectAndClose(status?: number): void
   dispose(): Promise<void>
 }
 
@@ -45,6 +46,9 @@ export async function createControlServer(): Promise<ControlFixture> {
     url: peer.origin,
     peer,
     received: peer.received,
+    rejectAndClose(status = 401) {
+      peer.rejectAndClose(status)
+    },
     send(typeOrEnvelope, options = {}) {
       if (typeof typeOrEnvelope === 'object' && 'messageType' in typeOrEnvelope) {
         peer.sendEnvelope(typeOrEnvelope as Envelope)
@@ -84,10 +88,6 @@ export async function createControlServer(): Promise<ControlFixture> {
         )
       } else if (messageType === MessageType.ERROR) {
         const payload = (options.payload ?? {}) as { code?: string; message?: string }
-        if (payload.code === 'REGISTRATION_REJECTED') {
-          peer.rejectAndClose(401)
-          return
-        }
         peer.sendEnvelope(
           create(EnvelopeSchema, {
             messageType: MessageType.ERROR,

@@ -219,7 +219,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     DaemonSession session1 = serverNode1.open(admitted1, conn1, null);
     session1.receive(readyEnvelope(DEV));
 
-    // 2. 另一个节点（Node 2）尝试绑定 DEV -> RETRY_LATER
+    // 2. 另一个节点（Node 2）尝试绑定 DEV -> RetryLater（映射 503 暂不可准入）
     DaemonAdmission admission2 =
         serverNode2.admit(new DaemonHandshake(REGISTRATION_TOKEN, DAEMON_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission2);
@@ -311,8 +311,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   }
 
   /**
-   * 测试意图：证明连接断开进入宽限期后，同节点 daemon 无需手工回拨 lease 即可重新发起 HELLO 成功 并换发新 leaseToken 成为
-   * CONNECTING；而异节点在宽限期内尝试 HELLO 必须被返回 RETRY_LATER 并断开。
+   * 测试意图：证明连接断开进入宽限期后，同节点 daemon 无需手工回拨 lease 即可重新发起握手准入成功并换发新 leaseToken 成为
+   * CONNECTING；而异节点在宽限期内尝试握手必须被返回 RetryLater（503 暂不可准入）并断开。
    */
   @Test
   void gracePeriodAllowsSameNodeReconnectWithoutManualLeaseRewindWhileBlockingOtherNode() {

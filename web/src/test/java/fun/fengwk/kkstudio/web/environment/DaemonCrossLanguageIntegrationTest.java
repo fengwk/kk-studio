@@ -428,7 +428,7 @@ class DaemonCrossLanguageIntegrationTest {
         0, sleepListener.errorCount.get(), "No error must be delivered for recovered call");
   }
 
-  /** 范围 4：准入拒绝。 凭据错误返回 401，Daemon 进入终态失败（REGISTRATION_REJECTED），子进程按约定退出。 */
+  /** 范围 4：准入拒绝。 凭据错误返回 401，Daemon 进入终态失败，子进程按约定退出。 */
   @Test
   void admissionRejectedOnInvalidTokenTerminatesProcess() throws Exception {
     startDaemon(INVALID_TOKEN);

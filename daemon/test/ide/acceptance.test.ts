@@ -15,7 +15,7 @@ import { exchangeUpstreamWebSocket, requestUpstream } from './acceptance-helpers
  * contains `lib/node` and `out/node/entry.js`) to run it. It launches the bundled Node CLI
  * on loopback ports, registers a managed view through the fork's private management API,
  * installs the bundled bridge extension and fetches real HTTP/WS responses through
- * `resolveView`. The mux data-plane adapter and browser flow live in their own slices.
+ * `resolveView`. The data-plane tunnel transport and browser flow live in their own slices.
  */
 
 const ACCEPTANCE_DIR = process.env.KK_STUDIO_IDE_ACCEPTANCE_DIR
