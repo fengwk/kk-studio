@@ -39,8 +39,8 @@ class ModelsDevCatalogParserTest {
 
   @BeforeEach
   void setUp() {
-    real = index(parser.parse(resource("models-dev-v2.json")));
-    validation = index(parser.parse(resource("models-dev-v2-validation.json")));
+    real = index(parser.parse(resource("models-dev.json")));
+    validation = index(parser.parse(resource("models-dev-validation.json")));
   }
 
   @Test
@@ -118,7 +118,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void parsesClaudeOpusAndCalculatesCostWithoutRegionMultiplier() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(parser.parse(resource("models-dev-v2-claude-opus-5-5.json")));
+        index(parser.parse(resource("models-dev-claude-opus-5-5.json")));
     ModelDefaultCandidateDTO opus = candidates.get("anthropic/claude-opus-5-5");
     assertNotNull(opus);
     assertTrue(opus.isPricingSupported());
@@ -190,7 +190,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void skipsMultiplierWhenRegionIsNestedOrMixed() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(parser.parse(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-region.json")));
 
     for (String key :
         List.of(
@@ -215,7 +215,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void rejectsRegionWithUnknownConditionOrInvalidFactor() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(parser.parse(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-region.json")));
     assertRejected(candidates.get("provider/region-unknown-condition"));
     assertRejected(candidates.get("provider/region-unknown-clause"));
     assertRejected(candidates.get("provider/region-not-unknown"));
@@ -230,7 +230,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void rejectsRegionConditionInOverrides() {
     Map<String, ModelDefaultCandidateDTO> candidates =
-        index(parser.parse(resource("models-dev-v2-region.json")));
+        index(parser.parse(resource("models-dev-region.json")));
     assertRejected(candidates.get("provider/region-input-override"));
     assertRejected(candidates.get("provider/region-output-override"));
     assertRejected(candidates.get("provider/region-nested-override"));
