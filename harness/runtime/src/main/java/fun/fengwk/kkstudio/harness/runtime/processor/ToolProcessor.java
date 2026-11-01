@@ -146,7 +146,14 @@ public final class ToolProcessor implements AutoCloseable {
     List<ToolExecution> awaiting =
         executions.activeExecutions().stream().filter(ToolExecution::isAwaitingRemote).toList();
     for (ToolExecution execution : awaiting) {
-      execution.handover(deadline);
+      try {
+        execution.handover(deadline);
+      } catch (RuntimeException failure) {
+        log.warn(
+            "Failed to handover awaiting remote tool execution for invocation {}; its claim remains until lease expiry",
+            execution.invocationId(),
+            failure);
+      }
     }
     close();
   }

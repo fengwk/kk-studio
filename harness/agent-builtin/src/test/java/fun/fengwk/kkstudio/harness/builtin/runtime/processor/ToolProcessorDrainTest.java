@@ -16,24 +16,30 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 /**
  * {@link fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor#drain()} 移交方法单元测试：
@@ -258,5 +264,170 @@ class ToolProcessorDrainTest {
     // 释放循环以便线程退出
     stopLoop.set(true);
     assertTrue(run.awaitExited());
+  }
+
+  /** 测试意图：一个执行在移交时 release 失败，不中断其余执行的移交，且最终 close 仍然被调用。 */
+  @Test
+  void drainWithOneHandoverFailureContinuesOthersAndCloses() throws Exception {
+    Fixture fixture = approvedFixture();
+
+    ToolProcessorTestSupport.Baseline baseline2 =
+        ToolProcessorTestSupport.seedToolBaseline(
+            fixture.store,
+            ToolProcessorTestSupport.NOW,
+            false,
+            ToolProcessorTestSupport.bashScenario(ToolSideEffect.READ_ONLY));
+    ToolInvocationRequest request2 =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "bash", "{}"),
+            ToolProcessorTestSupport.bashScenario(ToolSideEffect.READ_ONLY).binding());
+    ToolProcessorTestSupport.Seeded seeded2 =
+        ToolProcessorTestSupport.seedTool(
+            fixture.store,
+            baseline2,
+            request2,
+            ToolProcessorTestSupport.NOW,
+            ToolProcessorTestSupport.bashScenario(ToolSideEffect.READ_ONLY));
+    ToolProcessorTestSupport.toApproved(
+        fixture.store, seeded2.toolInvocationId(), ToolProcessorTestSupport.NOW);
+
+    UUID failingInvocationId = fixture.toolInvocationId;
+    UUID successInvocationId = seeded2.toolInvocationId();
+
+    AtomicBoolean shouldFailRelease = new AtomicBoolean(false);
+    HarnessStore delegatingStore =
+        new HarnessStore() {
+          @Override
+          public <T> T transaction(Function<Transaction, T> callback) {
+            return fixture.store.transaction(
+                tx -> {
+                  Transaction wrappedTx =
+                      (Transaction)
+                          Proxy.newProxyInstance(
+                              Transaction.class.getClassLoader(),
+                              new Class<?>[] {Transaction.class},
+                              (proxy, method, args) -> {
+                                if ("work".equals(method.getName())) {
+                                  WorkStore originalWork = tx.work();
+                                  return (WorkStore)
+                                      Proxy.newProxyInstance(
+                                          WorkStore.class.getClassLoader(),
+                                          new Class<?>[] {WorkStore.class},
+                                          (workProxy, workMethod, workArgs) -> {
+                                            if ("release".equals(workMethod.getName())) {
+                                              ClaimedWork claimArg = (ClaimedWork) workArgs[0];
+                                              if (shouldFailRelease.get()
+                                                  && claimArg
+                                                      .target()
+                                                      .id()
+                                                      .equals(failingInvocationId)) {
+                                                throw new RuntimeException(
+                                                    "simulated release failure");
+                                              }
+                                            }
+                                            return workMethod.invoke(originalWork, workArgs);
+                                          });
+                                }
+                                return method.invoke(tx, args);
+                              });
+                  return callback.apply(wrappedTx);
+                });
+          }
+
+          @Override
+          public void afterCommit(Runnable action) {
+            fixture.store.afterCommit(action);
+          }
+
+          @Override
+          public void assertNoAmbientTransaction() {
+            fixture.store.assertNoAmbientTransaction();
+          }
+        };
+
+    ToolProcessor processor =
+        new ToolProcessor(
+            delegatingStore,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock),
+            ToolProcessorTestSupport.STABLE_MATERIALIZER);
+
+    CountDownLatch r1Started = new CountDownLatch(1);
+    CountDownLatch r2Started = new CountDownLatch(1);
+    CountDownLatch r1Interrupted = new CountDownLatch(1);
+    CountDownLatch r2Interrupted = new CountDownLatch(1);
+
+    UUID r1RemoteId = UUID.randomUUID();
+    UUID r2RemoteId = UUID.randomUUID();
+
+    FakeRun run1 =
+        fixture.gateway.queueRun(
+            progress -> {
+              fixture.gateway.executions.get(0).remoteExecutions().tryStart(r1RemoteId, TEST_ENV);
+              r1Started.countDown();
+              try {
+                Thread.sleep(60_000);
+              } catch (InterruptedException e) {
+                r1Interrupted.countDown();
+              }
+              return ToolProcessorTestSupport.succeeded("call-1");
+            });
+
+    FakeRun run2 =
+        fixture.gateway.queueRun(
+            progress -> {
+              fixture.gateway.executions.get(1).remoteExecutions().tryStart(r2RemoteId, TEST_ENV);
+              r2Started.countDown();
+              try {
+                Thread.sleep(60_000);
+              } catch (InterruptedException e) {
+                r2Interrupted.countDown();
+              }
+              return ToolProcessorTestSupport.succeeded("call-2");
+            });
+
+    ClaimedWork claim1 =
+        ToolProcessorTestSupport.claim(
+            fixture.store, failingInvocationId, ToolProcessorTestSupport.NOW);
+    ClaimedWork claim2 =
+        ToolProcessorTestSupport.claim(
+            fixture.store, successInvocationId, ToolProcessorTestSupport.NOW);
+
+    assertEquals(ProcessResult.STARTED, processor.process(claim1));
+    assertEquals(ProcessResult.STARTED, processor.process(claim2));
+    assertTrue(r1Started.await(5, TimeUnit.SECONDS));
+    assertTrue(r2Started.await(5, TimeUnit.SECONDS));
+
+    shouldFailRelease.set(true);
+
+    // 触发排空
+    processor.drain();
+
+    assertTrue(r1Interrupted.await(5, TimeUnit.SECONDS));
+    assertTrue(r2Interrupted.await(5, TimeUnit.SECONDS));
+    assertTrue(run1.awaitExited());
+    assertTrue(run2.awaitExited());
+
+    // 两个执行都已退出，活跃执行已被 close 清空
+    assertFalse(processor.hasActiveExecution(), "close must be called clearing all executions");
+
+    // 失败移交的 claim 保持租约到期（leaseToken 未被清空）
+    WorkTarget target1 = new WorkTarget(WorkTargetType.TOOL, failingInvocationId);
+    Work work1 = fixture.store.transaction(tx -> tx.work().find(target1).orElseThrow());
+    assertNotNull(work1.leaseToken(), "failed release claim remains until lease expiry");
+
+    // 成功移交的 claim 租约已被释放
+    WorkTarget target2 = new WorkTarget(WorkTargetType.TOOL, successInvocationId);
+    Work work2 = fixture.store.transaction(tx -> tx.work().find(target2).orElseThrow());
+    assertNull(work2.leaseToken(), "successful handover work claim must be released");
   }
 }

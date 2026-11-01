@@ -11,6 +11,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -32,10 +33,22 @@ import java.util.function.Consumer;
 /** {@link HarnessRuntimeLifecycle} 的 dispatcher 启停、排空编排、失败回滚与 workers 开关语义。 */
 class HarnessRuntimeLifecycleTest {
 
+  @SuppressWarnings("unchecked")
+  private HarnessRuntimeLifecycle defaultLifecycle(
+      boolean workersEnabled, HarnessWorkDispatcher dispatcher) {
+    return new HarnessRuntimeLifecycle(
+        workersEnabled,
+        dispatcher,
+        mock(ModelProcessor.class),
+        mock(ToolProcessor.class),
+        mock(ObjectProvider.class),
+        Duration.ofSeconds(60));
+  }
+
   @Test
   void startsAndStopsDispatcher() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
 
     lifecycle.start();
     lifecycle.stop();
@@ -49,7 +62,7 @@ class HarnessRuntimeLifecycleTest {
   void startFailureStopsDispatcherAndRethrows() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
     doThrow(new IllegalStateException("dispatcher failed to start")).when(dispatcher).start();
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
 
     assertThrows(IllegalStateException.class, lifecycle::start);
 
@@ -64,27 +77,21 @@ class HarnessRuntimeLifecycleTest {
     IllegalStateException startFailure = new IllegalStateException("dispatcher failed to start");
     doThrow(startFailure).when(dispatcher).start();
     doThrow(new IllegalStateException("dispatcher stop failed")).when(dispatcher).stop();
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
 
     IllegalStateException thrown = assertThrows(IllegalStateException.class, lifecycle::start);
-    // 启动失败后的 stop 回滚异常被抑制到首个异常，running 同时复位。
     assertSame(startFailure, thrown);
     verify(dispatcher).stop();
     assertEquals(1, thrown.getSuppressed().length);
     assertEquals("dispatcher stop failed", thrown.getSuppressed()[0].getMessage());
     assertFalse(lifecycle.isRunning());
 
-    // running 已正确复位：start 重试不会被跳过。
     doNothing().when(dispatcher).start();
     lifecycle.start();
     verify(dispatcher, times(2)).start();
     assertTrue(lifecycle.isRunning());
   }
 
-  /**
-   * 测试意图：底层 {@code HarnessWorkDispatcher.stop()} 当前在置位后不会抛出；这里注入异常以固定契约—— 一旦 stop
-   * 抛异常（未观察到成功关闭），绝不能假装已停止，必须保留 running 以允许重试，且重试会真正再次调用 stop。
-   */
   @Test
   void stopFailureKeepsRunningSoCleanupCanBeRetried() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
@@ -92,28 +99,25 @@ class HarnessRuntimeLifecycleTest {
         .doNothing()
         .when(dispatcher)
         .stop();
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
 
     lifecycle.start();
     IllegalStateException thrown = assertThrows(IllegalStateException.class, lifecycle::stop);
 
     assertEquals("dispatcher stop failed", thrown.getMessage());
     verify(dispatcher).stop();
-    // 未确认关闭：状态如实保持 running，绝不写 running=false 谎报已停止。
     assertTrue(lifecycle.isRunning());
 
-    // 重试必须再次真实调用 stop，成功后状态才转为 stopped。
     lifecycle.stop();
     verify(dispatcher, times(2)).stop();
     assertFalse(lifecycle.isRunning());
   }
 
-  /** 测试意图：stop(Runnable) 在 stop 失败时仍必须在 finally 中回调，且状态保持可重试。 */
   @Test
   void stopCallbackRunsEvenWhenStopFailsAndKeepsRunning() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
     doThrow(new IllegalStateException("dispatcher stop failed")).when(dispatcher).stop();
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
     AtomicBoolean callbackRan = new AtomicBoolean();
 
     lifecycle.start();
@@ -126,7 +130,7 @@ class HarnessRuntimeLifecycleTest {
   @Test
   void workersDisabledNeverStartsAnything() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(false, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(false, dispatcher);
 
     lifecycle.start();
 
@@ -137,7 +141,7 @@ class HarnessRuntimeLifecycleTest {
   @Test
   void repeatedStartAndStopAreIdempotent() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
 
     lifecycle.start();
     lifecycle.start();
@@ -152,7 +156,7 @@ class HarnessRuntimeLifecycleTest {
   @Test
   void stopCallbackRunsEvenWhenAlreadyStopped() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
     AtomicBoolean callbackRan = new AtomicBoolean();
 
     lifecycle.stop(() -> callbackRan.set(true));
@@ -227,9 +231,7 @@ class HarnessRuntimeLifecycleTest {
             modelProcessor,
             toolProcessor,
             daemonServerProvider,
-            Duration.ofMillis(30),
-            Duration.ofMillis(10),
-            millis -> Thread.sleep(Math.min(millis, 10)));
+            Duration.ofMillis(30));
 
     lifecycle.start();
     lifecycle.stop();
@@ -267,16 +269,13 @@ class HarnessRuntimeLifecycleTest {
             modelProcessor,
             toolProcessor,
             daemonServerProvider,
-            Duration.ofSeconds(10),
-            Duration.ofMillis(50),
-            millis -> {
-              throw new InterruptedException("simulated interrupt");
-            });
+            Duration.ofSeconds(10));
 
     lifecycle.start();
+    Thread.currentThread().interrupt();
     try {
       lifecycle.stop();
-      assertTrue(Thread.currentThread().isInterrupted(), "中断标志必须被恢复");
+      assertTrue(Thread.currentThread().isInterrupted(), "中断标志必须被保留");
     } finally {
       Thread.interrupted();
     }
@@ -318,9 +317,51 @@ class HarnessRuntimeLifecycleTest {
   }
 
   @Test
+  void drainTimeoutZeroDoesNotWait() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true, dispatcher, modelProcessor, toolProcessor, daemonServerProvider, Duration.ZERO);
+
+    lifecycle.start();
+    lifecycle.stop();
+
+    verify(dispatcher).stop();
+    verify(modelProcessor, never()).hasActiveExecution();
+    verify(toolProcessor, never()).hasActiveExecution();
+    verify(toolProcessor).drain();
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
+  void negativeDrainTimeoutThrows() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new HarnessRuntimeLifecycle(
+                true,
+                dispatcher,
+                modelProcessor,
+                toolProcessor,
+                daemonServerProvider,
+                Duration.ofSeconds(-1)));
+  }
+
+  @Test
   void lifecyclePhaseIsMaxInt() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    HarnessRuntimeLifecycle lifecycle = defaultLifecycle(true, dispatcher);
     assertEquals(Integer.MAX_VALUE, lifecycle.getPhase());
   }
 }

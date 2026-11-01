@@ -113,10 +113,7 @@ public final class ClusterNodeLifecycle implements SmartLifecycle {
     return running.get();
   }
 
-  /**
-   * 注册相位排在 HarnessRuntimeLifecycle（Integer.MAX_VALUE）之前： 启动时节点注册先于分发启动；关闭时 HarnessRuntime
-   * 排空编排先于节点反注册。
-   */
+  /** 相位低于 HarnessRuntimeLifecycle：启动时先注册节点再开始分派，关闭时先完成排空再反注册节点。 */
   @Override
   public int getPhase() {
     return Integer.MAX_VALUE - 1;
