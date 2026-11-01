@@ -70,6 +70,11 @@ class GatewayConfigurationConditionalTest {
                   public Admission admit(Execution execution) {
                     return new ToolGateway.Busy(Duration.ofSeconds(1));
                   }
+
+                  @Override
+                  public Run reattach(ReattachExecution execution) {
+                    return null;
+                  }
                 })
         .run(
             context -> {

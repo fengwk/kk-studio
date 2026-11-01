@@ -539,6 +539,7 @@ final class ToolGatewayTestSupport {
   /** 可编程 EnvironmentCapabilityTransport：记录路由目标，按 action 决定返回 / 同步回调 / 抛异常。 */
   static final class FakeTransport implements EnvironmentCapabilityTransport {
     final List<InvokeRecord> invocations = new CopyOnWriteArrayList<>();
+    final List<AttachRecord> attaches = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> returnedHandles = new CopyOnWriteArrayList<>();
     volatile Duration defaultTerminalDeliveryGrace = Duration.ZERO;
     volatile RuntimeException defaultTerminalDeliveryGraceFailure;
@@ -563,6 +564,11 @@ final class ToolGatewayTestSupport {
     record InvokeRecord(
         EnvironmentId environmentId,
         EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {}
+
+    record AttachRecord(
+        EnvironmentId environmentId,
+        UUID remoteExecutionId,
         EnvironmentCapabilityExecutionListener listener) {}
 
     @Override
@@ -609,6 +615,7 @@ final class ToolGatewayTestSupport {
         EnvironmentId environmentId,
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener) {
+      attaches.add(new AttachRecord(environmentId, invocationId, listener));
       switch (action) {
         case THROW_UNAVAILABLE:
           throw new EnvironmentCapabilityUnavailableException("environment offline");

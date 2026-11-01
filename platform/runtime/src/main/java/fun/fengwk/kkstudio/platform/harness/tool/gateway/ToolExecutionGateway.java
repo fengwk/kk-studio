@@ -65,6 +65,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -377,6 +378,68 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
+  @Override
+  public Run reattach(ReattachExecution reattach) throws EnvironmentCapabilityUnavailableException {
+    Objects.requireNonNull(reattach, "reattach");
+    EnvironmentId environmentId = reattach.environmentId();
+    UUID remoteExecutionId = reattach.remoteExecutionId();
+    String modelCallId = reattach.request().call().id();
+    String toolName = reattach.request().call().toolName();
+    Duration timeout = reattach.timeout();
+
+    CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
+    AtomicReference<Consumer<ToolResult>> progressRef = new AtomicReference<>();
+    ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials =
+        new ConcurrentLinkedQueue<>();
+
+    EnvironmentCapabilityExecutionListener listener =
+        new EnvironmentCapabilityExecutionListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {
+            if (!terminal.isDone()) {
+              Consumer<ToolResult> progress = progressRef.get();
+              if (progress != null) {
+                progress.accept(toToolResult(partial, remoteExecutionId, modelCallId));
+              } else {
+                bufferedPartials.add(partial);
+              }
+            }
+          }
+
+          @Override
+          public void onComplete(EnvironmentCapabilityResult result) {
+            terminal.complete(result);
+          }
+
+          @Override
+          public void onError(Throwable error) {
+            terminal.completeExceptionally(error);
+          }
+
+          @Override
+          public void onExitConfirmed() {
+            reattach.onRemoteExitConfirmed().run();
+          }
+        };
+
+    EnvironmentCapabilityExecutionHandle transportHandle =
+        capabilityTransport.attach(environmentId, remoteExecutionId, listener);
+    if (transportHandle == null) {
+      throw new IllegalStateException(
+          "remote capability returned a null execution handle; outcome cannot be confirmed");
+    }
+    return new ReattachRun(
+        transportHandle,
+        terminal,
+        finalizer,
+        toolName,
+        modelCallId,
+        remoteExecutionId,
+        timeout,
+        progressRef,
+        bufferedPartials);
+  }
+
   /** 释放目录租用与并发租用；即使目录关闭失败，并发配额仍独立释放。 */
   private static void release(
       RuntimeToolCatalogSource.Lease catalogLease, ConcurrencyAdmission.Lease admissionLease) {
@@ -608,10 +671,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         EnvironmentCapabilityExecutionHandle transportHandle,
         EnvironmentCapabilityTerminationCause cause,
         Throwable failure) {
-      if (!terminal.completeExceptionally(failure)) {
-        return;
-      }
-      terminate(transportHandle, cause, failure);
+      ToolExecutionGateway.releaseInFlight(terminal, transportHandle, cause, failure);
     }
 
     /** 终止远端；清理失败不替换原始异常。 */
@@ -619,26 +679,154 @@ public final class ToolExecutionGateway implements ToolGateway {
         EnvironmentCapabilityExecutionHandle transportHandle,
         EnvironmentCapabilityTerminationCause cause,
         Throwable failure) {
-      try {
-        transportHandle.terminate(cause);
-      } catch (RuntimeException | Error cleanup) {
-        if (cleanup != failure) {
-          failure.addSuppressed(cleanup);
-        }
-      }
+      ToolExecutionGateway.terminate(transportHandle, cause, failure);
     }
 
     private ToolResult toToolResult(EnvironmentCapabilityResult result, UUID remoteExecutionId) {
-      // 远端只应回显本次执行 id；映射回模型 call id。模型 id 回显不是合法远端关联，保留为不匹配。
-      String remoteCallId = remoteExecutionId.toString();
-      String toolCallId = result.callId();
-      if (remoteCallId.equals(toolCallId)) {
-        toolCallId = modelCallId;
-      } else if (modelCallId.equals(toolCallId)) {
-        toolCallId = remoteCallId;
-      }
-      return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
+      return ToolExecutionGateway.toToolResult(result, remoteExecutionId, modelCallId);
     }
+  }
+
+  static void releaseInFlight(
+      CompletableFuture<EnvironmentCapabilityResult> terminal,
+      EnvironmentCapabilityExecutionHandle transportHandle,
+      EnvironmentCapabilityTerminationCause cause,
+      Throwable failure) {
+    if (!terminal.completeExceptionally(failure)) {
+      return;
+    }
+    terminate(transportHandle, cause, failure);
+  }
+
+  static void terminate(
+      EnvironmentCapabilityExecutionHandle transportHandle,
+      EnvironmentCapabilityTerminationCause cause,
+      Throwable failure) {
+    try {
+      transportHandle.terminate(cause);
+    } catch (RuntimeException | Error cleanup) {
+      if (cleanup != failure && failure != null) {
+        failure.addSuppressed(cleanup);
+      }
+    }
+  }
+
+  static ToolResult toToolResult(
+      EnvironmentCapabilityResult result, UUID remoteExecutionId, String modelCallId) {
+    // 远端只应回显本次执行 id；映射回模型 call id。模型 id 回显不是合法远端关联，保留为不匹配。
+    String remoteCallId = remoteExecutionId.toString();
+    String toolCallId = result.callId();
+    if (remoteCallId.equals(toolCallId)) {
+      toolCallId = modelCallId;
+    } else if (modelCallId.equals(toolCallId)) {
+      toolCallId = remoteCallId;
+    }
+    return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
+  }
+
+  static ToolInvocationError invalidResult(String whatFailed) {
+    return new ToolInvocationError(
+        ToolResultFinalizer.INVALID_RESULT_KIND,
+        ToolErrorGuidance.message(
+            whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
+  }
+
+  static ToolInvocationError invalidPartial(String whatFailed) {
+    return new ToolInvocationError(
+        INVALID_PARTIAL_KIND,
+        ToolErrorGuidance.message(
+            whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
+  }
+
+  static ToolInvocationError validatePartial(ToolResult partial, String expectedCallId) {
+    if (partial == null) {
+      return invalidPartial("partial must not be null");
+    }
+    if (!partial.toolCallId().equals(expectedCallId)) {
+      return invalidPartial("partial toolCallId does not match the request call");
+    }
+    for (ResultContent content : partial.contents()) {
+      if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
+        return invalidPartial("partial must not carry binary or resource content");
+      }
+    }
+    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+        partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
+      return invalidPartial(
+          "partial must not exceed "
+              + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
+              + " bytes of canonical tool result JSON");
+    }
+    return null;
+  }
+
+  static ToolGateway.Completion fail(ToolInvocationError error) {
+    return new ToolGateway.Failed(error, false);
+  }
+
+  static ToolGateway.Completion unknown(String toolName, Throwable failure, String whatFailed) {
+    // 底层原始 message 只进日志，绝不进入模型可见错误文本。
+    log.warn("tool gateway unknown outcome for tool {}: {}", toolName, safeMessage(failure));
+    return new ToolGateway.Unknown(
+        new ToolInvocationError(
+            EXECUTION_FAILED_KIND,
+            ToolErrorGuidance.message(
+                whatFailed, ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION)));
+  }
+
+  static ToolGateway.Completion classify(String toolName, RuntimeException error) {
+    if (error instanceof EnvironmentCapabilityCancelledException cancelled) {
+      // 取消可能发生在副作用之后：只能声明结果未确认，绝不能声称未执行。
+      return new ToolGateway.Cancelled(
+          new ToolInvocationError(
+              CANCELLED_KIND,
+              ToolErrorGuidance.message(
+                  failureMessage(cancelled, "Tool execution was cancelled"),
+                  ExecutionFact.UNCERTAIN,
+                  VERIFY_EFFECT_NEXT_ACTION)));
+    }
+    if (error instanceof EnvironmentCapabilityFailedException failed) {
+      return new ToolGateway.Failed(
+          new ToolInvocationError(
+              EXECUTION_FAILED_KIND,
+              ToolErrorGuidance.message(
+                  failureMessage(failed, "Tool execution failed"),
+                  ExecutionFact.FAILED,
+                  "Inspect the failure and adjust the request before calling the tool" + " again")),
+          false);
+    }
+    if (error instanceof EnvironmentCapabilitySendUncertainException uncertain) {
+      return new ToolGateway.Unknown(
+          new ToolInvocationError(
+              REMOTE_UNCERTAIN_KIND,
+              ToolErrorGuidance.message(
+                  failureMessage(uncertain, "Remote tool outcome is uncertain"),
+                  ExecutionFact.UNCERTAIN,
+                  VERIFY_EFFECT_NEXT_ACTION)));
+    }
+    if (error instanceof EnvironmentCapabilityUnavailableException unavailable) {
+      // transport 契约：unavailable 时调用肯定未执行。
+      return new ToolGateway.Failed(
+          new ToolInvocationError(
+              UNAVAILABLE_KIND,
+              ToolErrorGuidance.message(
+                  failureMessage(unavailable, "Tool is unavailable"),
+                  ExecutionFact.NOT_EXECUTED,
+                  "Wait for the Environment to become available, then call the tool" + " again")),
+          true);
+    }
+    if (error instanceof EnvironmentCapabilityBusyException busy) {
+      return new ToolGateway.Failed(
+          new ToolInvocationError(
+              UNAVAILABLE_KIND,
+              ToolErrorGuidance.message(
+                  failureMessage(busy, "Tool is busy"),
+                  ExecutionFact.NOT_EXECUTED,
+                  "Wait for the Environment to finish its current work, then call"
+                      + " the tool again")),
+          true);
+    }
+    return unknown(toolName, error, "the tool failed for an unclassified reason");
   }
 
   private static String failureMessage(Throwable error, String fallback) {
@@ -732,7 +920,7 @@ public final class ToolExecutionGateway implements ToolGateway {
                     ExecutionFact.UNCERTAIN,
                     VERIFY_EFFECT_NEXT_ACTION)));
       } catch (RuntimeException error) {
-        return classify(error);
+        return ToolExecutionGateway.classify(toolName, error);
       }
     }
 
@@ -746,7 +934,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     /** 校验 partial；非法即记录并中断执行线程（只在执行体内部投递），由 {@link #execute} 收敛为确定性失败。 */
     private Consumer<ToolResult> guard(Consumer<ToolResult> progress) {
       return partial -> {
-        ToolInvocationError invalid = validatePartial(partial);
+        ToolInvocationError invalid = validatePartial(partial, expectedCallId);
         if (invalid == null) {
           progress.accept(partial);
           return;
@@ -759,43 +947,6 @@ public final class ToolExecutionGateway implements ToolGateway {
           }
         }
       };
-    }
-
-    private ToolInvocationError validatePartial(ToolResult partial) {
-      if (partial == null) {
-        return invalidPartial("partial must not be null");
-      }
-      if (!partial.toolCallId().equals(expectedCallId)) {
-        return invalidPartial("partial toolCallId does not match the request call");
-      }
-      for (ResultContent content : partial.contents()) {
-        if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
-          return invalidPartial("partial must not carry binary or resource content");
-        }
-      }
-      if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-          partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
-        return invalidPartial(
-            "partial must not exceed "
-                + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
-                + " bytes of canonical tool result JSON");
-      }
-      return null;
-    }
-
-    /** 工具已开始执行后产出非法 partial：不是派发前验证拒绝，只能声明结果未交付且不可确认，不能声称未执行。 */
-    private static ToolInvocationError invalidPartial(String whatFailed) {
-      return new ToolInvocationError(
-          INVALID_PARTIAL_KIND,
-          ToolErrorGuidance.message(
-              whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
-    }
-
-    private static ToolInvocationError invalidResult(String whatFailed) {
-      return new ToolInvocationError(
-          ToolResultFinalizer.INVALID_RESULT_KIND,
-          ToolErrorGuidance.message(
-              whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
     }
 
     private ToolGateway.Completion complete(ToolOutcome outcome) {
@@ -822,7 +973,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       try {
         finalized = finalizer.finalizeResult(toolName, result);
       } catch (RuntimeException failure) {
-        return unknown(failure, "tool result finalization failed");
+        return ToolExecutionGateway.unknown(toolName, failure, "tool result finalization failed");
       }
       return switch (finalized) {
         case ToolResultFinalizer.Outcome.Success success -> new ToolGateway.Succeeded(
@@ -865,76 +1016,166 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
       return new ToolEffectBatch(payloads);
     }
+  }
 
-    /** 将执行异常映射为终态；远程发送不确定性必须保持为 {@code unknown}。 */
-    private ToolGateway.Completion classify(RuntimeException error) {
-      if (error instanceof EnvironmentCapabilityCancelledException cancelled) {
-        // 取消可能发生在副作用之后：只能声明结果未确认，绝不能声称未执行。
+  static final class ReattachRun implements ToolGateway.Run {
+    private final EnvironmentCapabilityExecutionHandle transportHandle;
+    private final CompletableFuture<EnvironmentCapabilityResult> terminal;
+    private final ToolResultFinalizer finalizer;
+    private final String toolName;
+    private final String modelCallId;
+    private final UUID remoteExecutionId;
+    private final Duration timeout;
+    private final AtomicReference<Consumer<ToolResult>> progressRef;
+    private final ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials;
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicReference<ToolInvocationError> rejectedPartial = new AtomicReference<>();
+    private final Object executionLock = new Object();
+    private Thread executingThread;
+
+    ReattachRun(
+        EnvironmentCapabilityExecutionHandle transportHandle,
+        CompletableFuture<EnvironmentCapabilityResult> terminal,
+        ToolResultFinalizer finalizer,
+        String toolName,
+        String modelCallId,
+        UUID remoteExecutionId,
+        Duration timeout,
+        AtomicReference<Consumer<ToolResult>> progressRef,
+        ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials) {
+      this.transportHandle = Objects.requireNonNull(transportHandle, "transportHandle");
+      this.terminal = Objects.requireNonNull(terminal, "terminal");
+      this.finalizer = Objects.requireNonNull(finalizer, "finalizer");
+      this.toolName = Objects.requireNonNull(toolName, "toolName");
+      this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
+      this.remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
+      this.timeout = Objects.requireNonNull(timeout, "timeout");
+      this.progressRef = Objects.requireNonNull(progressRef, "progressRef");
+      this.bufferedPartials = Objects.requireNonNull(bufferedPartials, "bufferedPartials");
+    }
+
+    @Override
+    public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+      Objects.requireNonNull(progress, "progress");
+      synchronized (executionLock) {
+        executingThread = Thread.currentThread();
+      }
+      Consumer<ToolResult> guarded = guard(progress);
+      progressRef.set(guarded);
+      EnvironmentCapabilityResult buffered;
+      while ((buffered = bufferedPartials.poll()) != null) {
+        guarded.accept(toToolResult(buffered, remoteExecutionId, modelCallId));
+      }
+      ToolGateway.Completion completion;
+      try {
+        completion = invoke();
+      } finally {
+        progressRef.set(null);
+        synchronized (executionLock) {
+          executingThread = null;
+        }
+      }
+      ToolInvocationError invalid = rejectedPartial.get();
+      return invalid == null ? completion : new ToolGateway.Failed(invalid, false);
+    }
+
+    private ToolGateway.Completion invoke() {
+      try {
+        EnvironmentCapabilityResult result;
+        long timeoutNanos = timeout.toNanos();
+        try {
+          result = terminal.get(timeoutNanos, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timedOut) {
+          EnvironmentCapabilitySendUncertainException timeoutException =
+              new EnvironmentCapabilitySendUncertainException(
+                  "remote capability timed out waiting for reattach terminal outcome after "
+                      + timeout,
+                  timedOut);
+          if (terminal.completeExceptionally(timeoutException)) {
+            terminate(
+                transportHandle, EnvironmentCapabilityTerminationCause.TIMED_OUT, timeoutException);
+            throw timeoutException;
+          }
+          result = terminal.get();
+        }
+        if (result == null) {
+          throw new IllegalStateException(
+              "remote capability completed without a result; outcome cannot be confirmed");
+        }
+        ToolResult toolResult = toToolResult(result, remoteExecutionId, modelCallId);
+        return complete(toolResult);
+      } catch (InterruptedException interrupted) {
+        releaseInFlight(
+            terminal,
+            transportHandle,
+            EnvironmentCapabilityTerminationCause.CANCELLED,
+            interrupted);
         return new ToolGateway.Cancelled(
             new ToolInvocationError(
                 CANCELLED_KIND,
                 ToolErrorGuidance.message(
-                    failureMessage(cancelled, "Tool execution was cancelled"),
+                    "Tool execution was cancelled",
                     ExecutionFact.UNCERTAIN,
                     VERIFY_EFFECT_NEXT_ACTION)));
+      } catch (ExecutionException failed) {
+        Throwable cause = failed.getCause();
+        if (cause instanceof RuntimeException runtime) {
+          return ToolExecutionGateway.classify(toolName, runtime);
+        }
+        return ToolExecutionGateway.classify(
+            toolName,
+            new IllegalStateException(
+                "remote capability failed with a non-runtime error; outcome cannot be confirmed",
+                cause));
+      } catch (RuntimeException error) {
+        return ToolExecutionGateway.classify(toolName, error);
       }
-      if (error instanceof EnvironmentCapabilityFailedException failed) {
-        return new ToolGateway.Failed(
-            new ToolInvocationError(
-                EXECUTION_FAILED_KIND,
-                ToolErrorGuidance.message(
-                    failureMessage(failed, "Tool execution failed"),
-                    ExecutionFact.FAILED,
-                    "Inspect the failure and adjust the request before calling the tool"
-                        + " again")),
-            false);
-      }
-      if (error instanceof EnvironmentCapabilitySendUncertainException uncertain) {
-        return new ToolGateway.Unknown(
-            new ToolInvocationError(
-                REMOTE_UNCERTAIN_KIND,
-                ToolErrorGuidance.message(
-                    failureMessage(uncertain, "Remote tool outcome is uncertain"),
-                    ExecutionFact.UNCERTAIN,
-                    VERIFY_EFFECT_NEXT_ACTION)));
-      }
-      if (error instanceof EnvironmentCapabilityUnavailableException unavailable) {
-        // transport 契约：unavailable 时调用肯定未执行。
-        return new ToolGateway.Failed(
-            new ToolInvocationError(
-                UNAVAILABLE_KIND,
-                ToolErrorGuidance.message(
-                    failureMessage(unavailable, "Tool is unavailable"),
-                    ExecutionFact.NOT_EXECUTED,
-                    "Wait for the Environment to become available, then call the tool" + " again")),
-            true);
-      }
-      if (error instanceof EnvironmentCapabilityBusyException busy) {
-        return new ToolGateway.Failed(
-            new ToolInvocationError(
-                UNAVAILABLE_KIND,
-                ToolErrorGuidance.message(
-                    failureMessage(busy, "Tool is busy"),
-                    ExecutionFact.NOT_EXECUTED,
-                    "Wait for the Environment to finish its current work, then call"
-                        + " the tool again")),
-            true);
-      }
-      return unknown(error, "the tool failed for an unclassified reason");
     }
 
-    private ToolGateway.Completion fail(ToolInvocationError error) {
-      return new ToolGateway.Failed(error, false);
+    private ToolGateway.Completion complete(ToolResult result) {
+      if (result == null) {
+        return fail(invalidResult("terminal result must not be null"));
+      }
+      if (!result.toolCallId().equals(modelCallId)) {
+        return fail(invalidResult("terminal result toolCallId does not match the request call"));
+      }
+      ToolResultFinalizer.Outcome finalized;
+      try {
+        finalized = finalizer.finalizeResult(toolName, result);
+      } catch (RuntimeException failure) {
+        return ToolExecutionGateway.unknown(toolName, failure, "tool result finalization failed");
+      }
+      return switch (finalized) {
+        case ToolResultFinalizer.Outcome.Success success -> new ToolGateway.Succeeded(
+            new ToolSuccess(success.result(), ToolEffectBatch.EMPTY));
+        case ToolResultFinalizer.Outcome.Failed failed -> fail(failed.error());
+        case ToolResultFinalizer.Outcome.StoreFailed storeFailed -> new ToolGateway.Unknown(
+            storeFailed.error());
+      };
     }
 
-    private ToolGateway.Completion unknown(Throwable failure, String whatFailed) {
-      // 底层原始 message 只进日志，绝不进入模型可见错误文本。
-      log.warn("tool gateway unknown outcome for tool {}: {}", toolName, safeMessage(failure));
-      return new ToolGateway.Unknown(
-          new ToolInvocationError(
-              EXECUTION_FAILED_KIND,
-              ToolErrorGuidance.message(
-                  whatFailed, ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION)));
+    @Override
+    public void close() {
+      if (closed.compareAndSet(false, true)) {
+        terminate(transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, null);
+      }
+    }
+
+    private Consumer<ToolResult> guard(Consumer<ToolResult> progress) {
+      return partial -> {
+        ToolInvocationError invalid = validatePartial(partial, modelCallId);
+        if (invalid == null) {
+          progress.accept(partial);
+          return;
+        }
+        if (rejectedPartial.compareAndSet(null, invalid)) {
+          synchronized (executionLock) {
+            if (executingThread != null) {
+              executingThread.interrupt();
+            }
+          }
+        }
+      };
     }
   }
 }

@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityF
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -934,5 +935,185 @@ class ToolExecutionGatewayRunTest {
       Thread.sleep(5);
     }
     assertFalse(transport.invocations.isEmpty(), "transport must have been invoked");
+  }
+
+  private static void awaitAttach(ToolGatewayTestSupport.FakeTransport transport)
+      throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (transport.attaches.isEmpty() && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
+    assertFalse(transport.attaches.isEmpty(), "transport must have been attached");
+  }
+
+  @Test
+  void reattachDeliversTerminalResultAndMapsCallId() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    UUID remoteExecutionId = UUID.randomUUID();
+    AtomicBoolean exitConfirmed = new AtomicBoolean();
+    List<ToolResult> partials = new ArrayList<>();
+    ToolInvocationRequest request =
+        ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
+
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            request,
+            ToolGatewayTestSupport.ENV_A,
+            remoteExecutionId,
+            Duration.ofSeconds(5),
+            () -> exitConfirmed.set(true));
+
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    try (ToolGateway.Run run = gateway.reattach(reattach)) {
+      Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partials::add)));
+      try (AutoCloseable workerExit = joinOnClose(worker)) {
+        awaitAttach(transport);
+        ToolGatewayTestSupport.FakeTransport.AttachRecord attach = transport.attaches.get(0);
+        assertEquals(ToolGatewayTestSupport.ENV_A, attach.environmentId());
+        assertEquals(remoteExecutionId, attach.remoteExecutionId());
+
+        attach
+            .listener()
+            .onPartial(
+                new EnvironmentCapabilityResult(
+                    remoteExecutionId.toString(),
+                    List.of(new TextResultContent("progress-1")),
+                    false,
+                    "{}"));
+
+        attach
+            .listener()
+            .onComplete(
+                new EnvironmentCapabilityResult(
+                    remoteExecutionId.toString(),
+                    List.of(new TextResultContent("done")),
+                    false,
+                    "{}"));
+
+        attach.listener().onExitConfirmed();
+
+        assertTrue(worker.join(Duration.ofSeconds(5)), "worker must exit after terminal");
+        assertInstanceOf(ToolGateway.Succeeded.class, completion.get());
+        ToolGateway.Succeeded succeeded = (ToolGateway.Succeeded) completion.get();
+        assertEquals("call-1", succeeded.success().result().toolCallId());
+        assertEquals(
+            List.of(new TextResultContent("done")), succeeded.success().result().contents());
+
+        assertEquals(1, partials.size());
+        assertEquals("call-1", partials.get(0).toolCallId());
+        assertTrue(exitConfirmed.get(), "exit confirmed callback must be called");
+        assertEquals(0, transport.returnedHandles.get(0).terminations().size());
+      }
+    }
+  }
+
+  @Test
+  void reattachUnavailableThrowsExceptionDirectly() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolInvocationRequest request =
+        ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            request,
+            ToolGatewayTestSupport.ENV_A,
+            UUID.randomUUID(),
+            Duration.ofSeconds(5),
+            () -> {});
+
+    assertThrows(EnvironmentCapabilityUnavailableException.class, () -> gateway.reattach(reattach));
+  }
+
+  @Test
+  void reattachTimeoutYieldsUnknownAndTerminatesTimedOut() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolInvocationRequest request =
+        ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            request,
+            ToolGatewayTestSupport.ENV_A,
+            UUID.randomUUID(),
+            Duration.ofMillis(50),
+            () -> {});
+
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    try (ToolGateway.Run run = gateway.reattach(reattach)) {
+      Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(p -> {})));
+      try (AutoCloseable workerExit = joinOnClose(worker)) {
+        awaitAttach(transport);
+        assertTrue(worker.join(Duration.ofSeconds(5)), "worker must exit on timeout");
+        assertInstanceOf(ToolGateway.Unknown.class, completion.get());
+        assertEquals(
+            List.of(EnvironmentCapabilityTerminationCause.TIMED_OUT),
+            transport.returnedHandles.get(0).terminations());
+      }
+    }
+  }
+
+  @Test
+  void reattachInterruptYieldsCancelledAndTerminatesCancelled() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolInvocationRequest request =
+        ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            request,
+            ToolGatewayTestSupport.ENV_A,
+            UUID.randomUUID(),
+            Duration.ofSeconds(10),
+            () -> {});
+
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    try (ToolGateway.Run run = gateway.reattach(reattach)) {
+      Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(p -> {})));
+      awaitAttach(transport);
+      worker.interrupt();
+      assertTrue(worker.join(Duration.ofSeconds(5)), "worker must exit on interrupt");
+      assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
+      assertEquals(
+          List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+          transport.returnedHandles.get(0).terminations());
+    }
+  }
+
+  @Test
+  void reattachCloseTerminatesCancelled() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolInvocationRequest request =
+        ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            request,
+            ToolGatewayTestSupport.ENV_A,
+            UUID.randomUUID(),
+            Duration.ofSeconds(10),
+            () -> {});
+
+    ToolGateway.Run run = gateway.reattach(reattach);
+    run.close();
+    assertEquals(
+        List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+        transport.returnedHandles.get(0).terminations());
   }
 }
