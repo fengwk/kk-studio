@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
@@ -30,10 +32,39 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** {@link EditReviewPreflight}：只读预览准备、成功 Ask 构造以及各种 transport / 畸形 / 超大结果降级为 Deny。 */
 class EditReviewPreflightTest {
+
+  @FunctionalInterface
+  private interface Invoker {
+    EnvironmentCapabilityExecutionHandle invoke(
+        EnvironmentId envId,
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener);
+  }
+
+  private static EnvironmentCapabilityTransport transport(Invoker invoker) {
+    return new EnvironmentCapabilityTransport() {
+      @Override
+      public EnvironmentCapabilityExecutionHandle invoke(
+          EnvironmentId envId,
+          EnvironmentCapabilityExecutionRequest request,
+          EnvironmentCapabilityExecutionListener listener) {
+        return invoker.invoke(envId, request, listener);
+      }
+
+      @Override
+      public EnvironmentCapabilityExecutionHandle attach(
+          EnvironmentId environmentId,
+          UUID invocationId,
+          EnvironmentCapabilityExecutionListener listener) {
+        throw new UnsupportedOperationException();
+      }
+    };
+  }
 
   private static final EnvironmentId ENV_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
@@ -52,20 +83,21 @@ class EditReviewPreflightTest {
   void successfulPreviewReturnsAskWithFrozenReview() {
     AtomicBoolean executed = new AtomicBoolean();
     EnvironmentCapabilityTransport transport =
-        (envId, request, listener) -> {
-          executed.set(true);
-          assertEquals(ENV_ID, envId);
-          assertEquals(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, request.descriptor().id());
-          // 预览不是 Thread Tool body：退出通知只应被安全忽略。
-          listener.onExitConfirmed();
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  request.call().id(),
-                  List.of(new JsonResultContent(VALID_REVIEW_JSON)),
-                  false,
-                  "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              executed.set(true);
+              assertEquals(ENV_ID, envId);
+              assertEquals(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, request.descriptor().id());
+              // 预览不是 Thread Tool body：退出通知只应被安全忽略。
+              listener.onExitConfirmed();
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new JsonResultContent(VALID_REVIEW_JSON)),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
 
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(
@@ -82,9 +114,10 @@ class EditReviewPreflightTest {
   @Test
   void transportThrowsExceptionDirectlyReturnsDeny() {
     EnvironmentCapabilityTransport busyTransport =
-        (envId, request, listener) -> {
-          throw new EnvironmentCapabilityBusyException("daemon busy");
-        };
+        transport(
+            (envId, request, listener) -> {
+              throw new EnvironmentCapabilityBusyException("daemon busy");
+            });
     ToolGateway.PreflightResult busyResult =
         EditReviewPreflight.prepare(busyTransport, createRequest(), "reason");
     ToolGateway.Deny busyDeny = assertInstanceOf(ToolGateway.Deny.class, busyResult);
@@ -92,9 +125,10 @@ class EditReviewPreflightTest {
     assertTrue(busyDeny.error().message().contains("daemon busy"));
 
     EnvironmentCapabilityTransport unavailableTransport =
-        (envId, request, listener) -> {
-          throw new EnvironmentCapabilityUnavailableException("daemon offline");
-        };
+        transport(
+            (envId, request, listener) -> {
+              throw new EnvironmentCapabilityUnavailableException("daemon offline");
+            });
     ToolGateway.PreflightResult unavailResult =
         EditReviewPreflight.prepare(unavailableTransport, createRequest(), "reason");
     ToolGateway.Deny unavailDeny = assertInstanceOf(ToolGateway.Deny.class, unavailResult);
@@ -104,7 +138,8 @@ class EditReviewPreflightTest {
 
   @Test
   void transportReturningNullHandleReturnsDeny() {
-    EnvironmentCapabilityTransport nullHandleTransport = (envId, request, listener) -> null;
+    EnvironmentCapabilityTransport nullHandleTransport =
+        transport((envId, request, listener) -> null);
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(nullHandleTransport, createRequest(), "reason");
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
@@ -116,10 +151,11 @@ class EditReviewPreflightTest {
   @Test
   void transportListenerReportsErrorReturnsDeny() {
     EnvironmentCapabilityTransport errorTransport =
-        (envId, request, listener) -> {
-          listener.onError(new IllegalStateException("preview failed on daemon"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onError(new IllegalStateException("preview failed on daemon"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(errorTransport, createRequest(), "reason");
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
@@ -131,15 +167,16 @@ class EditReviewPreflightTest {
   void previewResultErrorReturnsDeny() {
     // 带有 text error description
     EnvironmentCapabilityTransport errorResultTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  request.call().id(),
-                  List.of(new TextResultContent("File not found on disk")),
-                  true,
-                  "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new TextResultContent("File not found on disk")),
+                      true,
+                      "{}"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(errorResultTransport, createRequest(), "reason");
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
@@ -148,11 +185,12 @@ class EditReviewPreflightTest {
 
     // error 为 true 但没有 text content
     EnvironmentCapabilityTransport blankErrorTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(request.call().id(), List.of(), true, "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(request.call().id(), List.of(), true, "{}"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult blankResult =
         EditReviewPreflight.prepare(blankErrorTransport, createRequest(), "reason");
     ToolGateway.Deny blankDeny = assertInstanceOf(ToolGateway.Deny.class, blankResult);
@@ -164,15 +202,16 @@ class EditReviewPreflightTest {
   void previewResultWithMismatchedCallIdOrMalformedContentReturnsDeny() {
     // Mismatched call ID
     EnvironmentCapabilityTransport mismatchIdTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  "different-call-id",
-                  List.of(new JsonResultContent(VALID_REVIEW_JSON)),
-                  false,
-                  "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      "different-call-id",
+                      List.of(new JsonResultContent(VALID_REVIEW_JSON)),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult mismatchResult =
         EditReviewPreflight.prepare(mismatchIdTransport, createRequest(), "reason");
     ToolGateway.Deny mismatchDeny = assertInstanceOf(ToolGateway.Deny.class, mismatchResult);
@@ -180,22 +219,27 @@ class EditReviewPreflightTest {
 
     // null result
     EnvironmentCapabilityTransport nullResultTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(null);
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(null);
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult nullResult =
         EditReviewPreflight.prepare(nullResultTransport, createRequest(), "reason");
     assertInstanceOf(ToolGateway.Deny.class, nullResult);
 
     // Non-JSON content
     EnvironmentCapabilityTransport nonJsonTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  request.call().id(), List.of(new TextResultContent("not-json")), false, "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new TextResultContent("not-json")),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult nonJsonResult =
         EditReviewPreflight.prepare(nonJsonTransport, createRequest(), "reason");
     ToolGateway.Deny nonJsonDeny = assertInstanceOf(ToolGateway.Deny.class, nonJsonResult);
@@ -207,15 +251,17 @@ class EditReviewPreflightTest {
 
     // Multiple contents
     EnvironmentCapabilityTransport multipleContentTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  request.call().id(),
-                  List.of(new JsonResultContent(VALID_REVIEW_JSON), new TextResultContent("extra")),
-                  false,
-                  "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(
+                          new JsonResultContent(VALID_REVIEW_JSON), new TextResultContent("extra")),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
     ToolGateway.PreflightResult multipleResult =
         EditReviewPreflight.prepare(multipleContentTransport, createRequest(), "reason");
     assertInstanceOf(ToolGateway.Deny.class, multipleResult);
@@ -234,15 +280,16 @@ class EditReviewPreflightTest {
             + "\"}";
 
     EnvironmentCapabilityTransport hugeTransport =
-        (envId, request, listener) -> {
-          listener.onComplete(
-              new EnvironmentCapabilityResult(
-                  request.call().id(),
-                  List.of(new JsonResultContent(hugeReviewJson)),
-                  false,
-                  "{}"));
-          return new FakeHandle();
-        };
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new JsonResultContent(hugeReviewJson)),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
 
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(hugeTransport, createRequest(), "reason");
@@ -255,10 +302,11 @@ class EditReviewPreflightTest {
   void interruptedThreadCancelsHandleAndRestoresFlag() {
     FakeHandle handle = new FakeHandle();
     EnvironmentCapabilityTransport transport =
-        (envId, request, listener) -> {
-          // 不调用 listener，直接返回 handle；外部 thread 处于 interrupted 状态
-          return handle;
-        };
+        transport(
+            (envId, request, listener) -> {
+              // 不调用 listener，直接返回 handle；外部 thread 处于 interrupted 状态
+              return handle;
+            });
 
     Thread.currentThread().interrupt();
     try {

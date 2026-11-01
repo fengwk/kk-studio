@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
+import java.util.UUID;
+
 /**
  * Environment Capability 的调用侧传输窄端口。
  *
@@ -47,5 +49,26 @@ public interface EnvironmentCapabilityTransport {
   EnvironmentCapabilityExecutionHandle invoke(
       EnvironmentId environmentId,
       EnvironmentCapabilityExecutionRequest request,
+      EnvironmentCapabilityExecutionListener listener);
+
+  /**
+   * 重新挂接一个已由远端 Daemon 接受的 Capability Invocation。
+   *
+   * <p>与 {@link #invoke} 相比，本方法不向远端发送 INVOKE 帧；若会话处于 READY 状态，立即发送 RECOVER 恢复帧；若尚未处于 READY
+   * 状态，则注册为在途记录并在连接建立到 READY 时由恢复流程自动发送 RECOVER。
+   *
+   * <p>事件契约与 {@link #invoke} 相同：透传 partial 与恰好一个终态，外加退出确认；远端 {@code RECOVER_NOT_FOUND} 映射为 {@link
+   * EnvironmentCapabilitySendUncertainException} 终态异常。
+   *
+   * @param environmentId 冻结的 Environment 路由身份，不得为 null
+   * @param invocationId 远端调用的唯一标识，不得为 null
+   * @param listener 接收 partial 与终态事件的监听器，不得为 null
+   * @return 可取消的 execution handle
+   * @throws EnvironmentCapabilityUnavailableException 本节点不持有该 Environment 的 READY 租约
+   * @throws IllegalArgumentException 同一 invocationId 已在本节点登记
+   */
+  EnvironmentCapabilityExecutionHandle attach(
+      EnvironmentId environmentId,
+      UUID invocationId,
       EnvironmentCapabilityExecutionListener listener);
 }

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Environment Capability transport port 的事件顺序、取消和异常分类契约测试。 */
@@ -86,6 +88,22 @@ class EnvironmentCapabilityTransportTest {
     assertFalse(transport.invoked);
     assertTrue(listener.events.isEmpty());
     assertFalse(listener.error);
+  }
+
+  @Test
+  void attachPropagatesTerminalAndUnavailable() {
+    FakeTransport transport = new FakeTransport(Mode.STREAM);
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        transport.attach(ENVIRONMENT_ID, UUID.randomUUID(), listener);
+    assertNotNull(handle);
+    assertTrue(transport.invoked);
+    assertEquals(List.of("partial-1", "partial-2", "complete"), listener.events);
+
+    FakeTransport unavailable = new FakeTransport(Mode.UNAVAILABLE);
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> unavailable.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
   }
 
   private enum Mode {
@@ -159,6 +177,18 @@ class EnvironmentCapabilityTransportTest {
           return Duration.ZERO;
         }
       };
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle attach(
+        EnvironmentId environmentId,
+        UUID invocationId,
+        EnvironmentCapabilityExecutionListener listener) {
+      assertEquals(ENVIRONMENT_ID, environmentId);
+      if (mode == Mode.UNAVAILABLE) {
+        throw new EnvironmentCapabilityUnavailableException("unavailable");
+      }
+      return invoke(environmentId, REQUEST, listener);
     }
 
     /** Fake 内只实现 transport contract 所需的最小 terminal fence；它不替生产 transport 提供实现。 */
