@@ -31,6 +31,9 @@ public interface DaemonLeaseStore {
   /** 连接断开时回退为 CONNECTING 并保留重连宽限租约。 */
   boolean disconnect(EnvironmentId environmentId, UUID leaseToken, Duration graceDuration);
 
+  /** 持有者主动放弃路由租约，围栏校验通过后清除持有者与租约，使任何节点都可立即抢占；围栏失效返回 false。 */
+  boolean release(EnvironmentId environmentId, UUID leaseToken);
+
   /** 判定当前节点是否持有该 {@code leaseToken} 的有效 READY 租约（本地 INVOKE 准入围栏）。 */
   boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken);
 

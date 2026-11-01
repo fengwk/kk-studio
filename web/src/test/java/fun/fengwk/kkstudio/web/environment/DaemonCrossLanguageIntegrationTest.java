@@ -883,6 +883,11 @@ class DaemonCrossLanguageIntegrationTest {
     }
 
     @Override
+    public boolean release(EnvironmentId environmentId, UUID leaseToken) {
+      return true;
+    }
+
+    @Override
     public boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken) {
       return true;
     }
