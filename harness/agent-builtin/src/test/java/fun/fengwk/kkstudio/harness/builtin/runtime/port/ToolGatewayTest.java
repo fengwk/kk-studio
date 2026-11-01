@@ -202,6 +202,11 @@ class ToolGatewayTest {
           public Admission admit(Execution execution) {
             return new ToolGateway.Admitted(noopRun());
           }
+
+          @Override
+          public Run reattach(ReattachExecution execution) {
+            return noopRun();
+          }
         };
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest()));
     ToolGateway.Admission result =
@@ -218,6 +223,91 @@ class ToolGatewayTest {
     ToolGateway.Run run = ((ToolGateway.Admitted) result).run();
     assertNotNull(run.execute(partial -> {}));
     run.close();
+
+    UUID invocationId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    EnvironmentId envId = new EnvironmentId(UUID.randomUUID());
+    ToolGateway.ReattachExecution reattachExecution =
+        new ToolGateway.ReattachExecution(
+            invocationId,
+            threadId,
+            PortTestData.toolRequest(),
+            envId,
+            UUID.fromString("00000000-0000-0000-0000-000000000008"),
+            Duration.ofSeconds(30),
+            () -> {});
+    ToolGateway.Run reattachRun = gateway.reattach(reattachExecution);
+    assertNotNull(reattachRun.execute(partial -> {}));
+    reattachRun.close();
+  }
+
+  @Test
+  void reattachExecutionValidation() {
+    UUID invocationId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    ToolInvocationRequest request = PortTestData.toolRequest();
+    EnvironmentId envId = new EnvironmentId(UUID.randomUUID());
+    UUID remoteExecutionId = UUID.randomUUID();
+    Duration timeout = Duration.ofSeconds(10);
+    Runnable onExit = () -> {};
+
+    ToolGateway.ReattachExecution valid =
+        new ToolGateway.ReattachExecution(
+            invocationId, threadId, request, envId, remoteExecutionId, timeout, onExit);
+    assertSame(invocationId, valid.invocationId());
+    assertSame(threadId, valid.threadId());
+    assertSame(request, valid.request());
+    assertSame(envId, valid.environmentId());
+    assertSame(remoteExecutionId, valid.remoteExecutionId());
+    assertEquals(timeout, valid.timeout());
+    assertSame(onExit, valid.onRemoteExitConfirmed());
+
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                null, threadId, request, envId, remoteExecutionId, timeout, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, null, request, envId, remoteExecutionId, timeout, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, threadId, null, envId, remoteExecutionId, timeout, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, threadId, request, null, remoteExecutionId, timeout, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, threadId, request, envId, null, timeout, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, threadId, request, envId, remoteExecutionId, null, onExit));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId, threadId, request, envId, remoteExecutionId, timeout, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolGateway.ReattachExecution(
+                invocationId,
+                threadId,
+                request,
+                envId,
+                remoteExecutionId,
+                Duration.ofNanos(500),
+                onExit));
   }
 
   /** 测试显式提供的观察者，不代替生产登记实现。 */

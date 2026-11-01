@@ -346,5 +346,10 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
       startCalls.incrementAndGet();
       return new ToolGateway.Busy(Duration.ofSeconds(9));
     }
+
+    @Override
+    public Run reattach(ReattachExecution execution) {
+      throw new UnsupportedOperationException();
+    }
   }
 }

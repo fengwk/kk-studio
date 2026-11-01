@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -923,12 +924,15 @@ public final class ToolProcessorTestSupport {
     private static final Object NULL_ADMIT = new Object();
     final LinkedList<Object> preflightResults = new LinkedList<>();
     final LinkedList<Object> admitResults = new LinkedList<>();
+    final LinkedList<Object> reattachResults = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
+    final List<ReattachExecution> reattachExecutions = new CopyOnWriteArrayList<>();
     final List<PreflightCall> preflightCalls = new CopyOnWriteArrayList<>();
     volatile Consumer<PreflightCall> preflightHook;
     volatile Runnable admitHook;
     volatile int preflightCallsCount;
     volatile int admitCalls;
+    volatile int reattachCalls;
 
     void queuePreflightAllow() {
       preflightResults.add(new ToolGateway.Allow());
@@ -968,6 +972,34 @@ public final class ToolProcessorTestSupport {
 
     void queueNullAdmit() {
       admitResults.add(NULL_ADMIT);
+    }
+
+    void queueReattach(Object result) {
+      reattachResults.add(result);
+    }
+
+    FakeRun queueReattachRun(Function<Consumer<ToolResult>, Completion> body) {
+      FakeRun run = new FakeRun(body);
+      reattachResults.add(run);
+      return run;
+    }
+
+    @Override
+    public Run reattach(ReattachExecution execution)
+        throws EnvironmentCapabilityUnavailableException {
+      reattachCalls++;
+      reattachExecutions.add(execution);
+      Object result = reattachResults.poll();
+      if (result == null) {
+        throw new IllegalStateException("no queued reattach result");
+      }
+      if (result instanceof EnvironmentCapabilityUnavailableException unavailable) {
+        throw unavailable;
+      }
+      if (result instanceof RuntimeException failure) {
+        throw failure;
+      }
+      return (Run) result;
     }
 
     @Override

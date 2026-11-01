@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
@@ -35,6 +36,15 @@ public interface ToolGateway {
    * 没有产生任何副作用（也不持有任何 资源），Processor 保持 READY 并 reschedule。
    */
   Admission admit(Execution execution);
+
+  /**
+   * 重新挂接一个在途的远端 Capability 执行。
+   *
+   * @param execution 挂接执行描述
+   * @return 已准入的阻塞执行句柄
+   * @throws EnvironmentCapabilityUnavailableException 发送前目标不可用（如本节点不持有该 Environment 的 READY 租约）
+   */
+  Run reattach(ReattachExecution execution) throws EnvironmentCapabilityUnavailableException;
 
   /**
    * 绑定当前 Tool 代次的远端执行观察者。
@@ -79,6 +89,38 @@ public interface ToolGateway {
     public ExpectedFile expectedFile() {
       ToolEditReview editReview = approval.editReview();
       return editReview == null ? null : editReview.expectedFile();
+    }
+  }
+
+  /**
+   * 一次重新挂接远端执行的不可变描述。
+   *
+   * @param invocationId Tool invocation id
+   * @param threadId Thread id
+   * @param request 冻结的 Tool 调用请求
+   * @param environmentId 远端 Environment 路由身份
+   * @param remoteExecutionId 原 owner 发送给远端 Capability 的执行 id
+   * @param timeout 挂接等待上限（通常为 reattachWindow）
+   * @param onRemoteExitConfirmed 收到远端 EXECUTION_EXITED 退出确认时的回调
+   */
+  record ReattachExecution(
+      UUID invocationId,
+      UUID threadId,
+      ToolInvocationRequest request,
+      EnvironmentId environmentId,
+      UUID remoteExecutionId,
+      Duration timeout,
+      Runnable onRemoteExitConfirmed) {
+
+    public ReattachExecution {
+      Objects.requireNonNull(invocationId, "invocationId");
+      Objects.requireNonNull(threadId, "threadId");
+      request = Objects.requireNonNull(request, "request");
+      environmentId = Objects.requireNonNull(environmentId, "environmentId");
+      remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
+      timeout = HarnessStoreTime.requireWholeMillisecondDuration(timeout, "timeout");
+      onRemoteExitConfirmed =
+          Objects.requireNonNull(onRemoteExitConfirmed, "onRemoteExitConfirmed");
     }
   }
 

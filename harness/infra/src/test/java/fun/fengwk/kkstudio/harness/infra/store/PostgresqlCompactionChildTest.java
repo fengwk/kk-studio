@@ -291,6 +291,11 @@ class PostgresqlCompactionChildTest {
           public ToolGateway.Admission admit(ToolGateway.Execution execution) {
             throw new UnsupportedOperationException("no tools in this test");
           }
+
+          @Override
+          public ToolGateway.Run reattach(ToolGateway.ReattachExecution execution) {
+            throw new UnsupportedOperationException("no tools in this test");
+          }
         };
     return new ToolProcessor(
         store,
