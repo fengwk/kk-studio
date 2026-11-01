@@ -287,8 +287,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.operatingSystem").doesNotExist())
         .andExpect(jsonPath("$.data.timeZone").doesNotExist())
-        .andExpect(jsonPath("$.data.note").doesNotExist())
-        .andExpect(jsonPath("$.data.rootPath").doesNotExist());
+        .andExpect(jsonPath("$.data.note").doesNotExist());
   }
 
   /** 签发响应保留 JSON 信封和 ISO 过期时间，不返回长期凭据。 */

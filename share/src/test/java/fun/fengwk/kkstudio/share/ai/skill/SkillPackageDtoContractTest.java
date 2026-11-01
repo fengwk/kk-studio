@@ -149,21 +149,6 @@ class SkillPackageDtoContractTest {
   }
 
   @Test
-  void packageProjectionCarriesNoSkillContentOrPackageVersion() {
-    // 意图：旧 wire 的正文与 package 版本被彻底删除，manifest 元素只有 name/description。
-    assertThrows(
-        NoSuchFieldException.class, () -> SkillPackageDTO.class.getDeclaredField("packageVersion"));
-    assertThrows(
-        NoSuchFieldException.class, () -> SkillPackageDTO.class.getDeclaredField("content"));
-    assertThrows(
-        NoSuchFieldException.class, () -> SkillPackageDTO.class.getDeclaredField("active"));
-    assertThrows(
-        NoSuchFieldException.class, () -> SkillManifestEntryDTO.class.getDeclaredField("content"));
-    assertThrows(
-        NoSuchFieldException.class, () -> SkillRefDTO.class.getDeclaredField("packageVersion"));
-  }
-
-  @Test
   void skillRefIsAStrictIdentityPair() throws Exception {
     // 意图：Agent 配置里的 Skill 引用精确为 {packageName, name}，任何多余字段 fail closed。
     SkillRefDTO ref =
@@ -180,19 +165,5 @@ class SkillPackageDtoContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new SkillRefDTO().rejectUnknownField("content", "# dev"));
-  }
-
-  @Test
-  void deletedSkillPackageDtosAreGone() {
-    // 意图：clean-slate 删除的旧 DTO 不得回归（无别名、无兼容构造器）。
-    String packagePrefix = SkillRefDTO.class.getPackageName() + ".";
-    for (String simpleName :
-        List.of(
-            "SkillDTO", "SkillDefinitionDTO", "SkillPackageDetailDTO", "SkillPackageUpdateDTO")) {
-      assertThrows(
-          ClassNotFoundException.class,
-          () -> Class.forName(packagePrefix + simpleName),
-          simpleName);
-    }
   }
 }

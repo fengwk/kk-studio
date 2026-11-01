@@ -8,8 +8,8 @@ import java.nio.charset.StandardCharsets;
 /**
  * 内置 Agent 初始 prompt 的共享资源入口。
  *
- * <p>内置 Agent 的初始系统提示词属于内置目录资产，按模块资源路径唯一持有；压缩执行与请求预览等消费方按需读取这里的只读文本， 不再由运行时的压缩执行路径持有或暴露该
- * prompt。资源文本逐字读取（不做 trim 或转义），因此与目录初始化写入的初始 prompt 完全一致。
+ * <p>内置 Agent 的初始系统提示词属于内置目录资产，按模块资源路径唯一持有；压缩执行与请求预览等消费方按需读取这里的只读文本。资源文本逐字读取（不做 trim
+ * 或转义），因此与目录初始化写入的初始 prompt 完全一致。
  */
 public final class BuiltinAgentPrompts {
 

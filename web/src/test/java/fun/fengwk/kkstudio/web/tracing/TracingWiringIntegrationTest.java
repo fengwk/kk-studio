@@ -104,18 +104,18 @@ class TracingWiringIntegrationTest {
   }
 
   @Test
-  void startsANewW3cTraceWithoutLegacyHeaders() throws Exception {
+  void clientSuppliedTraceHeadersAreNotTrusted() throws Exception {
     HttpResponse<String> response =
         send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/tracing/probe"))
-                .header("X-Trace-ID", "legacy-trace")
-                .header("X-Span-ID", "legacy-span")
+                .header("X-Trace-ID", "untrusted-trace")
+                .header("X-Span-ID", "untrusted-span")
                 .GET()
                 .build());
 
     assertEquals(200, response.statusCode());
     Map<String, String> fields = fields(response.body());
-    assertNotEquals("legacy-trace", fields.get("traceId"));
+    assertNotEquals("untrusted-trace", fields.get("traceId"));
     assertEquals(fields.get("traceId"), fields.get("mdcTraceId"));
     assertEquals(fields.get("spanId"), fields.get("mdcSpanId"));
   }

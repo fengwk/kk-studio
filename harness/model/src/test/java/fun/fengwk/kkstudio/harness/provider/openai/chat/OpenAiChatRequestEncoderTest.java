@@ -115,11 +115,10 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("始终请求 usage：旧配置字段被忽略，requireDone=false 也不关闭 include_usage")
+  @DisplayName("始终请求 usage：requireDone=false 也不关闭 include_usage")
   void alwaysRequestsUsage() throws Exception {
     OpenAiChatConfiguration config =
-        OpenAiChatConfiguration.parse(
-            "{\"openAiChatIncludeUsage\": false, \"openAiChatRequireDone\": false}");
+        OpenAiChatConfiguration.parse("{\"openAiChatRequireDone\": false}");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =

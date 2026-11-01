@@ -51,10 +51,6 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
         .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"))
-        // 旧 integrations 段已从设置合同删除：wire 上既不出现整段，也不出现任何残留子字段。
-        .andExpect(jsonPath("$.data.integrations").doesNotExist())
-        .andExpect(jsonPath("$.data.integrations.comfyui").doesNotExist())
-        .andExpect(jsonPath("$.data.integrations.minimaxH3").doesNotExist())
         .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());

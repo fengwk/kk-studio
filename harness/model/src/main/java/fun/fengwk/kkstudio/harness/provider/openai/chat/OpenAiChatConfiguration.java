@@ -17,10 +17,9 @@ import java.util.Objects;
 /**
  * OpenAI Chat Completions 适配器配置解析与校验对象。
  *
- * <p>已知字段严格类型与取值校验，未知字段安全忽略，禁止向外泄露原始配置内容。提示缓存只由一个与运行时一致的留存档位字段 {@code promptCacheRetention}（{@link
- * PromptCacheRetention}）表达，不再有协议私有的 capability/policy/mode；缓存 key 由运行时按 Session 提供。成功响应必须携带完整
- * usage，因此 {@code stream_options.include_usage} 恒为 true，不属于配置项；旧配置中的 {@code openAiChatIncludeUsage}
- * 按未知字段忽略。
+ * <p>已知字段严格类型与取值校验，未知字段安全忽略，禁止向外泄露原始配置内容。提示缓存由留存档位字段 {@code promptCacheRetention}（{@link
+ * PromptCacheRetention}）表达；缓存 key 由运行时按 Session 提供。成功响应携带完整 usage，{@code
+ * stream_options.include_usage} 恒为 true，不属于配置项。
  */
 public final class OpenAiChatConfiguration {
 

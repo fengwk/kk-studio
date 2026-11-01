@@ -236,14 +236,13 @@ class AnthropicConfigurationTest {
     assertEquals(AnthropicThinkingMode.BUDGET, AnthropicThinkingMode.valueOf("BUDGET"));
   }
 
-  /** 意图：验证未知字段被忽略且不影响已知字段解析，同时 wire 模型标识不再由配置提供。 */
+  /** 意图：验证未知字段被忽略且不影响已知字段解析。 */
   @Test
-  @DisplayName("未知字段被忽略，wire 模型标识只来自 ModelDescriptor.modelId")
+  @DisplayName("未知字段被忽略")
   void ignoresUnknownFields() {
     AnthropicConfiguration config =
         AnthropicConfiguration.parse(
-            "{\"anthropicThinkingMode\":\"BUDGET\",\"unknownField\":{\"a\":1},"
-                + "\"modelAliases\":{\"MiniMax-M3\":\"claude-fable-5-dd-3M-xaMiniM\"}}");
+            "{\"anthropicThinkingMode\":\"BUDGET\",\"unknownField\":{\"a\":1}}");
     assertEquals(AnthropicThinkingMode.BUDGET, config.anthropicThinkingMode());
     assertEquals(AnthropicConfiguration.parse("{\"anthropicThinkingMode\":\"BUDGET\"}"), config);
   }

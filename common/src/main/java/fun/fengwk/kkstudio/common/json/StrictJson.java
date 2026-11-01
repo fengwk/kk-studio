@@ -23,7 +23,7 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * 严格 JSON 数据绑定：领域 record 就是唯一的数据形态，wire 差异只由 mapper 配置与 mixin 表达，不再为每个类型手写 codec。
+ * 严格 JSON 数据绑定：领域 record 就是唯一的数据形态，wire 差异只由 mapper 配置与 mixin 表达。
  *
  * <p>读取拒绝未知字段、缺失字段（record 每个组件都必须出现，可空组件以显式 {@code null} 出现）、重复键、尾随内容与任何标量强制转换；小数按 {@code
  * BigDecimal} 读取以保留精度；{@link Instant} 只接受 ISO-8601 文本，不接受数字时间戳。写出按 record 组件顺序并显式写出 {@code

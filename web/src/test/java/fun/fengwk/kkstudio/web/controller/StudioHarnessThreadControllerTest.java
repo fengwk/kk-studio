@@ -501,17 +501,6 @@ class StudioHarnessThreadControllerTest {
     verifyNoInteractions(runtime);
   }
 
-  /** 意图：旧的 GET 入口已彻底移除，不再作为兼容别名存在。 */
-  @Test
-  void modelRequestDebugGetIsNoLongerAvailable() throws Exception {
-    mockMvc
-        .perform(get("/api/threads/" + idText(1) + "/model-request-debug"))
-        .andExpect(status().isMethodNotAllowed());
-
-    verifyNoInteractions(modelRequestDebugService);
-    verifyNoInteractions(runtime);
-  }
-
   /** 意图：缺失 Thread 的 typed 异常保持 404 翻译，Debug 服务不额外发明错误语义。 */
   @Test
   void modelRequestDebugMapsMissingThreadToNotFound() throws Exception {

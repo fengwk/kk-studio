@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 6 小时缓存、single-flight、失败保留旧快照与游标分页的服务契约。 */
 class ModelCatalogServiceTest {
 
-  private static final String V2_JSON = resource("service-v2.json");
+  private static final String SERVICE_JSON = resource("service.json");
   private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
 
   private final ModelsDevCatalogParser parser = new ModelsDevCatalogParser();
@@ -44,7 +44,7 @@ class ModelCatalogServiceTest {
         service(
             () -> {
               calls.incrementAndGet();
-              return V2_JSON;
+              return SERVICE_JSON;
             });
 
     ModelCatalogPageDTO first = service.page(null, null, 20);
@@ -74,7 +74,7 @@ class ModelCatalogServiceTest {
               calls.incrementAndGet();
               entered.countDown();
               await(release);
-              return V2_JSON;
+              return SERVICE_JSON;
             });
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -104,7 +104,7 @@ class ModelCatalogServiceTest {
               if (calls.incrementAndGet() == 2) {
                 throw new ModelCatalogFetchException("upstream boom");
               }
-              return V2_JSON;
+              return SERVICE_JSON;
             });
 
     ModelCatalogPageDTO first = service.page(null, null, 20);
@@ -128,7 +128,7 @@ class ModelCatalogServiceTest {
         service(
             () -> {
               calls.incrementAndGet();
-              return V2_JSON;
+              return SERVICE_JSON;
             });
 
     ModelCatalogPageDTO first = service.page(null, null, 2);

@@ -168,16 +168,14 @@ class StudioHarnessCommandBatchControllerTest {
         UUID.fromString(OWNER_ID), ((OwnerRef.Chat) ownerCaptor.getAllValues().get(0)).chatId());
   }
 
-  /**
-   * 测试意图：THREAD target 与它的 cursor 字段已从创建型 union 删除；携带它们（无论是否补齐字段）都在入口 400，且不触达 service 与 runtime。
-   */
+  /** 测试意图：未知 target 类型在入口 400，且不触达 service 与 runtime。 */
   @Test
-  void rejectsDeletedThreadTargetAndCursorFieldsAtTheCreationRoute() throws Exception {
-    String bareThreadTarget =
+  void rejectsUnknownTargetTypeAtTheCreationRoute() throws Exception {
+    String unknownTarget =
         batch(
             """
             {
-              "type":"THREAD",
+              "type":"UNKNOWN_TARGET",
               "threadId":"%s"
             }
             """
@@ -186,9 +184,9 @@ class StudioHarnessCommandBatchControllerTest {
         .perform(
             post("/api/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(bareThreadTarget))
+                .content(unknownTarget))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown target type: THREAD"));
+        .andExpect(jsonPath("$.errors.detail").value("unknown target type: UNKNOWN_TARGET"));
   }
 
   @Test

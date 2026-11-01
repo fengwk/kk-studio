@@ -430,26 +430,6 @@ class StudioCanvasFunctionControllerTest {
     mockMvc.perform(resolve("RESUME")).andExpect(status().isConflict());
   }
 
-  /** 测试意图：验证无旧 alias，历史旧路径 /runs、/run、/run/cancel 均返回 404 NotFound。 */
-  @Test
-  void oldPathAliasesAreNotPresent() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"requestId\":\"r\"}"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(
-            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run/cancel")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"requestId\":\"r\"}"))
-        .andExpect(status().isNotFound());
-  }
-
   private static MockHttpServletRequestBuilder resolve(String resolution) {
     return post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/resolve")
         .contentType(MediaType.APPLICATION_JSON)

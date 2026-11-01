@@ -119,7 +119,7 @@ class StrictJacksonConfigurationTest {
               JacksonException.class,
               () ->
                   mapper.readValue(
-                      "{\"workspacePath\":\"/workspace/project\",\"agentName\":\"code-assistant\","
+                      "{\"unknownField\":\"value\",\"agentName\":\"code-assistant\","
                           + "\"model\":{\"modelName\":"
                           + "\"claude-3-5-sonnet\",\"variant\":\"default\"},"
                           + "\"environmentName\":null}",

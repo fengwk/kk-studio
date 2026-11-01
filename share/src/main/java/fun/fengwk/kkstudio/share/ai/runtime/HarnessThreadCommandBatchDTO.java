@@ -10,8 +10,7 @@ import java.util.List;
 /**
  * 既有 Thread 的通用命令写请求 DTO。
  *
- * <p>入口携带目标 Thread 的并发游标与有序命令，不再携带 owner 或 target：服务端从 path 的 {@code threadId} 解析 Session，
- * 身份认证、资源授权与附件引用校验照常完成，客户端无需伪造产品 owner。
+ * <p>入口携带目标 Thread 的并发游标与有序命令：服务端从 path 的 {@code threadId} 解析 Session， 身份认证、资源授权与附件引用校验照常完成。
  *
  * <p>单条纯 {@code USER_MESSAGE} 的发送批次必须同时省略 {@code expectedHeadEntryId} 与 {@code
  * expectedNextCommandSequence}（携带即 400），由服务端按当前邮箱尾部入队；包含 SET_*、GOAL、CUSTOM 或 NOTIFICATION

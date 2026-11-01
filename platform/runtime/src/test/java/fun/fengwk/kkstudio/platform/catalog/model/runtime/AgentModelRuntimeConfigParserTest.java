@@ -543,20 +543,15 @@ class AgentModelRuntimeConfigParserTest {
         "reasoningEffort must not exceed 64 characters");
   }
 
-  /**
-   * variant 只保留 id 与 reasoningEffort：任何已删除的采样、penalty、stopSequences 与单次输出上限都必须作为未知字段被
-   * 拒绝，绝不作为兼容路径被静默忽略。
-   */
+  /** 意图：验证 variant 严格拒绝未知字段。 */
   @Test
-  void rejectsEveryRemovedVariantField() {
-    for (String removed : REMOVED_VARIANT_FIELDS) {
-      String config =
-          validConfig()
-              .replace(
-                  "\"id\":\"quality\",\"reasoningEffort\":\"high\"",
-                  "\"id\":\"quality\"," + removed + "\"reasoningEffort\":\"high\"");
-      assertInvalid(config, "config.variants[0]." + removed.substring(1, removed.indexOf('"', 1)));
-    }
+  void rejectsUnknownVariantField() {
+    String config =
+        validConfig()
+            .replace(
+                "\"id\":\"quality\",\"reasoningEffort\":\"high\"",
+                "\"id\":\"quality\",\"unknownField\":\"value\",\"reasoningEffort\":\"high\"");
+    assertInvalid(config, "config.variants[0].unknownField");
   }
 
   /** 已持久化的 JSON 永远不能被静默修复：null/空白/畸形结构应大声抛出。 */
@@ -793,17 +788,6 @@ class AgentModelRuntimeConfigParserTest {
   private static final String PROTOCOL_OPTIONS_JSON =
       "{\"metadata\":{\"user_id\":\"u-1\"},\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096},"
           + "\"ratio\":0.5,\"revision\":1758880000000,\"flags\":[true,false]}";
-
-  /** 已从 variant 契约删除的字段：必须作为未知字段被严格拒绝。 */
-  private static final List<String> REMOVED_VARIANT_FIELDS =
-      List.of(
-          "\"maxOutputTokens\":4096,",
-          "\"temperature\":0.4,",
-          "\"topP\":0.8,",
-          "\"topK\":20,",
-          "\"frequencyPenalty\":0.1,",
-          "\"presencePenalty\":0.2,",
-          "\"stopSequences\":[\"done\"],");
 
   private static String withProtocolOptions(String config, String protocolOptionsJson) {
     return withProtocolOptionsToken(

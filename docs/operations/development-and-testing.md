@@ -123,8 +123,7 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 该模式运行同一套 preflight、Java、前端、脚本、文档和敏感数据检查，以及 Daemon 五平台矩阵，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
-V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变；
-退役的 `database-upgrade` 命令必须在启动 Spring 或访问数据库前拒绝。Java 门禁以
+V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变。Java 门禁以
 `mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
 React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动/旧库拒绝与 Node decoder。
 通过后上传仅含 `app.jar` 及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。

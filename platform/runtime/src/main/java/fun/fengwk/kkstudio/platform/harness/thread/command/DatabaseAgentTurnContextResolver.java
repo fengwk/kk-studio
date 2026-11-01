@@ -108,8 +108,7 @@ public final class DatabaseAgentTurnContextResolver {
             "agent not found: " + settings.agentName());
     AgentDefinitionConfigDTO agentConfig = decodeAgentConfig(agent);
 
-    // Environment 只由 branch settings 的可空 environmentName 决定：Issue Run 在启动时已显式 SET_ENVIRONMENT，
-    // 运行时不再按 Issue/阶段反查或覆写。
+    // Environment 只由 branch settings 的可空 environmentName 决定。
     Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
     CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。

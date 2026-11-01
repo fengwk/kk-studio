@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.share.canvas;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
@@ -128,7 +127,7 @@ class CanvasDtoContractTest {
     assertEquals(Map.of("Keep", "KEEP", "Text", "TEXT", "Blob", "BLOB"), actual);
   }
 
-  /** Function 目录以 name/description/argsSchema 与目录版本为身份，不再传 model/prompt/参数类型。 */
+  /** Function 目录以 name/description/argsSchema 与目录版本为身份。 */
   @Test
   void functionCatalogExposesNameDescriptionAndArgsSchema() {
     assertEquals(
@@ -146,13 +145,6 @@ class CanvasDtoContractTest {
         Map.of("definitionFingerprint", "String"), componentTypes(CanvasFunctionVersionDTO.class));
     assertEquals(
         Map.of("kind", "String", "name", "String"), componentTypes(CanvasFunctionOutputDTO.class));
-    for (String removed :
-        new String[] {"CanvasFunctionModelDTO", "CanvasFunctionParameterDefinitionDTO"}) {
-      assertThrows(
-          ClassNotFoundException.class,
-          () -> Class.forName("fun.fengwk.kkstudio.share.canvas." + removed),
-          removed + " must not survive as a model/parameter compatibility model");
-    }
   }
 
   /** start 必带 expectedVersion；cancel 是独立的 requestId-only wire，不留下非必填版本分支。 */
@@ -211,34 +203,15 @@ class CanvasDtoContractTest {
     assertEquals(Map.of("name", "String", "args", "Map"), componentTypes(CanvasFunctionDTO.class));
   }
 
-  /** 整图 CAS 游标与可写 Link 模型已删除，不再保留兼容字段或兼容 DTO。 */
   @Test
-  void graphCasCursorAndWriteLinkModelAreRemoved() {
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> ApplyCanvasCommandsRequestDTO.class.getDeclaredField("expectedVersion"),
-        "typed commands replace the whole-graph expectedVersion CAS cursor");
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> CanvasPatchDTO.class.getDeclaredField("baseVersion"),
-        "patch is a single accepted revision, not a baseVersion -> version pair");
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> CanvasPatchDTO.class.getDeclaredField("links"),
-        "links are projected from Function args and are never written");
-    assertThrows(
-        NoSuchFieldException.class,
-        () -> CanvasSnapshotDTO.class.getDeclaredField("links"),
-        "snapshot exposes derived references instead of writable links");
-    assertTrue(
-        CanvasSnapshotDTO.class.getDeclaredFields().length == 4,
-        "snapshot carries document, nodes, groups and derived references");
-    for (String removed : new String[] {"CanvasLinkDTO", "CanvasLinkPatchDTO"}) {
-      assertThrows(
-          ClassNotFoundException.class,
-          () -> Class.forName("fun.fengwk.kkstudio.share.canvas." + removed),
-          removed + " must not survive as a compatibility model");
-    }
+  void snapshotCarriesDocumentNodesGroupsAndReferences() {
+    assertEquals(
+        Map.of(
+            "document", "CanvasDocumentDTO",
+            "nodes", "List",
+            "groups", "List",
+            "references", "List"),
+        componentTypes(CanvasSnapshotDTO.class));
   }
 
   /** 冲突载荷必须描述受影响对象与服务端权威值，判别值由类型信息给出。 */

@@ -81,7 +81,7 @@ public class ModelsDevCatalogParser {
     return candidates;
   }
 
-  private static final String ID_PREFIX = "models_dev_v2:";
+  private static final String ID_PREFIX = "models_dev:";
 
   private ModelDefaultCandidateDTO toCandidate(
       String provider, String fallbackModelId, JsonNode model) {
