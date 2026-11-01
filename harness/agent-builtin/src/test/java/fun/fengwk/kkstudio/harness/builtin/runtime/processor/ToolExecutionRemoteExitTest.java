@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
@@ -44,6 +45,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ToolExecutionRemoteExitTest {
 
+  private static final EnvironmentId TEST_ENV = EnvironmentId.of(UUID.randomUUID());
+
   @Test
   void remoteAcknowledgementUsesPersistedRegistrationTimeWhenStudioClockIsBehind()
       throws Exception {
@@ -67,7 +70,9 @@ class ToolExecutionRemoteExitTest {
                 // 数据库时钟推进到本地 TOOL 登记之后；Studio confirmer 时钟仍固定在早期 NOW。
                 support.clock.advance(Duration.ofSeconds(10));
                 ToolGateway.RemoteExecutionObserver observer = execution.remoteExecutions();
-                assertTrue(observer.tryStart(remoteId), "first remote registration must succeed");
+                assertTrue(
+                    observer.tryStart(remoteId, TEST_ENV),
+                    "first remote registration must succeed");
                 registered.set(executionFact(support.store, remoteId));
                 ExecutionExitFact local =
                     support.store.transaction(
@@ -81,7 +86,8 @@ class ToolExecutionRemoteExitTest {
                     "the remote registration must be later than the local TOOL registration");
 
                 assertTrue(
-                    observer.tryStart(remoteId), "duplicate registration must stay idempotent");
+                    observer.tryStart(remoteId, TEST_ENV),
+                    "duplicate registration must stay idempotent");
                 repeated.set(executionFact(support.store, remoteId));
 
                 observer.confirmExit(remoteId);
@@ -137,7 +143,7 @@ class ToolExecutionRemoteExitTest {
               progress -> {
                 support.clock.advance(Duration.ofSeconds(10));
                 ToolGateway.RemoteExecutionObserver observer = execution.remoteExecutions();
-                assertTrue(observer.tryStart(remoteId));
+                assertTrue(observer.tryStart(remoteId, TEST_ENV));
                 registered.set(executionFact(support.store, remoteId));
 
                 // proof 已在 journal 落盘后数据库才短暂不可用：异常向调用方传播，但证据必须保留供重放。

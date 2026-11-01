@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
@@ -42,7 +43,7 @@ public interface ToolGateway {
    * ACK；{@link #confirmNotStarted} 只用于确定未发送。发送是否发生不确定时两者都不能调用。
    */
   interface RemoteExecutionObserver {
-    boolean tryStart(UUID remoteExecutionId);
+    boolean tryStart(UUID remoteExecutionId, EnvironmentId environmentId);
 
     void confirmExit(UUID remoteExecutionId);
 

@@ -125,6 +125,14 @@ public record WorkState(
     return new WorkState(nextAvailableAt, wakeVersion, null, null, requiredEnvironmentId);
   }
 
+  /** 在 lease 仍有效时主动释放 claim：清除 lease，使 work 立即可被认领；不改变 wakeVersion 与环境亲和性。 */
+  public WorkState release(String token, Instant now) {
+    Objects.requireNonNull(now, "now");
+    requireActiveLease(token, now);
+    Instant nextAvailableAt = availableAt.isAfter(now) ? now : availableAt;
+    return new WorkState(nextAvailableAt, wakeVersion, null, null, requiredEnvironmentId);
+  }
+
   /** 当前 lease 在 {@code now} 是否仍有效。 */
   public boolean hasActiveLeaseAt(Instant now) {
     return leaseUntil != null && leaseUntil.isAfter(now);

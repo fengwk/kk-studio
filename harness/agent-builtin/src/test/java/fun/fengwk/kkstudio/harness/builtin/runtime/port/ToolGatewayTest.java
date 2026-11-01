@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.PortTestData;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
@@ -223,7 +224,7 @@ class ToolGatewayTest {
   private static ToolGateway.RemoteExecutionObserver recordingObserver() {
     return new ToolGateway.RemoteExecutionObserver() {
       @Override
-      public boolean tryStart(UUID remoteExecutionId) {
+      public boolean tryStart(UUID remoteExecutionId, EnvironmentId environmentId) {
         return true;
       }
 

@@ -1484,6 +1484,7 @@ create table harness_execution_exit (
     owner_lease_token varchar(128) not null,
     kind varchar(16) not null,
     parent_execution_id uuid,
+    environment_id uuid,
     state varchar(32) not null,
     registered_at timestamptz(3) not null,
     confirmed_at timestamptz(3),
@@ -1495,8 +1496,8 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('MODEL', 'TOOL') and parent_execution_id is null)
-        or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id)
+        (kind in ('MODEL', 'TOOL') and parent_execution_id is null and environment_id is null)
+        or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
     ),
     constraint ck_harness_execution_exit_state check (
         (state = 'UNCONFIRMED' and confirmed_at is null and abandoned_at is null)
@@ -1522,6 +1523,7 @@ comment on column harness_execution_exit.attempt is '该 invocation 的具体执
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
 comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 TOOL 代次上的 REMOTE';
 comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 执行代次；本地执行为空';
+comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
 comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
@@ -1540,8 +1542,13 @@ create index idx_harness_execution_exit_parent
     on harness_execution_exit (parent_execution_id)
     where parent_execution_id is not null;
 
+create index idx_harness_execution_exit_unconfirmed_remote
+    on harness_execution_exit (environment_id)
+    where kind = 'REMOTE' and state = 'UNCONFIRMED';
+
 comment on index idx_harness_execution_exit_thread is 'Thread 深删按 thread_id 删除执行代次，并服务删除 Thread 时的外键检查';
 comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 TOOL 代次的自引用外键检查';
+comment on index idx_harness_execution_exit_unconfirmed_remote is '按 Environment 读取尚未确认退出的远端执行代次';
 
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts

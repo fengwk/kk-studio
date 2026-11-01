@@ -143,6 +143,7 @@ class HarnessRuntimeAbandonExitTest {
             "lease-1",
             ExecutionExitKind.TOOL,
             null,
+            null,
             ExecutionExitState.UNCONFIRMED,
             registeredAt,
             null,

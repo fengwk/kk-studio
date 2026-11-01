@@ -8,6 +8,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -333,6 +335,11 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     } else {
       node.put("parentExecutionId", record.parentExecutionId().toString());
     }
+    if (record.environmentId() == null) {
+      node.putNull("environmentId");
+    } else {
+      node.put("environmentId", record.environmentId().toString());
+    }
     node.put("targetState", record.targetState().name());
     node.put("confirmedAt", record.confirmedAt().toString());
     try {
@@ -352,6 +359,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         "ownerLeaseToken",
         "kind",
         "parentExecutionId",
+        "environmentId",
         "targetState",
         "confirmedAt");
     JsonNode attemptNode = node.get("attempt");
@@ -361,6 +369,11 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     JsonNode parentNode = node.get("parentExecutionId");
     UUID parent =
         parentNode == null || parentNode.isNull() ? null : uuid(parentNode, "parentExecutionId");
+    JsonNode envNode = node.get("environmentId");
+    EnvironmentId environmentId =
+        envNode == null || envNode.isNull()
+            ? null
+            : EnvironmentId.parse(text(envNode, "environmentId"));
     return new ExecutionExitJournalRecord(
         uuid(node.get("executionId"), "executionId"),
         uuid(node.get("threadId"), "threadId"),
@@ -369,6 +382,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         text(node.get("ownerLeaseToken"), "ownerLeaseToken"),
         ExecutionExitKind.valueOf(text(node.get("kind"), "kind")),
         parent,
+        environmentId,
         ExecutionExitState.valueOf(text(node.get("targetState"), "targetState")),
         Instant.parse(text(node.get("confirmedAt"), "confirmedAt")));
   }

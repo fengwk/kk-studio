@@ -193,7 +193,7 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据
 
 1. 在旧部署“设置 → 同步”导出配置 YAML，另存旧 App/Daemon 镜像、运行配置与密钥文件、
    全库 dump 与 S3 业务对象；确认备份可恢复后保留旧库，不把旧库作为新库目标。
-2. 新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用新版本产物初始化当前 Schema。
+2. 新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用新版本产物初始化当前 Schema。同时清空各 App 实例的 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` journal 卷，新版本 journal 记录包含固定的 `environmentId` 等字段，不兼容旧版本未确认文件。
 3. 部署新版本 App 与同版本 Daemon 并指向新库。旧 YAML 只作重建参考，不能原样导入：按当前契约整理
    全局模型名、Agent 引用与价格后，经界面或配置导入校验写入；Provider 凭据、Environment 注册令牌与
    安装设置逐项核对。会话、项目、画布、运行历史与 Blob 引用只保留在旧库和备份中。

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.FakeRun;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -57,6 +58,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 未交付。无论断言成败都通过 TWR 释放并等待执行体退出，后续清理独立尝试且不覆盖主体失败；释放后的 Studio 退出确认必须只交付一次。
  */
 class HarnessRuntimeStopExitContractTest {
+
+  private static final EnvironmentId TEST_ENV = EnvironmentId.of(UUID.randomUUID());
 
   @Test
   void stopKeepsRunningStatusAndWithholdsJoinUntilTheEnteredToolExits() throws Exception {
@@ -176,7 +179,7 @@ class HarnessRuntimeStopExitContractTest {
           fixture.gateway.queueRun(
               progress -> {
                 ToolGateway.Execution execution = fixture.gateway.executions.get(0);
-                started.set(execution.remoteExecutions().tryStart(remoteId));
+                started.set(execution.remoteExecutions().tryStart(remoteId, TEST_ENV));
                 execution.remoteExecutions().confirmExit(remoteId);
                 execution.remoteExecutions().confirmExit(remoteId);
                 return new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled"));
@@ -214,6 +217,7 @@ class HarnessRuntimeStopExitContractTest {
                                       "other-lease",
                                       remote.kind(),
                                       remote.parentExecutionId(),
+                                      remote.environmentId(),
                                       ExecutionExitState.UNCONFIRMED,
                                       remote.registeredAt(),
                                       null,
@@ -253,7 +257,8 @@ class HarnessRuntimeStopExitContractTest {
                 observer.set(remote);
                 starts.set(
                     List.of(
-                        remote.tryStart(acknowledgedRemote), remote.tryStart(notStartedRemote)));
+                        remote.tryStart(acknowledgedRemote, TEST_ENV),
+                        remote.tryStart(notStartedRemote, TEST_ENV)));
                 registered.countDown();
                 while (true) {
                   try {
@@ -416,7 +421,8 @@ class HarnessRuntimeStopExitContractTest {
 
         UUID afterStopRemote = UUID.randomUUID();
         assertFalse(
-            observer.get().tryStart(afterStopRemote), "Stop already won; no remote may start");
+            observer.get().tryStart(afterStopRemote, TEST_ENV),
+            "Stop already won; no remote may start");
         assertTrue(fixture.store.transaction(tx -> tx.exits().find(afterStopRemote)).isEmpty());
       }
     }
@@ -443,7 +449,7 @@ class HarnessRuntimeStopExitContractTest {
                 ToolGateway.RemoteExecutionObserver remote =
                     fixture.gateway.executions.get(0).remoteExecutions();
                 observer.set(remote);
-                started.set(remote.tryStart(legalRemoteId));
+                started.set(remote.tryStart(legalRemoteId, TEST_ENV));
                 registered.countDown();
                 try {
                   if (!release.await(5, TimeUnit.SECONDS)) {
@@ -487,6 +493,7 @@ class HarnessRuntimeStopExitContractTest {
                 local.ownerLeaseToken(),
                 ExecutionExitKind.TOOL,
                 null,
+                null,
                 ExecutionExitState.UNCONFIRMED,
                 local.registeredAt(),
                 null,
@@ -500,6 +507,7 @@ class HarnessRuntimeStopExitContractTest {
                 local.ownerLeaseToken(),
                 ExecutionExitKind.REMOTE,
                 foreignParent.executionId(),
+                TEST_ENV,
                 ExecutionExitState.UNCONFIRMED,
                 NOW,
                 null,

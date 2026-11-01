@@ -201,6 +201,7 @@ class ExecutionExitVirtualThreadPinningTest {
                 "lease-1",
                 ExecutionExitKind.TOOL,
                 null,
+                null,
                 ExecutionExitState.STUDIO_EXITED,
                 Instant.EPOCH);
         CountDownLatch contenderStarted = new CountDownLatch(1);
@@ -272,6 +273,7 @@ class ExecutionExitVirtualThreadPinningTest {
                 "lease-1",
                 ExecutionExitKind.TOOL,
                 null,
+                null,
                 ExecutionExitState.STUDIO_EXITED,
                 Instant.EPOCH));
       }
@@ -312,6 +314,7 @@ class ExecutionExitVirtualThreadPinningTest {
           1,
           "lease-1",
           ExecutionExitKind.TOOL,
+          null,
           null,
           ExecutionExitState.UNCONFIRMED,
           Instant.EPOCH,

@@ -300,6 +300,7 @@ public final class ExecutionExitConfirmer {
         expected.ownerLeaseToken(),
         expected.kind(),
         expected.parentExecutionId(),
+        expected.environmentId(),
         state,
         observedAt);
   }

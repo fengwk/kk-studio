@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
@@ -150,8 +151,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
   private final class RemoteExecution implements ToolGateway.RemoteExecutionObserver {
     @Override
-    public boolean tryStart(UUID remoteExecutionId) {
+    public boolean tryStart(UUID remoteExecutionId, EnvironmentId environmentId) {
       Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
+      Objects.requireNonNull(environmentId, "environmentId");
       if (abandoned.get()) {
         return false;
       }
@@ -173,7 +175,8 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
                     attempt,
                     claim.leaseToken(),
                     ExecutionExitKind.REMOTE,
-                    executionId());
+                    executionId(),
+                    environmentId);
               });
       if (remote == null) {
         return false;

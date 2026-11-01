@@ -235,6 +235,22 @@ final class InMemoryWorkStore implements WorkStore {
   }
 
   @Override
+  public boolean release(ClaimedWork claim) {
+    tx.checkOpen();
+    Instant now = tx.now();
+    Objects.requireNonNull(claim, "claim");
+    tx.locks().requireCanLockWork(claim.target());
+    Work work = state.works.get(claim.target());
+    if (work == null || !work.isOwnedBy(claim.leaseToken(), now)) {
+      return false;
+    }
+    tx.locks().recordWorkLock(claim.target());
+    Work released = work.release(claim.leaseToken(), now);
+    state.works.put(released.target(), released);
+    return true;
+  }
+
+  @Override
   public void reschedule(ClaimedWork claim, Duration delay) {
     tx.checkOpen();
     Instant now = tx.now();

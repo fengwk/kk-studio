@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 
@@ -27,6 +28,12 @@ public interface ExecutionExitStore {
 
   /** 读取 Thread 上尚未确认退出的执行代次。 */
   List<ExecutionExitFact> loadUnconfirmed(UUID threadId);
+
+  /** 读取指定 Environment 下全部尚未确认退出的远端执行代次，按 (registeredAt, executionId) 升序排序。 */
+  List<ExecutionExitFact> loadUnconfirmedRemote(EnvironmentId environmentId);
+
+  /** 读取指定 Invocation 与 attempt 下全部远端执行代次，按 (registeredAt, executionId) 升序排序。 */
+  List<ExecutionExitFact> loadRemote(UUID invocationId, int attempt);
 
   /** 按 executionId 读取执行代次。 */
   Optional<ExecutionExitFact> find(UUID executionId);

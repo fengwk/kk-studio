@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Instant;
@@ -19,6 +20,7 @@ public record ExecutionExitFact(
     String ownerLeaseToken,
     ExecutionExitKind kind,
     UUID parentExecutionId,
+    EnvironmentId environmentId,
     ExecutionExitState state,
     Instant registeredAt,
     Instant confirmedAt,
@@ -38,8 +40,14 @@ public record ExecutionExitFact(
       if (parentExecutionId.equals(executionId)) {
         throw new IllegalArgumentException("remote execution cannot parent itself");
       }
-    } else if (parentExecutionId != null) {
-      throw new IllegalArgumentException("only a remote execution has a parent execution");
+      environmentId = Objects.requireNonNull(environmentId, "environmentId");
+    } else {
+      if (parentExecutionId != null) {
+        throw new IllegalArgumentException("only a remote execution has a parent execution");
+      }
+      if (environmentId != null) {
+        throw new IllegalArgumentException("only a remote execution has an environment id");
+      }
     }
     state = Objects.requireNonNull(state, "state");
     if (state == ExecutionExitState.REMOTE_ACKNOWLEDGED && kind != ExecutionExitKind.REMOTE) {
@@ -87,7 +95,8 @@ public record ExecutionExitFact(
         && attempt == other.attempt
         && ownerLeaseToken.equals(other.ownerLeaseToken)
         && kind == other.kind
-        && Objects.equals(parentExecutionId, other.parentExecutionId);
+        && Objects.equals(parentExecutionId, other.parentExecutionId)
+        && Objects.equals(environmentId, other.environmentId);
   }
 
   /** 远端事实只能挂在同 Thread / invocation / attempt / lease 的本地 TOOL 代次下。 */
@@ -130,6 +139,7 @@ public record ExecutionExitFact(
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        environmentId,
         ExecutionExitState.ABANDONED,
         registeredAt,
         null,
@@ -163,6 +173,7 @@ public record ExecutionExitFact(
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        environmentId,
         next,
         registeredAt,
         confirmed,

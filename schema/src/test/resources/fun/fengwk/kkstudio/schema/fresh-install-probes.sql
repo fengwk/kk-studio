@@ -1198,6 +1198,29 @@ select pg_temp.rejects('abandonment cannot precede registration',
     $$update harness_execution_exit set abandoned_at = registered_at - interval '1 millisecond'
       where execution_id = pg_temp.uid(1700)$$,
     '23514', 'ck_harness_execution_exit_time');
+select pg_temp.rejects('a local TOOL execution cannot specify an environment_id',
+    $$insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
+        owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
+        values (pg_temp.uid(1702), pg_temp.uid(310), pg_temp.uid(1701), 2, 'lease-1', 'TOOL',
+            null, pg_temp.uid(901), 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null)$$,
+    '23514', 'ck_harness_execution_exit_kind');
+select pg_temp.rejects('a REMOTE execution must specify an environment_id',
+    $$insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
+        owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
+        values (pg_temp.uid(1703), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'REMOTE',
+            pg_temp.uid(1700), null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null)$$,
+    '23514', 'ck_harness_execution_exit_kind');
+insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
+    owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at)
+    values (pg_temp.uid(1704), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'REMOTE',
+        pg_temp.uid(1700), pg_temp.uid(901), 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
+select pg_temp.assert_true('remote execution exit fact records environment_id and parent',
+    (select kind = 'REMOTE' and parent_execution_id = pg_temp.uid(1700) and environment_id = pg_temp.uid(901)
+        from harness_execution_exit where execution_id = pg_temp.uid(1704)));
+select pg_temp.assert_true('unconfirmed remote execution partial index exists',
+    exists(select 1 from pg_indexes where schemaname = 'public'
+        and tablename = 'harness_execution_exit'
+        and indexname = 'idx_harness_execution_exit_unconfirmed_remote'));
 
 -- ---------------------------------------------------------------------------
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload

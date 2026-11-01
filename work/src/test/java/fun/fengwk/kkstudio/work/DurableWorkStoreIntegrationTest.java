@@ -168,6 +168,44 @@ class DurableWorkStoreIntegrationTest {
     assertTrue(issues.find(id).isEmpty());
   }
 
+  /** 释放租约使 Work 立即可被他人领取，且不改变 wakeVersion；失权时返回 false。 */
+  @Test
+  void releaseMakesWorkImmediatelyClaimableAndRejectsStaleClaims() {
+    UUID id = UUID.randomUUID();
+    issues.request(id);
+    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    assertEquals(1L, claim.claimedWakeVersion());
+
+    // 伪造 token 释放返回 false
+    assertFalse(
+        issues.release(new WorkClaim(id, claim.claimedWakeVersion(), "wrong", claim.leaseUntil())));
+
+    // 行不存在释放返回 false
+    assertFalse(
+        issues.release(
+            new WorkClaim(
+                UUID.randomUUID(), claim.claimedWakeVersion(), "owner", claim.leaseUntil())));
+
+    // 有效持有释放成功
+    assertTrue(issues.release(claim));
+
+    // 释放后原 claim 再次释放返回 false（幂等，不可再释放）
+    assertFalse(issues.release(claim));
+
+    // 释放后其他 worker 立即可以领取，wakeVersion 依然是 1
+    WorkClaim next = issues.claimNext("new-owner", LEASE).orElseThrow();
+    assertEquals(id, next.targetId());
+    assertEquals(1L, next.claimedWakeVersion());
+    assertEquals("new-owner", next.leaseToken());
+
+    // 过期后释放返回 false
+    jdbc.sql(
+            "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_id = :id")
+        .param("id", id)
+        .update();
+    assertFalse(issues.release(next));
+  }
+
   /** 行锁 API 必须显式加入外层事务，且不接受错误或过期 token。 */
   @Test
   void lockRequiresTransactionAndRejectsWrongOrExpiredOwner() {

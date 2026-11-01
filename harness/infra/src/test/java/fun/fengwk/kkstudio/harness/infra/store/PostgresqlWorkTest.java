@@ -497,6 +497,47 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     return milliseconds == null ? 0L : Math.round(milliseconds);
   }
 
+  /** 测试意图：release(ClaimedWork) 释放 Work 租约并使其立即可被重新认领，同时保留 wakeVersion 与环境亲和性。 */
+  @Test
+  void releaseMakesWorkImmediatelyClaimableAndPreservesIdentity() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID threadId = baseline.threadId();
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, threadId);
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(target);
+          return null;
+        });
+
+    Optional<ClaimedWork> claimOpt =
+        store.transaction(
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-1", CLAIM_LEASE));
+    ClaimedWork claim = claimOpt.orElseThrow();
+    assertEquals(target, claim.target());
+    assertEquals("lease-node-1", claim.leaseToken());
+
+    Optional<ClaimedWork> anotherClaimBeforeRelease =
+        store.transaction(
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-2", CLAIM_LEASE));
+    assertTrue(anotherClaimBeforeRelease.isEmpty());
+
+    store.transaction(
+        tx -> {
+          assertTrue(tx.work().release(claim));
+          return null;
+        });
+
+    Optional<ClaimedWork> newClaimOpt =
+        store.transaction(
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, "lease-node-2", CLAIM_LEASE));
+    ClaimedWork newClaim = newClaimOpt.orElseThrow();
+    assertEquals(target, newClaim.target());
+    assertEquals("lease-node-2", newClaim.leaseToken());
+    assertEquals(claim.claimedWakeVersion(), newClaim.claimedWakeVersion());
+  }
+
   private static void seedEnvironment(JdbcTemplate jdbc, EnvironmentId env) {
     jdbc.update(
         """

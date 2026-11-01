@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -225,7 +226,10 @@ class ExecutionConcurrentDeletionTest {
     ToolProcessorTestSupport.FakeRun run =
         new ToolProcessorTestSupport.FakeRun(
             progress -> {
-              if (remoteInBody != null && !execution.remoteExecutions().tryStart(remoteInBody)) {
+              if (remoteInBody != null
+                  && !execution
+                      .remoteExecutions()
+                      .tryStart(remoteInBody, EnvironmentId.of(UUID.randomUUID()))) {
                 throw new IllegalStateException("remote registration must succeed");
               }
               if (armInBody) {
