@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -34,16 +35,28 @@ import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -101,16 +114,41 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private ProductionDaemonFixture daemon;
 
+  private BrowserDriver browserDriver;
+
+  private Path browserTempDir;
+
   @AfterEach
   void tearDown() {
     RuntimeException failure = null;
     try {
+      if (browserDriver != null) {
+        try {
+          browserDriver.close();
+        } catch (RuntimeException error) {
+          failure = error;
+        } finally {
+          browserDriver = null;
+        }
+      }
+      if (browserTempDir != null) {
+        try {
+          deleteTree(browserTempDir);
+        } catch (Exception ignored) {
+        } finally {
+          browserTempDir = null;
+        }
+      }
       if (daemon != null) {
         daemon.close();
         daemon = null;
       }
     } catch (RuntimeException error) {
-      failure = error;
+      if (failure == null) {
+        failure = error;
+      } else {
+        failure.addSuppressed(error);
+      }
     } finally {
       browser.dispatcher().executorService().shutdown();
       browser.connectionPool().evictAll();
@@ -326,6 +364,92 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           fetchView(environmentId, freshView, freshCookie, "/").toLowerCase().contains("<html"),
           "the replacement code-server must serve the new view");
       closeView(environmentId, freshView, documentId, freshEpoch);
+    }
+  }
+
+  /** Chromium 真实工作台验收：首屏、内置终端执行命令、Monaco 文件编辑与保存。 */
+  @Test
+  @Order(5)
+  void drivesRealManagedCodeServerWorkbenchInChromium() throws Exception {
+    Path playwright = explicitPlaywrightModule();
+    Path node = nodeBinary();
+
+    browserTempDir = Files.createTempDirectory("kk-ide-br-");
+    Files.setPosixFilePermissions(browserTempDir, PosixFilePermissions.fromString("rwx------"));
+
+    String environmentId = startEnvironmentAndDaemon();
+    Path workspace = daemon.workspaceDirectory();
+    Files.writeString(
+        workspace.resolve("editable.txt"), "initial text in workspace\n", StandardCharsets.UTF_8);
+
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+      long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      String entryUrl = opened.path("entryUrl").asText();
+
+      browserDriver = BrowserDriver.start(node, recordsDir());
+      browserDriver.send(
+          Map.of(
+              "playwrightModule",
+              playwright.toString(),
+              "baseUrl",
+              baseUrl(),
+              "environmentId",
+              environmentId,
+              "documentId",
+              documentId.toString(),
+              "workspaceDirectory",
+              workspace.toString(),
+              "browserTempDirectory",
+              browserTempDir.toString(),
+              "entryUrl",
+              entryUrl,
+              "viewId",
+              viewId.toString(),
+              "bindingEpoch",
+              Long.toString(bindingEpoch)));
+
+      browserDriver.await("workbench-ready");
+      browserDriver.await("terminal-success");
+
+      // 宿主文件系统强断言：终端执行输出与退出码
+      Path outputPath = workspace.resolve("test-output.txt");
+      Path exitCodePath = workspace.resolve("exit-code.txt");
+      assertTrue(Files.isRegularFile(outputPath), "test-output.txt must be generated by terminal");
+      assertEquals(
+          "hello from terminal",
+          Files.readString(outputPath, StandardCharsets.UTF_8).trim(),
+          "test-output.txt must contain the command output");
+      assertTrue(Files.isRegularFile(exitCodePath), "exit-code.txt must be generated by terminal");
+      assertEquals(
+          "EXIT_CODE=0",
+          Files.readString(exitCodePath, StandardCharsets.UTF_8).trim(),
+          "exit-code.txt must confirm successful exit code");
+
+      browserDriver.await("file-saved");
+
+      // 宿主文件系统强断言：Monaco UI 编辑并保存的内容
+      Path editablePath = workspace.resolve("editable.txt");
+      String saved = Files.readString(editablePath, StandardCharsets.UTF_8);
+      assertTrue(
+          saved.contains("initial text in workspace"),
+          "saved file must retain initial text: " + saved);
+      assertTrue(
+          saved.contains("appended by playwright in monaco editor"),
+          "saved file must contain appended text from Monaco UI: " + saved);
+
+      browserDriver.proceed();
+      browserDriver.await("done");
+      browserDriver.finish();
+
+      closeView(environmentId, viewId, documentId, bindingEpoch);
     }
   }
 
@@ -673,6 +797,20 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
+  private Path explicitPlaywrightModule() {
+    String configured = System.getProperty(PLAYWRIGHT_MODULE_PROPERTY);
+    assumeTrue(
+        configured != null && !configured.isBlank(),
+        "Playwright acceptance is opt-in: configure -D"
+            + PLAYWRIGHT_MODULE_PROPERTY
+            + "=<path-to-@playwright/test>");
+    Path module = Path.of(configured).toAbsolutePath().normalize();
+    assertTrue(
+        Files.isDirectory(module) || Files.isRegularFile(module),
+        "the configured Playwright module path does not exist: " + module);
+    return module;
+  }
+
   private Path explicitCodeServerRelease() {
     String configured = System.getProperty(CODE_SERVER_RELEASE_PROPERTY);
     assertNotNull(configured, "explicit code-server release path is required");
@@ -818,6 +956,167 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     @Override
     public void close() {
       socket.close(1000, "acceptance complete");
+    }
+  }
+
+  /** 拥有 Node/Chromium 进程并使用不含敏感数据的行协议同步执行状态。 */
+  private static final class BrowserDriver implements AutoCloseable {
+    private final Process process;
+    private final BufferedReader output;
+    private final BufferedWriter input;
+    private final Path stderrLog;
+    private final Set<ProcessHandle> owned = new LinkedHashSet<>();
+    private final ExecutorService reader =
+        Executors.newSingleThreadExecutor(
+            task -> {
+              Thread thread = new Thread(task, "ide-browser-events");
+              thread.setDaemon(true);
+              return thread;
+            });
+    private final JsonMapper mapper = JsonMapper.builder().build();
+    private String stage = "starting";
+
+    private BrowserDriver(Process process, Path stderrLog) {
+      this.process = process;
+      this.stderrLog = stderrLog;
+      this.output =
+          new BufferedReader(
+              new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+      this.input =
+          new BufferedWriter(
+              new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+    }
+
+    static BrowserDriver start(Path node, Path records) throws IOException {
+      Path script =
+          repoRoot()
+              .resolve(
+                  "web/src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-production-browser.mjs");
+      Path log = Files.createTempFile(records, "ide-browser-", ".err.log");
+      Files.setPosixFilePermissions(log, PosixFilePermissions.fromString("rw-------"));
+      ProcessBuilder builder = new ProcessBuilder(node.toString(), script.toString());
+      builder.redirectError(log.toFile());
+      builder.environment().put("no_proxy", "127.0.0.1,localhost,::1");
+      builder.environment().put("NO_PROXY", "127.0.0.1,localhost,::1");
+      return new BrowserDriver(builder.start(), log);
+    }
+
+    void send(Object value) throws IOException {
+      input.write(mapper.writeValueAsString(value));
+      input.newLine();
+      input.flush();
+    }
+
+    void proceed() throws IOException {
+      send(Map.of("continue", true));
+    }
+
+    JsonNode await(String expected) throws Exception {
+      while (true) {
+        Future<String> line = reader.submit(output::readLine);
+        String event = line.get(120, TimeUnit.SECONDS);
+        captureDescendants();
+        if (event == null) {
+          throw new AssertionError("browser driver exited during " + stage + "; see " + stderrLog);
+        }
+        JsonNode frame;
+        try {
+          frame = mapper.readTree(event);
+        } catch (RuntimeException error) {
+          throw new AssertionError("invalid browser driver event at " + stage);
+        }
+        String type = safeLabel(frame.path("event").asText());
+        if ("stage".equals(type)) {
+          stage = safeLabel(frame.path("stage").asText());
+          continue;
+        }
+        if ("failure".equals(type)) {
+          throw new AssertionError(
+              "browser driver failed at "
+                  + safeLabel(frame.path("stage").asText())
+                  + " ("
+                  + safeLabel(frame.path("detail").asText())
+                  + "); see "
+                  + stderrLog);
+        }
+        assertEquals(expected, type, "unexpected browser driver event at " + stage);
+        return frame;
+      }
+    }
+
+    private static String safeLabel(String value) {
+      return value.matches("[A-Za-z0-9_-]{1,60}") ? value : "invalid";
+    }
+
+    void finish() throws Exception {
+      input.close();
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "browser driver must exit after closing");
+      assertEquals(0, process.exitValue(), "browser driver must exit cleanly; see " + stderrLog);
+    }
+
+    private void captureDescendants() {
+      owned.addAll(process.toHandle().descendants().toList());
+    }
+
+    @Override
+    public void close() {
+      try {
+        captureDescendants();
+      } catch (RuntimeException ignored) {
+      }
+      try {
+        reader.shutdownNow();
+      } catch (RuntimeException ignored) {
+      }
+      try {
+        input.close();
+      } catch (IOException ignored) {
+      }
+      try {
+        output.close();
+      } catch (IOException ignored) {
+      }
+      process.destroy();
+      try {
+        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+          process.destroyForcibly();
+        }
+      } catch (InterruptedException ignored) {
+        process.destroyForcibly();
+      }
+      for (ProcessHandle handle : owned) {
+        try {
+          if (handle.isAlive()) {
+            handle.destroy();
+          }
+        } catch (RuntimeException ignored) {
+        }
+      }
+      for (ProcessHandle handle : owned) {
+        try {
+          if (handle.isAlive()) {
+            handle.destroyForcibly();
+          }
+        } catch (RuntimeException ignored) {
+        }
+      }
+    }
+  }
+
+  private static void deleteTree(Path path) throws IOException {
+    if (Files.notExists(path)) {
+      return;
+    }
+    try (var stream = Files.walk(path)) {
+      stream
+          .sorted(Comparator.reverseOrder())
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (IOException ignored) {
+                }
+              });
     }
   }
 }
