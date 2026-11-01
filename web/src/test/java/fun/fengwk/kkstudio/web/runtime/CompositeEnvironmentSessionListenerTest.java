@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -17,6 +19,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.execution.RemoteExitReconciler;
 import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
@@ -39,6 +42,8 @@ class CompositeEnvironmentSessionListenerTest {
   private ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider;
   private IdeLeaseCoordinator leaseCoordinator;
   private ObjectProvider<IdeLeaseCoordinator> leaseCoordinatorProvider;
+  private RemoteExitReconciler reconciler;
+  private ObjectProvider<RemoteExitReconciler> reconcilerProvider;
   private EnvironmentSessionListener listener;
 
   @SuppressWarnings("unchecked")
@@ -78,9 +83,20 @@ class CompositeEnvironmentSessionListenerTest {
         .when(leaseCoordinatorProvider)
         .ifAvailable(any());
 
+    reconciler = mock(RemoteExitReconciler.class);
+    reconcilerProvider = mock(ObjectProvider.class);
+    doAnswer(
+            invocation -> {
+              Consumer<RemoteExitReconciler> consumer = invocation.getArgument(0);
+              consumer.accept(reconciler);
+              return null;
+            })
+        .when(reconcilerProvider)
+        .ifAvailable(any());
+
     listener =
         config.compositeEnvironmentSessionListener(
-            dispatcherProvider, orchestratorProvider, leaseCoordinatorProvider);
+            dispatcherProvider, orchestratorProvider, leaseCoordinatorProvider, reconcilerProvider);
   }
 
   /** 队列按每个并发槽 8 个排队任务计算，容量用尽时 AbortPolicy 拒绝。 */
@@ -103,12 +119,24 @@ class CompositeEnvironmentSessionListenerTest {
   }
 
   @Test
+  void remoteExitReconcileExecutorCreatesVirtualThreadExecutor() {
+    ExecutorService executor = new HarnessEnvironmentConfiguration().remoteExitReconcileExecutor();
+    try {
+      assertNotNull(executor);
+      assertFalse(executor.isShutdown());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void wakesWorkDispatcherAndTriggersSkillSync() {
     EnvironmentId envId = EnvironmentId.of(UUID.randomUUID());
     assertDoesNotThrow(() -> listener.onEnvironmentReady(envId));
 
     verify(workDispatcher).wake();
     verify(orchestrator).onEnvironmentReady(envId);
+    verify(reconciler).onEnvironmentReady(envId);
   }
 
   @Test
@@ -120,6 +148,19 @@ class CompositeEnvironmentSessionListenerTest {
 
     verify(workDispatcher).wake();
     verify(orchestrator).onEnvironmentReady(envId);
+    verify(reconciler).onEnvironmentReady(envId);
+  }
+
+  @Test
+  void exitReconciliationExceptionDoesNotPropagate() {
+    doThrow(new IllegalStateException("exit reconcile failed"))
+        .when(reconciler)
+        .onEnvironmentReady(any());
+
+    EnvironmentId envId = EnvironmentId.of(UUID.randomUUID());
+    assertDoesNotThrow(() -> listener.onEnvironmentReady(envId));
+
+    verify(reconciler).onEnvironmentReady(envId);
   }
 
   @Test

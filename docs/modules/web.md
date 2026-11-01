@@ -42,8 +42,8 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，model executor 
 装配通知 codec、超限 payload 缓冲、本地优先 realtime 总线，以及流式追帧 codec 与应用服务。
 
 [`HarnessEnvironmentConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessEnvironmentConfiguration.java)
-装配 Skill 同步执行器与编排器，并把 dispatcher 唤醒、Skill 同步、IDE 租约心跳和换代清理收进同一个会话监听器。
-Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需要 Harness 会话或 store。
+装配 Skill 同步执行器与编排器、远端退出对账专用虚拟线程 Executor 与 RemoteExitReconciler，并把 dispatcher 唤醒、Skill 同步、远端退出事实对账、IDE 租约心跳和换代清理收进同一个会话监听器。
+Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需要 Harness 会话或 store。各动作在监听器内通过 ObjectProvider 延迟解析并各自隔离运行时异常。
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
