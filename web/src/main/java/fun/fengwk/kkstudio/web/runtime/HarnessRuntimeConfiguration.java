@@ -257,7 +257,7 @@ public class HarnessRuntimeConfiguration {
     return new HarnessRuntimeLifecycle(
         properties.isWorkersEnabled(),
         dispatcher,
-        modelProcessor,
+        modelProcessor::hasActiveExecution,
         toolProcessor,
         daemonServerProvider,
         properties.getDrainTimeout());

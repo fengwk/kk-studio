@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.SmartLifecycle;
 
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -13,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * Harness worker dispatcher 生命周期与节点优雅退出排空编排。
@@ -39,7 +39,7 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
 
   private final boolean workersEnabled;
   private final HarnessWorkDispatcher dispatcher;
-  private final ModelProcessor modelProcessor;
+  private final BooleanSupplier modelExecutionActive;
   private final ToolProcessor toolProcessor;
   private final ObjectProvider<EnvironmentDaemonServer> daemonServerProvider;
   private final Duration drainTimeout;
@@ -47,16 +47,18 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
   private final Object lifecycleLock = new Object();
   private boolean running;
 
+  /** {@code modelExecutionActive} 报告本机是否仍有 Model 执行，由装配方提供，本类不依赖具体 Agent Driver 的类型。 */
   HarnessRuntimeLifecycle(
       boolean workersEnabled,
       HarnessWorkDispatcher dispatcher,
-      ModelProcessor modelProcessor,
+      BooleanSupplier modelExecutionActive,
       ToolProcessor toolProcessor,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider,
       Duration drainTimeout) {
     this.workersEnabled = workersEnabled;
     this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
-    this.modelProcessor = Objects.requireNonNull(modelProcessor, "modelProcessor");
+    this.modelExecutionActive =
+        Objects.requireNonNull(modelExecutionActive, "modelExecutionActive");
     this.toolProcessor = Objects.requireNonNull(toolProcessor, "toolProcessor");
     this.daemonServerProvider =
         Objects.requireNonNull(daemonServerProvider, "daemonServerProvider");
@@ -136,7 +138,7 @@ final class HarnessRuntimeLifecycle implements SmartLifecycle {
   }
 
   private boolean hasActiveExecutions() {
-    return modelProcessor.hasActiveExecution() || toolProcessor.hasActiveExecution();
+    return modelExecutionActive.getAsBoolean() || toolProcessor.hasActiveExecution();
   }
 
   private RuntimeException stopDispatcher() {

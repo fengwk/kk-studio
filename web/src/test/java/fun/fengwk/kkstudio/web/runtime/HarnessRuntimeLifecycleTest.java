@@ -39,7 +39,7 @@ class HarnessRuntimeLifecycleTest {
     return new HarnessRuntimeLifecycle(
         workersEnabled,
         dispatcher,
-        mock(ModelProcessor.class),
+        () -> false,
         mock(ToolProcessor.class),
         mock(ObjectProvider.class),
         Duration.ofSeconds(60));
@@ -189,7 +189,7 @@ class HarnessRuntimeLifecycleTest {
         new HarnessRuntimeLifecycle(
             true,
             dispatcher,
-            modelProcessor,
+            modelProcessor::hasActiveExecution,
             toolProcessor,
             daemonServerProvider,
             Duration.ofSeconds(10));
@@ -228,7 +228,7 @@ class HarnessRuntimeLifecycleTest {
         new HarnessRuntimeLifecycle(
             true,
             dispatcher,
-            modelProcessor,
+            modelProcessor::hasActiveExecution,
             toolProcessor,
             daemonServerProvider,
             Duration.ofMillis(30));
@@ -266,7 +266,7 @@ class HarnessRuntimeLifecycleTest {
         new HarnessRuntimeLifecycle(
             true,
             dispatcher,
-            modelProcessor,
+            modelProcessor::hasActiveExecution,
             toolProcessor,
             daemonServerProvider,
             Duration.ofSeconds(10));
@@ -302,7 +302,7 @@ class HarnessRuntimeLifecycleTest {
         new HarnessRuntimeLifecycle(
             true,
             dispatcher,
-            modelProcessor,
+            modelProcessor::hasActiveExecution,
             toolProcessor,
             daemonServerProvider,
             Duration.ofSeconds(10));
@@ -326,7 +326,12 @@ class HarnessRuntimeLifecycleTest {
 
     HarnessRuntimeLifecycle lifecycle =
         new HarnessRuntimeLifecycle(
-            true, dispatcher, modelProcessor, toolProcessor, daemonServerProvider, Duration.ZERO);
+            true,
+            dispatcher,
+            modelProcessor::hasActiveExecution,
+            toolProcessor,
+            daemonServerProvider,
+            Duration.ZERO);
 
     lifecycle.start();
     lifecycle.stop();
@@ -352,7 +357,7 @@ class HarnessRuntimeLifecycleTest {
             new HarnessRuntimeLifecycle(
                 true,
                 dispatcher,
-                modelProcessor,
+                modelProcessor::hasActiveExecution,
                 toolProcessor,
                 daemonServerProvider,
                 Duration.ofSeconds(-1)));
