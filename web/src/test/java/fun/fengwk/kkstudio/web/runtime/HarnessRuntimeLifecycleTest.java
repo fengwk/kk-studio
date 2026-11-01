@@ -5,20 +5,31 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
-/** {@link HarnessRuntimeLifecycle} 的 dispatcher 启停、失败回滚、workers 开关与幂等语义。 */
+/** {@link HarnessRuntimeLifecycle} 的 dispatcher 启停、排空编排、失败回滚与 workers 开关语义。 */
 class HarnessRuntimeLifecycleTest {
 
   @Test
@@ -148,5 +159,168 @@ class HarnessRuntimeLifecycleTest {
 
     assertTrue(callbackRan.get());
     verifyNoInteractions(dispatcher);
+  }
+
+  @Test
+  void normalShutdownSequenceOrchestratesAllSteps() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+    EnvironmentDaemonServer daemonServer = mock(EnvironmentDaemonServer.class);
+    doAnswer(
+            invocation -> {
+              Consumer<EnvironmentDaemonServer> consumer = invocation.getArgument(0);
+              consumer.accept(daemonServer);
+              return null;
+            })
+        .when(daemonServerProvider)
+        .ifAvailable(any());
+
+    when(modelProcessor.hasActiveExecution()).thenReturn(false);
+    when(toolProcessor.hasActiveExecution()).thenReturn(false);
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            modelProcessor,
+            toolProcessor,
+            daemonServerProvider,
+            Duration.ofSeconds(10));
+
+    lifecycle.start();
+    lifecycle.stop();
+
+    InOrder inOrder = inOrder(dispatcher, daemonServer, toolProcessor);
+    inOrder.verify(dispatcher).stop();
+    inOrder.verify(daemonServer).drain();
+    inOrder.verify(toolProcessor).drain();
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
+  void waitingTimeoutStillExecutesDrainAndHandover() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+    EnvironmentDaemonServer daemonServer = mock(EnvironmentDaemonServer.class);
+    doAnswer(
+            invocation -> {
+              Consumer<EnvironmentDaemonServer> consumer = invocation.getArgument(0);
+              consumer.accept(daemonServer);
+              return null;
+            })
+        .when(daemonServerProvider)
+        .ifAvailable(any());
+
+    when(modelProcessor.hasActiveExecution()).thenReturn(true);
+    when(toolProcessor.hasActiveExecution()).thenReturn(true);
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            modelProcessor,
+            toolProcessor,
+            daemonServerProvider,
+            Duration.ofMillis(30),
+            Duration.ofMillis(10),
+            millis -> Thread.sleep(Math.min(millis, 10)));
+
+    lifecycle.start();
+    lifecycle.stop();
+
+    InOrder inOrder = inOrder(dispatcher, daemonServer, toolProcessor);
+    inOrder.verify(dispatcher).stop();
+    inOrder.verify(daemonServer).drain();
+    inOrder.verify(toolProcessor).drain();
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
+  void waitingInterruptedRestoresFlagAndStillExecutesDrainAndHandover() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+    EnvironmentDaemonServer daemonServer = mock(EnvironmentDaemonServer.class);
+    doAnswer(
+            invocation -> {
+              Consumer<EnvironmentDaemonServer> consumer = invocation.getArgument(0);
+              consumer.accept(daemonServer);
+              return null;
+            })
+        .when(daemonServerProvider)
+        .ifAvailable(any());
+
+    when(modelProcessor.hasActiveExecution()).thenReturn(true);
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            modelProcessor,
+            toolProcessor,
+            daemonServerProvider,
+            Duration.ofSeconds(10),
+            Duration.ofMillis(50),
+            millis -> {
+              throw new InterruptedException("simulated interrupt");
+            });
+
+    lifecycle.start();
+    try {
+      lifecycle.stop();
+      assertTrue(Thread.currentThread().isInterrupted(), "中断标志必须被恢复");
+    } finally {
+      Thread.interrupted();
+    }
+
+    InOrder inOrder = inOrder(dispatcher, daemonServer, toolProcessor);
+    inOrder.verify(dispatcher).stop();
+    inOrder.verify(daemonServer).drain();
+    inOrder.verify(toolProcessor).drain();
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
+  void unconfiguredEnvironmentDaemonServerSkipsServerDrain() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    ModelProcessor modelProcessor = mock(ModelProcessor.class);
+    ToolProcessor toolProcessor = mock(ToolProcessor.class);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<EnvironmentDaemonServer> daemonServerProvider = mock(ObjectProvider.class);
+
+    when(modelProcessor.hasActiveExecution()).thenReturn(false);
+    when(toolProcessor.hasActiveExecution()).thenReturn(false);
+
+    HarnessRuntimeLifecycle lifecycle =
+        new HarnessRuntimeLifecycle(
+            true,
+            dispatcher,
+            modelProcessor,
+            toolProcessor,
+            daemonServerProvider,
+            Duration.ofSeconds(10));
+
+    lifecycle.start();
+    lifecycle.stop();
+
+    verify(dispatcher).stop();
+    verify(toolProcessor).drain();
+    verify(daemonServerProvider).ifAvailable(any());
+    assertFalse(lifecycle.isRunning());
+  }
+
+  @Test
+  void lifecyclePhaseIsMaxInt() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    assertEquals(Integer.MAX_VALUE, lifecycle.getPhase());
   }
 }
