@@ -94,7 +94,6 @@ class EnvironmentDaemonAdmissionControllerTest {
   void missingInstanceIdHeaderReturns400() throws Exception {
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Instance");
-    request.removeHeader("X-Daemon-Instance-Id");
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     controller.handle(request, response);
@@ -107,7 +106,6 @@ class EnvironmentDaemonAdmissionControllerTest {
   void missingProtocolVersionHeaderReturns400() throws Exception {
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Protocol");
-    request.removeHeader("X-Daemon-Protocol-Version");
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     controller.handle(request, response);
@@ -120,8 +118,7 @@ class EnvironmentDaemonAdmissionControllerTest {
   void malformedProtocolVersionHeaderReturns400() throws Exception {
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Protocol");
-    request.removeHeader("X-Daemon-Protocol-Version");
-    request.addHeader("X-Daemon-Protocol-Version", "not-a-number");
+    request.addHeader("KK-Daemon-Protocol", "not-a-number");
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     controller.handle(request, response);
