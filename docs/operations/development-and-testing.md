@@ -538,8 +538,8 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 
 ### 分布式双节点栈
 
-`--distributed` 启停 [deploy/distributed](../../deploy/distributed/compose.yaml) 的双 App/双 Daemon
-栈，并在适用 case 上启用 L5；它完全免费，不读取宿主真实 Provider 凭据，也不改变默认单实例路径。
+`--distributed` 启停 [deploy/distributed](../../deploy/distributed/compose.yaml) 的双 App/三 Daemon
+栈（含 `daemon-ingress` L4 TCP 中转），并在适用 case 上启用 L5；它完全免费，不读取宿主真实 Provider 凭据，也不改变默认单实例路径。
 栈的手工命令、端口、故障注入与清理语义见
 [部署与运行](deployment.md#deploydistributed双节点零-app-to-app-网络栈)。
 

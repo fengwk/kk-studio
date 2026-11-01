@@ -3,9 +3,19 @@ import { assert, assertDecimalVersion, envelopeData, expectHttpError, sleep } fr
 import { assertDistributedContext } from '../lib/distributed.mjs'
 import { registerCase } from '../lib/registry.mjs'
 import { createDurationTimer } from '../lib/time.mjs'
+import {
+  branchSettingsOf,
+  chatOwner,
+  createChat,
+  createNewSession,
+  userMessageCommand,
+} from '../lib/harness.mjs'
+import { baseModelConfig } from '../lib/fixtures.mjs'
 
 const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
 const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
+const ENV_C_ID = '55555555-5555-5555-5555-555555555555'
+const ENV_C_NAME = 'distributed-c'
 
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -323,5 +333,445 @@ registerCase({
         2,
       ),
     )
+  },
+})
+
+async function getThreadSnapshotFromNode(callNode, node, threadId) {
+  const { json } = await callNode(node, 'GET', `/api/threads/${encodeURIComponent(threadId)}`)
+  return envelopeData(json)
+}
+
+async function setupDistributedHarness(ctx, suffix) {
+  const providerRes = await ctx.callNode('a', 'POST', '/api/providers', {
+    name: `e2e-dist-prov-${suffix}`,
+    description: 'Distributed test provider',
+    providerType: 'openai',
+    baseUrl: 'http://stub.local:8080/v1',
+    credential: `e2e-dist-${suffix}`,
+    modelCallTimeoutMillis: 60_000,
+    modelCallIdleTimeoutMillis: 30_000,
+  })
+  const provider = envelopeData(providerRes.json)
+  assert(provider?.name, 'provider creation failed')
+
+  const modelRes = await ctx.callNode('a', 'POST', '/api/models', {
+    kind: 'MODEL',
+    providerName: provider.name,
+    name: `e2e-dist-model-${suffix}`,
+    modelId: 'gpt-4o',
+    description: 'Distributed test model',
+    config: baseModelConfig({
+      limit: { context: 4096, output: 512 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      variants: [{ id: 'default' }],
+    }),
+  })
+  const model = envelopeData(modelRes.json)
+  assert(model?.name, 'model creation failed')
+
+  const agentRes = await ctx.callNode('a', 'POST', '/api/agents', {
+    name: `e2e-dist-agent-${suffix}`,
+    description: 'Distributed test agent',
+    systemPrompt: 'You are an agent with bash tools.',
+    model: model.name,
+    variant: 'default',
+    config: {
+      tools: ['bash'],
+      skills: [],
+      subagents: [],
+      inheritParentEnvironment: true,
+    },
+  })
+  const agent = envelopeData(agentRes.json)
+  assert(agent?.name, 'agent creation failed')
+
+  return { provider, model, agent }
+}
+
+async function cleanupDistributedHarness(ctx, { agent, model, provider }) {
+  if (agent?.name) {
+    try {
+      await ctx.callNode(
+        'a',
+        'DELETE',
+        `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+      )
+    } catch {
+      try {
+        await ctx.callNode(
+          'b',
+          'DELETE',
+          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+        )
+      } catch {
+        // best effort
+      }
+    }
+  }
+  if (model?.name && model?.providerName) {
+    try {
+      await ctx.callNode(
+        'a',
+        'DELETE',
+        `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+      )
+    } catch {
+      try {
+        await ctx.callNode(
+          'b',
+          'DELETE',
+          `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+        )
+      } catch {
+        // best effort
+      }
+    }
+  }
+  if (provider?.name) {
+    try {
+      await ctx.callNode(
+        'a',
+        'DELETE',
+        `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+      )
+    } catch {
+      try {
+        await ctx.callNode(
+          'b',
+          'DELETE',
+          `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+        )
+      } catch {
+        // best effort
+      }
+    }
+  }
+}
+
+async function restoreDistributedStack(ctx) {
+  try {
+    ctx.runDistributedCommand('start-app-a')
+  } catch {
+    // ignore
+  }
+  try {
+    ctx.runDistributedCommand('restart-daemon-c')
+  } catch {
+    // ignore
+  }
+  await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID, 60)
+  await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID, 60)
+}
+
+registerCase({
+  id: 'distributed.graceful_drain_handover',
+  level: 'L5',
+  title: '双节点滚动发布优雅排空与工具挂接接管',
+  requires: ['distributed'],
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后优雅停止 app-a（SIGTERM）；验证 app-b 重新挂接并在 attempt=1 下交付 SUCCEEDED，全程无 UNKNOWN，unconfirmedExecutions 最终为空',
+  async run(ctx) {
+    assertDistributedContext(ctx)
+    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
+    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+
+    const suffix = randomUUID().slice(0, 8)
+    let harness = null
+    try {
+      harness = await setupDistributedHarness(ctx, suffix)
+      const chat = await createChat(ctx, {
+        title: `e2e-dist-chat-${suffix}`,
+        agentName: harness.agent.name,
+        yoloEnabled: true,
+      })
+
+      const threadId = randomUUID()
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: randomUUID(),
+        threadId,
+        rootSettings: branchSettingsOf(
+          harness.agent,
+          {
+            modelName: harness.model.name,
+            variant: 'default',
+          },
+          ENV_C_NAME,
+        ),
+        yoloEnabled: true,
+        commands: [
+          userMessageCommand(
+            'Please run sleep 20 && echo handover-done on the environment.',
+            randomUUID(),
+          ),
+        ],
+      })
+
+      let toolId = null
+      for (let i = 0; i < 60; i++) {
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const tool = snap.toolInvocations?.[0]
+        if (tool && tool.status === 'RUNNING') {
+          toolId = tool.id
+          break
+        }
+        await sleep(500)
+      }
+      assert(toolId, 'tool invocation did not enter RUNNING')
+
+      // 优雅停止 app-a：触发排空、release claim 并让出路由租约
+      ctx.runDistributedCommand('stop-app-a')
+
+      let finalSnapshot = null
+      let sawUnknown = false
+      for (let i = 0; i < 90; i++) {
+        try {
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
+          const tool = snap.toolInvocations?.[0]
+          if (tool?.status === 'UNKNOWN') sawUnknown = true
+          if (tool && tool.status === 'SUCCEEDED' && snap.executionStatus === 'IDLE') {
+            finalSnapshot = snap
+            break
+          }
+        } catch {
+          // app-b 可能正在处理重连与状态同步
+        }
+        await sleep(1000)
+      }
+
+      assert(finalSnapshot, 'thread did not reach quiescence on node B')
+      assert(!sawUnknown, 'must not observe UNKNOWN during graceful drain handover')
+
+      const finalTool = finalSnapshot.toolInvocations?.[0]
+      assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
+      assert(
+        finalTool?.resultJson?.includes('handover-done'),
+        `expected result to contain handover-done: ${finalTool?.resultJson}`,
+      )
+      assert(finalTool?.attempt === 1, `expected attempt 1, got ${finalTool?.attempt}`)
+      assert(
+        Array.isArray(finalSnapshot.unconfirmedExecutions) && finalSnapshot.unconfirmedExecutions.length === 0,
+        `expected unconfirmedExecutions to be empty, got: ${JSON.stringify(finalSnapshot.unconfirmedExecutions)}`,
+      )
+
+      ctx.writeArtifact(
+        'graceful-drain-handover.json',
+        JSON.stringify(
+          {
+            toolInvocation: finalTool,
+            unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
+            executionStatus: finalSnapshot.executionStatus,
+          },
+          null,
+          2,
+        ),
+      )
+    } finally {
+      await restoreDistributedStack(ctx)
+      if (harness) await cleanupDistributedHarness(ctx, harness)
+    }
+  },
+})
+
+registerCase({
+  id: 'distributed.crash_failover',
+  level: 'L5',
+  title: '双节点崩溃故障接管与租约超时恢复',
+  requires: ['distributed'],
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后强杀 app-a（SIGKILL）；验证租约超时后 app-b 接管并交付 SUCCEEDED，被杀节点的 TOOL 退出事实保持未确认留在 unconfirmedExecutions 中',
+  async run(ctx) {
+    assertDistributedContext(ctx)
+    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
+    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+
+    const suffix = randomUUID().slice(0, 8)
+    let harness = null
+    try {
+      harness = await setupDistributedHarness(ctx, suffix)
+      const chat = await createChat(ctx, {
+        title: `e2e-crash-chat-${suffix}`,
+        agentName: harness.agent.name,
+        yoloEnabled: true,
+      })
+
+      const threadId = randomUUID()
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: randomUUID(),
+        threadId,
+        rootSettings: branchSettingsOf(
+          harness.agent,
+          {
+            modelName: harness.model.name,
+            variant: 'default',
+          },
+          ENV_C_NAME,
+        ),
+        yoloEnabled: true,
+        commands: [
+          userMessageCommand(
+            'Please run sleep 20 && echo handover-done on the environment.',
+            randomUUID(),
+          ),
+        ],
+      })
+
+      let toolId = null
+      for (let i = 0; i < 60; i++) {
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const tool = snap.toolInvocations?.[0]
+        if (tool && tool.status === 'RUNNING') {
+          toolId = tool.id
+          break
+        }
+        await sleep(500)
+      }
+      assert(toolId, 'tool invocation did not enter RUNNING')
+
+      // 强杀 app-a（不排空，不释放租约与 Work）
+      ctx.runDistributedCommand('kill-app-a')
+
+      let finalSnapshot = null
+      for (let i = 0; i < 90; i++) {
+        try {
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'b', threadId)
+          const tool = snap.toolInvocations?.[0]
+          if (tool && tool.status === 'SUCCEEDED' && snap.executionStatus === 'IDLE') {
+            finalSnapshot = snap
+            break
+          }
+        } catch {
+          // 等待租约过期与接管
+        }
+        await sleep(1000)
+      }
+
+      assert(finalSnapshot, 'thread did not reach quiescence on node B after crash failover')
+
+      const finalTool = finalSnapshot.toolInvocations?.[0]
+      assert(finalTool?.status === 'SUCCEEDED', `expected tool status SUCCEEDED, got ${finalTool?.status}`)
+      assert(
+        finalTool?.resultJson?.includes('handover-done'),
+        `expected result to contain handover-done: ${finalTool?.resultJson}`,
+      )
+
+      const unconfirmed = finalSnapshot.unconfirmedExecutions || []
+      assert(
+        unconfirmed.some((e) => e.kind === 'TOOL' && e.attempt === 1),
+        `expected unconfirmedExecutions to retain killed node TOOL fact: ${JSON.stringify(unconfirmed)}`,
+      )
+
+      ctx.writeArtifact(
+        'crash-failover.json',
+        JSON.stringify(
+          {
+            toolInvocation: finalTool,
+            unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
+            executionStatus: finalSnapshot.executionStatus,
+          },
+          null,
+          2,
+        ),
+      )
+    } finally {
+      await restoreDistributedStack(ctx)
+      if (harness) await cleanupDistributedHarness(ctx, harness)
+    }
+  },
+})
+
+registerCase({
+  id: 'distributed.daemon_restart_unknown',
+  level: 'L5',
+  title: '双节点远端 Daemon 重启崩溃恢复收敛为 UNKNOWN',
+  requires: ['distributed'],
+  docs: '在 distributed-c 上运行 sleep 20 && echo handover-done；工具进入 RUNNING 后重启 daemon-c（journal 丢失）；验证远端调用因 RECOVER_NOT_FOUND 收敛为 UNKNOWN，且 Thread 正常达到 quiescence',
+  async run(ctx) {
+    assertDistributedContext(ctx)
+    await waitForEnvironmentReady(ctx.callNode, 'a', ENV_C_ID)
+    await waitForEnvironmentReady(ctx.callNode, 'b', ENV_C_ID)
+
+    const suffix = randomUUID().slice(0, 8)
+    let harness = null
+    try {
+      harness = await setupDistributedHarness(ctx, suffix)
+      const chat = await createChat(ctx, {
+        title: `e2e-restart-chat-${suffix}`,
+        agentName: harness.agent.name,
+        yoloEnabled: true,
+      })
+
+      const threadId = randomUUID()
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: randomUUID(),
+        threadId,
+        rootSettings: branchSettingsOf(
+          harness.agent,
+          {
+            modelName: harness.model.name,
+            variant: 'default',
+          },
+          ENV_C_NAME,
+        ),
+        yoloEnabled: true,
+        commands: [
+          userMessageCommand(
+            'Please run sleep 20 && echo handover-done on the environment.',
+            randomUUID(),
+          ),
+        ],
+      })
+
+      let toolId = null
+      for (let i = 0; i < 60; i++) {
+        const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+        const tool = snap.toolInvocations?.[0]
+        if (tool && tool.status === 'RUNNING') {
+          toolId = tool.id
+          break
+        }
+        await sleep(500)
+      }
+      assert(toolId, 'tool invocation did not enter RUNNING')
+
+      // 重启 daemon-c，journal 丢失
+      ctx.runDistributedCommand('restart-daemon-c')
+
+      let finalSnapshot = null
+      for (let i = 0; i < 60; i++) {
+        try {
+          const snap = await getThreadSnapshotFromNode(ctx.callNode, 'a', threadId)
+          const tool = snap.toolInvocations?.[0]
+          if (tool && tool.status === 'UNKNOWN' && snap.executionStatus === 'IDLE') {
+            finalSnapshot = snap
+            break
+          }
+        } catch {
+          // waiting for recovery failure
+        }
+        await sleep(1000)
+      }
+
+      assert(finalSnapshot, 'thread did not reach quiescence with UNKNOWN tool status after daemon restart')
+      const finalTool = finalSnapshot.toolInvocations?.[0]
+      assert(finalTool?.status === 'UNKNOWN', `expected tool status UNKNOWN, got ${finalTool?.status}`)
+      assert(finalSnapshot.executionStatus === 'IDLE', `expected thread to be IDLE, got ${finalSnapshot.executionStatus}`)
+
+      ctx.writeArtifact(
+        'daemon-restart-unknown.json',
+        JSON.stringify(
+          {
+            toolInvocation: finalTool,
+            unconfirmedExecutions: finalSnapshot.unconfirmedExecutions,
+            executionStatus: finalSnapshot.executionStatus,
+          },
+          null,
+          2,
+        ),
+      )
+    } finally {
+      await restoreDistributedStack(ctx)
+      if (harness) await cleanupDistributedHarness(ctx, harness)
+    }
   },
 })

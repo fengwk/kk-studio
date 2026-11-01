@@ -280,22 +280,29 @@ fake Function 与 Chat 的应用契约检查。一次运行的通过范围以退
 ./scripts/dev/verify/e2e/distributed.sh down --volumes
 ```
 
-`node-a-db`、`node-b-db`、`daemon-a`、`daemon-b` 都是 `internal: true`，没有任何网络同时包含
+`node-a-db`、`node-b-db`、`daemon-a`、`daemon-b`、`daemon-c` 都是 `internal: true`，没有任何网络同时包含
 App-A 与 App-B；宿主只经 `app-ingress-a`/`app-ingress-b` 发布 loopback 端口（默认 app-a
-`18082`、app-b `18083`，PostgreSQL `15433`、MinIO `19001`、mock `18090`）。两个 App 共享同一
+`18082`、app-b `18083`，PostgreSQL `15433`、MinIO `19001`、mock `18090`）。受控中转服务
+`daemon-ingress` 同时接入 `daemon-a`、`daemon-b` 与 `daemon-c`，只接受经 DNS 校验源地址来自
+`daemon-c` 的 L4 TCP 连接，并按 `app-a` -> `app-b` 顺序故障重试，不连通两个 App。两个 App 共享同一
 PostgreSQL database 与 MinIO bucket，节点身份用可覆盖的 disposable 变量表达：
 
 ```text
 DISTRIBUTED_ENV_A_NAME=distributed-a
 DISTRIBUTED_ENV_B_NAME=distributed-b
+DISTRIBUTED_ENV_C_NAME=distributed-c
 DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=e2e-token-dist-a
 DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=e2e-token-dist-b
+DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN=e2e-token-dist-c
 DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
 
-distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操作的幂等故障注入，不会影响
-`daemon-a` 网络与 daemon workspace volume。
+两节点配置 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT=10s`、`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION=10s` 与
+`stop_grace_period: 60s`，支持在优雅停止时主动排空在途工具并释放路由租约。
+distributed.sh 提供受控命令集：`disconnect-db-a` / `reconnect-db-a` 注入 DB 网络断开；
+`stop-app-a` / `stop-app-b`、`start-app-a` / `start-app-b`、`kill-app-a` / `kill-app-b` 与
+`restart-daemon-c` 编排滚动发布排空与故障接管。
 [`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 的 `--distributed` 通过该入口启停栈
 并在退出时清理。
 

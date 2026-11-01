@@ -110,11 +110,18 @@ test('test intent: workspace init prepares distinct daemon volumes for A/B owner
   assert.ok(!COMPOSE.includes('distributed-b-only'))
 })
 
-test('test intent: three L5 distributed cases are registered in the matrix', () => {
+test('test intent: six L5 distributed cases are registered in the matrix', () => {
   const casesFile = path.join(E2E_ROOT, 'cases/distributed.mjs')
   assert.ok(existsSync(casesFile))
   const content = readFileSync(casesFile, 'utf8')
-  for (const id of ['distributed.shared_state', 'distributed.lease_routing', 'distributed.db_loss_fail_closed']) {
+  for (const id of [
+    'distributed.shared_state',
+    'distributed.lease_routing',
+    'distributed.db_loss_fail_closed',
+    'distributed.graceful_drain_handover',
+    'distributed.crash_failover',
+    'distributed.daemon_restart_unknown',
+  ]) {
     assert.ok(content.includes(id), id)
   }
   assert.ok(content.includes("level: 'L5'"))
@@ -124,8 +131,10 @@ test('test intent: three L5 distributed cases are registered in the matrix', () 
 test('test intent: node identity defaults are fixed', () => {
   assert.ok(COMPOSE.includes('${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}'))
   assert.ok(COMPOSE.includes('${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}'))
+  assert.ok(COMPOSE.includes('${DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN:-e2e-token-dist-c}'))
   assert.ok(COMPOSE.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080'))
   assert.ok(COMPOSE.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080'))
+  assert.ok(COMPOSE.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://daemon-ingress:8080'))
 })
 
 test('test intent: the distributed node:test file lives where CI Node discovery looks for it', () => {
