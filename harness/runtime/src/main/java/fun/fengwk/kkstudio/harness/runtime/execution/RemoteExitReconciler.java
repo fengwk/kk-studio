@@ -57,7 +57,10 @@ public final class RemoteExitReconciler {
     try {
       executor.execute(() -> reconcile(environmentId));
     } catch (RejectedExecutionException error) {
-      log.warn("remote exit reconciliation rejected: environmentId={}", environmentId, error);
+      log.warn(
+          "remote exit reconciliation rejected: environmentId={}, reason={}",
+          environmentId,
+          error.getMessage());
     }
   }
 
@@ -83,14 +86,23 @@ public final class RemoteExitReconciler {
                                   .find(id)
                                   .map(tool -> tool.status() == ToolInvocationStatus.RUNNING)
                                   .orElse(false));
-                  if (!isRunning) {
+                  if (isRunning) {
+                    log.debug(
+                        "skipping unconfirmed fact because tool is running: executionId={}, invocationId={}, reason={}",
+                        fact.executionId(),
+                        fact.invocationId(),
+                        "tool is running");
+                  } else {
                     attachable.add(fact);
                   }
                 }
                 return List.copyOf(attachable);
               });
     } catch (RuntimeException error) {
-      log.warn("failed to query unconfirmed remote exits: environmentId={}", environmentId, error);
+      log.warn(
+          "failed to query unconfirmed remote exits: environmentId={}, reason={}",
+          environmentId,
+          error.getMessage());
       return;
     }
 
@@ -99,14 +111,14 @@ public final class RemoteExitReconciler {
         transport.attach(environmentId, fact.executionId(), createExitOnlyListener(fact));
       } catch (IllegalArgumentException error) {
         log.debug(
-            "execution already registered on this node, skipping: executionId={}",
+            "skipping unconfirmed fact because execution is already registered: executionId={}, reason={}",
             fact.executionId(),
-            error);
+            error.getMessage());
       } catch (EnvironmentCapabilityUnavailableException error) {
-        log.info(
-            "environment capability unavailable, stopping reconcile round: environmentId={}",
-            environmentId,
-            error);
+        log.warn(
+            "stopping reconcile round because capability is unavailable: executionId={}, reason={}",
+            fact.executionId(),
+            error.getMessage());
         break;
       }
     }
