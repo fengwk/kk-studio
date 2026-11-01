@@ -462,6 +462,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     }
   }
 
+  @Override
+  public boolean release(EnvironmentId environmentId, UUID leaseToken) {
+    if (environmentId == null || leaseToken == null) {
+      return false;
+    }
+    return disconnect(environmentId, leaseToken, Duration.ZERO);
+  }
+
   /** 查询数据库中指定环境的当前路由快照。 */
   public Optional<EnvironmentConnection> find(EnvironmentId environmentId) {
     if (environmentId == null) {

@@ -805,6 +805,11 @@ class DaemonCrossLanguageIntegrationTest {
             }
 
             @Override
+            public void drain() {
+              control.drain();
+            }
+
+            @Override
             public void closeAfterFlush() {
               control.closeAfterFlush();
             }
@@ -889,6 +894,11 @@ class DaemonCrossLanguageIntegrationTest {
 
     @Override
     public boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken) {
+      return true;
+    }
+
+    @Override
+    public boolean release(EnvironmentId environmentId, UUID leaseToken) {
       return true;
     }
   }

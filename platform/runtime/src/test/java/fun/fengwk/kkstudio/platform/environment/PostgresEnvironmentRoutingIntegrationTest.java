@@ -411,6 +411,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     }
 
     @Override
+    public synchronized void drain() {
+      closed = true;
+    }
+
+    @Override
     public synchronized void closeAfterFlush() {
       closed = true;
     }

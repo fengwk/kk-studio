@@ -36,4 +36,13 @@ public interface DaemonLeaseStore {
 
   /** 判定当前节点是否仍持有该活跃连接代币（同节点 HELLO 防冲突保护）。 */
   boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken);
+
+  /**
+   * 持有者主动放弃路由租约，使任何节点都可立即重新认领。
+   *
+   * @param environmentId 目标环境
+   * @param leaseToken 当前会话持有的租约代币，用于围栏校验
+   * @return 释放成功且围栏有效返回 true；租约不匹配或已被抢占返回 false
+   */
+  boolean release(EnvironmentId environmentId, UUID leaseToken);
 }

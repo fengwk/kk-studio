@@ -50,6 +50,7 @@ public class DaemonControlStream implements DaemonControlChannel {
   private final DaemonConnectionIdentity identity;
   private final Stream stream;
   private final Runnable sessionCloser;
+  private final Runnable sessionDrainer;
   private final Scheduler scheduler;
   private final Object lock = new Object();
 
@@ -70,10 +71,12 @@ public class DaemonControlStream implements DaemonControlChannel {
       DaemonConnectionIdentity identity,
       Stream stream,
       Runnable sessionCloser,
+      Runnable sessionDrainer,
       Scheduler scheduler) {
     this.identity = Objects.requireNonNull(identity, "identity must not be null");
     this.stream = Objects.requireNonNull(stream, "stream must not be null");
     this.sessionCloser = Objects.requireNonNull(sessionCloser, "sessionCloser must not be null");
+    this.sessionDrainer = Objects.requireNonNull(sessionDrainer, "sessionDrainer must not be null");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
   }
 
@@ -126,6 +129,11 @@ public class DaemonControlStream implements DaemonControlChannel {
   private void onFrameTimeout(QueuedFrame frame) {
     log.error("Control frame write timed out after 10s on stream {}", stream.getId());
     failChannel(new TimeoutException("control frame write deadline exceeded 10s"));
+  }
+
+  @Override
+  public void drain() {
+    sessionDrainer.run();
   }
 
   @Override

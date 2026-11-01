@@ -677,6 +677,7 @@ final class EnvironmentDaemonServerTestSupport {
     boolean markReadyResult = true;
     boolean rejected;
     boolean retryLater;
+    boolean released;
     DaemonCapabilities readyCapabilities;
 
     Throwable disconnectFailure;
@@ -745,6 +746,15 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("database unavailable");
       }
       return activeLeaseToken;
+    }
+
+    @Override
+    public boolean release(EnvironmentId environmentId, UUID leaseToken) {
+      if (databaseUnavailable) {
+        throw new IllegalStateException("database unavailable");
+      }
+      released = true;
+      return true;
     }
   }
 
@@ -831,6 +841,7 @@ final class EnvironmentDaemonServerTestSupport {
     Throwable closeFailure;
 
     private volatile int closeAfterFlushCount = 0;
+    private volatile int drainCount = 0;
 
     private final CountDownLatch offerEntered = new CountDownLatch(1);
     private final CountDownLatch offerReleased = new CountDownLatch(1);
@@ -876,6 +887,16 @@ final class EnvironmentDaemonServerTestSupport {
       }
       envelopes.add(envelope);
       return DaemonOfferResult.ACCEPTED;
+    }
+
+    @Override
+    public void drain() {
+      drainCount++;
+      closeAfterFlush();
+    }
+
+    int drainCount() {
+      return drainCount;
     }
 
     @Override
