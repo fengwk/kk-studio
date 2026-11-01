@@ -310,7 +310,7 @@ test('cleanup does not repeat an accepted stop while the Thread remains RUNNING'
   const snapshot = {
     thread: threadDto(threadId, { status: 'RUNNING', executionControl: 'STOPPED' }),
     queuedCommands: [],
-    modelInvocation: null,
+    activeAssistantOutput: null,
     toolInvocations: [],
   }
   const calls = []

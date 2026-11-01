@@ -149,7 +149,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           thread: { ...thread },
           entries: entries.map((entry) => ({ ...entry })),
           queuedCommands: [],
-          modelInvocation: null,
+          activeAssistantOutput: null,
           toolInvocations: [],
         },
       },

@@ -151,7 +151,7 @@ registerCase({
       await mock.waitForRequests(1, { timeoutMs: 30_000 })
       assert(mock.requests[0].state === 'held', JSON.stringify(mock.requests[0]))
       const activeSnapshot = await waitForActiveModel(ctx, threadId, { timeoutMs: 30_000 })
-      assert(activeSnapshot.modelInvocation !== null, JSON.stringify(activeSnapshot))
+      assert(activeSnapshot.activeAssistantOutput !== null, JSON.stringify(activeSnapshot))
 
       // 运行中入队两条 THREAD batch：各一条 USER_MESSAGE。cursor 在入队时推进。
       const running = await getThreadSnapshot(ctx, threadId)
@@ -184,7 +184,7 @@ registerCase({
         `expected two queued commands: ${JSON.stringify(queuedSnapshot.queuedCommands)}`,
       )
       assert(
-        queuedSnapshot.modelInvocation !== null,
+        queuedSnapshot.activeAssistantOutput !== null,
         `first model invocation must still be active while commands are queued: ${JSON.stringify(
           queuedSnapshot,
         )}`,
@@ -309,7 +309,7 @@ registerCase({
         if (
           snapshot.thread.status !== 'IDLE'
           || snapshot.queuedCommands.length > 0
-          || snapshot.modelInvocation !== null
+          || snapshot.activeAssistantOutput !== null
         ) {
           await stopThread(ctx, threadId, {
             stopRequestId: cid(),
@@ -378,7 +378,7 @@ async function waitForActiveModel(ctx, threadId, { timeoutMs = 30_000 }) {
   let last = null
   while (Date.now() <= deadline) {
     last = await getThreadSnapshot(ctx, threadId)
-    if (last.modelInvocation !== null) return last
+    if (last.activeAssistantOutput !== null) return last
     await sleep(100)
   }
   throw new Error(

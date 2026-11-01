@@ -263,7 +263,7 @@ async function offlineChat(client) {
     quiescent =
       candidate.status === 'IDLE' &&
       current.queuedCommands.length === 0 &&
-      current.modelInvocation === null &&
+      current.activeAssistantOutput === null &&
       current.toolInvocations.length === 0
     if (!quiescent) {
       await wait(250)

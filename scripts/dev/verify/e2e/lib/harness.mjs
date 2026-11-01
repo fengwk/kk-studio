@@ -995,7 +995,7 @@ export async function stopThreadForCleanup(
       && (
         snapshot.thread.status !== 'IDLE'
         || snapshot.queuedCommands.length > 0
-        || snapshot.modelInvocation !== null
+        || snapshot.activeAssistantOutput !== null
         || snapshot.toolInvocations.length > 0
       )
     if (!active) {
@@ -1053,7 +1053,7 @@ export async function approveToolInvocation(
  * 轮询完整快照直到 Thread 真正 quiescent 并返回最终 Thread 投影。
  *
  * 判定基于完整 snapshot 而不是单字段：status=IDLE、queuedCommands 为空、
- * modelInvocation=null、toolInvocations 为空，且同一 cursor/version 必须连续观测两次。
+ * activeAssistantOutput=null、toolInvocations 为空，且同一 cursor/version 必须连续观测两次。
  * executionControl=STOPPED 只表示停止已请求，不能替代活动状态判定。
  * 单次 quiescent 可能落在异步 Work 已移除队列、尚未提交 Thread 尾部状态的瞬时窗口，不能作为
  * 后续 CAS 写入的稳定 cursor。
@@ -1087,10 +1087,14 @@ export async function waitForQuiescentThread(
  */
 export function observeQuiescentSnapshot(previousKey, snapshot) {
   const thread = snapshot?.thread
+  assert(
+    snapshot && typeof snapshot === 'object' && 'activeAssistantOutput' in snapshot,
+    'snapshot must declare activeAssistantOutput',
+  )
   if (
     thread?.status !== 'IDLE'
     || (snapshot?.queuedCommands || []).length !== 0
-    || snapshot?.modelInvocation !== null
+    || snapshot.activeAssistantOutput !== null
     || (snapshot?.toolInvocations || []).length !== 0
   ) {
     return { key: null, stable: false }

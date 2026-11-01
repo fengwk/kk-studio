@@ -169,12 +169,12 @@ registerCase({
       assert(activeFailurePromise != null, 'active failure observation was not started')
       const activeResult = await activeFailurePromise
       activeSnapshot = activeResult.snapshot
-      const activeFailure = activeSnapshot.modelAttemptFailures[0]
+      const activeFailure = activeSnapshot.generationFailures[0]
       assert(
-        firstPublishedDelta.invocationId === activeSnapshot.modelInvocation.id,
+        firstPublishedDelta.invocationId === activeSnapshot.activeAssistantOutput.generationId,
         `recovered delta must belong to the retried invocation: ${JSON.stringify({
           firstPublishedDelta,
-          modelInvocation: activeSnapshot.modelInvocation,
+          activeAssistantOutput: activeSnapshot.activeAssistantOutput,
         })}`,
       )
       assertActiveFailure(activeSnapshot, activeFailure, {
@@ -298,7 +298,7 @@ registerCase({
         if (
           snapshot.thread.status !== 'IDLE'
           || snapshot.queuedCommands.length > 0
-          || snapshot.modelInvocation !== null
+          || snapshot.activeAssistantOutput !== null
         ) {
           await stopThread(ctx, threadId, {
             stopRequestId: cid(),
@@ -388,9 +388,9 @@ async function waitForActiveAttemptFailure(
   while (Date.now() <= deadline) {
     lastSnapshot = await getThreadSnapshot(ctx, threadId)
     polls += 1
-    const failures = lastSnapshot.modelAttemptFailures || []
+    const failures = lastSnapshot.generationFailures || []
     if (
-      lastSnapshot.modelInvocation !== null
+      lastSnapshot.activeAssistantOutput !== null
       && failures.length === 1
       && failures[0].attempt === 1
       && failures[0].text === partialText
@@ -400,19 +400,19 @@ async function waitForActiveAttemptFailure(
     await sleep(25)
   }
   throw new Error(
-    `active modelAttemptFailures snapshot was not observed after ${polls} polls; ` +
+    `active generationFailures snapshot was not observed after ${polls} polls; ` +
       JSON.stringify({
         initialMarker,
         lastThread: lastSnapshot?.thread,
-        lastModelInvocation: lastSnapshot?.modelInvocation,
-        lastModelAttemptFailures: lastSnapshot?.modelAttemptFailures,
+        lastActiveAssistantOutput: lastSnapshot?.activeAssistantOutput,
+        lastGenerationFailures: lastSnapshot?.generationFailures,
       }),
   )
 }
 
 function assertActiveFailure(snapshot, failure, { partialText, thinking }) {
-  assert(snapshot.modelAttemptFailures.length === 1, JSON.stringify(snapshot.modelAttemptFailures))
-  assert(snapshot.modelInvocation !== null, JSON.stringify(snapshot))
+  assert(snapshot.generationFailures.length === 1, JSON.stringify(snapshot.generationFailures))
+  assert(snapshot.activeAssistantOutput !== null, JSON.stringify(snapshot))
   assert(failure.attempt === 1, JSON.stringify(failure))
   assert(
     typeof failure.sequence === 'string'
@@ -433,17 +433,17 @@ function assertActiveFailure(snapshot, failure, { partialText, thinking }) {
     `retryAt must not precede failedAt: ${JSON.stringify(failure)}`,
   )
   for (const [field, value] of [
-    ['modelInvocationId', failure.modelInvocationId],
+    ['generationId', failure.generationId],
     ['turnStartEntryId', failure.turnStartEntryId],
     ['requestHeadEntryId', failure.requestHeadEntryId],
   ]) {
     assertUuid(value, field)
   }
   assert(
-    failure.modelInvocationId === snapshot.modelInvocation.id,
-    `failure must belong to the active model invocation: ${JSON.stringify({
+    failure.generationId === snapshot.activeAssistantOutput.generationId,
+    `failure must belong to the active assistant output: ${JSON.stringify({
       failure,
-      modelInvocation: snapshot.modelInvocation,
+      activeAssistantOutput: snapshot.activeAssistantOutput,
     })}`,
   )
 }
@@ -452,10 +452,10 @@ function assertFirstTurnDurable(
   snapshot,
   { initialMarker, partialText, thinking, failure, recoveredText },
 ) {
-  assert(snapshot.modelInvocation === null, JSON.stringify(snapshot))
+  assert(snapshot.activeAssistantOutput === null, JSON.stringify(snapshot))
   assert(
-    snapshot.modelAttemptFailures.length === 0,
-    `materialized failures must be removed from snapshot: ${JSON.stringify(snapshot.modelAttemptFailures)}`,
+    snapshot.generationFailures.length === 0,
+    `materialized failures must be removed from snapshot: ${JSON.stringify(snapshot.generationFailures)}`,
   )
   assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
 
@@ -519,8 +519,8 @@ function assertFirstTurnDurable(
 }
 
 function assertSecondTurnDurable(snapshot, { secondMarker, secondTurnText }) {
-  assert(snapshot.modelInvocation === null, JSON.stringify(snapshot))
-  assert(snapshot.modelAttemptFailures.length === 0, JSON.stringify(snapshot.modelAttemptFailures))
+  assert(snapshot.activeAssistantOutput === null, JSON.stringify(snapshot))
+  assert(snapshot.generationFailures.length === 0, JSON.stringify(snapshot.generationFailures))
   assert(snapshot.queuedCommands.length === 0, JSON.stringify(snapshot.queuedCommands))
   const secondUserIndex = findUserEntryIndex(snapshot.entries, secondMarker)
   assert(secondUserIndex >= 0, JSON.stringify(snapshot.entries))

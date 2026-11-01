@@ -517,7 +517,7 @@ registerCase({
         if (
           snapshot.thread.status !== 'IDLE'
           || snapshot.queuedCommands.length > 0
-          || snapshot.modelInvocation !== null
+          || snapshot.activeAssistantOutput !== null
         ) {
           await stopThread(ctx, threadId, {
             stopRequestId: cid(),

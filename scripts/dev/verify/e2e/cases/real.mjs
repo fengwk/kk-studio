@@ -536,8 +536,8 @@ async function cleanupAgent(ctx, agent) {
 // 每轮同时验证查询快照与对应 assistant 之后的 TURN_END，避免旧轮次完成掩盖新轮次失败。
 function assertTextCacheRoundCompleted(snapshot, entries, assistant) {
   assert(snapshot.thread.status === 'IDLE', 'text cache snapshot thread must be IDLE')
-  assert(snapshot.modelInvocation === null, 'IDLE snapshot must expose no active model invocation')
-  assert(!('modelInvocations' in snapshot), 'snapshot DTO has no modelInvocations[]')
+  assert(snapshot.activeAssistantOutput === null, 'IDLE snapshot must expose no active model invocation')
+  assert(!('modelInvocation' in snapshot), 'snapshot DTO has no modelInvocation')
   assert((snapshot.queuedCommands || []).length === 0, 'queued commands must be empty')
   const assistantIndex = entries.findIndex((entry) => entry.entryId === assistant.entryId)
   const turnEnd = entries.slice(assistantIndex + 1).find((entry) => entryType(entry) === 'TURN_END')
@@ -558,7 +558,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       def.providerType === 'google'
         ? `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1 个短 follow-up，断言非空/marker 回复与 usage 并观测 cache hit（Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖），写脱敏 artifact`
         : `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`
-    ) + '；每轮校验 IDLE、无 active modelInvocation/queuedCommands、对应 TURN_END COMPLETED 且 continueModel false，逐轮写统一 rounds artifact；'
+    ) + '；每轮校验 IDLE、无 active activeAssistantOutput/queuedCommands、对应 TURN_END COMPLETED 且 continueModel false，逐轮写统一 rounds artifact；'
       + `须显式 --real，最多 ${def.providerType === 'google' ? 2 : 4} 次请求，不自动加重试，cachePolicy=${def.providerType === 'google' ? 'observed' : 'required'}。`,
     // 所有协议使用相同的逐轮证据结构；case PASS 与缓存观测结果分别表达。
     async run(ctx) {
@@ -2300,8 +2300,8 @@ async function captureThreadFailureDiagnostics(ctx, threadId, label, extra = {})
           thread: snapshot.thread,
           entries: summarizeThreadHistory(snapshot.entries || []),
           toolInvocations: snapshot.toolInvocations,
-          modelInvocation: snapshot.modelInvocation,
-          modelAttemptFailures: snapshot.modelAttemptFailures,
+          activeAssistantOutput: snapshot.activeAssistantOutput,
+          generationFailures: snapshot.generationFailures,
           queuedCommands: snapshot.queuedCommands,
         }),
         null,

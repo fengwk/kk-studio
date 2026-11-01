@@ -40,7 +40,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
       }
       if (method === 'GET' && path === `/api/threads/${thread.threadId}`) {
         return { status: 200, json: { data: {
-          thread, queuedCommands: [], modelInvocation: null, toolInvocations: [],
+          thread, queuedCommands: [], activeAssistantOutput: null, toolInvocations: [],
         } } }
       }
       if (method === 'POST' && path.endsWith('/provider-request-preview')) {
@@ -203,9 +203,9 @@ function modelRequestDebugFixture() {
             thread: { ...thread },
             entries: [],
             queuedCommands: [],
-            modelInvocation: null,
+            activeAssistantOutput: null,
             toolInvocations: [],
-            modelAttemptFailures: [],
+            generationFailures: [],
             stopReceipts: [],
           },
         },

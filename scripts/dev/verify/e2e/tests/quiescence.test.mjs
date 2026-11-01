@@ -27,7 +27,7 @@ test('active work and cursor changes reset the quiescent candidate', () => {
     { ...initial, thread: { ...initial.thread, status: 'RUNNING', executionControl: 'STOPPED' } },
     { ...initial, thread: { ...initial.thread, status: 'WAITING', executionControl: 'STOPPED' } },
     { ...initial, queuedCommands: [{ sequence: '1' }] },
-    { ...initial, modelInvocation: { id: 'model-1' } },
+    { ...initial, activeAssistantOutput: { generationId: 'generation-1' } },
     { ...initial, toolInvocations: [{ id: 'tool-1' }] },
   ]) {
     assert.deepEqual(observeQuiescentSnapshot(candidate.key, active), {
@@ -71,7 +71,7 @@ function quiescentSnapshot() {
       executionControl: 'RUNNABLE',
     },
     queuedCommands: [],
-    modelInvocation: null,
+    activeAssistantOutput: null,
     toolInvocations: [],
   }
 }

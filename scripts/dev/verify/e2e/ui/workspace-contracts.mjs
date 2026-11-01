@@ -963,7 +963,7 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
     toolInvocations: [
       {
         id: 'inv-bash-1',
-        modelInvocationId: 'm-1',
+        turnStartEntryId: 'entry-turn-1',
         assistantEntryId: 'entry-tool-1',
         callIndex: 0,
         status: 'WAITING_APPROVAL',
@@ -985,8 +985,8 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
         updateTime: '2026-07-28T10:00:01Z',
       },
     ],
-    modelInvocation: null,
-    modelAttemptFailures: [],
+    activeAssistantOutput: null,
+    generationFailures: [],
   }
 }
 

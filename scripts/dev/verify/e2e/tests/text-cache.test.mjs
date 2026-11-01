@@ -102,10 +102,10 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       }
       if (method === 'GET' && url === `/api/threads/${thread?.threadId}`) {
         snapshotReads++
-        const snapshot = { thread, entries, modelInvocation: null, queuedCommands: [], toolInvocations: [] }
+        const snapshot = { thread, entries, activeAssistantOutput: null, queuedCommands: [], toolInvocations: [] }
         // 稳定轮询之后的独立快照发生变化，验证 case 自身也会拒绝新出现的 active work。
         if (requestCount === 2 && snapshotReads === 3) {
-          if (fault === 'activeInvocation') snapshot.modelInvocation = { id: randomUUID() }
+          if (fault === 'activeInvocation') snapshot.activeAssistantOutput = { generationId: randomUUID() }
           if (fault === 'queuedCommands') snapshot.queuedCommands = [{ sequence: '3' }]
           if (fault === 'status') snapshot.thread = { ...thread, status: 'RUNNING' }
         }

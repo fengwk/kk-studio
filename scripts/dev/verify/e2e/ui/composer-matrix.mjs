@@ -1976,7 +1976,7 @@ async function waitForActiveModel(apiCtx, threadId, timeoutMs = 15_000) {
   let last = null
   while (Date.now() <= deadline) {
     last = await getThreadSnapshot(apiCtx, threadId)
-    if (last.modelInvocation != null) return last
+    if (last.activeAssistantOutput != null) return last
     await sleep(50)
   }
   throw new Error(`model invocation did not become active: ${JSON.stringify(last)}`)
