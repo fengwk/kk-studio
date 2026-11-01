@@ -538,12 +538,13 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertEquals(claim.claimedWakeVersion(), newClaim.claimedWakeVersion());
   }
 
-  /** 测试意图：release(ClaimedWork) 释放 TOOL Work 租约并使其立即可被具备该环境连接的节点重新认领。 */
+  /** 测试意图：release(ClaimedWork) 释放 TOOL Work 租约并使其立即可被具备该环境连接的其他节点重新认领。 */
   @Test
   void releaseToolWorkMakesItImmediatelyClaimableWithAffinityPreserved() {
-    UUID node = UUID.randomUUID();
+    UUID node1 = UUID.randomUUID();
+    UUID node2 = UUID.randomUUID();
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-    seedEnvironmentConnection(jdbc, env, "daemon-1", node, "READY");
+    seedEnvironmentConnection(jdbc, env, "daemon-1", node1, "READY");
 
     SeededTool seededTool = seedTool(store);
     UUID toolId = seededTool.toolId();
@@ -559,27 +560,33 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     ClaimedWork claim =
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-1", LEASE_30S, node))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-1", LEASE_30S, node1))
             .orElseThrow();
     assertEquals(target, claim.target());
     assertEquals("lease-token-1", claim.leaseToken());
 
+    // 守护进程在排空期间重新连接到 node2
+    seedEnvironmentConnection(jdbc, env, "daemon-2", node2, "READY");
+
+    // 未 release 前 node2 无法抢占
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node2))
             .isEmpty());
 
+    // node1 移交并释放 claim
     store.transaction(
         tx -> {
           assertTrue(tx.work().release(claim));
           return null;
         });
 
+    // node2 可立即认领该 Work
     ClaimedWork reClaim =
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node))
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-token-2", LEASE_30S, node2))
             .orElseThrow();
     assertEquals(target, reClaim.target());
     assertEquals("lease-token-2", reClaim.leaseToken());
