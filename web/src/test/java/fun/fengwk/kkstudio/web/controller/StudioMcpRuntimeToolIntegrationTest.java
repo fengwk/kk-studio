@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -335,7 +336,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     private final List<UUID> started = new ArrayList<>();
 
     @Override
-    public boolean tryStart(UUID remoteExecutionId) {
+    public boolean tryStart(UUID remoteExecutionId, EnvironmentId environmentId) {
       started.add(remoteExecutionId);
       return true;
     }
