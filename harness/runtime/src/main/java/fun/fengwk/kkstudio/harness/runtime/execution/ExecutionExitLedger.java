@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
@@ -37,7 +38,7 @@ public final class ExecutionExitLedger {
 
   private ExecutionExitLedger() {}
 
-  /** 登记一次尚未退出的本地或远端执行。重复登记相同身份是幂等的。 */
+  /** 登记一次尚未退出的本地执行。重复登记相同身份是幂等的。 */
   public static ExecutionExitFact register(
       HarnessStore.Transaction tx,
       UUID executionId,
@@ -47,6 +48,29 @@ public final class ExecutionExitLedger {
       String ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
+    return register(
+        tx,
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        ownerLeaseToken,
+        kind,
+        parentExecutionId,
+        null);
+  }
+
+  /** 登记一次尚未退出的本地或远端执行。重复登记相同身份是幂等的。 */
+  public static ExecutionExitFact register(
+      HarnessStore.Transaction tx,
+      UUID executionId,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String ownerLeaseToken,
+      ExecutionExitKind kind,
+      UUID parentExecutionId,
+      EnvironmentId environmentId) {
     Objects.requireNonNull(tx, "tx");
     Instant now = tx.now();
     return tx.exits()
@@ -59,6 +83,7 @@ public final class ExecutionExitLedger {
                 ownerLeaseToken,
                 kind,
                 parentExecutionId,
+                environmentId,
                 ExecutionExitState.UNCONFIRMED,
                 now,
                 null,

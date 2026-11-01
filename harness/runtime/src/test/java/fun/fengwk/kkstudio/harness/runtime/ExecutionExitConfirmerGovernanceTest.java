@@ -549,6 +549,7 @@ class ExecutionExitConfirmerGovernanceTest {
         "lease-1",
         ExecutionExitKind.TOOL,
         null,
+        null,
         ExecutionExitState.UNCONFIRMED,
         registeredAt,
         null,
@@ -564,6 +565,7 @@ class ExecutionExitConfirmerGovernanceTest {
         fact.ownerLeaseToken(),
         fact.kind(),
         fact.parentExecutionId(),
+        fact.environmentId(),
         ExecutionExitState.STUDIO_EXITED,
         T0);
   }

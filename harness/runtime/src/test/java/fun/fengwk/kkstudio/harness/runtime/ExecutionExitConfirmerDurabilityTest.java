@@ -270,6 +270,7 @@ class ExecutionExitConfirmerDurabilityTest {
             recorded.ownerLeaseToken(),
             recorded.kind(),
             recorded.parentExecutionId(),
+            recorded.environmentId(),
             ExecutionExitState.UNCONFIRMED,
             recorded.registeredAt(),
             null,
@@ -373,6 +374,7 @@ class ExecutionExitConfirmerDurabilityTest {
         fact.ownerLeaseToken(),
         fact.kind(),
         fact.parentExecutionId(),
+        fact.environmentId(),
         ExecutionExitState.STUDIO_EXITED,
         T0);
   }
@@ -419,6 +421,7 @@ class ExecutionExitConfirmerDurabilityTest {
         1,
         "lease-1",
         ExecutionExitKind.TOOL,
+        null,
         null,
         ExecutionExitState.UNCONFIRMED,
         registeredAt,

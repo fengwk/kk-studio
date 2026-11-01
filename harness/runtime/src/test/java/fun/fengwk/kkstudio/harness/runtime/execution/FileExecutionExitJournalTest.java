@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -384,6 +386,7 @@ class FileExecutionExitJournalTest {
             "lease-1",
             ExecutionExitKind.REMOTE,
             UUID.randomUUID(),
+            EnvironmentId.of(UUID.randomUUID()),
             ExecutionExitState.REMOTE_ACKNOWLEDGED,
             T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -418,6 +421,21 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\","
+              + "\"confirmedAt\":\""
+              + T0
+              + "\"}");
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
+
+      Files.writeString(
+          entry,
+          "{\"executionId\":\""
+              + UUID.randomUUID()
+              + "\",\"threadId\":\""
+              + UUID.randomUUID()
+              + "\",\"invocationId\":\""
+              + UUID.randomUUID()
+              + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
+              + "\"parentExecutionId\":null,\"environmentId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAtX\":\""
               + T0
               + "\"}");
@@ -432,7 +450,7 @@ class FileExecutionExitJournalTest {
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
               + "\",\"attempt\":\"one\",\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
-              + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\","
+              + "\"parentExecutionId\":null,\"environmentId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAt\":\""
               + T0
               + "\"}");
@@ -447,7 +465,7 @@ class FileExecutionExitJournalTest {
               + "\",\"invocationId\":\""
               + UUID.randomUUID()
               + "\",\"attempt\":1,\"ownerLeaseToken\":\"\",\"kind\":\"TOOL\","
-              + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\","
+              + "\"parentExecutionId\":null,\"environmentId\":null,\"targetState\":\"STUDIO_EXITED\","
               + "\"confirmedAt\":\""
               + T0
               + "\"}");
@@ -872,6 +890,7 @@ class FileExecutionExitJournalTest {
         1,
         "lease-1",
         ExecutionExitKind.TOOL,
+        null,
         null,
         state,
         confirmedAt);

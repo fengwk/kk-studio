@@ -13,6 +13,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +34,8 @@ class ExecutionExitFactTest {
   private static final UUID OTHER_INVOCATION_ID = new UUID(0L, 302L);
   private static final String LEASE = "lease-1";
   private static final String OTHER_LEASE = "lease-2";
+  private static final EnvironmentId ENV = EnvironmentId.of(new UUID(0L, 501L));
+  private static final EnvironmentId OTHER_ENV = EnvironmentId.of(new UUID(0L, 502L));
   private static final Instant REGISTERED_AT = Instant.parse("2026-07-01T00:00:00.123Z");
   private static final Instant CONFIRMED_AT = REGISTERED_AT.plusSeconds(1);
 
@@ -41,6 +45,9 @@ class ExecutionExitFactTest {
     assertEquals(ExecutionExitKind.TOOL, tool().kind());
     assertEquals(ExecutionExitKind.REMOTE, remote().kind());
     assertEquals(TOOL_EXECUTION_ID, remote().parentExecutionId());
+    assertEquals(ENV, remote().environmentId());
+    assertNull(model().environmentId());
+    assertNull(tool().environmentId());
   }
 
   @Test
@@ -144,7 +151,73 @@ class ExecutionExitFactTest {
                 1,
                 LEASE,
                 ExecutionExitKind.REMOTE,
-                OTHER_PARENT_ID)));
+                OTHER_PARENT_ID)),
+        Arguments.of(
+            "environmentId",
+            remote,
+            unconfirmed(
+                REMOTE_EXECUTION_ID,
+                THREAD_ID,
+                INVOCATION_ID,
+                1,
+                LEASE,
+                ExecutionExitKind.REMOTE,
+                TOOL_EXECUTION_ID,
+                OTHER_ENV)));
+  }
+
+  @Test
+  void rejectsInvalidEnvironmentIdCombinations() {
+    // REMOTE 必须提供 environmentId
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            fact(
+                REMOTE_EXECUTION_ID,
+                THREAD_ID,
+                INVOCATION_ID,
+                1,
+                LEASE,
+                ExecutionExitKind.REMOTE,
+                TOOL_EXECUTION_ID,
+                null,
+                ExecutionExitState.UNCONFIRMED,
+                REGISTERED_AT,
+                null));
+
+    // MODEL 不能提供 environmentId
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            fact(
+                MODEL_EXECUTION_ID,
+                THREAD_ID,
+                INVOCATION_ID,
+                1,
+                LEASE,
+                ExecutionExitKind.MODEL,
+                null,
+                ENV,
+                ExecutionExitState.UNCONFIRMED,
+                REGISTERED_AT,
+                null));
+
+    // TOOL 不能提供 environmentId
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            fact(
+                TOOL_EXECUTION_ID,
+                THREAD_ID,
+                INVOCATION_ID,
+                1,
+                LEASE,
+                ExecutionExitKind.TOOL,
+                null,
+                ENV,
+                ExecutionExitState.UNCONFIRMED,
+                REGISTERED_AT,
+                null));
   }
 
   @Test
@@ -377,6 +450,26 @@ class ExecutionExitFactTest {
       String ownerLeaseToken,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
+    return unconfirmed(
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        ownerLeaseToken,
+        kind,
+        parentExecutionId,
+        kind == ExecutionExitKind.REMOTE ? ENV : null);
+  }
+
+  private static ExecutionExitFact unconfirmed(
+      UUID executionId,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String ownerLeaseToken,
+      ExecutionExitKind kind,
+      UUID parentExecutionId,
+      EnvironmentId environmentId) {
     return fact(
         executionId,
         threadId,
@@ -385,6 +478,7 @@ class ExecutionExitFactTest {
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        environmentId,
         ExecutionExitState.UNCONFIRMED,
         REGISTERED_AT,
         null);
@@ -401,6 +495,32 @@ class ExecutionExitFactTest {
       ExecutionExitState state,
       Instant registeredAt,
       Instant confirmedAt) {
+    return fact(
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        ownerLeaseToken,
+        kind,
+        parentExecutionId,
+        kind == ExecutionExitKind.REMOTE ? ENV : null,
+        state,
+        registeredAt,
+        confirmedAt);
+  }
+
+  private static ExecutionExitFact fact(
+      UUID executionId,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String ownerLeaseToken,
+      ExecutionExitKind kind,
+      UUID parentExecutionId,
+      EnvironmentId environmentId,
+      ExecutionExitState state,
+      Instant registeredAt,
+      Instant confirmedAt) {
     return new ExecutionExitFact(
         executionId,
         threadId,
@@ -409,6 +529,7 @@ class ExecutionExitFactTest {
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        environmentId,
         state,
         registeredAt,
         confirmedAt,

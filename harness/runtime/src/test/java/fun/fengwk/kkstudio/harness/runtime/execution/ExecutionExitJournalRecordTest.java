@@ -4,12 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+
 import java.time.Instant;
 import java.util.UUID;
 
 class ExecutionExitJournalRecordTest {
 
   private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");
+  private static final EnvironmentId ENV = EnvironmentId.of(new UUID(0L, 501L));
 
   @Test
   void rejectsIdentityTargetAndEvidenceCombinationsThatCannotBeReplayed() {
@@ -115,6 +118,7 @@ class ExecutionExitJournalRecordTest {
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        kind == ExecutionExitKind.REMOTE ? ENV : null,
         targetState,
         confirmedAt);
   }

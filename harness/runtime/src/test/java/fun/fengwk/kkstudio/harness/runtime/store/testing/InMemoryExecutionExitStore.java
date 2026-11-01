@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -97,6 +99,41 @@ final class InMemoryExecutionExitStore implements ExecutionExitStore {
         .filter(
             fact ->
                 fact.threadId().equals(threadId) && fact.state() == ExecutionExitState.UNCONFIRMED)
+        .sorted(
+            Comparator.comparing(ExecutionExitFact::registeredAt)
+                .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))
+        .toList();
+  }
+
+  @Override
+  public List<ExecutionExitFact> loadUnconfirmedRemote(EnvironmentId environmentId) {
+    tx.checkOpen();
+    Objects.requireNonNull(environmentId, "environmentId");
+    return state.executions.values().stream()
+        .filter(
+            fact ->
+                environmentId.equals(fact.environmentId())
+                    && fact.kind() == ExecutionExitKind.REMOTE
+                    && fact.state() == ExecutionExitState.UNCONFIRMED)
+        .sorted(
+            Comparator.comparing(ExecutionExitFact::registeredAt)
+                .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))
+        .toList();
+  }
+
+  @Override
+  public List<ExecutionExitFact> loadRemote(UUID invocationId, int attempt) {
+    tx.checkOpen();
+    Objects.requireNonNull(invocationId, "invocationId");
+    if (attempt < 1) {
+      throw new IllegalArgumentException("attempt must be positive");
+    }
+    return state.executions.values().stream()
+        .filter(
+            fact ->
+                fact.invocationId().equals(invocationId)
+                    && fact.attempt() == attempt
+                    && fact.kind() == ExecutionExitKind.REMOTE)
         .sorted(
             Comparator.comparing(ExecutionExitFact::registeredAt)
                 .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))

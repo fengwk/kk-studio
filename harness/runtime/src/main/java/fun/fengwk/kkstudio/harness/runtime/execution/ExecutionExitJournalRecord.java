@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Instant;
@@ -19,6 +20,7 @@ public record ExecutionExitJournalRecord(
     String ownerLeaseToken,
     ExecutionExitKind kind,
     UUID parentExecutionId,
+    EnvironmentId environmentId,
     ExecutionExitState targetState,
     Instant confirmedAt) {
 
@@ -41,8 +43,14 @@ public record ExecutionExitJournalRecord(
       if (parentExecutionId.equals(executionId)) {
         throw new IllegalArgumentException("remote execution cannot parent itself");
       }
-    } else if (parentExecutionId != null) {
-      throw new IllegalArgumentException("only a remote execution has a parent execution");
+      environmentId = Objects.requireNonNull(environmentId, "environmentId");
+    } else {
+      if (parentExecutionId != null) {
+        throw new IllegalArgumentException("only a remote execution has a parent execution");
+      }
+      if (environmentId != null) {
+        throw new IllegalArgumentException("only a remote execution has an environment id");
+      }
     }
     targetState = Objects.requireNonNull(targetState, "targetState");
     if (!targetState.confirmed()) {
@@ -68,6 +76,7 @@ public record ExecutionExitJournalRecord(
         ownerLeaseToken,
         kind,
         parentExecutionId,
+        environmentId,
         ExecutionExitState.UNCONFIRMED,
         registeredAt,
         null,
@@ -83,6 +92,7 @@ public record ExecutionExitJournalRecord(
         && attempt == other.attempt
         && ownerLeaseToken.equals(other.ownerLeaseToken)
         && kind == other.kind
-        && Objects.equals(parentExecutionId, other.parentExecutionId);
+        && Objects.equals(parentExecutionId, other.parentExecutionId)
+        && Objects.equals(environmentId, other.environmentId);
   }
 }

@@ -131,6 +131,11 @@ public record Work(
     return from(target, state().reschedule(token, claimedWakeVersion, now, availableAt));
   }
 
+  /** 在当前 lease 于 {@code now} 仍有效时主动释放 claim：清除 lease，使 work 立即可被认领。保留环境亲和性。 */
+  public Work release(String token, Instant now) {
+    return from(target, state().release(token, now));
+  }
+
   /** 当前 lease 在 {@code now} 是否仍由 {@code token} 持有。 */
   public boolean isOwnedBy(String token, Instant now) {
     return leaseToken != null

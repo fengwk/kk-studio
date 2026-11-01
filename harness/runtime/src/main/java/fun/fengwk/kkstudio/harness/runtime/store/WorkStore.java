@@ -49,6 +49,9 @@ public interface WorkStore {
   /** 完成 claim；返回空表示删除匹配当前 wake 的行。 */
   Optional<Work> complete(ClaimedWork claim);
 
+  /** 释放 claim lease，使 Work 立即可被认领；失权时返回 false。 */
+  boolean release(ClaimedWork claim);
+
   /** 重排 claim 的 Work 到权威时间加延迟。 */
   void reschedule(ClaimedWork claim, Duration delay);
 }

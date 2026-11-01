@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
@@ -1678,6 +1679,9 @@ public abstract class HarnessStoreJoinContract {
     assertEquals("only a remote execution can be remote-acknowledged", failure.getMessage());
   }
 
+  private static final EnvironmentId ENV_1 = EnvironmentId.of(TestIds.id(901));
+  private static final EnvironmentId ENV_2 = EnvironmentId.of(TestIds.id(902));
+
   private static ExecutionExitFact fact(
       UUID executionId,
       UUID threadId,
@@ -1686,6 +1690,28 @@ public abstract class HarnessStoreJoinContract {
       String lease,
       ExecutionExitKind kind,
       UUID parentExecutionId) {
+    return fact(
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        lease,
+        kind,
+        parentExecutionId,
+        kind == ExecutionExitKind.REMOTE ? ENV_1 : null,
+        T0);
+  }
+
+  private static ExecutionExitFact fact(
+      UUID executionId,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String lease,
+      ExecutionExitKind kind,
+      UUID parentExecutionId,
+      EnvironmentId environmentId,
+      Instant registeredAt) {
     return new ExecutionExitFact(
         executionId,
         threadId,
@@ -1694,10 +1720,163 @@ public abstract class HarnessStoreJoinContract {
         lease,
         kind,
         parentExecutionId,
+        environmentId,
         ExecutionExitState.UNCONFIRMED,
-        T0,
+        registeredAt,
         null,
         null);
+  }
+
+  /**
+   * 测试意图：loadUnconfirmedRemote 严格按 EnvironmentId 过滤未确认的 REMOTE 事实， 排除已确认事实与其它环境的事实，并按
+   * (registered_at, execution_id) 升序排序。
+   */
+  @Test
+  void loadUnconfirmedRemoteFiltersByEnvironmentAndStateAndSortsChronologically() {
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(830);
+    ExecutionExitFact parent =
+        fact(TestIds.id(831), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact remoteEnv1Early =
+        fact(
+            TestIds.id(832),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            parent.executionId(),
+            ENV_1,
+            T0);
+    ExecutionExitFact remoteEnv1Late =
+        fact(
+            TestIds.id(833),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            parent.executionId(),
+            ENV_1,
+            T0.plusMillis(10));
+    ExecutionExitFact remoteEnv2 =
+        fact(
+            TestIds.id(834),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            parent.executionId(),
+            ENV_2,
+            T0);
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          tx.exits().register(parent);
+          tx.exits().register(remoteEnv1Late);
+          tx.exits().register(remoteEnv1Early);
+          tx.exits().register(remoteEnv2);
+          return null;
+        });
+
+    // 此时 ENV_1 下应有两条未确认远端事实，并按时间升序排列
+    List<ExecutionExitFact> env1Facts =
+        store.transaction(tx -> tx.exits().loadUnconfirmedRemote(ENV_1));
+    assertEquals(List.of(remoteEnv1Early, remoteEnv1Late), env1Facts);
+
+    // 确认一条后，loadUnconfirmedRemote 不再返回该事实
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          tx.exits()
+              .confirm(remoteEnv1Early, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0.plusMillis(20))
+              .orElseThrow();
+          return null;
+        });
+
+    List<ExecutionExitFact> env1Remaining =
+        store.transaction(tx -> tx.exits().loadUnconfirmedRemote(ENV_1));
+    assertEquals(List.of(remoteEnv1Late), env1Remaining);
+
+    // ENV_2 仅有一条
+    List<ExecutionExitFact> env2Facts =
+        store.transaction(tx -> tx.exits().loadUnconfirmedRemote(ENV_2));
+    assertEquals(List.of(remoteEnv2), env2Facts);
+  }
+
+  /**
+   * 测试意图：loadRemote 按 invocationId 与 attempt 读取全部 REMOTE 事实， 精确覆盖 0 条（未登记）、1 条（恰好一条）、多条（同一 attempt
+   * 多条）三种情况，并按时间与 executionId 排序。
+   */
+  @Test
+  void loadRemoteCoversZeroOneAndMultipleFactsWithSorting() {
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(840);
+    UUID otherInvocationId = TestIds.id(841);
+
+    // 1. 0 条事实场景
+    List<ExecutionExitFact> zeroFacts =
+        store.transaction(tx -> tx.exits().loadRemote(invocationId, 1));
+    assertTrue(zeroFacts.isEmpty(), "未登记时应返回空列表");
+
+    ExecutionExitFact parentAttempt1 =
+        fact(TestIds.id(842), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact remote1 =
+        fact(
+            TestIds.id(843),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            parentAttempt1.executionId(),
+            ENV_1,
+            T0);
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          tx.exits().register(parentAttempt1);
+          tx.exits().register(remote1);
+          return null;
+        });
+
+    // 2. 恰有 1 条事实场景
+    List<ExecutionExitFact> oneFact =
+        store.transaction(tx -> tx.exits().loadRemote(invocationId, 1));
+    assertEquals(1, oneFact.size());
+    assertEquals(remote1, oneFact.getFirst());
+
+    // 其它 attempt 仍为 0 条
+    assertTrue(store.transaction(tx -> tx.exits().loadRemote(invocationId, 2)).isEmpty());
+    // 其它 invocationId 仍为 0 条
+    assertTrue(store.transaction(tx -> tx.exits().loadRemote(otherInvocationId, 1)).isEmpty());
+
+    // 3. 多条事实场景（同一 invocation 与 attempt 下登记第二条远端调用）
+    ExecutionExitFact remote2 =
+        fact(
+            TestIds.id(844),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            parentAttempt1.executionId(),
+            ENV_1,
+            T0.plusMillis(5));
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          tx.exits().register(remote2);
+          return null;
+        });
+
+    List<ExecutionExitFact> multipleFacts =
+        store.transaction(tx -> tx.exits().loadRemote(invocationId, 1));
+    assertEquals(List.of(remote1, remote2), multipleFacts);
   }
 
   @Test
