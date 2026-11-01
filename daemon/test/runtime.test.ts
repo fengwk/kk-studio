@@ -336,7 +336,10 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
           eventNodeId: rawPayload.eventNodeId,
           connectionId: rawPayload.connectionId,
           claimId: rawPayload.claimId,
+          bindingEpoch: rawPayload.bindingEpoch !== undefined ? BigInt(rawPayload.bindingEpoch) : undefined,
           mode: rawPayload.mode === 'open' ? ProtoIdeOpenMode.RESUME : (rawPayload.mode === 'create' ? ProtoIdeOpenMode.CREATE : undefined),
+          directory: rawPayload.directory,
+          discard: rawPayload.discard,
         }),
       },
     })
@@ -2232,6 +2235,43 @@ describe('runtime IDE commands', () => {
     expect(result?.invocationId).toBe('ide-1')
     expect(result?.payload).toEqual({ ok: true, views: [] })
     expect(handled).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('maps all protocol fields including discard, bindingEpoch, directory to IdeCommand', async () => {
+    let captured: any = null
+    const setup = buildRuntime({
+      ide: ideService({
+        async handle(command) {
+          captured = command
+          return { ok: true }
+        },
+      }),
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'ide-close-1',
+        payload: {
+          action: 'CLOSE_VIEW',
+          viewId: '11111111-1111-1111-1111-111111111111',
+          documentId: '22222222-2222-2222-2222-222222222222',
+          bindingEpoch: 42,
+          discard: true,
+          directory: '/workspace/dir',
+        },
+      }),
+    )
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT'))
+    expect(captured).toMatchObject({
+      action: 'CLOSE_VIEW',
+      viewId: '11111111-1111-1111-1111-111111111111',
+      documentId: '22222222-2222-2222-2222-222222222222',
+      bindingEpoch: '42',
+      discard: true,
+      directory: '/workspace/dir',
+    })
     setup.runtime.close()
   })
 
