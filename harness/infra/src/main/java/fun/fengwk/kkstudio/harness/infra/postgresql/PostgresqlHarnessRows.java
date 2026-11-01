@@ -358,6 +358,7 @@ final class PostgresqlHarnessRows {
               resultSet.getString("owner_lease_token"),
               ExecutionExitKind.valueOf(resultSet.getString("kind")),
               nullableUuid(resultSet, "parent_execution_id"),
+              nullableEnvironmentId(resultSet.getObject("environment_id")),
               ExecutionExitState.valueOf(resultSet.getString("state")),
               instant(resultSet, "registered_at"),
               nullableInstant(resultSet, "confirmed_at"),

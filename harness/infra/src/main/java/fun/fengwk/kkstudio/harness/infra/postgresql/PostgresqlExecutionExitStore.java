@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.postgresql;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessTransaction.LockKey;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
@@ -45,8 +46,8 @@ final class PostgresqlExecutionExitStore implements ExecutionExitStore {
         """
         insert into harness_execution_exit (
             execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind,
-            parent_execution_id, state, registered_at, confirmed_at, abandoned_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            parent_execution_id, environment_id, state, registered_at, confirmed_at, abandoned_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         fact.executionId(),
         fact.threadId(),
@@ -55,6 +56,7 @@ final class PostgresqlExecutionExitStore implements ExecutionExitStore {
         fact.ownerLeaseToken(),
         fact.kind().name(),
         fact.parentExecutionId(),
+        fact.environmentId() == null ? null : fact.environmentId().value(),
         fact.state().name(),
         PostgresqlHarnessRows.timestamp(fact.registeredAt()),
         PostgresqlHarnessRows.timestamp(fact.confirmedAt()),
@@ -136,6 +138,38 @@ final class PostgresqlExecutionExitStore implements ExecutionExitStore {
         """,
         PostgresqlHarnessRows.EXECUTION_EXIT,
         threadId);
+  }
+
+  @Override
+  public List<ExecutionExitFact> loadUnconfirmedRemote(EnvironmentId environmentId) {
+    tx.checkOpen();
+    Objects.requireNonNull(environmentId, "environmentId");
+    return tx.queryList(
+        """
+        select * from harness_execution_exit
+         where environment_id = ? and kind = 'REMOTE' and state = 'UNCONFIRMED'
+         order by registered_at, execution_id
+        """,
+        PostgresqlHarnessRows.EXECUTION_EXIT,
+        environmentId.value());
+  }
+
+  @Override
+  public List<ExecutionExitFact> loadRemote(UUID invocationId, int attempt) {
+    tx.checkOpen();
+    Objects.requireNonNull(invocationId, "invocationId");
+    if (attempt < 1) {
+      throw new IllegalArgumentException("attempt must be positive");
+    }
+    return tx.queryList(
+        """
+        select * from harness_execution_exit
+         where invocation_id = ? and attempt = ? and kind = 'REMOTE'
+         order by registered_at, execution_id
+        """,
+        PostgresqlHarnessRows.EXECUTION_EXIT,
+        invocationId,
+        attempt);
   }
 
   @Override

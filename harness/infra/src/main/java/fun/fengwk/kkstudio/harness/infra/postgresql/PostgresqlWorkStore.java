@@ -212,6 +212,19 @@ final class PostgresqlWorkStore implements WorkStore {
     tx.notifyEnvironmentWorkChanged(claim.target(), claim.requiredEnvironmentId());
   }
 
+  @Override
+  public boolean release(ClaimedWork claim) {
+    tx.checkOpen();
+    Objects.requireNonNull(claim, "claim");
+    tx.requireCanLockWork(claim.target());
+    boolean released = store(claim.target()).release(toClaim(claim));
+    tx.recordWorkLock(claim.target());
+    if (released) {
+      tx.notifyEnvironmentWorkChanged(claim.target(), claim.requiredEnvironmentId());
+    }
+    return released;
+  }
+
   private DurableWorkStore store(WorkTarget target) {
     Objects.requireNonNull(target, "target");
     return store(target.type());
