@@ -395,14 +395,14 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(commandJson("\"extra\":true")))
         .andExpect(status().isBadRequest());
-    // 已删除的 Link 写模型不再是合法命令类型，命令级未知字段同样拒绝。
+    // 未知命令类型同样拒绝。
     mockMvc
         .perform(
             post("/api/canvases/" + CANVAS + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"idempotencyKey":"%s","commands":[{"type":"CREATE_LINK"}]}
+                    {"idempotencyKey":"%s","commands":[{"type":"UNKNOWN_COMMAND"}]}
                     """
                         .formatted(COMMAND)))
         .andExpect(status().isBadRequest());

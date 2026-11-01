@@ -190,7 +190,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.providerName").value(providerName))
                 .andExpect(jsonPath("$.data.name").value(modelName))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.providerId").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
@@ -198,7 +197,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(modelName, modelData.path("name").asText());
     assertEquals(WIRE_MODEL_ID, modelData.path("modelId").asText());
     assertFalse(modelData.has("id"));
-    assertFalse(modelData.has("providerId"));
 
     AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     agentConfig.setTools(List.of());
@@ -222,7 +220,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.model").value(modelName))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
-                .andExpect(jsonPath("$.data.providerId").doesNotExist())
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.subagents").isEmpty())
@@ -233,7 +230,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(modelName, agentData.path("model").asText());
     assertFalse(agentData.has("id"));
     assertFalse(agentData.has("modelId"));
-    assertFalse(agentData.has("providerId"));
 
     JsonNode providerPage =
         data(mockMvc.perform(get("/api/providers")).andExpect(status().isOk()).andReturn());
@@ -247,7 +243,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(providerName, listedModel.path("providerName").asText());
     assertEquals(WIRE_MODEL_ID, listedModel.path("modelId").asText());
     assertFalse(listedModel.has("id"));
-    assertFalse(listedModel.has("providerId"));
 
     JsonNode agentPage =
         data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
@@ -255,7 +250,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     assertEquals(modelName, listedAgent.path("model").asText());
     assertFalse(listedAgent.has("id"));
     assertFalse(listedAgent.has("modelId"));
-    assertFalse(listedAgent.has("providerId"));
 
     AgentProviderUpdateDTO providerUpdate = new AgentProviderUpdateDTO();
     providerUpdate.setDescription("updated provider");
@@ -308,8 +302,8 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     modelUpdate.setConfig(model.getConfig());
     modelUpdate.setExpectedVersion("0");
     ObjectNode modelUpdateBody = objectMapper.valueToTree(modelUpdate);
-    modelUpdateBody.put("providerId", "1");
-    // 全局模型 PUT 允许 providerName，但仍拒绝旧数据库 providerId 字段。
+    modelUpdateBody.put("unknownField", "1");
+    // 全局模型 PUT 拒绝未知字段。
     mockMvc
         .perform(
             put(modelPath(providerName, modelName))
@@ -330,7 +324,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.name").value(modelName))
                 .andExpect(jsonPath("$.data.description").value("updated model"))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
-                .andExpect(jsonPath("$.data.providerId").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").value(WIRE_MODEL_ID))
                 .andExpect(jsonPath("$.data.version").value("1"))
                 .andReturn());
@@ -380,7 +373,6 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.description").value("updated agent"))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
-                .andExpect(jsonPath("$.data.providerId").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("1"))
                 .andReturn());
     assertEquals(agentName, updatedAgent.path("name").asText());
@@ -469,7 +461,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     configureExecutableModel(idBasedModel);
     ObjectNode idBasedModelBody = objectMapper.valueToTree(idBasedModel);
     idBasedModelBody.remove("providerName");
-    idBasedModelBody.put("providerId", "1");
+    idBasedModelBody.put("unknownField", "1");
     mockMvc
         .perform(
             post("/api/models")

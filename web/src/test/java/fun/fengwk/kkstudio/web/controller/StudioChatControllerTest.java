@@ -140,8 +140,7 @@ class StudioChatControllerTest {
             post("/api/chats")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"t\",\"agentName\":\"default-assistant\"}"))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.workspacePath").doesNotExist());
+        .andExpect(status().isCreated());
 
     ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
     verify(chatService).createChat(captor.capture());

@@ -53,7 +53,7 @@ class StudioModelCatalogControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.generation").value("7"))
         .andExpect(jsonPath("$.data.loading").value(false))
-        .andExpect(jsonPath("$.data.items[0].id").value("models_dev_v2:vendor:model"))
+        .andExpect(jsonPath("$.data.items[0].id").value("models_dev:vendor:model"))
         .andExpect(jsonPath("$.data.items[0].pricingSupported").value(true))
         .andExpect(jsonPath("$.data.nextCursor").value("next"));
 
@@ -81,7 +81,7 @@ class StudioModelCatalogControllerTest {
 
   private static ModelCatalogPageDTO page(boolean loading) {
     ModelDefaultCandidateDTO candidate = new ModelDefaultCandidateDTO();
-    candidate.setId("models_dev_v2:vendor:model");
+    candidate.setId("models_dev:vendor:model");
     candidate.setProvider("vendor");
     candidate.setModelId("model");
     candidate.setName("Model");

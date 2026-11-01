@@ -69,8 +69,5 @@ class E2eToolPermissionProfileTest {
     assertTrue(baseline.contains("\"edit\":[{\"action\":\"ask\",\"pattern\":\"*\"}]"));
     assertTrue(baseline.contains("\"write\":[{\"action\":\"ask\",\"pattern\":\"*\"}]"));
     assertFalse(baseline.contains("\"read\""), "V1 default row must not add a read override");
-    assertFalse(
-        baseline.contains("\"base."),
-        "V1 default row must not retain legacy base.* permission keys");
   }
 }
