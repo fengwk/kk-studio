@@ -50,12 +50,29 @@ BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-6.0.0.jar"}
 STORAGE_S3_ENDPOINT=${KK_STUDIO_STORAGE_S3_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_PUBLIC_ENDPOINT=${KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_REGION=${KK_STUDIO_STORAGE_S3_REGION:-us-east-1}
-STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio}
+STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio-e2e-matrix}
 STORAGE_S3_ACCESS_KEY=${KK_STUDIO_STORAGE_S3_ACCESS_KEY:-kk-studio}
 STORAGE_S3_SECRET_KEY=${KK_STUDIO_STORAGE_S3_SECRET_KEY:-kk-studio}
 DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
 # 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
 DAEMON_NODE=${DAEMON_NODE:-}
+
+# E2E 拥有固定专用的独立数据库与 S3 bucket，绝不触碰开发应用的 kk_studio_e2e 或 kk_studio
+E2E_DEDICATED_DATABASE="kk_studio_e2e_matrix"
+DB_HOST=${KK_STUDIO_DB_HOST:-127.0.0.1}
+DB_PORT=${KK_STUDIO_DB_PORT:-5432}
+DB_USER=${KK_STUDIO_DB_USER:-kk_studio}
+DB_PASSWORD=${KK_STUDIO_DB_PASSWORD:-kk_studio}
+if [ -n "${KK_STUDIO_DB_URL:-}" ]; then
+  if [[ "$KK_STUDIO_DB_URL" =~ jdbc:postgresql://([^:/]+)(:([0-9]+))?(/([^/?#]+))? ]]; then
+    DB_HOST="${BASH_REMATCH[1]}"
+    DB_PORT="${BASH_REMATCH[3]:-5432}"
+  fi
+fi
+export KK_STUDIO_DB_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${E2E_DEDICATED_DATABASE}"
+export KK_STUDIO_DB_USER="$DB_USER"
+export KK_STUDIO_DB_PASSWORD="$DB_PASSWORD"
+export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
 
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -206,11 +223,55 @@ ensure_s3_storage() {
   fi
 }
 
+ensure_dedicated_s3_bucket() {
+  local s3_endpoint="$STORAGE_S3_ENDPOINT"
+  if [ "$s3_endpoint" = "http://127.0.0.1:9000" ] || [ "$s3_endpoint" = "http://localhost:9000" ]; then
+    ensure_s3_storage
+    step "Ensuring clean dedicated E2E bucket $STORAGE_S3_BUCKET"
+    local mc_cmd="
+      mc alias set e2e-local '$STORAGE_S3_ENDPOINT' '$STORAGE_S3_ACCESS_KEY' '$STORAGE_S3_SECRET_KEY' >/dev/null
+      if mc ls 'e2e-local/$STORAGE_S3_BUCKET' >/dev/null 2>&1; then
+        mc rm --recursive --force 'e2e-local/$STORAGE_S3_BUCKET/'
+      else
+        mc mb 'e2e-local/$STORAGE_S3_BUCKET'
+        mc anonymous set none 'e2e-local/$STORAGE_S3_BUCKET'
+      fi
+    "
+    if command -v mc >/dev/null 2>&1; then
+      bash -ec "$mc_cmd"
+    elif command -v docker >/dev/null 2>&1; then
+      docker run --rm --net host --entrypoint /bin/sh kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z -ec "$mc_cmd"
+    else
+      die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
+    fi
+  fi
+}
+
+exec_postgres_admin_sql() {
+  local sql=$1
+  if command -v psql >/dev/null 2>&1; then
+    PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
+      -v ON_ERROR_STOP=1 -c "$sql"
+  elif command -v docker >/dev/null 2>&1 && [ -n "$(docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" ps --status running -q postgres 2>/dev/null)" ]; then
+    docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
+      psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c "$sql"
+  else
+    die "cannot reset E2E database: psql is not installed on host and deploy/local postgres container is not running"
+  fi
+}
+
+reset_e2e_database() {
+  step "Resetting dedicated E2E database $E2E_DEDICATED_DATABASE on $DB_HOST:$DB_PORT"
+  exec_postgres_admin_sql "DROP DATABASE IF EXISTS $E2E_DEDICATED_DATABASE WITH (FORCE);"
+  exec_postgres_admin_sql "CREATE DATABASE $E2E_DEDICATED_DATABASE;"
+}
+
 start_backend() {
   local java_home=$1
   mkdir -p "$WORK_DIR"
   kill_port "$BACKEND_PORT"
-  ensure_s3_storage
+  reset_e2e_database
+  ensure_dedicated_s3_bucket
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
   # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.

@@ -52,6 +52,8 @@ registerCase({
     let firstFinalSnapshot = null
     let secondFinalSnapshot = null
     let primaryError = null
+    let activeFailurePromise = null
+    const activeFailureAbort = new AbortController()
     const cleanupErrors = []
 
     try {
@@ -125,7 +127,6 @@ registerCase({
         intervalMs: 100,
       })
 
-      let activeFailurePromise = null
       const { signal: firstPublishedDelta, startResult } =
         await waitForModelTextDeltaAfterEventSubscribed(
           ctx,
@@ -134,6 +135,7 @@ registerCase({
             activeFailurePromise = waitForActiveAttemptFailure(ctx, threadId, {
               initialMarker,
               partialText: PARTIAL_TEXT,
+              signal: activeFailureAbort.signal,
             })
             return acceptCommandBatch(ctx, {
               owner: chatOwner(chat.id),
@@ -292,6 +294,14 @@ registerCase({
     } catch (error) {
       primaryError = error
     } finally {
+      activeFailureAbort.abort()
+      if (activeFailurePromise != null) {
+        try {
+          await activeFailurePromise
+        } catch {
+          // ignore aborted background poll
+        }
+      }
       await cleanup('stop active thread', cleanupErrors, async () => {
         if (!threadId) return
         const snapshot = await getThreadSnapshot(ctx, threadId)
@@ -380,12 +390,12 @@ async function waitForQuiescentSnapshot(ctx, threadId) {
 async function waitForActiveAttemptFailure(
   ctx,
   threadId,
-  { initialMarker, partialText, timeoutMs = 5_000 },
+  { initialMarker, partialText, timeoutMs = 5_000, signal },
 ) {
   const deadline = Date.now() + timeoutMs
   let lastSnapshot = null
   let polls = 0
-  while (Date.now() <= deadline) {
+  while (Date.now() <= deadline && !signal?.aborted) {
     lastSnapshot = await getThreadSnapshot(ctx, threadId)
     polls += 1
     const failures = lastSnapshot.generationFailures || []
@@ -398,6 +408,9 @@ async function waitForActiveAttemptFailure(
       return { snapshot: lastSnapshot, polls }
     }
     await sleep(25)
+  }
+  if (signal?.aborted) {
+    return { snapshot: lastSnapshot, polls, aborted: true }
   }
   throw new Error(
     `active generationFailures snapshot was not observed after ${polls} polls; ` +
@@ -721,7 +734,7 @@ class OpenAiAttemptMock {
     const timer = setTimeout(() => {
       this.timers.delete(timer)
       if (!response.destroyed) response.destroy()
-    }, 75)
+    }, 20)
     this.timers.add(timer)
   }
 
@@ -753,6 +766,19 @@ class OpenAiAttemptMock {
         created: Math.floor(Date.now() / 1000),
         model: body.model || 'e2e-model',
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      }),
+    )
+    response.write(
+      sseFrame({
+        id: `e2e-success-usage-${requestIndex}`,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: body.model || 'e2e-model',
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+        },
       }),
     )
     response.end('data: [DONE]\n\n')

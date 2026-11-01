@@ -1158,10 +1158,17 @@ registerCase({
     // 部分重放：HTTP 面 shape 限制一个 batch 恰一条 USER_MESSAGE，因此用
     // SET_AGENT(新) + USER_MESSAGE(已存在) 构造 partial：SET 是新 id、USER 已存在 =>
     // present=1/2 => 409 PARTIAL_COMMAND_REPLAY（Runtime 检测先于命令 admission）。
+    // 混合批次按契约必须携带当前游标。
+    const freshSnapshot = await getThreadSnapshot(ctx, threadId)
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
-          ...batch(),
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: freshSnapshot.thread.headEntryId,
+            expectedNextCommandSequence: freshSnapshot.thread.nextCommandSequence,
+          }),
           commands: [
             setAgentCommand('x', cid()),
             userMessageCommand('replayed again', idempotencyKey),
@@ -1205,6 +1212,8 @@ registerCase({
     })
     assert(accepted.replayed === false, JSON.stringify(accepted))
 
+    // 等待消息消费并进入稳定状态，确保后续拒绝对比不受异步执行干扰。
+    await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const afterMessage = await getThreadSnapshot(ctx, threadId)
     assert(
       BigInt(afterMessage.thread.nextCommandSequence) > BigInt(before.thread.nextCommandSequence),
@@ -2448,25 +2457,27 @@ registerCase({
       assert(full.entries.length > 1, 'quiescent thread must have entries after ROOT')
       const { json: afterRootJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${rootId}`)
       const afterRootData = envelopeData(afterRootJson)
-      assert.strictEqual(afterRootData.baseEntryId, rootId, 'ancestor cursor must be echoed as baseEntryId')
-      assert.deepStrictEqual(
-        afterRootData.entries.map((entry) => entry.entryId),
-        full.entries.slice(1).map((entry) => entry.entryId),
+      assert(afterRootData.baseEntryId === rootId, 'ancestor cursor must be echoed as baseEntryId')
+      assert(
+        isDeepStrictEqual(
+          afterRootData.entries.map((entry) => entry.entryId),
+          full.entries.slice(1).map((entry) => entry.entryId),
+        ),
         'ancestor cursor must return only the entries after it',
       )
 
       // 3. cursor=head -> 空 delta，baseEntryId=head
       const { json: atHeadJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${headId}`)
       const atHeadData = envelopeData(atHeadJson)
-      assert.strictEqual(atHeadData.baseEntryId, headId, 'cursor at head must return baseEntryId as head')
-      assert.strictEqual(atHeadData.entries.length, 0, 'cursor at head must return empty entries list')
+      assert(atHeadData.baseEntryId === headId, 'cursor at head must return baseEntryId as head')
+      assert(atHeadData.entries.length === 0, 'cursor at head must return empty entries list')
 
       // 4. 非祖先游标 -> 回退全量，baseEntryId=null
       const nonAncestorId = '00000000-0000-0000-0000-000000000999'
       const { json: nonAncestorJson } = await ctx.call('GET', `/api/threads/${threadId}?afterEntryId=${nonAncestorId}`)
       const nonAncestorData = envelopeData(nonAncestorJson)
-      assert.strictEqual(nonAncestorData.baseEntryId, null, 'non-ancestor cursor must fallback to full snapshot with null baseEntryId')
-      assert.strictEqual(nonAncestorData.entries.length, full.entries.length, 'fallback full snapshot must have same entry count')
+      assert(nonAncestorData.baseEntryId === null, 'non-ancestor cursor must fallback to full snapshot with null baseEntryId')
+      assert(nonAncestorData.entries.length === full.entries.length, 'fallback full snapshot must have same entry count')
     } finally {
       await ctx.call(
         'DELETE',

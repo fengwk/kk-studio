@@ -445,6 +445,19 @@ function sendCompletionsSuccess(response, body, text, requestIndex) {
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
     }),
   )
+  response.write(
+    sseFrame({
+      id: `e2e-queue-usage-${requestIndex}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: body.model || 'e2e-model',
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        total_tokens: 15,
+      },
+    }),
+  )
   response.end('data: [DONE]\n\n')
 }
 

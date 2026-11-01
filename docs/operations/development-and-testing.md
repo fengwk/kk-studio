@@ -429,9 +429,12 @@ case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`ca
 这些需在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
-runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口和 E2E 数据库
-（默认 `127.0.0.1:5432/kk_studio_e2e`）为独立可丢弃环境，不要指向共享或生产数据库。
-Backend 启动还要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket；即使只跑免费 L1 API
+runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口为独立可丢弃环境。
+E2E runner 拥有专用的独立数据库（默认 `127.0.0.1:5432/kk_studio_e2e_matrix`）与专用存储桶
+（默认 `kk-studio-e2e-matrix`）；runner 启动后端时会自动重建该专用空库（由 Flyway 初始化当前
+Schema 与种子）并清空专用 S3 存储桶，严格与开发应用使用的 `kk_studio_e2e` 隔离。重置工具优先使用
+宿主 `psql`，其次使用本地 compose 的 postgres 容器；环境缺少工具或重置失败时明确报错停止。
+Backend 启动要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket；即使只跑免费 L1 API
 矩阵，也需要独立的 S3/MinIO 环境。不能用共享或生产存储桶充当测试基础设施。
 `--rebuild` 默认允许 Maven 在线解析依赖，只有 `E2E_MAVEN_OFFLINE=true` 时才加 `-o`；
 `E2E_WORK_DIR` 默认 `runtime/e2e`，工具 case 的任务工作目录默认是其下的 `environment`（fixture
