@@ -121,10 +121,10 @@ Docker Compose/BuildKit 组合会静默忽略 `build.network=host`。
 ## 注入 mock routes
 
 HTTP mock 固定提供 `/health`、内置 `POST /v1/chat/completions` SSE stub，以及 fake Hub 的
-upload、execute、execution detail 与 Resource download。自定义 route 从 JSON 文件读取，**在内置
-chat completions stub 与 fake Hub 路由之前优先评估**。route 按 HTTP method 与 URL path 精确匹配；
-可选用 `bodyIncludes` 字符串数组约束请求体：只有当数组中的所有子串都包含在 UTF-8 请求体中时才命中，未声明
-`bodyIncludes` 时不解析请求体。未命中任何自定义 route 时回退至内置 stub。默认 [mock/routes.json](mock/routes.json) 为空。
+upload、execute、execution detail 与 Resource download。自定义 route 从 JSON 文件读取（每个请求重新读取），
+在内置 chat completions stub 与 fake Hub 之前匹配：按 HTTP method 与 URL path 精确匹配，可选的字符串
+`bodyIncludes` 要求 UTF-8 请求体包含该子串；多条 route 同时满足时取文件中的第一条。没有 route 命中时
+才交给内置 stub 与 fake Hub。默认 [mock/routes.json](mock/routes.json) 为空。
 
 ```bash
 CANVAS_TEST_MOCK_ROUTES=/absolute/path/to/routes.json \
@@ -150,7 +150,7 @@ route 文件格式：
     {
       "method": "POST",
       "path": "/v1/chat/completions",
-      "bodyIncludes": ["sleep 20", "handover-done"],
+      "bodyIncludes": "\"role\":\"tool\"",
       "status": 200,
       "headers": {
         "Content-Type": "text/event-stream"
