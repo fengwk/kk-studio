@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create, toBinary } from '@bufbuild/protobuf'
 import { WebSocketServer, WebSocket } from 'ws'
 import { constants as h2constants } from 'node:http2'
@@ -276,8 +276,9 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     peer.sendEnvelope(settingsEnvelope)
 
     // 等待 Daemon 收到并处理
-    await new Promise((r) => setTimeout(r, 100))
-    expect(envelopeReceived).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(envelopeReceived).not.toBeNull()
+    })
     expect((envelopeReceived as unknown as Envelope).messageType).toBe(MessageType.SETTINGS)
 
     // Daemon 回复 RECOVER_NOT_FOUND
@@ -326,8 +327,9 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     await connectPromise
 
     peer.sendGoaway(h2constants.NGHTTP2_NO_ERROR)
-    await new Promise((r) => setTimeout(r, 100))
-    expect(goawayFired).toBe(true)
+    await vi.waitFor(() => {
+      expect(goawayFired).toBe(true)
+    })
 
     await transport.close()
   })
@@ -358,9 +360,10 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     await peer.openControlStream()
     await connectPromise
 
-    // 等待超过 150ms 无数据
-    await new Promise((r) => setTimeout(r, 300))
-    expect(disconnected).toBe(true)
+    // 等待超过 150ms 无数据触发 inactivity timeout 断开连接
+    await vi.waitFor(() => {
+      expect(disconnected).toBe(true)
+    }, { timeout: 3000 })
 
     await transport.close()
   })
@@ -594,11 +597,15 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
 
       // 测试半关闭：客户端 end，检查不崩溃
       connectStream.end()
-      await new Promise((r) => setTimeout(r, 50))
+      if (!connectStream.writableFinished) {
+        await new Promise((r) => connectStream.once('finish', r))
+      }
 
       await new Promise<void>((r) => localHttp.close(() => r()))
       await transport.close()
-      expect(released).toBe(true)
+      await vi.waitFor(() => {
+        expect(released).toBe(true)
+      })
     })
   })
 
@@ -738,7 +745,6 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       expect(upgradeFailedCode).toBe(401)
 
       await transport.close()
-      await new Promise((r) => setTimeout(r, 50))
     })
 
     it('handles 426 UpgradeRequired with empty body', async () => {
@@ -871,8 +877,9 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       expect(activeWs).not.toBeNull()
       activeWs?.send('illegal text message')
 
-      await new Promise((r) => setTimeout(r, 100))
-      expect(disconnected).toBe(true)
+      await vi.waitFor(() => {
+        expect(disconnected).toBe(true)
+      })
       await transport.close()
     })
 
@@ -930,6 +937,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       await connectPromise
 
       peer.sendGoaway(h2constants.NGHTTP2_PROTOCOL_ERROR)
+      // 反向断言：非 NO_ERROR 错误码的 GOAWAY 不触发 onGoaway 回调；短暂等待确认回调未被调用
       await new Promise((r) => setTimeout(r, 100))
       expect(goawayFired).toBe(false)
 
@@ -966,8 +974,9 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       // 发送 4 字节 length = 4，加上 4 字节的乱码 payload，触发 decodeFrame 异常
       controlStream?.write(Buffer.from([0x00, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]))
 
-      await new Promise((r) => setTimeout(r, 100))
-      expect(disconnected).toBe(true)
+      await vi.waitFor(() => {
+        expect(disconnected).toBe(true)
+      })
       await transport.close()
     })
 
@@ -1013,8 +1022,9 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
 
       // 关闭连接
       conn.close()
-      await new Promise((r) => setTimeout(r, 50))
-      expect(conn.isOpen()).toBe(false)
+      await vi.waitFor(() => {
+        expect(conn.isOpen()).toBe(false)
+      })
 
       // 已关闭连接调用 send 返回 false
       expect(conn.send(dummyEnvelope)).toBe(false)
