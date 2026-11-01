@@ -697,8 +697,8 @@ function main() {
 
   command(['image', 'inspect', IMAGE])
   const suffix = randomBytes(16).toString('hex')
-  const name = `kkstudio-v1-${suffix}`
-  const database = `kkstudio_v1_${suffix}`
+  const name = `kkstudio-${suffix}`
+  const database = `kkstudio_${suffix}`
   const label = 'kkstudio.schema-baseline'
   let containerId = null
   let cleanupError = null

@@ -137,7 +137,7 @@ describe('Windows installer security: credentials, task ownership and direct exe
     const text = scriptText()
     assertIncludesAll(text, [
       '"kk-studio-environment-daemon-$($script:CurrentSid)"',
-      '"Managed by $($script:ManagedBy); schema=1; ownerSid=$($script:CurrentSid)"',
+      '"Managed by $($script:ManagedBy); ownerSid=$($script:CurrentSid)"',
     ])
     const body = functionBody('Assert-ManagedTask')
     assertIncludesAll(body, ['$Task.Description -ne $script:TaskDescription', '拒绝操作非受管计划任务'])

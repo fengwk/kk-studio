@@ -427,7 +427,7 @@ function Initialize-HostContext {
     $script:CurrentSid = $identity.User.Value
     $script:TaskName = "kk-studio-environment-daemon-$($script:CurrentSid)"
     $script:TaskDescription =
-        "Managed by $($script:ManagedBy); schema=1; ownerSid=$($script:CurrentSid)"
+        "Managed by $($script:ManagedBy); ownerSid=$($script:CurrentSid)"
 
     $script:HomePath =
         [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
