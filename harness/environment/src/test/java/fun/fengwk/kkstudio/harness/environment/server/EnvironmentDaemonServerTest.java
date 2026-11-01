@@ -25,6 +25,7 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.startedEnvelope;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.updateResultEnvelope;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -3381,6 +3383,133 @@ class EnvironmentDaemonServerTest {
             .build();
     fixture.receive(channel, request);
     assertTrue(channel.closed());
+  }
+
+  @Test
+  void attachCompletesWhenTerminalCompletedReceived() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-attach-complete");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener listener = new RecordingListener();
+
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.attach(ENVIRONMENT_ID, invocationId, listener);
+    assertNotNull(handle);
+    assertEquals(1, channel.countOf(MessageType.RECOVER));
+    assertEquals(0, channel.countOf(MessageType.INVOKE));
+
+    fixture.receive(channel, completedEnvelope(invocationId, "done"));
+    assertNotNull(listener.completed);
+    assertEquals("done", ((TextResultContent) listener.completed.contents().getFirst()).text());
+  }
+
+  @Test
+  void attachFailsWhenRecoverNotFoundReceived() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-attach-not-found");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener listener = new RecordingListener();
+
+    fixture.server.attach(ENVIRONMENT_ID, invocationId, listener);
+    assertEquals(1, channel.countOf(MessageType.RECOVER));
+
+    fixture.receive(channel, recoverNotFoundEnvelope(invocationId));
+    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, listener.error);
+  }
+
+  @Test
+  void attachCanBeCancelledByHandle() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-attach-cancel");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener listener = new RecordingListener();
+
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.attach(ENVIRONMENT_ID, invocationId, listener);
+    handle.cancel();
+    assertEquals(1, channel.countOf(MessageType.CANCEL));
+
+    fixture.receive(channel, cancelledEnvelope(invocationId, "user cancel"));
+    assertInstanceOf(EnvironmentCapabilityCancelledException.class, listener.error);
+  }
+
+  @Test
+  void attachUnavailableWhenSessionNotReadyOrNoLease() {
+    Fixture fixture = new Fixture();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+
+    FakeControlChannel channel = fixture.openSession("channel-attach-not-ready");
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+
+    fixture.receiveReady(channel);
+    fixture.leaseStore.holdsReadyLease = false;
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+  }
+
+  @Test
+  void attachReplaysRecoverOnSessionReconnect() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel1 = fixture.connectReady("channel-attach-reconnect-1");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener listener = new RecordingListener();
+
+    fixture.server.attach(ENVIRONMENT_ID, invocationId, listener);
+    assertEquals(1, channel1.countOf(MessageType.RECOVER));
+    assertEquals(0, channel1.countOf(MessageType.INVOKE));
+
+    fixture.close(channel1);
+    FakeControlChannel channel2 = fixture.connectReady("channel-attach-reconnect-2");
+    assertEquals(1, channel2.countOf(MessageType.RECOVER));
+    assertEquals(0, channel2.countOf(MessageType.INVOKE));
+
+    fixture.receive(channel2, completedEnvelope(invocationId, "recovered-done"));
+    assertNotNull(listener.completed);
+    assertEquals(
+        "recovered-done", ((TextResultContent) listener.completed.contents().getFirst()).text());
+  }
+
+  @Test
+  void attachTerminatesWithSendUncertainWhenDaemonInstanceReplaced() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-attach-replace-1");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener listener = new RecordingListener();
+
+    fixture.server.attach(ENVIRONMENT_ID, invocationId, listener);
+
+    fixture.close("channel-attach-replace-1");
+    fixture.connectReady("channel-attach-replace-2", OTHER_INSTANCE_ID);
+    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, listener.error);
+  }
+
+  @Test
+  void drainSendsGoawayReleasesLeasesAndSubsequentAdmitReturnsRetryLater() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-drain-1");
+
+    fixture.server.drain();
+    assertEquals(1, channel.drainCount());
+    assertTrue(fixture.leaseStore.released);
+
+    DaemonAdmission admission = fixture.server.admit(new DaemonHandshake(TOKEN, INSTANCE_ID));
+    assertInstanceOf(DaemonAdmission.RetryLater.class, admission);
+
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.attach(ENVIRONMENT_ID, UUID.randomUUID(), new RecordingListener()));
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
+
+    assertDoesNotThrow(() -> fixture.server.drain());
   }
 
   private static final class ThrowingLogHandler implements AutoCloseable {
