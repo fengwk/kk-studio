@@ -144,7 +144,8 @@ public class HarnessProcessorConfiguration {
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
-        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()));
+        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()),
+        ToolProcessorConfig.DEFAULT_REATTACH_WINDOW);
   }
 
   /**

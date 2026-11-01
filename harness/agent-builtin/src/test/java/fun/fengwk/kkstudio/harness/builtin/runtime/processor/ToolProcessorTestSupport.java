@@ -118,6 +118,7 @@ public final class ToolProcessorTestSupport {
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration PREFLIGHT_FAILURE_DELAY = Duration.ofSeconds(7);
   static final Duration BUSY_FALLBACK_DELAY = Duration.ofSeconds(9);
+  static final Duration REATTACH_WINDOW = Duration.ofMinutes(10);
   public static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
@@ -296,7 +297,11 @@ public final class ToolProcessorTestSupport {
               gateway,
               sink,
               new ToolProcessorConfig(
-                  LEASE_CONFIG, () -> retryPolicy, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
+                  LEASE_CONFIG,
+                  () -> retryPolicy,
+                  PREFLIGHT_FAILURE_DELAY,
+                  BUSY_FALLBACK_DELAY,
+                  REATTACH_WINDOW),
               clock,
               scheduler,
               Runnable::run,

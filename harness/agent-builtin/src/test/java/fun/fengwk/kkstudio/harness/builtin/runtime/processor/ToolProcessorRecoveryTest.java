@@ -683,7 +683,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             hooked,
             Runnable::run,
@@ -776,7 +777,7 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.tool(fixture.store, second.toolInvocationId()).status());
   }
 
-  /** ToolProcessorConfig：两个 delay 必须为正且至少 1ms，其余参数非空。 */
+  /** ToolProcessorConfig：三个 duration 必须为正且至少 1ms，其余参数非空。 */
   @Test
   void toolProcessorConfigValidates() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -787,7 +788,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 Duration.ZERO,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -795,7 +797,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 Duration.ofNanos(500),
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -803,6 +806,25 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                Duration.ZERO,
+                ToolProcessorTestSupport.REATTACH_WINDOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                Duration.ofNanos(500),
+                ToolProcessorTestSupport.REATTACH_WINDOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
                 Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
@@ -811,6 +833,7 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
                 Duration.ofNanos(500)));
     assertThrows(
         NullPointerException.class,
@@ -819,7 +842,17 @@ class ToolProcessorRecoveryTest {
                 null,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY));
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                null,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -837,7 +870,8 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.LEASE_CONFIG,
         () -> ToolProcessorTestSupport.NO_RETRY,
         ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-        ToolProcessorTestSupport.BUSY_FALLBACK_DELAY);
+        ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+        ToolProcessorTestSupport.REATTACH_WINDOW);
   }
 
   /** scheduler 拒绝 heartbeat 提交：视为无法维持 lease，bounce 为 RESCHEDULED 且不调用 Gateway。 */
@@ -860,7 +894,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             dead,
             Runnable::run,
@@ -1053,7 +1088,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
