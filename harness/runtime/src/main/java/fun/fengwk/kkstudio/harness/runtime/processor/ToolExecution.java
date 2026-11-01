@@ -240,43 +240,23 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
    * 的关闭责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
    */
   public ProcessResult start(ToolGateway.Run run) {
-    boolean committed;
-    try {
-      committed = markRunning();
-    } catch (RuntimeException failure) {
-      log.warn("cannot persist tool running state for {}", invocationId, failure);
-      committed = false;
-    }
-    if (!committed || abandoned.get()) {
-      boolean closed = closeStrict(run);
-      if (committed && closed) {
-        confirmNotStarted();
-      }
-      abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    try {
-      Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
-    } catch (RuntimeException | Error failure) {
-      if (closeStrict(run)) {
-        confirmNotStarted();
-      }
-      abandon();
-      throw failure;
-    }
-    return ProcessResult.STARTED;
+    return launch(run, this::markRunning, "running");
   }
 
   /**
-   * Gateway reattach 成功拿到 Run 后调用：在事务内以本 claim 锁 Thread -&gt; Tool -&gt; Work 登记本节点的 TOOL 事实， 绝不自增
+   * Gateway reattach 成功拿到 Run 后调用：在事务内以本 claim 锁 Thread -> Tool -> Work 登记本节点的 TOOL 事实， 绝不自增
    * attempt，不调用 markRunning（状态已是 RUNNING）。随后启动执行线程。
    */
-  public ProcessResult startReattach(ToolGateway.Run run) {
+  public ProcessResult startReattach(ToolGateway.Run run, ExecutionExitFact remoteFact) {
+    return launch(run, () -> registerReattach(remoteFact), "reattach");
+  }
+
+  private ProcessResult launch(ToolGateway.Run run, BooleanSupplier persist, String phase) {
     boolean committed;
     try {
-      committed = registerReattach();
+      committed = persist.getAsBoolean();
     } catch (RuntimeException failure) {
-      log.warn("cannot persist tool reattach state for {}", invocationId, failure);
+      log.warn("cannot persist tool {} state for {}", phase, invocationId, failure);
       committed = false;
     }
     if (!committed || abandoned.get()) {
@@ -297,23 +277,6 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       throw failure;
     }
     return ProcessResult.STARTED;
-  }
-
-  /** 新 owner 确认旧 REMOTE 事实：必须使用库中原始身份（loadRemote），确认为 REMOTE_ACKNOWLEDGED。 */
-  public void confirmReattachedRemoteExit(ExecutionExitFact remoteFact) {
-    Objects.requireNonNull(remoteFact, "remoteFact");
-    try {
-      ExecutionExitConfirmer.Result result =
-          exitConfirmer.confirm(remoteFact, ExecutionExitState.REMOTE_ACKNOWLEDGED);
-      if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
-        return;
-      }
-    } catch (RuntimeException failure) {
-      log.warn(
-          "cannot confirm reattached remote execution exit for {}; phase=REMOTE_EXIT_CONFIRM; exception={}",
-          remoteFact.executionId(),
-          failure.getClass().getSimpleName());
-    }
   }
 
   /** 执行线程主体：阻塞执行、提交终态、释放资源。abandon 在执行体开始之前获胜时绝不调用工具。 */
@@ -619,36 +582,42 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   }
 
   /**
-   * 挂接执行体在事务内锁 Thread -&gt; Tool -&gt; Work 登记本节点的 TOOL 事实： 同一 attempt、新 executionId、本 claim
-   * token。不调用 markRunning，不修改 version。
+   * 挂接执行体在事务内锁 Thread -> Tool -> Work 登记本节点的 TOOL 事实： 同一 attempt、新 executionId、本 claim token。不调用
+   * markRunning，不修改 version。提交成功后将原 REMOTE 事实放入 registeredRemotes，以便统一退出确认与排空移交判定。
    */
-  private boolean registerReattach() {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.threads().lock(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              registered =
-                  ExecutionExitLedger.register(
-                      tx,
-                      executionId(),
-                      threadId,
-                      invocationId,
-                      attempt,
-                      claim.leaseToken(),
-                      ExecutionExitKind.TOOL,
-                      null);
-              return true;
-            }));
+  private boolean registerReattach(ExecutionExitFact remoteFact) {
+    Objects.requireNonNull(remoteFact, "remoteFact");
+    boolean committed =
+        Boolean.TRUE.equals(
+            store.transaction(
+                tx -> {
+                  ThreadState thread = tx.threads().lock(threadId).orElse(null);
+                  if (thread == null) {
+                    return false;
+                  }
+                  ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+                  if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+                    return false;
+                  }
+                  if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+                    return false;
+                  }
+                  registered =
+                      ExecutionExitLedger.register(
+                          tx,
+                          executionId(),
+                          threadId,
+                          invocationId,
+                          attempt,
+                          claim.leaseToken(),
+                          ExecutionExitKind.TOOL,
+                          null);
+                  return true;
+                }));
+    if (committed) {
+      registeredRemotes.put(remoteFact.executionId(), remoteFact);
+    }
+    return committed;
   }
 
   /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */

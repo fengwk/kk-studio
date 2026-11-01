@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
@@ -263,13 +262,7 @@ public final class ToolProcessor implements AutoCloseable {
           }
           executions.ensureLeaseMargin(tx, claim);
           ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
-          return new Prepare.Reattach(
-              thread.id(),
-              tool.assistantEntryId(),
-              tool.attempt(),
-              request,
-              tool.binding().environmentId(),
-              remoteFact);
+          return new Prepare.Reattach(thread.id(), tool.attempt(), request, remoteFact);
         }
       }
     }
@@ -401,7 +394,11 @@ public final class ToolProcessor implements AutoCloseable {
       ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
     UUID invocationId = claim.target().id();
     ToolExecution execution =
-        newExecution(claim, preflight.threadId(), preflight.attempt(), preflight.request());
+        newExecution(
+            claim,
+            preflight.threadId(),
+            Math.addExact(preflight.attempt(), 1),
+            preflight.request());
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
@@ -633,7 +630,11 @@ public final class ToolProcessor implements AutoCloseable {
       Prepare.Dispatched dispatched,
       ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
     ToolExecution execution =
-        newExecution(claim, dispatched.threadId(), dispatched.attempt(), dispatched.request());
+        newExecution(
+            claim,
+            dispatched.threadId(),
+            Math.addExact(dispatched.attempt(), 1),
+            dispatched.request());
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
@@ -724,7 +725,7 @@ public final class ToolProcessor implements AutoCloseable {
       Prepare.Reattach reattach,
       ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
     ToolExecution execution =
-        newReattachExecution(claim, reattach.threadId(), reattach.attempt(), reattach.request());
+        newExecution(claim, reattach.threadId(), reattach.attempt(), reattach.request());
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
@@ -765,10 +766,10 @@ public final class ToolProcessor implements AutoCloseable {
                   invocationId,
                   reattach.threadId(),
                   reattach.request(),
-                  reattach.environmentId(),
+                  reattach.request().binding().environmentId(),
                   reattach.remoteFact().executionId(),
                   config.reattachWindow(),
-                  () -> execution.confirmReattachedRemoteExit(reattach.remoteFact())));
+                  execution.remoteExecutions()));
     } catch (EnvironmentCapabilityUnavailableException unavailable) {
       log.warn(
           "tool reattach unavailable for invocation {}: {}",
@@ -782,10 +783,6 @@ public final class ToolProcessor implements AutoCloseable {
           ProcessorExceptions.describe(failure));
       return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
     }
-    if (run == null) {
-      log.warn("tool reattach returned null for invocation {}", invocationId);
-      return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
-    }
     if (execution.abandoned() || ticket.isSuperseded()) {
       try {
         run.close();
@@ -794,7 +791,7 @@ public final class ToolProcessor implements AutoCloseable {
       }
       return rescheduleReattachResult(claim, reattach, config.admitFailureDelay());
     }
-    return execution.startReattach(run);
+    return execution.startReattach(run, reattach.remoteFact());
   }
 
   private boolean rescheduleReattach(
@@ -825,24 +822,6 @@ public final class ToolProcessor implements AutoCloseable {
         : ProcessResult.LOST_OWNERSHIP;
   }
 
-  private ToolExecution newReattachExecution(
-      ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
-    return new ToolExecution(
-        store,
-        realtimeEventSink,
-        claim,
-        threadId,
-        attempt,
-        request,
-        config,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        executions::release,
-        exitConfirmer,
-        toolResultHistoryMaterializer);
-  }
-
   private ToolExecution newExecution(
       ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
     return new ToolExecution(
@@ -850,7 +829,7 @@ public final class ToolProcessor implements AutoCloseable {
         realtimeEventSink,
         claim,
         threadId,
-        Math.addExact(attempt, 1),
+        attempt,
         request,
         config,
         clock,
@@ -906,12 +885,7 @@ public final class ToolProcessor implements AutoCloseable {
         implements Prepare {}
 
     record Reattach(
-        UUID threadId,
-        UUID assistantEntryId,
-        int attempt,
-        ToolInvocationRequest request,
-        EnvironmentId environmentId,
-        ExecutionExitFact remoteFact)
+        UUID threadId, int attempt, ToolInvocationRequest request, ExecutionExitFact remoteFact)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

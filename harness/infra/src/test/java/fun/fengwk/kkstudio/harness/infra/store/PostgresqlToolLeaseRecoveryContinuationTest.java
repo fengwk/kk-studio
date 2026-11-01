@@ -271,8 +271,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
           assertEquals(toolId, reattach.invocationId());
           assertEquals(ENV_ID, reattach.environmentId());
           assertEquals(oldRemoteExecutionId, reattach.remoteExecutionId());
-          reattach.onRemoteExitConfirmed().run();
-          return new CompletedRun(succeeded("call-0"));
+          return new CompletedRun(
+              succeeded("call-0"),
+              () -> reattach.remoteExecutions().confirmExit(oldRemoteExecutionId));
         });
 
     ToolProcessor toolProcessor = newToolProcessor();
@@ -641,13 +642,20 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private static final class CompletedRun implements ToolGateway.Run {
     private final ToolGateway.Completion completion;
+    private final Runnable onExecute;
 
     CompletedRun(ToolGateway.Completion completion) {
+      this(completion, () -> {});
+    }
+
+    CompletedRun(ToolGateway.Completion completion, Runnable onExecute) {
       this.completion = completion;
+      this.onExecute = onExecute;
     }
 
     @Override
     public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+      onExecute.run();
       return completion;
     }
 

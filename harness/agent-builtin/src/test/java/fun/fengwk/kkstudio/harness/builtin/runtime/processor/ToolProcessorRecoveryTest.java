@@ -1291,7 +1291,12 @@ class ToolProcessorRecoveryTest {
     ToolProcessorTestSupport.FakeRun run =
         fixture.gateway.queueReattachRun(
             progress -> {
-              fixture.gateway.reattachExecutions.getFirst().onRemoteExitConfirmed().run();
+              fixture
+                  .gateway
+                  .reattachExecutions
+                  .getFirst()
+                  .remoteExecutions()
+                  .confirmExit(oldRemoteFact.executionId());
               return ToolProcessorTestSupport.succeeded("call-1");
             });
 

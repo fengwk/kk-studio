@@ -952,7 +952,8 @@ class ToolExecutionGatewayRunTest {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
     UUID remoteExecutionId = UUID.randomUUID();
-    AtomicBoolean exitConfirmed = new AtomicBoolean();
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
     List<ToolResult> partials = new ArrayList<>();
     ToolInvocationRequest request =
         ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A);
@@ -965,7 +966,7 @@ class ToolExecutionGatewayRunTest {
             ToolGatewayTestSupport.ENV_A,
             remoteExecutionId,
             Duration.ofSeconds(5),
-            () -> exitConfirmed.set(true));
+            remoteExecutions);
 
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     try (ToolGateway.Run run = gateway.reattach(reattach)) {
@@ -1005,7 +1006,7 @@ class ToolExecutionGatewayRunTest {
 
         assertEquals(1, partials.size());
         assertEquals("call-1", partials.get(0).toolCallId());
-        assertTrue(exitConfirmed.get(), "exit confirmed callback must be called");
+        assertEquals(List.of(remoteExecutionId), remoteExecutions.exitConfirmed);
         assertEquals(0, transport.returnedHandles.get(0).terminations().size());
       }
     }
@@ -1027,7 +1028,7 @@ class ToolExecutionGatewayRunTest {
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
             Duration.ofSeconds(5),
-            () -> {});
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
 
     assertThrows(EnvironmentCapabilityUnavailableException.class, () -> gateway.reattach(reattach));
   }
@@ -1047,7 +1048,7 @@ class ToolExecutionGatewayRunTest {
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
             Duration.ofMillis(50),
-            () -> {});
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
 
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     try (ToolGateway.Run run = gateway.reattach(reattach)) {
@@ -1078,7 +1079,7 @@ class ToolExecutionGatewayRunTest {
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
             Duration.ofSeconds(10),
-            () -> {});
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
 
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     try (ToolGateway.Run run = gateway.reattach(reattach)) {
@@ -1108,7 +1109,7 @@ class ToolExecutionGatewayRunTest {
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
             Duration.ofSeconds(10),
-            () -> {});
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
 
     ToolGateway.Run run = gateway.reattach(reattach);
     run.close();

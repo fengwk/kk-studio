@@ -3430,6 +3430,36 @@ class EnvironmentDaemonServerTest {
   }
 
   @Test
+  void attachSucceedsAfterRetireAndDeliversToNewListener() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-attach-retire-reattach");
+    UUID invocationId = UUID.randomUUID();
+    RecordingListener oldListener = new RecordingListener();
+
+    EnvironmentCapabilityExecutionHandle oldHandle =
+        fixture.server.attach(ENVIRONMENT_ID, invocationId, oldListener);
+    assertNotNull(oldHandle);
+    assertEquals(1, channel.countOf(MessageType.RECOVER));
+
+    fixture.server.expire(oldHandle);
+
+    RecordingListener newListener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle newHandle =
+        fixture.server.attach(ENVIRONMENT_ID, invocationId, newListener);
+    assertNotNull(newHandle);
+    assertEquals(2, channel.countOf(MessageType.RECOVER));
+
+    fixture.receive(channel, completedEnvelope(invocationId, "done"));
+    assertNull(oldListener.completed);
+    assertNotNull(newListener.completed);
+    assertEquals("done", ((TextResultContent) newListener.completed.contents().getFirst()).text());
+
+    fixture.receive(channel, executionExitedEnvelope(invocationId.toString()));
+    assertEquals(0, oldListener.exitConfirmations);
+    assertEquals(1, newListener.exitConfirmations);
+  }
+
+  @Test
   void attachFailsWhenRecoverNotFoundReceived() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-attach-not-found");

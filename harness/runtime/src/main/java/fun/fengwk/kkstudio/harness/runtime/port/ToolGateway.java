@@ -101,7 +101,7 @@ public interface ToolGateway {
    * @param environmentId 远端 Environment 路由身份
    * @param remoteExecutionId 原 owner 发送给远端 Capability 的执行 id
    * @param timeout 挂接等待上限（通常为 reattachWindow）
-   * @param onRemoteExitConfirmed 收到远端 EXECUTION_EXITED 退出确认时的回调
+   * @param remoteExecutions 远端执行观察器（用于确认退出等）
    */
   record ReattachExecution(
       UUID invocationId,
@@ -110,7 +110,7 @@ public interface ToolGateway {
       EnvironmentId environmentId,
       UUID remoteExecutionId,
       Duration timeout,
-      Runnable onRemoteExitConfirmed) {
+      RemoteExecutionObserver remoteExecutions) {
 
     public ReattachExecution {
       Objects.requireNonNull(invocationId, "invocationId");
@@ -119,8 +119,7 @@ public interface ToolGateway {
       environmentId = Objects.requireNonNull(environmentId, "environmentId");
       remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
       timeout = HarnessStoreTime.requireWholeMillisecondDuration(timeout, "timeout");
-      onRemoteExitConfirmed =
-          Objects.requireNonNull(onRemoteExitConfirmed, "onRemoteExitConfirmed");
+      remoteExecutions = Objects.requireNonNull(remoteExecutions, "remoteExecutions");
     }
   }
 

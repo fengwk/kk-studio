@@ -235,7 +235,7 @@ class ToolGatewayTest {
             envId,
             UUID.fromString("00000000-0000-0000-0000-000000000008"),
             Duration.ofSeconds(30),
-            () -> {});
+            recordingObserver());
     ToolGateway.Run reattachRun = gateway.reattach(reattachExecution);
     assertNotNull(reattachRun.execute(partial -> {}));
     reattachRun.close();
@@ -249,49 +249,49 @@ class ToolGatewayTest {
     EnvironmentId envId = new EnvironmentId(UUID.randomUUID());
     UUID remoteExecutionId = UUID.randomUUID();
     Duration timeout = Duration.ofSeconds(10);
-    Runnable onExit = () -> {};
+    ToolGateway.RemoteExecutionObserver observer = recordingObserver();
 
     ToolGateway.ReattachExecution valid =
         new ToolGateway.ReattachExecution(
-            invocationId, threadId, request, envId, remoteExecutionId, timeout, onExit);
+            invocationId, threadId, request, envId, remoteExecutionId, timeout, observer);
     assertSame(invocationId, valid.invocationId());
     assertSame(threadId, valid.threadId());
     assertSame(request, valid.request());
     assertSame(envId, valid.environmentId());
     assertSame(remoteExecutionId, valid.remoteExecutionId());
     assertEquals(timeout, valid.timeout());
-    assertSame(onExit, valid.onRemoteExitConfirmed());
+    assertSame(observer, valid.remoteExecutions());
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                null, threadId, request, envId, remoteExecutionId, timeout, onExit));
+                null, threadId, request, envId, remoteExecutionId, timeout, observer));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                invocationId, null, request, envId, remoteExecutionId, timeout, onExit));
+                invocationId, null, request, envId, remoteExecutionId, timeout, observer));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                invocationId, threadId, null, envId, remoteExecutionId, timeout, onExit));
+                invocationId, threadId, null, envId, remoteExecutionId, timeout, observer));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                invocationId, threadId, request, null, remoteExecutionId, timeout, onExit));
+                invocationId, threadId, request, null, remoteExecutionId, timeout, observer));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                invocationId, threadId, request, envId, null, timeout, onExit));
+                invocationId, threadId, request, envId, null, timeout, observer));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolGateway.ReattachExecution(
-                invocationId, threadId, request, envId, remoteExecutionId, null, onExit));
+                invocationId, threadId, request, envId, remoteExecutionId, null, observer));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -307,7 +307,7 @@ class ToolGatewayTest {
                 envId,
                 remoteExecutionId,
                 Duration.ofNanos(500),
-                onExit));
+                observer));
   }
 
   /** 测试显式提供的观察者，不代替生产登记实现。 */

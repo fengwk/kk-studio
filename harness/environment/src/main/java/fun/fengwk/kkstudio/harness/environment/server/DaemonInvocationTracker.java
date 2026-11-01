@@ -39,6 +39,37 @@ final class DaemonInvocationTracker {
     }
   }
 
+  /**
+   * 挂接在途能力调用：如果已有在途登记抛 {@link IllegalArgumentException}； 如果已有 tombstone 则允许替换（删除该 tombstone
+   * 再登记新的在途记录）。
+   */
+  void registerAttach(ActiveInvocation active) {
+    synchronized (lock) {
+      LinkedHashMap<UUID, ActiveInvocation> invocations =
+          invocationsByEnvironment.computeIfAbsent(
+              active.environmentId, ignored -> new LinkedHashMap<>());
+      if (invocations.containsKey(active.invocationId)) {
+        throw new IllegalArgumentException(
+            "invocationId is already active for environment "
+                + active.environmentId
+                + ": "
+                + active.invocationId);
+      }
+      removeTombstoneLocked(active.environmentId, active.invocationId);
+      invocations.put(active.invocationId, active);
+    }
+  }
+
+  private void removeTombstoneLocked(EnvironmentId environmentId, UUID invocationId) {
+    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+    if (tombstones != null) {
+      tombstones.remove(invocationId);
+      if (tombstones.isEmpty()) {
+        invocationTombstones.remove(environmentId);
+      }
+    }
+  }
+
   boolean unregister(ActiveInvocation active) {
     synchronized (lock) {
       LinkedHashMap<UUID, ActiveInvocation> invocations =

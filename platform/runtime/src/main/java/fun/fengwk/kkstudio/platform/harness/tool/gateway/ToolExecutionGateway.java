@@ -418,7 +418,7 @@ public final class ToolExecutionGateway implements ToolGateway {
 
           @Override
           public void onExitConfirmed() {
-            reattach.onRemoteExitConfirmed().run();
+            reattach.remoteExecutions().confirmExit(remoteExecutionId);
           }
         };
 

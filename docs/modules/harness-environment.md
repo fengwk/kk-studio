@@ -77,7 +77,7 @@ EnvironmentCapabilityExecutionHandle attach(
     EnvironmentCapabilityExecutionListener listener);
 ```
 
-传输外壳只携带冻结的 `environmentId`，不携带第二份 workdir。`attach` 用于接管已经在其他节点或原执行中发出的远端调用：它为指定的 `invocationId` 登记在途记录而不发送 `INVOKE`；连接处于 READY 时立即下发 `RECOVER`，未 READY 时随下次 READY 恢复；本节点不持有 READY 租约时抛 [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java)；同一 `invocationId` 已存在时抛 `IllegalArgumentException`。事件契约与 `invoke` 一致：`PROGRESS* -> exactly one terminal`，`RECOVER_NOT_FOUND` 以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 结束。发送阶段的异常具有固定语义：
+传输外壳只携带冻结的 `environmentId`，不携带第二份 workdir。`attach` 用于接管已经在其他节点或原执行中发出的远端调用：它为指定的 `invocationId` 登记在途记录而不发送 `INVOKE`；连接处于 READY 时立即下发 `RECOVER`，未 READY 时随下次 READY 恢复；本节点不持有 READY 租约时抛 [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java)；同一 `invocationId` 已处于活跃在途状态时抛 `IllegalArgumentException`，若存在历史 tombstone（如本节点此前放弃等待该调用）则允许替换 tombstone 并重新登记在途记录。事件契约与 `invoke` 一致：`PROGRESS* -> exactly one terminal`，`RECOVER_NOT_FOUND` 以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 结束。发送阶段的异常具有固定语义：
 
 | 异常 | 语义 |
 | --- | --- |

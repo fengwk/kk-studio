@@ -37,6 +37,8 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -226,7 +228,8 @@ class ToolProcessorDrainTest {
                 shortLease,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
@@ -354,7 +357,8 @@ class ToolProcessorDrainTest {
                 ToolProcessorTestSupport.LEASE_CONFIG,
                 () -> ToolProcessorTestSupport.NO_RETRY,
                 ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY,
+                ToolProcessorTestSupport.REATTACH_WINDOW),
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
@@ -429,5 +433,120 @@ class ToolProcessorDrainTest {
     WorkTarget target2 = new WorkTarget(WorkTargetType.TOOL, successInvocationId);
     Work work2 = fixture.store.transaction(tx -> tx.work().find(target2).orElseThrow());
     assertNull(work2.leaseToken(), "successful handover work claim must be released");
+  }
+
+  /**
+   * 测试意图：挂接执行体在等待远端结果时响应 drain 排空移交： 1. 处于 reattach 阻塞中的执行体被中断并退出； 2. durable ToolInvocation 保持为
+   * RUNNING，attempt 保持为 1； 3. 挂接登记的本地 TOOL 退出事实确认为 STUDIO_EXITED； 4. 原 owner 的 TOOL 退出事实与 REMOTE
+   * 退出事实仍为 UNCONFIRMED； 5. Work claim 租约被释放，允许下一个 worker 再次认领并重新挂接。
+   */
+  @Test
+  void drainHandsOverReattachedExecutionReleasesClaimAndLeavesRunning() throws Exception {
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    try {
+      ToolProcessorTestSupport.Fixture fixture =
+          new ToolProcessorTestSupport.Fixture(
+              ToolProcessorTestSupport.NO_RETRY,
+              false,
+              0,
+              scheduler,
+              ToolProcessorTestSupport.remoteScenario(ToolSideEffect.READ_ONLY),
+              false);
+
+      ToolProcessorTestSupport.toRunning(
+          fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+      ExecutionExitFact oldToolFact =
+          ToolProcessorTestSupport.registerOldToolExit(
+              fixture.store, fixture.baseline.threadId(), fixture.toolInvocationId, 1, "old-token");
+      ExecutionExitFact oldRemoteFact =
+          ToolProcessorTestSupport.registerRemoteExit(
+              fixture.store,
+              fixture.baseline.threadId(),
+              fixture.toolInvocationId,
+              1,
+              "old-token",
+              oldToolFact.executionId(),
+              ToolProcessorTestSupport.ENV_ID);
+
+      ToolProcessorTestSupport.claim(
+          fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+      fixture.clock.advance(Duration.ofSeconds(61));
+      ClaimedWork recovered =
+          ToolProcessorTestSupport.claim(
+              fixture.store, fixture.toolInvocationId, fixture.clock.instant());
+
+      CountDownLatch waitInterruptedLatch = new CountDownLatch(1);
+      CountDownLatch reattachStartedLatch = new CountDownLatch(1);
+
+      FakeRun run =
+          fixture.gateway.queueReattachRun(
+              progress -> {
+                reattachStartedLatch.countDown();
+                try {
+                  Thread.sleep(60_000);
+                } catch (InterruptedException e) {
+                  waitInterruptedLatch.countDown();
+                }
+                return ToolProcessorTestSupport.succeeded("call-1");
+              });
+
+      assertEquals(ProcessResult.STARTED, fixture.processor.process(recovered));
+      assertTrue(reattachStartedLatch.await(5, TimeUnit.SECONDS), "reattach run must start");
+
+      ExecutionExitFact reattachedToolFactBeforeDrain =
+          fixture.store.transaction(
+              tx ->
+                  tx.exits().loadUnconfirmed(fixture.baseline.threadId()).stream()
+                      .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
+                      .filter(fact -> !fact.executionId().equals(oldToolFact.executionId()))
+                      .findFirst()
+                      .orElseThrow());
+
+      // 触发排空
+      fixture.processor.drain();
+
+      assertTrue(
+          waitInterruptedLatch.await(5, TimeUnit.SECONDS),
+          "reattach worker must be interrupted on drain");
+      assertTrue(run.awaitExited(), "reattach run must exit");
+      assertFalse(
+          fixture.processor.hasActiveExecution(), "active execution must be cleared after drain");
+
+      // durable 状态保持为 RUNNING，attempt 保持为 1
+      ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+      assertEquals(ToolInvocationStatus.RUNNING, tool.status(), "tool status must stay RUNNING");
+      assertEquals(1, tool.attempt(), "tool attempt must remain 1");
+
+      // 挂接生成的本地 TOOL 退出事实确认为 STUDIO_EXITED
+      ExecutionExitFact reattachedToolFact =
+          fixture.store.transaction(
+              tx -> tx.exits().find(reattachedToolFactBeforeDrain.executionId()).orElseThrow());
+      assertEquals(
+          ExecutionExitState.STUDIO_EXITED,
+          reattachedToolFact.state(),
+          "reattached tool fact must be STUDIO_EXITED");
+
+      // 原 owner 的 TOOL 退出事实与 REMOTE 退出事实仍为 UNCONFIRMED
+      ExecutionExitFact oldToolFactAfterDrain =
+          fixture.store.transaction(tx -> tx.exits().find(oldToolFact.executionId()).orElseThrow());
+      assertEquals(
+          ExecutionExitState.UNCONFIRMED,
+          oldToolFactAfterDrain.state(),
+          "old tool fact must remain UNCONFIRMED");
+      ExecutionExitFact oldRemoteFactAfterDrain =
+          fixture.store.transaction(
+              tx -> tx.exits().find(oldRemoteFact.executionId()).orElseThrow());
+      assertEquals(
+          ExecutionExitState.UNCONFIRMED,
+          oldRemoteFactAfterDrain.state(),
+          "old remote fact must remain UNCONFIRMED");
+
+      // Work claim 租约被释放，可被重新认领
+      WorkTarget target = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
+      Work work = fixture.store.transaction(tx -> tx.work().find(target).orElseThrow());
+      assertNull(work.leaseToken(), "handover work claim must be released");
+    } finally {
+      scheduler.shutdownNow();
+    }
   }
 }

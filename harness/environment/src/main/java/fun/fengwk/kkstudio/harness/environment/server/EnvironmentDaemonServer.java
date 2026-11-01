@@ -406,7 +406,7 @@ public final class EnvironmentDaemonServer
       if (!session.isReady() || !leaseToken.equals(session.leaseToken())) {
         throw unavailable(environmentId, "invocation " + invocationId);
       }
-      invocationTracker.register(active);
+      invocationTracker.registerAttach(active);
 
       Envelope recoverEnvelope =
           Envelope.newBuilder()
