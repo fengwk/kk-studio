@@ -427,7 +427,7 @@ registerCase({
   level: 'L1',
   title: 'Canvas typed command 冲突与严格请求边界',
   docs:
-    '免费 L1：整批 409 不写入任何行——TARGET_MISSING/TARGET_PRESENT/STALE_NODE(MEMBERSHIP)/STALE_GROUP/NODE_REFERENCED 各自携带受影响对象与服务端权威值，不返回新编辑基线；同幂等键绑定不同请求指纹 409、画布不存在 404；未知命令类型（已删除的 CREATE_LINK）、命令级未知字段、空命令批、缺失或非 canonical 幂等键、非法 UUID 都在触达写入前 400',
+    '免费 L1：整批 409 不写入任何行——TARGET_MISSING/TARGET_PRESENT/STALE_NODE(MEMBERSHIP)/STALE_GROUP/NODE_REFERENCED 各自携带受影响对象与服务端权威值，不返回新编辑基线；同幂等键绑定不同请求指纹 409、画布不存在 404；未知命令类型、命令级未知字段、空命令批、缺失或非 canonical 幂等键、非法 UUID 都在触达写入前 400',
   async run(ctx) {
     const canvas = await createCanvas(ctx, `e2e-canvas-conflict-${cid().slice(0, 8)}`)
     const upstreamNodeId = cid()
@@ -646,7 +646,7 @@ registerCase({
 
     // 严格请求校验：全部在触达写入前 400。
     for (const request of [
-      { idempotencyKey: cid(), commands: [{ type: 'CREATE_LINK', nodeId: consumerNodeId }] },
+      { idempotencyKey: cid(), commands: [{ type: 'UNKNOWN_COMMAND', nodeId: consumerNodeId }] },
       {
         idempotencyKey: cid(),
         commands: [

@@ -253,8 +253,7 @@ test('run-matrix --list/--docs execute fully offline and include the new contrac
 
 test('run-matrix drains deferred stdout/stderr before exiting', () => {
   // 测试意图：预加载夹具把 stdout/stderr 写入推迟到定时器（模拟真实管道下的异步写入），
-  // 入口必须在退出前 drain 这些 pending 写入，否则旧版 process.exit 会截断尾部 case（如
-  // settings.system_contract_cas）或吞掉整个错误输出。保留完整 inventory 断言，不降低既有覆盖。
+  // 入口必须在退出前 drain 这些 pending 写入，避免直接 process.exit 截断尾部 case 或吞掉错误输出。
   for (const flag of ['--list', '--docs']) {
     const result = spawnSync(
       process.execPath,

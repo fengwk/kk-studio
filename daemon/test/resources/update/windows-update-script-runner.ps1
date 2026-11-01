@@ -35,7 +35,7 @@ $taskName = "kk-studio-environment-daemon-$sid"
 $description = if ($ownership -eq 'foreign') {
     'someone else'
 } else {
-    "Managed by scripts/daemon/install.ps1; schema=1; ownerSid=$sid"
+    "Managed by scripts/daemon/install.ps1; ownerSid=$sid"
 }
 $expectedNode = Join-Path $installedDir 'runtime\code-server\lib\node.exe'
 $configPath = Join-Path (Split-Path -Parent $installedDir) 'daemon.json'

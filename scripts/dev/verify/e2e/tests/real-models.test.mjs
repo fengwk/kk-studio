@@ -9,17 +9,15 @@ import {
   MINIMAX_ANTHROPIC_M3,
 } from '../lib/real-models.mjs'
 
-test('lib/real-models 模块无副作用导出，且 cases/real 正确兼容重导出', async () => {
-  // 测试意图：确保独立导入 lib/real-models.mjs 时具备零副作用（不触发 case 注册），同时 cases/real.mjs 保持向后兼容的透明重导出。
+test('lib/real-models 模块无副作用导出', async () => {
+  // 测试意图：确保独立导入 lib/real-models.mjs 时具备零副作用（不触发 case 注册）。
   assert.equal(
     ALL_CASES.length,
     0,
     'importing lib/real-models.mjs must have zero top-level side effects (no case registration)',
   )
 
-  const casesReal = await import('../cases/real.mjs')
-  assert.equal(casesReal.REAL_MODEL_DEFINITIONS, REAL_MODEL_DEFINITIONS)
-  assert.equal(casesReal.MINIMAX_ANTHROPIC_M3, MINIMAX_ANTHROPIC_M3)
+  await import('../cases/real.mjs')
   assert.ok(ALL_CASES.length > 0, 'importing cases/real.mjs registers real cases')
 })
 

@@ -17,7 +17,7 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 `bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token>`
 （Windows 为 `-ConfigFile` / `-TokenFile`）。它默认下载官方 GitHub latest release
 的发行归档与 SHA 文件、用归档内置的运行时 `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
-保留数据；没有交互提示，也没有 from-source 或单独 upgrade 动作。`status` 只读；`uninstall`
+保留数据；没有交互提示。`status` 只读；`uninstall`
 删除受管服务定义与程序发行目录，保留配置、token、数据与日志。详情与三平台排错见
 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 
@@ -54,7 +54,7 @@ systemd/launchd 服务，测试入口见
 | Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.mjs](dev/verify/smoke/seedance-prepare.mjs) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
 | 生成契约（前端传输与 Daemon 协议代码）生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | JDK 21、Maven；按 Web 控制器签名用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/contracts.ts](../frontend/src/shared/api/generated/contracts.ts)，并根据 control.proto 校验 [daemon/src/generated/control_pb.ts](../daemon/src/generated/control_pb.ts)，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改源码需人工审阅 diff；`mvn verify` 执行同一 check |
-| Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.mjs](dev/verify/repository/check-canvas-project-schema.mjs) | Node、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1，按基线 DDL 校验完整业务表集合、目标表列/外键/索引与 SQL 探针，不访问部署库 |
+| Canvas/Project 库表验证 | [dev/verify/repository/check-canvas-project-schema.mjs](dev/verify/repository/check-canvas-project-schema.mjs) | Node、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载基线迁移，按基线 DDL 校验完整业务表集合、目标表列/外键/索引与 SQL 探针，不访问部署库 |
 | 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.mjs](dev/verify/repository/check-sensitive-data.mjs) | Node、git，只读；命中只报告规则与位置，不回显敏感值 |
 | Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.mjs](dev/verify/repository/check-sensitive-history.mjs) | Node、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
 

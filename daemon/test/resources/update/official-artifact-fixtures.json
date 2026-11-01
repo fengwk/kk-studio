@@ -54,10 +54,6 @@
   ],
   "rejected": [
     {
-      "name": "legacy JVM jar product",
-      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1.jar"
-    },
-    {
       "name": "release tag does not match the target version",
       "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.0/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
     },

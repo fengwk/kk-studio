@@ -110,7 +110,7 @@ $ErrorActionPreference = 'Stop'
 $OperationId = Split-Path -Leaf $OperationDir
 $Sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $TaskName = "kk-studio-environment-daemon-$Sid"
-$TaskDescription = "Managed by scripts/daemon/install.ps1; schema=1; ownerSid=$Sid"
+$TaskDescription = "Managed by scripts/daemon/install.ps1; ownerSid=$Sid"
 $TaskPath = '\\'
 $StopWaitSeconds = 30
 

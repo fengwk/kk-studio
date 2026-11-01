@@ -38,11 +38,6 @@ import {
   MINIMAX_ANTHROPIC_M3,
 } from '../lib/real-models.mjs'
 
-export {
-  REAL_MODEL_DEFINITIONS,
-  MINIMAX_ANTHROPIC_M3,
-}
-
 /** 最小确定性稳定前缀字节数（>= 16KiB = 16384 bytes）。 */
 export const MIN_CACHE_PREFIX_BYTES = 16 * 1024
 

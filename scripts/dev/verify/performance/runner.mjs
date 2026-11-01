@@ -993,9 +993,7 @@ function collectRuntimeMetadata() {
     commandVersion('docker', ['--version']) ||
     'unavailable'
   const imageReference =
-    process.env.PERFORMANCE_IMAGE ||
-    process.env.CANVAS_TEST_APP_IMAGE ||
-    'kk-studio-app:performance-baseline'
+    process.env.PERFORMANCE_IMAGE || 'kk-studio-app:performance-baseline'
   return {
     commit: commandOutput('git', ['rev-parse', 'HEAD'], REPO_ROOT) || 'unavailable',
     jdk: javaCommand ? commandVersion(javaCommand, ['-version']) || 'unavailable' : 'unavailable',

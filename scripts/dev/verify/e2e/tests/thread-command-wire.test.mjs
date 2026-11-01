@@ -325,9 +325,8 @@ test('cleanup does not repeat an accepted stop while the Thread remains RUNNING'
   assert.equal(snapshot.thread.status, 'RUNNING')
 })
 
-test('stopThread validates per-thread receipts and rejects the removed root-only shape', async () => {
-  // 测试意图：Stop 结果的权威形状是每个受影响 Thread 一条回执；顶层 cancelledUserMessages/stoppedTurnEndEntryId
-  // 已删除，缺失 stoppedThreads[] 的回执不再被接受。
+test('stopThread validates per-thread receipts', async () => {
+  // 测试意图：Stop 结果的权威形状是每个受影响 Thread 一条回执。
   const threadId = cid()
   const stopRequestId = cid()
   const stoppedTurnEndEntryId = cid()
@@ -364,9 +363,9 @@ test('stopThread validates per-thread receipts and rejects the removed root-only
   assert.equal(stop.thread.executionControl, 'STOPPED')
   assert.equal(stop.stoppedThreads[0].cancelledInputs[0].type, 'USER_MESSAGE')
 
-  // 旧 root-only 形状（无 stoppedThreads）必须被拒绝；CUSTOM_MESSAGE/NOTIFICATION 不得冒充人类草稿。
+  // 缺少 stoppedThreads 或非 USER_MESSAGE 输入必须被拒绝。
   for (const malformed of [
-    { status: 'STOPPED', thread: threadDto(threadId), stoppedTurnEndEntryId },
+    { status: 'STOPPED', thread: threadDto(threadId) },
     {
       status: 'STOPPED',
       thread: threadDto(threadId),

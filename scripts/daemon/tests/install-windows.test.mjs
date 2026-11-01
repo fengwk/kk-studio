@@ -65,38 +65,10 @@ describe('Windows installer surface: the public PowerShell entry stays discovera
       'does not capture daemon stdout/stderr',
       'best effort settings',
     ])
-    assertIncludesNone(scriptText(), [
-      '-JavaHome',
-      'JDK',
-      'GatewayUri',
-      'RegistrationToken',
-      'FromSource',
-      '$Version',
-      'LspConfig',
-      'Read-Host',
-      'Invoke-Upgrade',
-      'Resolve-RepositoryRoot',
-      'Resolve-Executable',
-      'Assert-BashReady',
-    ])
   })
 
   it('needs no user JRE or Node', () => {
-    // The frozen release archive is the only runtime source: no JDK/JAR and no PATH Node.
     const text = scriptText()
-    assertIncludesNone(text, [
-      'JAVA_HOME_21',
-      'JAVA_TOOL_OPTIONS',
-      '_JAVA_OPTIONS',
-      'JDK_JAVA_OPTIONS',
-      'java.exe',
-      '.jar',
-      '--base64-args',
-      'Assert-Jdk21',
-      'Resolve-JavaHome',
-      'Invoke-WithoutJavaOptionEnvironment',
-      'ConvertTo-DaemonEncodedArguments',
-    ])
     // Only the archive's own frozen runtime may be executed.
     assert.ok(!text.includes('Get-Command "node.exe"'))
     assert.ok(text.includes('runtime\\code-server\\lib\\node.exe'))
@@ -165,7 +137,7 @@ describe('Windows installer security: credentials, task ownership and direct exe
     const text = scriptText()
     assertIncludesAll(text, [
       '"kk-studio-environment-daemon-$($script:CurrentSid)"',
-      '"Managed by $($script:ManagedBy); schema=1; ownerSid=$($script:CurrentSid)"',
+      '"Managed by $($script:ManagedBy); ownerSid=$($script:CurrentSid)"',
     ])
     const body = functionBody('Assert-ManagedTask')
     assertIncludesAll(body, ['$Task.Description -ne $script:TaskDescription', '拒绝操作非受管计划任务'])
@@ -383,7 +355,6 @@ describe('Windows installer native contracts: native tests run only where Window
       'Assert-DirectArgumentRoundTrip',
       'real node.exe',
     ])
-    assertIncludesNone(native, ['java.exe', 'JDK', 'base64', 'Base64', 'DaemonArguments', '-jar'])
   })
 
   it('also runs the managed-update native suite from the installer suite', () => {

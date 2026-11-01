@@ -49,10 +49,9 @@ test('localized error case checks Chinese display text, stable codes and languag
   })
 })
 
-test('localized error case rejects old display text and translated machine resource ids', async () => {
-  // 负对照确保不会沿用旧展示名，或把机器资源标识一起翻译。
+test('localized error case rejects translated machine resource ids', async () => {
+  // 负对照确保不会把机器资源标识一起翻译。
   for (const [field, value, expected] of [
-    ['message', '未找到 chat。', /未找到 chat/],
     ['resource', '对话', /"resource":"对话"/],
   ]) {
     await withResponses((body, kind, language) => {

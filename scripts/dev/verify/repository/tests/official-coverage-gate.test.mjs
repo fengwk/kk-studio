@@ -7,9 +7,8 @@ import { fileURLToPath } from 'node:url'
 import { indexMainSources, isExactClassName } from './support/jacoco-source-index.mjs'
 
 /**
- * 官方 JaCoCo 覆盖门禁守护：runtime 与 agent-builtin 各自用 native jacoco:check 校验自己的关键类，
- * 不再由一个模块的 Ant task 读取另一个模块的 classfiles。每个 include 必须是当前模块真实存在的
- * 精确类名（嵌套类型按 JaCoCo 的 `.` 归一命名），否则空匹配会让门禁静默失效。
+ * 官方 JaCoCo 覆盖门禁守护：runtime 与 agent-builtin 各自用 native jacoco:check 校验自己的关键类。
+ * 每个 include 必须是当前模块真实存在的精确类名（嵌套类型按 JaCoCo 的 `.` 归一命名），否则空匹配会让门禁静默失效。
  */
 
 function repositoryRoot() {

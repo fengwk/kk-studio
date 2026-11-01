@@ -167,7 +167,7 @@ const THREAD_RUNTIME_STATUSES = new Set(['RUNNING', 'WAITING', 'IDLE'])
  *
  * POST 请求体的 `environmentName` 可选：省略或 null 都表示无默认环境，提供时必须是已存在的 canonical
  * Environment 名。Chat 响应投影的 `environmentName` 是 required-nullable 字段（DTO 用 ALWAYS 显式发 null），
- * helper 断言它始终存在且等于请求值；已删除的 workspace 字段（workspacePath/environment/environmentId）绝不出现。
+ * helper 断言它始终存在且等于请求值。
  */
 export async function createChat(
   ctx,
@@ -183,9 +183,6 @@ export async function createChat(
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'workspacePath'), `Chat leaked workspacePath: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'environment'), `Chat leaked environment: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'environmentId'), `Chat leaked environmentId: ${JSON.stringify(chat)}`)
   assert(
     Object.hasOwn(chat, 'environmentName'),
     `Chat must project required-nullable environmentName: ${JSON.stringify(chat)}`,

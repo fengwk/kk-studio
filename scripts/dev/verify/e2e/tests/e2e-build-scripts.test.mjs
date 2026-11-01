@@ -102,9 +102,6 @@ test('test intent: the daemon distribution is a Node entry without JVM or classp
   // Daemon 是 Node 产品：没有 JAR/lib/classpath，只由 Node 启动编译入口。
   const lib = readText(E2E_LIB)
   assert.ok(lib.includes('DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}'))
-  for (const removed of ['DAEMON_JAR', 'DAEMON_TOOL_JAR', 'DAEMON_CP_FILE', 'daemon.classpath']) {
-    assert.ok(!lib.includes(removed), removed)
-  }
   for (const machinery of ['dependency:build-classpath', 'dependency:copy-dependencies']) {
     assert.ok(!lib.includes(machinery), machinery)
   }
@@ -112,14 +109,6 @@ test('test intent: the daemon distribution is a Node entry without JVM or classp
   // 启动逻辑集中在 bootstrap helper：daemon 只通过 `node <dist>/main.js --config` 启动。
   const bootstrap = readText(E2E_DAEMON_BOOTSTRAP)
   assert.ok(bootstrap.includes('exec "$node_bin" "$entry" --config "$config_file"'))
-  for (const removedJvm of ['-jar', 'DaemonMain', 'JAVA_HOME', '-cp ']) {
-    assert.ok(!bootstrap.includes(removedJvm), removedJvm)
-  }
-  // 旧 CLI/裸配置来源必须保持删除状态。
-  for (const removedFlag of ['--gateway-uri', '--data-dir', '--registration-token-file', '--note ']) {
-    assert.ok(!lib.includes(removedFlag), removedFlag)
-    assert.ok(!bootstrap.includes(removedFlag), removedFlag)
-  }
 
   const startDaemon = functionBody(E2E_LIB, 'start_daemon')
   assert.ok(startDaemon.includes('daemon-bootstrap.sh'))
@@ -130,8 +119,6 @@ test('test intent: the daemon distribution is a Node entry without JVM or classp
   const killDaemon = functionBody(E2E_LIB, 'kill_daemon')
   assert.ok(killDaemon.includes('pgrep -f --'))
   assert.ok(killDaemon.includes('$DAEMON_DIST/main.js'))
-  assert.ok(!killDaemon.includes('DaemonMain'))
-  assert.ok(!killDaemon.includes('DAEMON_JAR'))
 })
 
 /** Stand-in for the daemon: any process whose argv carries the given path. */

@@ -160,7 +160,7 @@ Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 驱动安装器
 产品运行时不依赖 Python。不要改用 `script` 命令替代，因为各平台的参数与可用性不一致。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
-以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
+以及卸载只移除受管服务与程序。安装器没有交互提示；从 checkout
 运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实发行归档由
 [scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 独立打包并上传 GitHub Release。
 安装器不要求宿主 JDK 或 Node：服务直接运行归档自带的冻结运行时。测试不注册真实 systemd/launchd 服务。
@@ -207,8 +207,8 @@ npm --prefix daemon ci && npm --prefix daemon run build
 node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
 ```
 
-Java producer 把生产 codec 的结果写入 `harness/environment/target/daemon-update-java-commands.json`，
-CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十二条错配必须被拒。
+Java producer 把生产 codec 的结果（accepted 包含 protobuf 长度前缀编码帧，rejected 包含 artifactUrl）写入 `harness/environment/target/daemon-update-java-commands.json`，
+CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十一条错配必须被拒。
 CI 在 `mvn -Pdistribution verify` 之后以同样的顺序运行这两步。
 
 ## Java 质量检查

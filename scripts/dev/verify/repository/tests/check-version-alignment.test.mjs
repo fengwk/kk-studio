@@ -23,16 +23,14 @@ const inputs = (version, { property = version, packageVersion = version, runtime
   configTs: CONFIG(runtimeVersion),
 })
 
-test('test intent: aligned internal sources pass without a tag and the tag may carry a v prefix', () => {
+test('test intent: aligned internal sources pass without a tag and the tag must carry a v prefix', () => {
   const result = checkAlignment(inputs('1.2.3'))
   assert.deepEqual(result, { expected: '1.2.3', mismatches: [] })
-  for (const tag of ['v1.2.3', '1.2.3']) {
-    assert.deepEqual(checkAlignment({ ...inputs('1.2.3'), tag }), { expected: '1.2.3', mismatches: [] })
-  }
+  assert.deepEqual(checkAlignment({ ...inputs('1.2.3'), tag: 'v1.2.3' }), { expected: '1.2.3', mismatches: [] })
 })
 
 test('test intent: a runtime constant left at the previous version fails the gate', () => {
-  // 旧门禁只比较 POM 与 package，遗漏 config.ts 会让 4.0.1 发布出 4.0.0 的 daemon。
+  // config.ts 必须与 root 版本保持对齐。
   const result = checkAlignment(inputs('1.2.3', { runtimeVersion: '1.2.2' }))
   assert.deepEqual(result.mismatches, [
     'daemon/src/config.ts DAEMON_VERSION is "1.2.2", expected "1.2.3"',
@@ -63,7 +61,7 @@ test('test intent: unreadable or ambiguous versions and invalid tags fail instea
     () => checkAlignment({ ...inputs('1'), configTs: 'export const DAEMON_VERSION = readVersion()\n' }),
     /exactly one literal/,
   )
-  for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v']) {
+  for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v', '1.2.3']) {
     assert.throws(() => checkAlignment({ ...inputs('1.2.3'), tag }), /invalid RELEASE_TAG/, JSON.stringify(tag))
   }
 })

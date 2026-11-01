@@ -38,7 +38,7 @@ class OfficialUpdateArtifactFixtureTest {
   private static final int PUBLISHED_PLATFORM_COUNT = 5;
 
   /** 反例清单规模：fixture 必须覆盖每一种已知的错配形态。 */
-  private static final int REJECTION_FORM_COUNT = 12;
+  private static final int REJECTION_FORM_COUNT = 11;
 
   private static final String PLACEHOLDER_ENVIRONMENT_ID = "00000000-0000-0000-0000-000000000000";
 

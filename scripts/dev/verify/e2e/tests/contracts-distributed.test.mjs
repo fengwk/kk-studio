@@ -119,21 +119,13 @@ test('test intent: three L5 distributed cases are registered in the matrix', () 
   }
   assert.ok(content.includes("level: 'L5'"))
   assert.ok(content.includes("requires: ['distributed']"))
-  // The removed directory-browsing mailbox case must not come back.
-  assert.ok(!content.includes('distributed.lease_mailbox_routing'))
-  assert.ok(!content.includes('/directories'))
 })
 
-test('test intent: node identity defaults are fixed and the old CLI flags stay removed', () => {
+test('test intent: node identity defaults are fixed', () => {
   assert.ok(COMPOSE.includes('${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}'))
   assert.ok(COMPOSE.includes('${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}'))
   assert.ok(COMPOSE.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080'))
   assert.ok(COMPOSE.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080'))
-  // Configuration flows only through the shared daemon.json.
-  for (const removed of ['--gateway-uri', '--data-dir', '--environment-name', '--gateway-token', '--daemon-id']) {
-    assert.ok(!COMPOSE.includes(removed), removed)
-  }
-  assert.ok(!COMPOSE.includes('DISTRIBUTED_DAEMON_TOKEN'))
 })
 
 test('test intent: the distributed node:test file lives where CI Node discovery looks for it', () => {

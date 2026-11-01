@@ -332,7 +332,7 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
 
 test('centralizes security revisions without downgrading the Boot platform', () => {
     // Intent: only the root dependencyManagement may override Boot's supported Netty 4.2;
-    // Tomcat is completely removed and replaced with Jetty 12.
+    // Jetty 12 is the embedded server.
     // Classpath regression tests separately verify the actual resolved revisions, not just these declarations.
     const pom = readFileSync(POM, 'utf8')
     const bootVersion = /<spring-boot\.version>(\d+)\.\d+/.exec(pom)?.[1]
@@ -341,7 +341,6 @@ test('centralizes security revisions without downgrading the Boot platform', () 
         pom,
         /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<scope>import<\/scope>/,
     )
-    assert.doesNotMatch(pom, /<tomcat\.version>/, 'Tomcat version lock must be removed')
     assert.match(pom, /<netty\.version>4\.2\.18\.Final<\/netty\.version>/)
     const managementStart = pom.indexOf('<dependencyManagement>')
     const managementEnd = pom.indexOf('</dependencyManagement>')

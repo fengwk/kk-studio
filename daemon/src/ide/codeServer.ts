@@ -155,7 +155,7 @@ async function extensionDigest(source: string): Promise<string> {
  *
  * The single real contract path is `<distributionDir>/ide-extension`; there is no runtime
  * fallback. The install is staged and only swapped in once complete, and it is refreshed
- * whenever the source digest changes so an upgraded daemon never keeps an old bridge.
+ * whenever the source digest changes so the runtime stays synchronized with the distribution.
  */
 async function installBridgeExtension(distributionDir: string, extensionsDir: string): Promise<void> {
   const source = join(distributionDir, 'ide-extension')

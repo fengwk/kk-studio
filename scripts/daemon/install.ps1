@@ -427,7 +427,7 @@ function Initialize-HostContext {
     $script:CurrentSid = $identity.User.Value
     $script:TaskName = "kk-studio-environment-daemon-$($script:CurrentSid)"
     $script:TaskDescription =
-        "Managed by $($script:ManagedBy); schema=1; ownerSid=$($script:CurrentSid)"
+        "Managed by $($script:ManagedBy); ownerSid=$($script:CurrentSid)"
 
     $script:HomePath =
         [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
@@ -544,8 +544,8 @@ function Resolve-InstallInputs {
 }
 
 function Get-TrustedConfigFailureDetail {
-    # Surface only the core's fixed, value-free marker line. Every other outcome (an older
-    # release rejecting the flag, a stack trace) stays generic so nothing can echo a secret.
+    # Surface only the core's fixed, value-free marker line. Every other outcome (e.g. a
+    # stack trace) stays generic so nothing can echo a secret.
     param(
         [AllowEmptyString()][string] $Stdout,
         [AllowEmptyString()][string] $Stderr
@@ -588,15 +588,13 @@ function Prepare-StagedArchive {
         return
     }
     # Prefer the core's trusted, value-free field diagnostic. Never echo the raw streams: an
-    # older release rejecting --check-config or an unexpected stack trace must not leak
-    # configuration or credential values.
+    # unexpected stack trace must not leak configuration or credential values.
     $detail = Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr
     if ($null -ne $detail) {
         Throw-Failure "配置校验失败：$detail 现有安装未改动。"
     }
     Throw-Failure (
-        "配置校验失败：--check-config 未通过（退出码 $($result.ExitCode)），且输出无法识别。" +
-        "下载的版本可能早于统一 --config 约定。现有安装未改动。"
+        "配置校验失败：--check-config 未通过（退出码 $($result.ExitCode)），且输出无法识别。现有安装未改动。"
     )
 }
 

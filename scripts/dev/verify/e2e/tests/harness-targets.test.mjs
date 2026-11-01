@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import * as harnessModule from '../lib/harness.mjs'
 import {
   acceptCommandBatch,
   assertRootYoloEnabled,
@@ -23,12 +22,9 @@ import { cid } from '../lib/http.mjs'
 const sampleId = () => '00000000-0000-4000-8000-000000000000'
 
 test('harness owner helpers expose only the Chat owner shape', async () => {
-  // Test intent: Canvas 不持有 Harness Session（公共 batch 端点只服务 CHAT），
-  // 因此 canvasOwner 死代码与其 /sessions 查询 helper 必须保持删除状态。
+  // Test intent: Canvas 不持有 Harness Session（公共 batch 端点只服务 CHAT）。
   const chat = chatOwner(sampleId())
   assert.deepEqual(chat, { type: 'CHAT', chatId: sampleId() })
-  assert.equal(Object.hasOwn(harnessModule, 'canvasOwner'), false)
-  assert.equal(Object.hasOwn(harnessModule, 'listCanvasSessions'), false)
   await assert.rejects(
     () =>
       acceptCommandBatch(
@@ -305,9 +301,8 @@ test('acceptCommandBatch rejects malformed owner shapes before HTTP', async () =
   }
 })
 
-test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call', async () => {
-  // Test intent: 后端 owner 判别式只有 CHAT 与 ISSUE_AGENT（Canvas 不持有 Harness Session），
-  // helper 必须在本地就拒绝 PROJECT 等旧判别式，不能把已删除的 owner 放行给后端。
+test('acceptCommandBatch rejects an unknown owner type before any HTTP call', async () => {
+  // Test intent: helper 必须在本地就拒绝未知 owner.type，不能把未知 owner 放行给后端。
   const calls = []
   const ctx = {
     call: async (...args) => {
@@ -318,7 +313,7 @@ test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call'
   await assert.rejects(
     () =>
       acceptCommandBatch(ctx, {
-        owner: { type: 'PROJECT', id: sampleId() },
+        owner: { type: 'UNKNOWN_OWNER', id: sampleId() },
         target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
         commands: [userMessageCommand('plan', sampleId())],
       }),

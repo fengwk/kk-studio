@@ -363,11 +363,11 @@ preflight() {
   TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
   if ! "$STAGED_NODE" "$STAGED_MAIN" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
     detail=$(preflight_failure_detail) && fail "配置校验失败：$detail 现有安装未改动。"
-    fail "配置校验失败：当前版本拒绝 --check-config 或暂存的配置与令牌。请修正输入，或使用支持 --check-config 的版本后重试。现有安装未改动。"
+    fail "配置校验失败：暂存的配置与令牌未通过校验。现有安装未改动。"
   fi
   output=$(cat "$DOWNLOAD_DIR/preflight.log")
   [ "$output" = "Daemon configuration is valid" ] ||
-    fail "unexpected --check-config result; use a release supporting this installer. Existing installation unchanged"
+    fail "配置校验失败：--check-config 输出无法识别。现有安装未改动。"
 }
 stage_file() {
   local source=$1 directory=$2 name=$3 mode=$4

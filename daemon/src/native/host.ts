@@ -33,7 +33,7 @@ export function bundledNodeExecutableName(): string {
 /**
  * 把当前宿主映射到更新脚本使用的 OS 名。
  *
- * <p>未知平台按 linux 处理，与更新器历史分发一致：只有 windows 与 darwin 有专用脚本。
+ * <p>windows 与 darwin 有专用更新脚本，其它平台按 linux 处理。
  */
 export function updateScriptOs(): 'windows' | 'macos' | 'linux' {
   if (process.platform === 'win32') {

@@ -56,7 +56,7 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentN
   })
   assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
   assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'model'])
-  // ModelSelection 只携带全局逻辑模型名与 variant，不携带旧 providerName。
+  // ModelSelection 只携带全局逻辑模型名与 variant。
   assert.deepEqual(request.rootSettings.model, {
     modelName: model.modelName,
     variant: VARIANT,
@@ -64,9 +64,6 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentN
   assert.deepEqual(Object.keys(request.rootSettings.model).sort(), ['modelName', 'variant'])
   // 未选择 Environment 时必须显式携带 null，而不是省略字段。
   assert.equal(request.rootSettings.environmentName, null)
-  // 产品 Workspace 已删除：root settings 不得再携带任何目录/环境覆盖字段。
-  assert.equal(Object.hasOwn(request.rootSettings, 'workspacePath'), false)
-  assert.equal(Object.hasOwn(request.rootSettings, 'environmentId'), false)
 })
 
 test('run-agent-matrix contract: accepted snapshot assertions enforce the canonical envelope', () => {

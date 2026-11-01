@@ -60,10 +60,10 @@ export function checkAlignment({ pomXml, packageJson, configTs, tag }) {
     'daemon/src/config.ts DAEMON_VERSION': runtimeVersion,
   }
   if (tag !== undefined) {
-    if (typeof tag !== 'string' || !/^[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
+    if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
       throw new Error(`invalid RELEASE_TAG ${JSON.stringify(tag)}`)
     }
-    const tagVersion = tag.startsWith('v') ? tag.slice(1) : tag
+    const tagVersion = tag.slice(1)
     sources[`release tag ${JSON.stringify(tag)}`] = tagVersion
   }
   const mismatches = Object.entries(sources)

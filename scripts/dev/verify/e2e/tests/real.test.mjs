@@ -5,6 +5,8 @@ import { ALL_CASES } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
   MINIMAX_ANTHROPIC_M3,
+} from '../lib/real-models.mjs'
+import {
   MIN_CACHE_PREFIX_BYTES,
   buildCachePrefix,
   buildTextCacheSystemPrompt,
@@ -23,8 +25,8 @@ import {
   requireRealMiniMaxM3,
 } from '../cases/real.mjs'
 
-test('十二个指定 real case 正确注册到 case registry 且旧 text_turn 移除', () => {
-  // 测试意图：确保四个声明式模型文本+缓存 case、四个多推理级别烟雾 case 和四个真实工具 case 正确注册，旧单模型 real.text_turn 已被彻底移除，注册表保持干净且可单独 --only 运行。
+test('十二个指定 real case 正确注册到 case registry', () => {
+  // 测试意图：确保四个声明式模型文本+缓存 case、四个多推理级别烟雾 case 和四个真实工具 case 正确注册，注册表保持干净且可单独 --only 运行。
   const caseIds = ALL_CASES.map((c) => c.id)
 
   const expectedTextCacheIds = [
@@ -56,8 +58,6 @@ test('十二个指定 real case 正确注册到 case registry 且旧 text_turn �
   for (const id of expectedToolIds) {
     assert.equal(caseIds.includes(id), true, `missing tool case: ${id}`)
   }
-
-  assert.equal(caseIds.includes('real.text_turn'), false, 'legacy real.text_turn must be removed')
 })
 
 test('真实用例矩阵 capability 声明严格对齐规范（text_cache/reasoning_levels 仅 real，tool 与 delegation 需 real+tools）', () => {

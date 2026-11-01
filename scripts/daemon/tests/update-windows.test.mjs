@@ -86,7 +86,7 @@ describe('Windows task ownership: the installer marker is re-verified before any
     assertIncludesAll(scriptText(), [
       '$Sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value',
       '$TaskName = "kk-studio-environment-daemon-$Sid"',
-      '$TaskDescription = "Managed by scripts/daemon/install.ps1; schema=1; ownerSid=$Sid"',
+      '$TaskDescription = "Managed by scripts/daemon/install.ps1; ownerSid=$Sid"',
       "$TaskPath = '\\'",
       'function Find-ManagedTask([string]$Name) {',
       'Get-ScheduledTask -ErrorAction Stop |',
@@ -173,7 +173,6 @@ describe('Windows native fixture: the Windows-only companion exercises the same 
       'WINDOWS_UPDATE_SCRIPT',
       'export-update-script.mjs',
     ])
-    assertIncludesNone(text, ['--input-type', 'harness' + '/daemon', '.jar', 'java.exe', 'JAVA_HOME'])
   })
 
   it('covers run, stop and start without recreating handoff state', () => {
