@@ -41,12 +41,9 @@ public class EnvironmentDaemonAdmissionController {
   private static final int MAX_BINARY_MESSAGE_SIZE = 1024 * 1024;
   private static final String BEARER_PREFIX = "Bearer ";
 
-  private static final String HEADER_PROTOCOL_1 = "KK-Daemon-Protocol";
-  private static final String HEADER_PROTOCOL_2 = "X-Daemon-Protocol-Version";
-  private static final String HEADER_INSTANCE_1 = "KK-Daemon-Instance";
-  private static final String HEADER_INSTANCE_2 = "X-Daemon-Instance-Id";
-  private static final String HEADER_PLATFORM_1 = "KK-Daemon-Platform";
-  private static final String HEADER_PLATFORM_2 = "X-Daemon-Platform";
+  private static final String HEADER_PROTOCOL = "KK-Daemon-Protocol";
+  private static final String HEADER_INSTANCE = "KK-Daemon-Instance";
+  private static final String HEADER_PLATFORM = "KK-Daemon-Platform";
 
   private final DaemonSessions sessions;
   private final ObjectProvider<DaemonReleaseProvider> releaseProvider;
@@ -86,14 +83,14 @@ public class EnvironmentDaemonAdmissionController {
       return;
     }
 
-    String instanceId = getFirstHeader(request, HEADER_INSTANCE_1, HEADER_INSTANCE_2);
+    String instanceId = request.getHeader(HEADER_INSTANCE);
     if (instanceId == null || instanceId.isBlank()) {
       response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing daemon instance identifier");
       return;
     }
     instanceId = instanceId.trim();
 
-    String protocolStr = getFirstHeader(request, HEADER_PROTOCOL_1, HEADER_PROTOCOL_2);
+    String protocolStr = request.getHeader(HEADER_PROTOCOL);
     if (protocolStr == null || protocolStr.isBlank()) {
       response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing daemon protocol version");
       return;
@@ -187,7 +184,7 @@ public class EnvironmentDaemonAdmissionController {
         UpgradeRequired.newBuilder()
             .setTargetProtocolVersion(ControlProtocolCodec.PROTOCOL_VERSION);
 
-    String platformHeader = getFirstHeader(request, HEADER_PLATFORM_1, HEADER_PLATFORM_2);
+    String platformHeader = request.getHeader(HEADER_PLATFORM);
     if (platformHeader != null && !platformHeader.isBlank()) {
       populateArtifactMetadata(builder, platformHeader.trim());
     }
@@ -242,15 +239,5 @@ public class EnvironmentDaemonAdmissionController {
       }
     }
     return hasUpgradeInConnection && "websocket".equalsIgnoreCase(upgrade.trim());
-  }
-
-  private static String getFirstHeader(HttpServletRequest request, String... names) {
-    for (String name : names) {
-      String value = request.getHeader(name);
-      if (value != null && !value.isBlank()) {
-        return value;
-      }
-    }
-    return null;
   }
 }

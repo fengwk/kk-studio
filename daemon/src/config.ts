@@ -17,7 +17,7 @@ import { MAX_NOTE_CHARS } from './protocol/control/codec.js'
  * <p>配置错误只包含字段路径与规则，不含输入取值或解析器细节，供 {@code --check-config} 输出单行安全诊断。
  */
 
-/** 统一项目版本；HELLO/READY 上报的 daemon 构建版本。 */
+/** 统一项目版本；READY 上报的 daemon 构建版本。 */
 export const DAEMON_VERSION = '6.0.0'
 
 /** 未显式配置时的 bash 可执行文件。 */

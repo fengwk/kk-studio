@@ -2402,7 +2402,7 @@ describe('runtime connection management', () => {
     setup.runtime.close()
   })
 
-  it('fails terminally on REGISTRATION_REJECTED and reconnects on RETRY_LATER', async () => {
+  it('fails terminally on 401 registration rejection and reconnects on disconnect', async () => {
     const setup = buildRuntime()
     setup.runtime.start()
     await waitFor(() => setup.transport.connection !== null)

@@ -106,13 +106,13 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertFalse(env.isReady(Instant.now(), LEASE_DURATION));
   }
 
-  /** 测试意图：验证其他节点在活跃租约期内抢占返回 RETRY_LATER，且现有路由不被改变。 */
+  /** 测试意图：验证其他节点在活跃租约期内抢占返回 RetryLater，且现有路由不被改变。 */
   @Test
   void activeRouteReturnsRetryLater() {
     LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     LeaseBindResult.Acquired acquired = assertInstanceOf(LeaseBindResult.Acquired.class, r1);
 
-    // 活跃租约期内再次尝试抢占 -> RETRY_LATER，且现有路由不变
+    // 活跃租约期内再次尝试抢占 -> RetryLater，且现有路由不变
     LeaseBindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     assertInstanceOf(LeaseBindResult.RetryLater.class, r2);
 
@@ -256,7 +256,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     // 断开连接，进入宽限期（status='CONNECTING' 且 lease_until > now）
     assertTrue(registry1.disconnect(DEV, token1, Duration.ofSeconds(30)));
 
-    // 其他节点在宽限期内尝试抢占 -> 必须返回 RETRY_LATER
+    // 其他节点在宽限期内尝试抢占 -> 必须返回 RetryLater
     LeaseBindResult r2 = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     assertInstanceOf(LeaseBindResult.RetryLater.class, r2);
 
@@ -278,11 +278,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
     assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
 
-    // 同节点重复 acquire -> RETRY_LATER（READY 状态不准抢占）
+    // 同节点重复 acquire -> RetryLater（READY 状态不准抢占）
     LeaseBindResult rSame = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     assertInstanceOf(LeaseBindResult.RetryLater.class, rSame);
 
-    // 异节点 acquire -> RETRY_LATER
+    // 异节点 acquire -> RetryLater
     LeaseBindResult rOther = registry2.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
     assertInstanceOf(LeaseBindResult.RetryLater.class, rOther);
   }

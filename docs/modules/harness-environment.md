@@ -238,7 +238,7 @@ close(connectionId)
 
 [`DaemonLeaseStore`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
 
-`Rejected` 与 `RetryLater` 分别写入 `REGISTRATION_REJECTED` 与 `RETRY_LATER`。存储运行时异常使连接 fail closed，错误帧给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
+准入阶段在升级前裁决：`Rejected` 映射为 HTTP 401（注册凭据无效），`RetryLater` 映射为 HTTP 503 与 Retry-After 响应头（暂不可准入）。存储运行时异常使连接 fail closed，错误响应给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
 
 ### 调用所有权与并发
 

@@ -56,14 +56,6 @@ const environment = {
   tempDirectory: '/tmp',
 }
 
-const welcomePayload = {
-  environmentId: ENVIRONMENT_ID,
-  name: 'env',
-  maxResourceBytes: 1024 * 1024,
-  temporaryResourceTtlSeconds: 60,
-  temporaryResourceCleanupIntervalSeconds: 30,
-}
-
 const cleans: Array<() => Promise<void>> = []
 afterEach(async () => {
   for (const clean of cleans.splice(0).reverse()) {
@@ -87,7 +79,7 @@ async function startEntry(): Promise<EntryHarness> {
   await mkdir(path.join(dataDir, 'lib'), { recursive: true })
   await writeFile(path.join(dataDir, 'lib', MANAGED_ENTRY), '// installed entry')
   await writeFile(path.join(dataDir, 'daemon.json'), '{}')
-  // 注册凭证以属主私有文件提供：HELLO 只在真实读得到 token 时才发出。
+  // 注册凭证以属主私有文件提供：握手建连只在真实读得到 token 时才发出。
   await writeFile(path.join(dataDir, 'daemon.token'), 'test-registration-token', { mode: 0o600 })
   const config: DaemonConfig = {
     configPath: path.join(dataDir, 'daemon.json'),

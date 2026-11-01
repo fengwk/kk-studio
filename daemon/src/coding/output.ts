@@ -950,7 +950,7 @@ const storesByDataDir = new Map<string, Promise<TextOutputStore>>()
  * 按数据目录惰性获取受控临时输出存储。
  *
  * <p>契约中的 {@code DaemonConfig} 不携带存储实例，因此能力在执行时按 {@code <dataDir>/tmp} 惰性打开并复用同一实例；Runtime 侧应通过本入口取得同一实例来按
- * WELCOME 下发的 TTL 定时 {@link TextOutputStore#sweep}，保证清扫与能力使用的是同一份 lease 状态。
+ * SETTINGS 下发的 TTL 定时 {@link TextOutputStore#sweep}，保证清扫与能力使用的是同一份 lease 状态。
  */
 export function textOutputStoreFor(dataDir: string): Promise<TextOutputStore> {
   let store = storesByDataDir.get(dataDir)

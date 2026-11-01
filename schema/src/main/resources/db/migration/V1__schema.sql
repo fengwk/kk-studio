@@ -87,7 +87,7 @@ create table environment (
 comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token_hash 是 Daemon 握手凭证的 SHA-256';
 comment on column environment.id is 'Environment 的全局唯一 UUID（服务端生成，永不变更）';
 comment on column environment.name is 'Environment 唯一名称（NFKC trim，<= 64 字符，不含空白或斜杠）';
-comment on column environment.registration_token_hash is 'Daemon HELLO 注册凭证的 SHA-256（小写十六进制）；明文只在创建、轮换与安装脚本中出现一次，不落库';
+comment on column environment.registration_token_hash is 'Daemon 握手准入注册凭证的 SHA-256（小写十六进制）；明文只在创建、轮换与安装脚本中出现一次，不落库';
 comment on column environment.install_config is '保存的安装设置（不含 token，不表示已部署）';
 comment on column environment.install_code is '一次性安装 code 摘要与 UTC 失效时间（JSON object：codeHash、expiresAt）；null 表示没有未核销 code';
 comment on column environment.created_at is '创建时间（毫秒精度）';
