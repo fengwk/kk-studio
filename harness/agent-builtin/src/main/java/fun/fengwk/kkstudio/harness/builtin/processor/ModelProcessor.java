@@ -449,8 +449,7 @@ public final class ModelProcessor implements AutoCloseable {
     }
     // 运行前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     executions.ensureLeaseMargin(tx, claim);
-    // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
-    // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
+    // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：拒绝引用缺失或类型错误的 turn start。
     Entry turnStart =
         tx.entries()
             .find(model.turnStartEntryId())
