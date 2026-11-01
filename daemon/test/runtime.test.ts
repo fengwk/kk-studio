@@ -268,6 +268,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         case: 'invoke',
         value: create(InvokeSchema, {
           capabilityId: rawPayload.capabilityId ?? 'fs.read',
+          capabilityVersion: rawPayload.capabilityVersion ?? '3',
           argumentsJson: JSON.stringify(rawPayload.arguments ?? {}),
           timeoutMillis: BigInt(rawPayload.timeoutMillis ?? 0),
         }),
@@ -1309,6 +1310,43 @@ describe('runtime resource upload', () => {
     setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
     expect(uploads).toBe(0)
+    setup.runtime.close()
+  })
+
+  it('fails invocation when binary content is returned but uploader is null, and encodes progress with json and resource', async () => {
+    let progressSent = false
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          await context.progress({
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [
+              { type: 'text', text: 'step 1' },
+              { type: 'json', json: { status: 'running' } },
+            ],
+          })
+          progressSent = true
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'binary', bytes: new Uint8Array([1, 2, 3]), mediaType: 'application/octet-stream' }],
+          }
+        },
+      },
+      resources: null as any,
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-prog', payload: invokePayload() }))
+
+    await waitFor(() => progressSent)
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'PROGRESS'))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+
+    const failedEnv = sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')
+    expect((failedEnv?.payload as { message: string }).message).toContain('resource upload is not configured')
     setup.runtime.close()
   })
 })

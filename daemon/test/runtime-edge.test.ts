@@ -36,6 +36,12 @@ import {
   type TemporaryResourceSweeper,
   type UpdatePort,
 } from '../src/runtime.js'
+import {
+  collectDiagnosticFailure,
+  describeFailureType,
+  recordShutdownFailure,
+  releaseStep,
+} from '../src/runtime-shutdown.js'
 import { FakeConnection, FakeTransport, fakeProcessSupervisor, testConfig, tick, waitFor } from './helpers.js'
 import { artifactFixture } from './support/update-fixture.js'
 
@@ -730,6 +736,49 @@ describe('environment detection helpers', () => {
       if (original !== undefined) {
         Object.defineProperty(process, 'arch', original)
       }
+    }
+  })
+
+  it('validates environment detection edge cases and default note constraints', () => {
+    expect(() => defaultNote(OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED)).toThrow(/unspecified/)
+
+    const origPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
+    Object.defineProperty(process, 'platform', { value: 'sunos', configurable: true })
+    try {
+      expect(() => detectEnvironmentInfo(testConfig())).toThrow(/unsupported daemon operating system/)
+    } finally {
+      Object.defineProperty(process, 'platform', origPlatform)
+    }
+  })
+
+  it('validates runtime shutdown helper failure types and release step diagnostics', async () => {
+    expect(describeFailureType(new TypeError('type err'))).toBe('TypeError')
+    expect(describeFailureType(new RangeError('range err'))).toBe('RangeError')
+    expect(describeFailureType('string err')).toBe('UnknownError')
+    expect(describeFailureType(new Error('err'))).toBe('Error')
+
+    const failures: unknown[] = []
+    releaseStep(failures, 'async-phase', () => Promise.reject(new Error('async fail')))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(failures.length).toBe(1)
+
+    releaseStep(failures, 'sync-phase', () => {
+      throw new Error('sync fail')
+    })
+    expect(failures.length).toBe(2)
+
+    collectDiagnosticFailure(failures, 'diag', new Error('diagnostic error'))
+
+    const origWrite = process.stderr.write
+    try {
+      process.stderr.write = (() => {
+        throw new Error('stderr error')
+      }) as any
+      const diagFailures: unknown[] = []
+      recordShutdownFailure(diagFailures, 'phase', new Error('err'))
+      expect(diagFailures.length).toBe(2)
+    } finally {
+      process.stderr.write = origWrite
     }
   })
 })

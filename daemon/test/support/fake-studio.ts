@@ -138,6 +138,14 @@ export class FakeStudioPeer {
     return this.allReceivedEnvelopes
   }
 
+  getActiveWs(): WebSocket | null {
+    return this.activeWs
+  }
+
+  getControlStream(): ClientHttp2Stream | null {
+    return this.controlStream
+  }
+
   private setupHttp2(ws: WebSocket): void {
     const wsStream = createWebSocketStream(ws)
     const session = http2.connect('https://daemon', {

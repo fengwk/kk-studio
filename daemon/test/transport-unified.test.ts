@@ -740,5 +740,307 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
       await transport.close()
       await new Promise((r) => setTimeout(r, 50))
     })
+
+    it('handles 426 UpgradeRequired with empty body', async () => {
+      peer = new FakeStudioPeer({
+        onHandshake: (_req, res) => {
+          res.writeHead(426, { 'content-type': 'application/x-protobuf' })
+          res.end(Buffer.alloc(0))
+          return true
+        },
+      })
+      await peer.start()
+
+      let failedCode = 0
+      let upgradeObj: unknown = 'init'
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      await expect(
+        transport.connect({
+          onEnvelope: () => {},
+          onDisconnected: () => {},
+          onGoaway: () => {},
+          onUpgradeFailed: (code, upgrade) => {
+            failedCode = code
+            upgradeObj = upgrade
+          },
+        }),
+      ).rejects.toThrow(/handshake failed with 426/)
+
+      expect(failedCode).toBe(426)
+      expect(upgradeObj).toBeUndefined()
+      await transport.close()
+    })
+
+    it('handles 503 service unavailable during handshake', async () => {
+      peer = new FakeStudioPeer({
+        onHandshake: (_req, res) => {
+          res.writeHead(503, { 'content-type': 'text/plain' })
+          res.end('Unavailable')
+          return true
+        },
+      })
+      await peer.start()
+
+      let failedCode = 0
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      await expect(
+        transport.connect({
+          onEnvelope: () => {},
+          onDisconnected: () => {},
+          onGoaway: () => {},
+          onUpgradeFailed: (code) => {
+            failedCode = code
+          },
+        }),
+      ).rejects.toThrow(/handshake failed with status 503/)
+
+      expect(failedCode).toBe(503)
+      await transport.close()
+    })
+
+    it('fails connect when control stream is not opened within timeout', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      let disconnected = false
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+        controlStreamTimeoutMillis: 100,
+      })
+
+      await expect(
+        transport.connect({
+          onEnvelope: () => {},
+          onDisconnected: () => {
+            disconnected = true
+          },
+          onGoaway: () => {},
+          onUpgradeFailed: () => {},
+        }),
+      ).rejects.toThrow(/connection failed before control stream established/)
+
+      expect(disconnected).toBe(true)
+      await transport.close()
+    })
+
+    it('closes connection when receiving text WebSocket frame', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      let disconnected = false
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const connectPromise = transport.connect({
+        onEnvelope: () => {},
+        onDisconnected: () => {
+          disconnected = true
+        },
+        onGoaway: () => {},
+        onUpgradeFailed: () => {},
+      })
+
+      await peer.openControlStream()
+      await connectPromise
+
+      // 对端 WebSocket 发送文本帧
+      const activeWs = peer.getActiveWs()
+      expect(activeWs).not.toBeNull()
+      activeWs?.send('illegal text message')
+
+      await new Promise((r) => setTimeout(r, 100))
+      expect(disconnected).toBe(true)
+      await transport.close()
+    })
+
+    it('responds 404 to unknown HTTP/2 stream path', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const connectPromise = transport.connect({
+        onEnvelope: () => {},
+        onDisconnected: () => {},
+        onGoaway: () => {},
+        onUpgradeFailed: () => {},
+      })
+
+      await peer.openControlStream()
+      await connectPromise
+
+      const res = await peer.requestHttp('/unknown/non-ide-path', 'GET')
+      expect(res.status).toBe(404)
+
+      await transport.close()
+    })
+
+    it('ignores GOAWAY with error code other than NO_ERROR', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      let goawayFired = false
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const connectPromise = transport.connect({
+        onEnvelope: () => {},
+        onDisconnected: () => {},
+        onGoaway: () => {
+          goawayFired = true
+        },
+        onUpgradeFailed: () => {},
+      })
+
+      await peer.openControlStream()
+      await connectPromise
+
+      peer.sendGoaway(h2constants.NGHTTP2_PROTOCOL_ERROR)
+      await new Promise((r) => setTimeout(r, 100))
+      expect(goawayFired).toBe(false)
+
+      await transport.close()
+    })
+
+    it('handles control stream protocol violation (corrupt frame length or invalid protobuf)', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      let disconnected = false
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const connectPromise = transport.connect({
+        onEnvelope: () => {},
+        onDisconnected: () => {
+          disconnected = true
+        },
+        onGoaway: () => {},
+        onUpgradeFailed: () => {},
+      })
+
+      await peer.openControlStream()
+      await connectPromise
+
+      const controlStream = peer.getControlStream()
+      expect(controlStream).not.toBeNull()
+      // 发送 4 字节 length = 4，加上 4 字节的乱码 payload，触发 decodeFrame 异常
+      controlStream?.write(Buffer.from([0x00, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]))
+
+      await new Promise((r) => setTimeout(r, 100))
+      expect(disconnected).toBe(true)
+      await transport.close()
+    })
+
+    it('ControlConnection handles closed state and close() correctly', async () => {
+      peer = new FakeStudioPeer()
+      await peer.start()
+
+      const transport = createDaemonTransport({
+        gatewayUri: peer.gatewayUri,
+        config,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      const connectPromise = transport.connect({
+        onEnvelope: () => {},
+        onDisconnected: () => {},
+        onGoaway: () => {},
+        onUpgradeFailed: () => {},
+      })
+
+      await peer.openControlStream()
+      const conn = await connectPromise
+      expect(conn.isOpen()).toBe(true)
+
+      // 关闭连接
+      conn.close()
+      await new Promise((r) => setTimeout(r, 50))
+      expect(conn.isOpen()).toBe(false)
+
+      // 已关闭连接调用 send 返回 false
+      const dummyEnvelope = create(EnvelopeSchema, {
+        messageType: MessageType.READY,
+        environmentId: '11111111-1111-4111-8111-111111111111',
+        payload: { case: 'ready', value: create(ReadySchema, {}) },
+      })
+      expect(conn.send(dummyEnvelope)).toBe(false)
+
+      await transport.close()
+
+      // 已关闭的 transport 再次 connect 抛出异常
+      await expect(
+        transport.connect({
+          onEnvelope: () => {},
+          onDisconnected: () => {},
+          onGoaway: () => {},
+          onUpgradeFailed: () => {},
+        }),
+      ).rejects.toThrow('transport is closed')
+    })
+
+    it('rejects connect if registration token cannot be read', async () => {
+      const badConfig = {
+        ...config,
+        tokenPath: '/non/existent/path/for/token/never/exists',
+      }
+      const transport = createDaemonTransport({
+        gatewayUri: 'ws://127.0.0.1:1234',
+        config: badConfig as any,
+        ide: {} as unknown as IdeService,
+        daemonInstanceId: randomUUID(),
+        platformKey: 'linux-amd64',
+      })
+
+      await expect(
+        transport.connect({
+          onEnvelope: () => {},
+          onDisconnected: () => {},
+          onGoaway: () => {},
+          onUpgradeFailed: () => {},
+        }),
+      ).rejects.toThrow(/cannot read registration token/)
+    })
   })
 })
