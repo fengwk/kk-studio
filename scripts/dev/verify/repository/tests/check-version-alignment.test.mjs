@@ -30,7 +30,7 @@ test('test intent: aligned internal sources pass without a tag and the tag must 
 })
 
 test('test intent: a runtime constant left at the previous version fails the gate', () => {
-  // 旧门禁只比较 POM 与 package，遗漏 config.ts 会让 4.0.1 发布出 4.0.0 的 daemon。
+  // config.ts 必须与 root 版本保持对齐。
   const result = checkAlignment(inputs('1.2.3', { runtimeVersion: '1.2.2' }))
   assert.deepEqual(result.mismatches, [
     'daemon/src/config.ts DAEMON_VERSION is "1.2.2", expected "1.2.3"',

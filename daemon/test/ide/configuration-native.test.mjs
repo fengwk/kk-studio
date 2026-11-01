@@ -326,9 +326,9 @@ process.exit(0)
     await bounded(exited, 10_000, 'direct child did not exit')
     await waitUntil(() => /PIPE_HELD \d+/.test(output), 10_000, output)
     holderPid = Number(output.match(/PIPE_HELD (\d+)/)[1])
-    // This is exactly where the old cleanup returned; the pipe holder is still alive.
-    const legacyJoin = () => exited
-    await legacyJoin()
+    // The direct child has exited; the pipe holder is still alive.
+    const directJoin = () => exited
+    await directJoin()
     await writeFile(probe, '')
     await waitUntil(() => pathExists(ack), 10_000, 'pipe holder did not acknowledge')
     assert.equal(closeSettled, false, 'close must remain pending while the pipe is held')

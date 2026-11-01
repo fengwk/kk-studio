@@ -17,7 +17,7 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 `bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token>`
 （Windows 为 `-ConfigFile` / `-TokenFile`）。它默认下载官方 GitHub latest release
 的发行归档与 SHA 文件、用归档内置的运行时 `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
-保留数据；没有交互提示，也没有 from-source 或单独 upgrade 动作。`status` 只读；`uninstall`
+保留数据；没有交互提示。`status` 只读；`uninstall`
 删除受管服务定义与程序发行目录，保留配置、token、数据与日志。详情与三平台排错见
 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 

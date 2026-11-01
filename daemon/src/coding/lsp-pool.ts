@@ -53,7 +53,7 @@ export interface LspPoolOptions {
 
 /**
  * Structured reuse fingerprint: a JSON tuple so that array values containing separators can never
- * collide (the previous `,`-join merged distinct configurations).
+ * collide.
  */
 export function poolKey(root: string, server: ResolvedServerConfig): string {
   return JSON.stringify([

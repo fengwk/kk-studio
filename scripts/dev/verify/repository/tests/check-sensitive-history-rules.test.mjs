@@ -60,7 +60,7 @@ test('test intent: reserved-host credentials stay candidates and only gain a hin
 })
 
 test('test intent: quoted and camelCase keys are matched', () => {
-  // These are exactly the shapes that used to escape the generic rule.
+  // Quoted, camelCase, and assigned keys must be matched by the generic secret rule.
   const samples = [
     '{"apiKey": ' + '"abcdef0123456789abcdef"}',
     "{'apiKey': " + "'abcdef0123456789abcdef'}",

@@ -50,7 +50,7 @@ const ARTIFACT_NAME_PATTERN =
 
 /**
  * 解析官方制品 URL：只有「官方仓库 + {@code v<tag>} + 官方归档名 + tag 与制品版本一致 + 已发布平台」才解析出结果，
- * 其余（其它仓库、任意 URL、.jar 等旧形态、未发布平台、附加查询串或额外路径段）一律返回 {@code null}。
+ * 其余（其它仓库、任意 URL、非 tar.gz 形态、未发布平台、附加查询串或额外路径段）一律返回 {@code null}。
  */
 export function parseReleaseArtifactUrl(url: string): ReleaseArtifact | null {
   const prefix = `${RELEASE_BASE}/v`
