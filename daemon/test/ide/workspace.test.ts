@@ -125,6 +125,48 @@ describe('private recovery backups', () => {
     await expect(readRecoveryBackup(cfg, second, 1024)).rejects.toBeInstanceOf(RecoveryQuotaError)
   })
 
+  it('validates corrupt backup payload variants', async () => {
+    const dir = await tempDir()
+    const cfg = config(dir)
+    const viewId = newViewId()
+    await mkdir(recoveryDirectory(cfg), { recursive: true })
+    const file = join(recoveryDirectory(cfg), `${viewId}.json`)
+
+    // 非对象 JSON
+    await writeFile(file, '"a string"')
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is corrupt')
+
+    // 非法 bindingEpoch
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...backup(viewId),
+        bindingEpoch: 'not-a-number',
+      }),
+    )
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is corrupt')
+
+    // document 路径包含非法控制字符
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...backup(viewId),
+        documents: [{ path: '/project/\u0000.txt', text: 'hi' }],
+      }),
+    )
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is corrupt')
+
+    // document 不是对象
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...backup(viewId),
+        documents: ['not-an-object'],
+      }),
+    )
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is corrupt')
+  })
+
   it('writes files privately and does not overflow the fixed directory budget', async () => {
     const dir = await tempDir()
     const cfg = config(dir)

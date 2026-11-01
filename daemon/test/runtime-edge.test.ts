@@ -777,6 +777,10 @@ describe('environment detection helpers', () => {
       const diagFailures: unknown[] = []
       recordShutdownFailure(diagFailures, 'phase', new Error('err'))
       expect(diagFailures.length).toBe(2)
+
+      const collectFailures: unknown[] = []
+      collectDiagnosticFailure(collectFailures, 'phase', new Error('err'))
+      expect(collectFailures.length).toBe(1)
     } finally {
       process.stderr.write = origWrite
     }

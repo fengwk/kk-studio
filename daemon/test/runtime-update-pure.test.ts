@@ -59,6 +59,9 @@ describe('runtime-update.ts pure unit tests', () => {
     const execFailedUnknown = executionFailureReceipt(active, cmd, null)
     expect(execFailedUnknown.result.message).toBe('update failed')
 
+    const execFailedEmpty = executionFailureReceipt(active, cmd, new Error('   '))
+    expect(execFailedEmpty.result.message).toBe('capability execution failed')
+
     const normalizedFailed = normalizeUpdateResult({ phase: 'FAILED', message: 'err' }, 'op-1')
     expect(normalizedFailed.phase).toBe(UpdatePhase.UPDATE_FAILED)
 

@@ -1,5 +1,6 @@
 import http, { type IncomingHttpHeaders } from 'node:http'
 import net from 'node:net'
+import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { constants as h2constants, type ServerHttp2Stream } from 'node:http2'
@@ -28,6 +29,10 @@ class MockServerHttp2Stream extends PassThrough {
   closeCode: number | null = null
   shouldThrowOnRespond = false
   shouldThrowOnWrite = false
+
+  constructor() {
+    super({ autoDestroy: false, emitClose: false })
+  }
 
   override write(chunk: any, ...args: any[]): boolean {
     if (this.shouldThrowOnWrite) {
@@ -61,6 +66,33 @@ function makeValidUpstream(overrides: Partial<IdeStreamUpstream> = {}): IdeStrea
     release: () => {},
     ...overrides,
   }
+}
+
+function makeRawWebSocketServer(extraHead = ''): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = net.createServer((socket) => {
+    socket.once('data', (chunk) => {
+      const text = chunk.toString('utf8')
+      const match = text.match(/sec-websocket-key:\s*([^\r\n]+)/i)
+      const key = match ? match[1].trim() : 'dGhlIHNhbXBsZSBub25jZQ=='
+      const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\n' +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          `Sec-WebSocket-Accept: ${accept}\r\n\r\n` +
+          extraHead,
+      )
+    })
+  })
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const port = (server.address() as net.AddressInfo).port
+      resolve({
+        port,
+        close: () => new Promise<void>((r) => server.close(() => r())),
+      })
+    })
+  })
 }
 
 describe('ide-tunnel unit tests', () => {
@@ -349,6 +381,52 @@ describe('ide-tunnel unit tests', () => {
       expect(released).toBe(true)
       await new Promise<void>((r) => server.close(() => r()))
     })
+
+    it('releases upstream immediately if stream is closed before http request is dispatched', async () => {
+      const stream = new MockServerHttp2Stream()
+      stream.closed = true
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ release: () => { released = true } }),
+      } as unknown as IdeService
+
+      await handleIdeHttpRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
+      expect(released).toBe(true)
+    })
+
+    it('passes array headers and upstream cookie to upstream in handleIdeHttpRequest', async () => {
+      let receivedHeaders: http.IncomingHttpHeaders | null = null
+      const server = http.createServer((req, res) => {
+        receivedHeaders = req.headers
+        res.writeHead(200)
+        res.end('ok')
+      })
+      const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
+
+      const stream = new MockServerHttp2Stream()
+      stream.end()
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({
+          port,
+          cookie: 'session=abc',
+          release: () => { released = true },
+        }),
+      } as unknown as IdeService
+
+      await handleIdeHttpRequest(
+        stream as any,
+        {
+          ':path': '/ide/11111111-1111-4111-8111-111111111111/1/',
+          accept: ['text/html', 'application/json'],
+        },
+        ide,
+      )
+      await new Promise((r) => setTimeout(r, 100))
+      expect(released).toBe(true)
+      expect(receivedHeaders!['cookie']).toBe('session=abc')
+      await new Promise<void>((r) => server.close(() => r()))
+    })
   })
 
   describe('handleIdeConnectRequest', () => {
@@ -459,6 +537,102 @@ describe('ide-tunnel unit tests', () => {
       expect(stream.respondedHeaders?.[HTTP2_HEADER_STATUS]).toBe(400)
       expect(released).toBe(true)
 
+      await new Promise<void>((r) => server.close(() => r()))
+    })
+
+    it('releases upstream immediately if stream is closed before connect request is dispatched', async () => {
+      const stream = new MockServerHttp2Stream()
+      stream.closed = true
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ release: () => { released = true } }),
+      } as unknown as IdeService
+
+      await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
+      expect(released).toBe(true)
+    })
+
+    it('handles stream.respond throw and upstream.cookie on non-upgrade response', async () => {
+      let receivedCookie: string | undefined
+      const server = http.createServer((req, res) => {
+        receivedCookie = req.headers['cookie']
+        res.writeHead(403)
+        res.end('forbidden')
+      })
+      const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
+
+      const stream = new MockServerHttp2Stream()
+      stream.shouldThrowOnRespond = true
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({
+          port,
+          cookie: 'token=xyz',
+          release: () => { released = true },
+        }),
+      } as unknown as IdeService
+
+      await handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
+      await new Promise((r) => setTimeout(r, 100))
+      expect(released).toBe(true)
+      expect(receivedCookie).toBe('token=xyz')
+      await new Promise<void>((r) => server.close(() => r()))
+    })
+
+    it('destroys upstreamRes and releases upstream if stream is closed before non-upgrade response', async () => {
+      let resolveRes: () => void = () => {}
+      const server = http.createServer((_req, res) => {
+        new Promise<void>((r) => { resolveRes = r }).then(() => {
+          res.writeHead(403)
+          res.end('forbidden')
+        })
+      })
+      const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
+
+      const stream = new MockServerHttp2Stream()
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ port, release: () => { released = true } }),
+      } as unknown as IdeService
+
+      const p = handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
+      await new Promise((r) => setTimeout(r, 50))
+      stream.closed = true
+      resolveRes()
+      await p
+      await new Promise((r) => setTimeout(r, 50))
+      expect(released).toBe(true)
+      await new Promise<void>((r) => server.close(() => r()))
+    })
+
+    it('passes sec-websocket-extensions header back to stream on upgrade', async () => {
+      const server = http.createServer()
+      const wss = new WebSocketServer({ noServer: true, perMessageDeflate: true })
+      server.on('upgrade', (req, socket, head) => {
+        wss.handleUpgrade(req, socket, head, () => {})
+      })
+      const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
+
+      const stream = new MockServerHttp2Stream()
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ port, release: () => { released = true } }),
+      } as unknown as IdeService
+
+      await handleIdeConnectRequest(
+        stream as any,
+        {
+          ':path': '/ide/11111111-1111-4111-8111-111111111111/1/',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+          'sec-websocket-extensions': 'permessage-deflate',
+        },
+        ide,
+      )
+      await new Promise((r) => setTimeout(r, 100))
+      expect(stream.headersSent).toBe(true)
+      expect(stream.respondedHeaders?.['sec-websocket-extensions']).toBeDefined()
+      stream.emit('close')
       await new Promise<void>((r) => server.close(() => r()))
     })
 
@@ -635,6 +809,58 @@ describe('ide-tunnel unit tests', () => {
       expect(released).toBe(true)
 
       await new Promise<void>((r) => server.close(() => r()))
+    })
+
+    it('writes initial head buffer to stream on upgrade', async () => {
+      const rawServer = await makeRawWebSocketServer('initial-head-bytes')
+      const stream = new MockServerHttp2Stream()
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ port: rawServer.port, release: () => { released = true } }),
+      } as unknown as IdeService
+
+      let receivedHead = ''
+      stream.on('data', (chunk) => {
+        receivedHead += chunk.toString('utf8')
+      })
+
+      await handleIdeConnectRequest(
+        stream as any,
+        {
+          ':path': '/ide/11111111-1111-4111-8111-111111111111/1/',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+        },
+        ide,
+      )
+      await new Promise((r) => setTimeout(r, 100))
+      expect(stream.headersSent).toBe(true)
+      expect(receivedHead).toContain('initial-head-bytes')
+      stream.emit('close')
+      await rawServer.close()
+    })
+
+    it('handles stream.write error when writing initial head buffer', async () => {
+      const rawServer = await makeRawWebSocketServer('initial-head-bytes')
+      const stream = new MockServerHttp2Stream()
+      stream.shouldThrowOnWrite = true
+      let released = false
+      const ide = {
+        resolveView: async () => makeValidUpstream({ port: rawServer.port, release: () => { released = true } }),
+      } as unknown as IdeService
+
+      await handleIdeConnectRequest(
+        stream as any,
+        {
+          ':path': '/ide/11111111-1111-4111-8111-111111111111/1/',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+        },
+        ide,
+      )
+      await new Promise((r) => setTimeout(r, 100))
+      expect(released).toBe(true)
+      await rawServer.close()
     })
   })
 })

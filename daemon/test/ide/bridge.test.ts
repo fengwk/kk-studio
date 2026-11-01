@@ -629,11 +629,26 @@ describe('loopback IDE bridge', () => {
     aborted.abort()
     await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
 
+    const preAborted = new AbortController()
+    preAborted.abort()
+    await expect(instance.waitForConnection(viewId, preAborted.signal)).rejects.toMatchObject({ name: 'AbortError' })
+
     // Registering the window resumes a pending wait, and a connected view resolves at once.
     const waiting = instance.waitForConnection(viewId, signal())
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
     await expect(waiting).resolves.toBeUndefined()
     await expect(instance.waitForConnection(viewId, signal())).resolves.toBeUndefined()
+
+    // view binding epoch 不匹配时拒绝
+    await expect(
+      instance.request(viewId, { action: 'FOCUS_TERMINAL' }, signal(), { expectedEpoch: '999' }),
+    ).rejects.toThrow('view binding changed')
+
+    // recovery documents 数量超限时拒绝
+    const tooManyDocs = Array.from({ length: 257 }, (_, i) => ({ path: `/file${i}.txt`, text: '' }))
+    await expect(
+      instance.request(viewId, { op: 'restore', documents: tooManyDocs } as any, signal()),
+    ).rejects.toThrow('too many recovery documents')
   })
 
   it('releases a pending connection wait on close', async () => {
