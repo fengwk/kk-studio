@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 /**
  * Environment 注册凭证：数据库只保存 SHA-256，明文只在创建、轮换与安装脚本中出现一次。
  *
- * <p>Daemon 在 HELLO 中出示明文，服务端按同一摘要查找 Environment，因此泄露的数据库或配置导出都不能直接冒充 Daemon。
+ * <p>Daemon 在握手请求头中出示明文，服务端按同一摘要查找 Environment，因此泄露的数据库或配置导出都不能直接冒充 Daemon。
  */
 public final class RegistrationTokens {
 

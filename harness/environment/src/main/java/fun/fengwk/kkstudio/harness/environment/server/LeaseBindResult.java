@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.environment.server;
 import java.util.Objects;
 import java.util.UUID;
 
-/** HELLO 抢约占位的结果。 */
+/** 握手准入时抢占路由租约的结果。 */
 public sealed interface LeaseBindResult {
 
   /** 路由租约已归属本节点连接，返回新签发的 {@code leaseToken}。 */

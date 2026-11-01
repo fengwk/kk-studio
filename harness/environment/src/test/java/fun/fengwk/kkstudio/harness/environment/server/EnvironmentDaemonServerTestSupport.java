@@ -678,7 +678,6 @@ final class EnvironmentDaemonServerTestSupport {
     boolean markReadyResult = true;
     boolean rejected;
     boolean retryLater;
-    boolean released;
     DaemonCapabilities readyCapabilities;
 
     Throwable disconnectFailure;
@@ -756,15 +755,6 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("database unavailable");
       }
       return activeLeaseToken;
-    }
-
-    @Override
-    public boolean release(EnvironmentId environmentId, UUID leaseToken) {
-      if (databaseUnavailable) {
-        throw new IllegalStateException("database unavailable");
-      }
-      released = true;
-      return true;
     }
   }
 

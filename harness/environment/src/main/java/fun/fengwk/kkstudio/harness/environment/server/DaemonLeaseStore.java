@@ -14,11 +14,11 @@ import java.util.UUID;
  */
 public interface DaemonLeaseStore {
 
-  /** 在 HELLO 认证时原子校验注册凭据并抢占/续约路由租约。 */
+  /** 握手准入时原子校验注册凭据并抢占或续约路由租约。 */
   LeaseBindResult tryAcquire(
       EnvironmentId environmentId, String registrationToken, Duration leaseDuration);
 
-  /** 将环境标记为 READY 并写入版本化能力信息；围栏失效返回 false。 */
+  /** 将环境标记为 READY 并写入宿主 metadata；围栏失效返回 false。 */
   boolean markReady(
       EnvironmentId environmentId,
       UUID leaseToken,
@@ -37,15 +37,6 @@ public interface DaemonLeaseStore {
   /** 判定当前节点是否持有该 {@code leaseToken} 的有效 READY 租约（本地 INVOKE 准入围栏）。 */
   boolean holdsReadyLease(EnvironmentId environmentId, UUID leaseToken);
 
-  /** 判定当前节点是否仍持有该活跃连接代币（同节点 HELLO 防冲突保护）。 */
+  /** 判定当前节点是否仍持有该活跃连接代币（同节点重复准入保护）。 */
   boolean hasActiveLeaseToken(EnvironmentId environmentId, UUID leaseToken);
-
-  /**
-   * 持有者主动放弃路由租约，使任何节点都可立即重新认领。
-   *
-   * @param environmentId 目标环境
-   * @param leaseToken 当前会话持有的租约代币，用于围栏校验
-   * @return 释放成功且围栏有效返回 true；租约不匹配或已被抢占返回 false
-   */
-  boolean release(EnvironmentId environmentId, UUID leaseToken);
 }
