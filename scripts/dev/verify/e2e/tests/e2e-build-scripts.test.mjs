@@ -209,3 +209,35 @@ test('test intent: provider credentials are synchronized only for real mode', ()
   assert.match(script, /if \[ "\$REAL" = "true" \]; then\n {2}sync_e2e_provider_credentials\nfi/)
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
+
+test('test intent: S3 bucket isolation rules for local MinIO vs external S3 endpoint', () => {
+  // 本地 MinIO (127.0.0.1:9000) 固定专用名 kk-studio-e2e-matrix，忽略外部环境变量覆盖
+  const localProbe = `source ${E2E_LIB}
+echo "$STORAGE_S3_BUCKET"
+`
+  const localResult = runBash(localProbe, {
+    env: {
+      ...process.env,
+      KK_STUDIO_STORAGE_S3_ENDPOINT: 'http://127.0.0.1:9000',
+      KK_STUDIO_STORAGE_S3_BUCKET: 'dev-user-bucket',
+    },
+  })
+  assert.equal(localResult.status, 0, output(localResult))
+  assert.equal(localResult.stdout.trim(), 'kk-studio-e2e-matrix')
+
+  // 外部 S3 endpoint 允许覆盖 bucket，但跳过清理
+  const externalProbe = `source ${E2E_LIB}
+echo "$STORAGE_S3_BUCKET"
+ensure_dedicated_s3_bucket
+`
+  const externalResult = runBash(externalProbe, {
+    env: {
+      ...process.env,
+      KK_STUDIO_STORAGE_S3_ENDPOINT: 'https://s3.us-west-2.amazonaws.com',
+      KK_STUDIO_STORAGE_S3_BUCKET: 'custom-external-bucket',
+    },
+  })
+  assert.equal(externalResult.status, 0, output(externalResult))
+  assert.match(externalResult.stdout, /custom-external-bucket/)
+  assert.match(externalResult.stdout, /External S3 endpoint configured.*skipping bucket cleanup/)
+})

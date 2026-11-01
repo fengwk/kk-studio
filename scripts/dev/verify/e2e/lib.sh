@@ -50,9 +50,28 @@ BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-6.0.0.jar"}
 STORAGE_S3_ENDPOINT=${KK_STUDIO_STORAGE_S3_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_PUBLIC_ENDPOINT=${KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9000}
 STORAGE_S3_REGION=${KK_STUDIO_STORAGE_S3_REGION:-us-east-1}
-STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio-e2e-matrix}
 STORAGE_S3_ACCESS_KEY=${KK_STUDIO_STORAGE_S3_ACCESS_KEY:-kk-studio}
 STORAGE_S3_SECRET_KEY=${KK_STUDIO_STORAGE_S3_SECRET_KEY:-kk-studio}
+
+is_local_minio_endpoint() {
+  case "$STORAGE_S3_ENDPOINT" in
+    http://127.0.0.1:9000*|http://localhost:9000*|127.0.0.1:9000*|localhost:9000*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# S3 bucket 隔离规则：
+# - 本地 MinIO (127.0.0.1/localhost:9000) 固定使用专用名 kk-studio-e2e-matrix，忽略环境变量覆盖并执行清理；
+# - 外部 S3 endpoint 允许经 KK_STUDIO_STORAGE_S3_BUCKET 覆盖，但绝不执行清理。
+if is_local_minio_endpoint; then
+  STORAGE_S3_BUCKET="kk-studio-e2e-matrix"
+else
+  STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio-e2e-matrix}
+fi
 DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
 # 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
 DAEMON_NODE=${DAEMON_NODE:-}
@@ -224,26 +243,28 @@ ensure_s3_storage() {
 }
 
 ensure_dedicated_s3_bucket() {
-  local s3_endpoint="$STORAGE_S3_ENDPOINT"
-  if [ "$s3_endpoint" = "http://127.0.0.1:9000" ] || [ "$s3_endpoint" = "http://localhost:9000" ]; then
-    ensure_s3_storage
-    step "Ensuring clean dedicated E2E bucket $STORAGE_S3_BUCKET"
-    local mc_cmd="
-      mc alias set e2e-local '$STORAGE_S3_ENDPOINT' '$STORAGE_S3_ACCESS_KEY' '$STORAGE_S3_SECRET_KEY' >/dev/null
-      if mc ls 'e2e-local/$STORAGE_S3_BUCKET' >/dev/null 2>&1; then
-        mc rm --recursive --force 'e2e-local/$STORAGE_S3_BUCKET/'
-      else
-        mc mb 'e2e-local/$STORAGE_S3_BUCKET'
-        mc anonymous set none 'e2e-local/$STORAGE_S3_BUCKET'
-      fi
-    "
-    if command -v mc >/dev/null 2>&1; then
-      bash -ec "$mc_cmd"
-    elif command -v docker >/dev/null 2>&1; then
-      docker run --rm --net host --entrypoint /bin/sh kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z -ec "$mc_cmd"
+  if ! is_local_minio_endpoint; then
+    step "External S3 endpoint configured ($STORAGE_S3_ENDPOINT); skipping bucket cleanup"
+    return 0
+  fi
+
+  ensure_s3_storage
+  step "Ensuring clean dedicated E2E bucket $STORAGE_S3_BUCKET"
+  local mc_cmd="
+    mc alias set e2e-local '$STORAGE_S3_ENDPOINT' '$STORAGE_S3_ACCESS_KEY' '$STORAGE_S3_SECRET_KEY' >/dev/null
+    if mc ls 'e2e-local/$STORAGE_S3_BUCKET' >/dev/null 2>&1; then
+      mc rm --recursive --force 'e2e-local/$STORAGE_S3_BUCKET/'
     else
-      die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
+      mc mb 'e2e-local/$STORAGE_S3_BUCKET'
+      mc anonymous set none 'e2e-local/$STORAGE_S3_BUCKET'
     fi
+  "
+  if command -v mc >/dev/null 2>&1; then
+    bash -ec "$mc_cmd"
+  elif command -v docker >/dev/null 2>&1; then
+    docker run --rm --net host --entrypoint /bin/sh kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z -ec "$mc_cmd"
+  else
+    die "cannot initialize E2E S3 bucket: mc is not installed and docker is not available"
   fi
 }
 
