@@ -51,9 +51,7 @@ public final class RemoteExitReconciler {
    * <p>立即返回，不在调用线程上访问数据库或传输。
    */
   public void onEnvironmentReady(EnvironmentId environmentId) {
-    if (environmentId == null) {
-      return;
-    }
+    Objects.requireNonNull(environmentId, "environmentId");
     try {
       executor.execute(() -> reconcile(environmentId));
     } catch (RejectedExecutionException error) {
@@ -88,10 +86,9 @@ public final class RemoteExitReconciler {
                                   .orElse(false));
                   if (isRunning) {
                     log.debug(
-                        "skipping unconfirmed fact because tool is running: executionId={}, invocationId={}, reason={}",
+                        "skipping remote exit {} of invocation {}: the tool is still running",
                         fact.executionId(),
-                        fact.invocationId(),
-                        "tool is running");
+                        fact.invocationId());
                   } else {
                     attachable.add(fact);
                   }
