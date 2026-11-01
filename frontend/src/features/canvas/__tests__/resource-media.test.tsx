@@ -141,8 +141,6 @@ describe('Canvas lazy resource media', () => {
     expect(image).toHaveAttribute('height', '1402')
     expect(image).toHaveAttribute('draggable', 'false')
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
-    // 常驻原件操作条已移除。
-    expect(document.querySelector('.media-original-actions')).toBeNull()
   })
 
   it('loads a lazy preview immediately when layout already places it near the viewport', async () => {

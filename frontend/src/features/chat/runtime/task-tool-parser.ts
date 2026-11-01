@@ -16,7 +16,7 @@ const UUID_PATTERN =
 /**
  * 解析 task 调用参数 JSON（后端 TaskTool.parseArguments 的只读投影）：
  * subagent_type / prompt 必填，thread_id / max_turns 可选。
- * 严格使用规范字段名，绝不识别 session_id 或 maxTurns 别名。
+ * 使用规范字段名解析。
  * 非数字的 max_turns 直接丢弃为 null，绝不 Number() 强转。
  */
 export function parseTaskArguments(json: string): TaskToolArguments {

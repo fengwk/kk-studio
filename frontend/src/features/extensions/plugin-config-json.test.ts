@@ -58,7 +58,7 @@ describe('plugin-config-json', () => {
       expect(resRoot.error).toContain('Duplicate key detected: "a"')
     }
 
-    // 2. Empty string key duplicate (previously bypassed with truthiness check)
+    // 2. Empty string key duplicate
     const dupEmptyKey = '{"": 1, "": 2}'
     const resEmptyKey = parseStrictJsonObject(dupEmptyKey)
     expect(resEmptyKey.ok).toBe(false)

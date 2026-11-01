@@ -243,35 +243,33 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     expect(loaded[0]?.ack).toEqual([])
   })
 
-  it('reload 现存带有多余旧字段（如 baselineRevision）的持久记录仍可取回命令并保留身份', async () => {
+  it('未知字段不影响读取与重放', async () => {
     const idbFactory = createMockIDBFactory()
     const scoped = { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
-    // 模拟既有数据库中存储了带有旧多余字段的历史记录
-    const legacyRecord = {
-      id: `user-1:${CANVAS_ID}:tab-1:legacy-key`,
+    const recordWithUnknownFields = {
+      id: `user-1:${CANVAS_ID}:tab-1:record-key`,
       userId: 'user-1',
       canvasId: CANVAS_ID,
       editingSessionId: 'tab-1',
       sessionKey: `user-1:${CANVAS_ID}:tab-1`,
-      idempotencyKey: 'legacy-key',
-      commands: [renameCommand('legacy-node')],
-      baselineRevision: '42', // 历史多余字段
+      idempotencyKey: 'record-key',
+      commands: [renameCommand('node-1')],
       unknownExtraField: 'ignored-value',
       ack: [{ nodeId: NODE_ID, field: 'name', generation: 1 }],
       sequence: 1,
       createdAt: 1_700_000_000_000,
     } as unknown as CanvasPendingOperation
-    await saveCanvasOperation(legacyRecord, scoped)
+    await saveCanvasOperation(recordWithUnknownFields, scoped)
 
     const loaded = await loadCanvasOperations(CANVAS_ID, scoped)
     expect(loaded).toHaveLength(1)
-    expect(loaded[0]?.idempotencyKey).toBe('legacy-key')
-    expect(loaded[0]?.commands).toEqual([renameCommand('legacy-node')])
+    expect(loaded[0]?.idempotencyKey).toBe('record-key')
+    expect(loaded[0]?.commands).toEqual([renameCommand('node-1')])
     expect(loaded[0]?.ack).toEqual([{ nodeId: NODE_ID, field: 'name', generation: 1 }])
     expect(loaded[0]?.sequence).toBe(1)
   })
 
-  it('I10: sessionReloading 期间 operation store 各入口（save/remove/list）全部 fail-closed 拒写，且不污染已持久化的旧 session 记录', async () => {
+  it('I10: sessionReloading 期间 operation store 各入口（save/remove/list）全部 fail-closed 拒写，且不污染已持久化的其他 session 记录', async () => {
     // 测试意图：验证当 bfcache 导致 sessionReloading 为 true 时，待确认操作存储的所有入口（save/remove/list）全部拒绝抛出 CanvasStorageUnavailableError，且旧 session 已存记录完好无损未被篡改
     resetEditingSessionForTests()
     const idbFactory = createMockIDBFactory()

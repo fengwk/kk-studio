@@ -783,8 +783,8 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('enters raw JSON mode with error alert when prompt or references shape is unsupported, and edits full args losslessly', async () => {
-    // 测试意图：当节点 args 中 prompt 为非字符串（如旧版 prompt.segments 或复杂对象）时，
-    // 面板绝不能静默覆盖为 ''，必须切换至完整 JSON 编辑模式并显示提示，保证编辑保存无损。
+    // 测试意图：当节点 args 中 prompt 为非字符串（如对象或复杂结构）时，
+    // 面板切换至完整 JSON 编辑模式并显示提示，保证编辑保存无损。
     const rawTarget: ResourceNode = {
       ...fixture().target,
       function: {

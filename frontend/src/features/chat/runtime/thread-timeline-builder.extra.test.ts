@@ -753,7 +753,7 @@ describe('thread timeline edge branches', () => {
 
   it('keeps queued custom messages out of the queue and pending inputs, while durable custom messages fall back to user', () => {
     // QUEUED CUSTOM_MESSAGE 不是人类输入：既不进入可编辑队列，也不代表待处理的用户输入。
-    // 持久 CUSTOM_MESSAGE 的角色兼容语义保留：未知 role 统一投影为 user。
+    // 持久 CUSTOM_MESSAGE 的未知 role 统一投影为 user。
     const timeline = buildThreadTimeline(
       [entry('durable-custom', 'CUSTOM_MESSAGE', { message: { role: 'AGENT', contents: [{ type: 'text', text: 'x' }] } })],
       [
@@ -774,7 +774,7 @@ describe('thread timeline edge branches', () => {
   })
 
   it('projects unsupported message entries for unknown roles with or without role name', () => {
-    // MESSAGE 出现非 USER/ASSISTANT/TOOL 角色（如 HUMAN 或已废弃的 SYSTEM）时投影为
+    // MESSAGE 出现非 USER/ASSISTANT/TOOL 角色（如 HUMAN 等未知角色）时投影为
     // unsupported_message；带角色名的标题带 role 插值，空角色用通用文案。
     const withRole = buildThreadTimeline(
       [

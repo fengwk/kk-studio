@@ -238,7 +238,7 @@ describe('Canvas canonical generation codec & policy', () => {
   })
 
   it('routes unsupported prompt shapes and malformed references to rawArgs without silent data loss', () => {
-    // 1. prompt 为对象结构（如旧版 prompt.segments 或自定义 prompt 对象）：不能静默置空，转入 rawArgs
+    // 1. prompt 为对象结构（如自定义 prompt 对象）：不能静默置空，转入 rawArgs
     const objectPromptArgs = {
       prompt: { segments: [{ type: 'TEXT', text: 'keep me' }] },
       ratio: '16:9',

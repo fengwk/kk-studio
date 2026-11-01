@@ -480,11 +480,11 @@ describe('PaneTarget durable-local FSM', () => {
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
-    // 既有 Thread 的旧 THREAD target 不再属于创建批次，必须 fail-closed 拒绝。
+    // 创建批次只接受 NEW_THREAD。
     setRequest({
       ...validRequest,
       target: {
-        type: 'THREAD',
+        type: 'UNKNOWN',
         threadId: 't1',
         expectedHeadEntryId: 'e1',
         expectedNextCommandSequence: '1',

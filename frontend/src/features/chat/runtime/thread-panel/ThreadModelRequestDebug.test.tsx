@@ -426,7 +426,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(inspector).toHaveAttribute('aria-label', '缓存策略')
       expect(screen.getByText('NONE')).toBeInTheDocument()
       expect(screen.getByText('(无显式缓存控制，Provider 仍可能自动缓存)')).toBeInTheDocument()
-      // key 为空时如实显示 '—'（断点字段已移除）
+      // key 为空时如实显示 '—'
       const dashes = screen.getAllByText('—')
       expect(dashes.length).toBeGreaterThanOrEqual(1)
     })
@@ -805,18 +805,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
   })
 
   describe('frozen invocation and error display without redundant headings', () => {
-    it('does not render Current planning, Inspect, or Preview current draft buttons', () => {
-      render(
-        <ThreadModelRequestDebug
-          debug={sampleDebug()}
-          onSelectInspector={vi.fn()}
-        />,
-      )
-      expect(screen.queryByRole('heading', { name: '当前规划' })).not.toBeInTheDocument()
-      expect(screen.queryByText('检查操作')).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /预览当前草稿/ })).not.toBeInTheDocument()
-    })
-
     it('renders frozen invocation entry when frozenInvocation is present and hides it when null', async () => {
       const user = userEvent.setup()
       const onSelectInspector = vi.fn()

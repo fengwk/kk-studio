@@ -643,7 +643,7 @@ function projectEntryRecord(
       if (role === 'TOOL') {
         return projectToolResultRecord(base, payload)
       }
-      // SYSTEM/未知角色按 CUSTOM_MESSAGE。
+      // 其他未知角色按 CUSTOM_MESSAGE 处理。
       return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
     }
     default:

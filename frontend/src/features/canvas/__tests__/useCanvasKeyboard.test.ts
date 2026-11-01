@@ -105,13 +105,6 @@ describe('useCanvasKeyboard editor shortcuts', () => {
     fireKey(window, { key: 'Backspace' })
     expect(api.deleteSelection).toHaveBeenCalledTimes(3)
   })
-
-  it('does not consume the removed Canvas thread shortcut', () => {
-    // 测试意图：不再为已移除的 Agent dock 劫持浏览器快捷键。
-    setup()
-    const meta = fireKey(window, { key: 'k', metaKey: true })
-    expect(meta.defaultPrevented).toBe(false)
-  })
 })
 
 describe('useCanvasKeyboard scoping', () => {

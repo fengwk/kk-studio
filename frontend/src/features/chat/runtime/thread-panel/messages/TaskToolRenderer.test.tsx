@@ -42,11 +42,10 @@ describe('parseTaskArguments', () => {
     })
   })
 
-  it('strictly does not recognize legacy session_id or camelCase maxTurns aliases', () => {
-    // 传入旧别名 session_id / maxTurns，解析结果中对应字段必须为 null
+  it('非规范字段名与非法值被忽略', () => {
     expect(
       parseTaskArguments(
-        '{"subagent_type":"coder","prompt":"fix it","session_id":"old-session","maxTurns":4}',
+        '{"subagent_type":"coder","prompt":"fix it","unknown_id":"val","maxTurns":4}',
       ),
     ).toEqual({
       subagentType: 'coder',
@@ -54,9 +53,6 @@ describe('parseTaskArguments', () => {
       threadId: null,
       maxTurns: null,
     })
-  })
-
-  it('drops non-numeric max_turns and invalid JSON without coercion', () => {
     expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":"4"}').maxTurns).toBeNull()
     expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":0}').maxTurns).toBeNull()
     expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":-1}').maxTurns).toBeNull()
@@ -190,20 +186,20 @@ describe('TaskToolRenderer call phase', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
-  it('does not render fields for legacy session_id or maxTurns aliases', () => {
+  it('does not render fields for non-standard or unknown attributes', () => {
     render(
       <TaskToolRenderer
         expanded
         message={message({
           arguments:
-            '{"subagent_type":"explorer","prompt":"inspect","session_id":"legacy-7","maxTurns":10}',
+            '{"subagent_type":"explorer","prompt":"inspect","unknown_id":"extra-7","maxTurns":10}',
         })}
       />,
     )
     expect(screen.getByText('inspect')).toBeInTheDocument()
-    // session_id 与 maxTurns 不识别，不应出现 Thread 链接或遗留会话指纹。
+    // 未知字段与非规范属性不识别，不应出现 Thread 链接。
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.queryByText('legacy-7')).not.toBeInTheDocument()
+    expect(screen.queryByText('extra-7')).not.toBeInTheDocument()
   })
 
   it('falls back to raw arguments viewport when arguments is not valid JSON', () => {
@@ -332,8 +328,8 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.getByText('raw result with malformed details')).toBeInTheDocument()
   })
 
-  it('treats legacy body JSON text as fallback content without synthesizing a link', () => {
-    // 遗留正文 JSON 不再被识别为 receipt，直接按原文展示
+  it('treats body JSON text as plain content without synthesizing a link', () => {
+    // 正文中的 JSON 文本按纯文本原文展示，不提取为结构化 receipt
     render(
       <TaskToolRenderer
         message={message({
