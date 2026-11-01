@@ -10,12 +10,16 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.RemoteExitReconciler;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -69,19 +73,38 @@ public class HarnessEnvironmentConfiguration {
     return orchestratorFactory.create(capabilityTransport, environmentSkillSyncExecutor);
   }
 
+  /** 跨实例远端退出对账专用 virtual thread executor。 */
+  @Bean(name = "remoteExitReconcileExecutor", destroyMethod = "shutdown")
+  public ExecutorService remoteExitReconcileExecutor() {
+    return Executors.newThreadPerTaskExecutor(
+        Thread.ofVirtual().name("remote-exit-reconcile-", 0L).factory());
+  }
+
+  /** 跨实例远端退出对账器。 */
+  @Bean
+  public RemoteExitReconciler remoteExitReconciler(
+      HarnessStore store,
+      EnvironmentCapabilityTransport capabilityTransport,
+      ExecutionExitConfirmer executionExitConfirmer,
+      @Qualifier("remoteExitReconcileExecutor") ExecutorService remoteExitReconcileExecutor) {
+    return new RemoteExitReconciler(
+        store, capabilityTransport, executionExitConfirmer, remoteExitReconcileExecutor);
+  }
+
   /**
-   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，并触发该 Environment 的 Skill 全量同步。
+   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，触发该 Environment 的 Skill 全量同步，以及远端退出事实对账。
    *
    * <p>每个动作都立刻返回且各自隔离异常：会话状态推进会先完成，任何宿主回调失败都不得向调用方泄露。
    *
-   * <p>协作者都用延迟解析：dispatcher 与 Skill 同步编排器都经由 capability 传输间接依赖本监听器（daemon server → listener →
+   * <p>协作者都用延迟解析：dispatcher、Skill 同步编排器和退出对账器都经由 capability 传输间接依赖本监听器（daemon server → listener →
    * 协作者），启动期直接注入会形成环。
    */
   @Bean
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
-      ObjectProvider<IdeLeaseCoordinator> ideLeaseCoordinatorProvider) {
+      ObjectProvider<IdeLeaseCoordinator> ideLeaseCoordinatorProvider,
+      ObjectProvider<RemoteExitReconciler> remoteExitReconcilerProvider) {
     return new EnvironmentSessionListener() {
       @Override
       public void onEnvironmentReady(EnvironmentId environmentId) {
@@ -92,6 +115,11 @@ public class HarnessEnvironmentConfiguration {
         try {
           orchestratorProvider.ifAvailable(
               orchestrator -> orchestrator.onEnvironmentReady(environmentId));
+        } catch (RuntimeException ignored) {
+        }
+        try {
+          remoteExitReconcilerProvider.ifAvailable(
+              reconciler -> reconciler.onEnvironmentReady(environmentId));
         } catch (RuntimeException ignored) {
         }
       }
