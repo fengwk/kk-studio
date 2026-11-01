@@ -1221,23 +1221,22 @@ describe('CanvasCommandQueue', () => {
     expect(saved.size).toBe(0)
   })
 
-  it('recover 面对持久化存储中带有多余旧字段（如 baselineRevision）的历史记录，正常重放并保留命令与身份', async () => {
+  it('未知字段不影响读取与重放', async () => {
     const store = createFakeOperationStore()
-    const legacyOpWithExtraFields = {
-      id: 'user:canvas:session:k-legacy',
+    const opWithExtraFields = {
+      id: 'user:canvas:session:k-extra',
       userId: 'user',
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
       idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000099',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'old', name: 'recovered' }],
-      baselineRevision: '888',
       extraAuditInfo: { origin: 'unknown' },
       ack: [],
       sequence: 0,
       createdAt: 1000,
     } as unknown as CanvasPendingOperation
-    await store.store.save(legacyOpWithExtraFields)
+    await store.store.save(opWithExtraFields)
 
     const applyCalls: ApplyCanvasCommandsRequestDTO[] = []
     const apply = vi.fn().mockImplementation(async (_canvasId, request: ApplyCanvasCommandsRequestDTO) => {

@@ -96,7 +96,5 @@ describe('ThreadTranscript', () => {
 
     expect(screen.getByText('未知 Entry')).toBeInTheDocument()
     expect(screen.getByText('会话已创建。')).toBeInTheDocument()
-    // timeline 的 raw toggle 已移除，Entry 只展示投影文本。
-    expect(screen.queryByText('查看原始数据')).toBeNull()
   })
 })

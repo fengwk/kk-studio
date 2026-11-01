@@ -5,7 +5,7 @@ import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
  * Pane 绑定目标：有共享 tab 状态时完全受控，没有时保持宿主内局部状态。
  *
  * Chat workspace 由父页唯一持有呈现状态；本 Hook 只镜像最新目标并在用户事件中
- * 请求父页提交。它不读取也不写任何旧的 per-pane 呈现键。
+ * 请求父页提交。
  */
 export function usePaneTarget({
   initialTarget,

@@ -70,9 +70,9 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
   })
 
-  // 只接受 harness 持久 codec 的 canonical 字段名：snake_case / 常见别名一律不再兼容
+  // 只按 canonical 字段计数，非规范字段名不参与解析
   describe('parseAssistantUsage canonical fields', () => {
-    it('counts output and cache writes once, ignoring the obsolete long-cache alias', () => {
+    it('只按 canonical 字段计数，非规范字段名不参与解析', () => {
       const parsed = parseAssistantUsage(
         {
           usage: {
@@ -80,7 +80,7 @@ describe('content-utils usage & speed & cache calculations', () => {
             outputTokens: 50,
             cacheReadTokens: 10,
             cacheWriteTokens: 20,
-            cacheWriteLongTokens: 5,
+            extraTokens: 5,
             reasoningTokens: 15,
             providerTotalTokens: 200,
           },
@@ -102,7 +102,7 @@ describe('content-utils usage & speed & cache calculations', () => {
       })
     })
 
-    it('ignores snake_case and common aliases entirely', () => {
+    it('ignores unknown or non-canonical field names entirely', () => {
       const parsed = parseAssistantUsage({
         usage: {
           input_tokens: '10',
@@ -112,7 +112,7 @@ describe('content-utils usage & speed & cache calculations', () => {
           totalTokens: 44,
         },
       })
-      // 携带模型 metadata 但缺 canonical 字段：返回全 unknown TurnUsage，不采信别名数字
+      // 携带模型 metadata 但缺 canonical 字段：返回全 unknown TurnUsage，不采信非规范字段
       expect(parsed).toEqual({
         input: null,
         output: null,
@@ -127,7 +127,7 @@ describe('content-utils usage & speed & cache calculations', () => {
       })
     })
 
-    // 旧 payload 里的 metadata.cost 不再被读取：费用只能来自读取投影
+    // metadata.cost 不参与费用计算：费用来自读取投影
     it('never prices from assistant metadata', () => {
       const parsed = parseAssistantUsage({
         usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -232,11 +232,11 @@ describe('content-utils usage & speed & cache calculations', () => {
         expect(parsed?.decodeDurationMillis).toBeNull()
         expect(parsed?.decodeTokens).toBeNull()
       }
-      const aliased = parseAssistantUsage({
+      const nonCanonical = parseAssistantUsage({
         usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
         decode_duration_millis: 800,
       })
-      expect(aliased?.decodeDurationMillis).toBeNull()
+      expect(nonCanonical?.decodeDurationMillis).toBeNull()
     })
 
     // known reasoning <= output 一致校验；invalid optional 不得真 0；合法 usage reasoning 未知且后端 cost 已知仍保留费用

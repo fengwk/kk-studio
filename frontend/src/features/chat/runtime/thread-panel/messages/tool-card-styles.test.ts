@@ -59,9 +59,6 @@ describe('tool card style contracts', () => {
     expect(output).toContain('overflow: auto')
     expect(output).toContain('overscroll-behavior: auto')
     expect(pre).toContain('font-family: var(--mono)')
-    // 不再有旧的展开态/行预算契约。
-    expect(css).not.toContain('.thread-tool-output.is-expanded')
-    expect(css).not.toMatch(/--thread-tool-output-lines/)
   })
 
   it('uses the danger token for approval rejection borders', () => {

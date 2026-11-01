@@ -1777,7 +1777,7 @@ export async function expectStorage(page, key, expected) {
       )
       return
     }
-    // localStorage 草稿格式为 v1（不是 events-v2 帧）：exact keys version/parts、恰一个 text part。
+    // localStorage 草稿格式：exact keys parts、恰一个 text part。
     await page.waitForFunction(
       ({ storageKey, text }) => {
         const raw = localStorage.getItem(storageKey)
@@ -1792,8 +1792,7 @@ export async function expectStorage(page, key, expected) {
           parsed == null
           || typeof parsed !== 'object'
           || Array.isArray(parsed)
-          || JSON.stringify(Object.keys(parsed).sort()) !== '["parts","version"]'
-          || parsed.version !== 1
+          || JSON.stringify(Object.keys(parsed).sort()) !== '["parts"]'
           || !Array.isArray(parsed.parts)
           || parsed.parts.length !== 1
         ) {

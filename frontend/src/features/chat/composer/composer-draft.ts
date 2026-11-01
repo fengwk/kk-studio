@@ -33,7 +33,6 @@ export function storeComposerDraft(
     storage.setItem(
       composerDraftStorageKey(scope),
       JSON.stringify({
-        version: 1,
         parts: parts.map((part) => {
           if (part.type === 'text') {
             return { type: 'text', text: part.text }
@@ -113,10 +112,10 @@ export function restoreComposerDraft(
 
 function parseStoredDraft(raw: string): ComposerPart[] {
   const parsed: unknown = JSON.parse(raw)
-  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.parts)) {
+  if (!isRecord(parsed) || !Array.isArray(parsed.parts)) {
     throw new Error('invalid composer draft')
   }
-  if (!hasExactKeys(parsed, ['version', 'parts'])) {
+  if (!hasExactKeys(parsed, ['parts'])) {
     throw new Error('invalid composer draft fields')
   }
   return parsed.parts.map((part) => {
@@ -205,7 +204,7 @@ export function storeUnknownUploads(
     storage.removeItem(key)
     return
   }
-  const serialized = JSON.stringify({ version: 1, uploads })
+  const serialized = JSON.stringify({ uploads })
   storage.setItem(key, serialized)
   // Readback 确保存储落盘一致性
   const readback = storage.getItem(key)
@@ -248,7 +247,7 @@ export function loadUnknownUploads(
     }
     return []
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.uploads)) {
+  if (!isRecord(parsed) || !Array.isArray(parsed.uploads)) {
     try {
       storage.removeItem(key)
     } catch {

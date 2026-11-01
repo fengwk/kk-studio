@@ -55,7 +55,6 @@ describe('composer draft storage', () => {
     storeComposerDraft(scope, [createTextPart('  first\nsecond  ')], storage)
 
     expect(JSON.parse(storage.getItem(composerDraftStorageKey(scope)) ?? '')).toEqual({
-      version: 1,
       parts: [{ type: 'text', text: '  first\nsecond  ' }],
     })
     expect(partsToText(loadStoredComposerDraft(scope, storage))).toBe('  first\nsecond  ')
@@ -155,7 +154,19 @@ describe('composer draft storage', () => {
     const scope = 'thread:t1'
     storage.setItem(
       composerDraftStorageKey(scope),
-      '{"version":1,"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
+      '{"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
+    )
+
+    expect(loadStoredComposerDraft(scope, storage)).toEqual([])
+    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+  })
+
+  it('fails closed and removes persisted drafts with unknown fields', () => {
+    const storage = new MemoryStorage()
+    const scope = 'thread:t1'
+    storage.setItem(
+      composerDraftStorageKey(scope),
+      '{"parts":[],"extra":1}',
     )
 
     expect(loadStoredComposerDraft(scope, storage)).toEqual([])

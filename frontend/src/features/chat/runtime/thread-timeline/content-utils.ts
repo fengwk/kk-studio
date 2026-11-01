@@ -381,7 +381,7 @@ export function createUnknownTurnUsage(): TurnUsage {
 /**
  * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取 provider usage。
  *
- * 只接受 harness 持久 codec 的 canonical 字段名，不兼容 snake_case / 常见别名；
+ * 只按 canonical 字段名解析；
  * 只有 assistantMetadata 为 null/undefined 才是无模型调用，返回 null；
  * 显式存在的空对象、数组、primitive 或损坏 usage 返回全未知 TurnUsage（不创造零）；
  * reasoningTokens 必须满足非负安全整数且 known reasoning <= output 一致校验，非法不得真 0；
@@ -442,7 +442,7 @@ export function parseAssistantUsage(
   const cost = normalizeUsageCost(usageCost)
 
   // decodeDurationMillis 是 harness 持久字段：只接受 backend 形态的安全整数 > 0。
-  // 小数、Infinity、超安全整数、字符串以及 snake_case 别名一律视为无效（null）。
+  // 小数、Infinity、超安全整数、字符串及非规范形态一律视为无效（null）。
   const decodeDurationMillis =
     typeof metaRecord.decodeDurationMillis === 'number'
     && Number.isSafeInteger(metaRecord.decodeDurationMillis)

@@ -95,7 +95,7 @@ describe('questionnaire-parser', () => {
     expect(parseCompletedResult(null)).toBeNull()
   })
 
-  it('accepts questionnaires and answers beyond the old business ceilings without truncation', () => {
+  it('accepts questionnaires and answers beyond business ceilings without truncation', () => {
     const parsed = parseQuestionnaire(LONG_QUESTIONNAIRE_JSON)
     expect(parsed?.questions).toHaveLength(LONG_QUESTION_COUNT)
     expect(parsed?.questions[0].options).toHaveLength(LONG_OPTION_COUNT)

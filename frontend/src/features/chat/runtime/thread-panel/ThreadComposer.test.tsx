@@ -93,8 +93,7 @@ describe('ThreadComposer and commands', () => {
   })
 
   it('exposes navigation and goal commands for bound threads without owner gating', () => {
-    // 原 owner 裁剪（受控 Issue 线程隐藏导航命令）已删除：既有 Thread 的
-    // 命令可用性只由目标 kind 与显式能力选项决定，owner 不参与裁剪。
+    // 既有 Thread 的命令可用性由目标 kind 与显式能力选项决定，owner 不参与裁剪。
     const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
     expect(bound.find((command) => command.id === 'thread')?.disabled).toBe(false)
     expect(bound.find((command) => command.id === 'new')?.disabled).toBe(false)

@@ -32,13 +32,13 @@ test('workspace observer requires a thread ack, ignoring connected and other res
   assert.equal(current.listenerCount('framereceived'), 0)
 })
 
-test('composer storage observer retains production draft v1, independently of event wire v2', async () => {
+test('composer storage observer retains production draft schema', async () => {
   const source = readFileSync(new URL('../../../../../frontend/src/features/chat/composer/composer-draft.ts', import.meta.url), 'utf8')
-  assert.match(source, /JSON\.stringify\(\{\s*version: 1,\s*parts:/)
+  assert.match(source, /JSON\.stringify\(\{\s*parts:/)
   const original = globalThis.localStorage
-  let version = 1
+  let payload = { parts: [{ type: 'text', text: 'draft' }] }
   globalThis.localStorage = {
-    getItem: () => JSON.stringify({ version, parts: [{ type: 'text', text: 'draft' }] }),
+    getItem: () => JSON.stringify(payload),
   }
   const page = {
     async waitForFunction(predicate, input) { assert.equal(predicate(input), true) },
@@ -46,7 +46,7 @@ test('composer storage observer retains production draft v1, independently of ev
   }
   try {
     await expectStorage(page, 'draft', 'draft')
-    version = 2
+    payload = { parts: [{ type: 'text', text: 'draft' }], extra: 1 }
     await assert.rejects(expectStorage(page, 'draft', 'draft'), /localStorage mismatch/)
   } finally {
     if (original === undefined) delete globalThis.localStorage

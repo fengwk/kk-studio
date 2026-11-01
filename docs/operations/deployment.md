@@ -172,9 +172,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不再按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
-脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。
-旧 Provider 配置中的 `openAiChatIncludeUsage` 已无作用，会按未知字段忽略；升级时从配置中删除，
-不要依赖它关闭 usage 请求。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
+脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[模型用量与计价](../modules/model-pricing.md#协议来源)。
 
 兼容的数据面继续复用。停止 Worker 领取新 Work，排空在途调用，在批准的窗口替换 App 镜像；
@@ -217,7 +215,7 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据
 先在“设置 → 同步”导出配置，执行 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，
 再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复八类配置及文件随带的 Provider 凭据与注册令牌摘要。
 会话、项目、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
-Environment 注册令牌摘要可恢复，已安装的 Daemon 用原令牌重连；重连仍须验收，Plugin 认证和部署级配置需另行准备（如 OpenCLI 的独立 Plugin 普通配置与 `apiKey` 静态秘密，旧 SystemSettings 中对应三项已彻底废除拒绝，无双读别名）。结构调整仅允许通过配置导出备份后由数据所有者授权重建，严禁在已有部署或共享数据库上就地执行未授权改动。
+Environment 注册令牌摘要可恢复，已安装的 Daemon 用原令牌重连；重连仍须验收，Plugin 认证和部署级配置需另行准备（如 OpenCLI 的独立 Plugin 普通配置与 `apiKey` 静态秘密，由独立 Plugin 管理）。结构调整仅允许通过配置导出备份后由数据所有者授权重建，严禁在已有部署或共享数据库上就地执行未授权改动。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
 验收完成且确认备份可恢复后，可用 `reset-database.sh --cleanup-snapshots --dry-run`

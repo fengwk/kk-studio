@@ -61,7 +61,7 @@ describe('EnvironmentManagementModal', () => {
   })
 
   /**
-   * 测试意图：验证宿主信息卡片呈现包含 userName 与 homeDirectory 的宿主事实，不展示已废弃的 rootPath。
+   * 测试意图：验证宿主信息卡片呈现包含 userName 与 homeDirectory 的宿主事实。
    */
   it('renders host information from environment card including userName and homeDirectory', async () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
@@ -72,16 +72,13 @@ describe('EnvironmentManagementModal', () => {
     // 宿主信息展示实际 daemon 构建版本，与 CAS 配置版本不是同一事实。
     expect(screen.getByText('Daemon 版本')).toBeInTheDocument()
     expect(screen.getByText('1.2.3')).toBeInTheDocument()
-    // 宿主信息展示最近一次 READY 的进程用户与 HOME，不再展示任何 Root 路径。
+    // 宿主信息展示最近一次 READY 的进程用户与 HOME。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('/home/dev')).toBeInTheDocument()
-    expect(screen.queryByText('根路径')).toBeNull()
-    expect(screen.queryByText('/opt/studio/workspace')).toBeNull()
     expect(screen.getByText('Production host')).toBeInTheDocument()
     // lastSeen 必须本地化展示，不直接铺 UTC 原文。
     expect(screen.getByText(/2026\/07\/20 \d{2}:\d{2}:\d{2}/)).toBeInTheDocument()
     expect(screen.queryByText('2026-07-20T02:00:00.000Z')).toBeNull()
-    expect(screen.queryByText('/opt/studio/workspace')).not.toBeInTheDocument()
 
     // 绝不包含任何操作记录区域
     expect(screen.queryByText('异步操作记录')).not.toBeInTheDocument()

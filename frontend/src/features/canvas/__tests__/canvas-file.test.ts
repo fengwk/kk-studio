@@ -18,7 +18,7 @@ describe('Canvas file descriptor fallback', () => {
   })
 
   it('uses the accepted extension as authority and rejects unsupported files', () => {
-    // Browsers may omit or mislabel MIME; reserve accepts only the explicit v1 extension allowlist.
+    // Browsers may omit or mislabel MIME; reserve accepts only the explicit extension allowlist.
     expect(canvasFileDescriptor({ name: 'capture.HEIC', type: 'image/jpeg' })).toEqual({
       kind: 'IMAGE',
       mediaType: 'image/heic',

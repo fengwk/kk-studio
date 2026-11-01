@@ -85,15 +85,11 @@ describe('EntryMessageBlock', () => {
     expect(container.querySelector('[data-entry-kind="unknown_entry"] svg')).toBeInTheDocument()
   })
 
-  it('never renders a conversation raw payload toggle', () => {
-    // 测试意图：会话 timeline 的 raw toggle 已彻底移除；原始事实只在独立 Debug events 中查看。
-    const { container } = render(
+  it('renders unsupported_message with its summary', () => {
+    render(
       <EntryMessageBlock message={event('unsupported_message', '无法识别消息 Entry')} />,
     )
 
-    expect(container.querySelector('.thread-entry-payload')).toBeNull()
-    expect(screen.queryByText('查看原始数据')).toBeNull()
-    expect(screen.queryByText('View raw data')).toBeNull()
     expect(screen.getByText('无法识别消息 Entry 的摘要')).toBeInTheDocument()
   })
 

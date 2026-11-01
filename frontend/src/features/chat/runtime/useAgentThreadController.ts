@@ -127,7 +127,7 @@ export function useAgentThreadController(
   const [stopReplayPending, setStopReplayPending] = useState(false)
   const queryClient = useQueryClient()
 
-  // 命令与控制面仅消费 required 投影，不再自建订阅，也不再使用空串关闭技巧。
+  // 命令与控制面仅消费 required 投影。
   const { thread, queuedCommands, stopReceipts, snapshotQuery } = projection
   const bound = projection.bound
 
