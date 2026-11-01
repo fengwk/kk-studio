@@ -285,7 +285,7 @@ export function modelConfigMatrix() {
       ok: false,
       expectStatus: 400,
       messageIncludes: /Failed to read request|Bad Request|unknown/i,
-      title: '已删除的 variant 字段被拒绝',
+      title: '未知 variant 字段被拒绝',
       build: () =>
         baseModelConfig({
           variants: [{ id: 'default', temperature: 0.5 }],

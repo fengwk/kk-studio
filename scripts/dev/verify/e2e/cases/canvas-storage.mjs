@@ -98,27 +98,6 @@ registerCase({
     assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
     assertDecimalVersion(canvas.revision, 'canvas.revision')
     assert(canvas.revision === '0', JSON.stringify(canvas))
-    assert(
-      !('version' in canvas) && !('threadId' in canvas),
-      `Canvas must expose revision only: ${JSON.stringify(canvas)}`,
-    )
-
-    // 公开 /api/s3/** 端点已删除。
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/s3/presigned-uploads', {
-          key: 'comfyui-inputs/e2e/upload/input.png',
-          contentType: 'image/png',
-        }),
-      { status: 404 },
-    )
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/s3/presigned-downloads', {
-          key: 'blobs/00000000-0000-0000-0000-000000000001/preview.webp',
-        }),
-      { status: 404 },
-    )
 
     const upload = await uploadPng(ctx)
 

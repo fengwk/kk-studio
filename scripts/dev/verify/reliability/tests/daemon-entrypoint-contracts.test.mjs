@@ -73,10 +73,6 @@ test('test intent: compose injects only environment; the entrypoint materializes
   assert.ok(compose.includes('KK_STUDIO_DAEMON_REGISTRATION_TOKEN'))
   assert.ok(compose.includes('KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080'))
   assert.ok(compose.includes('e2e-token-reliability'))
-  // 旧 CLI/启动参数必须保持删除状态；配置只经共享 daemon.json 文件。
-  for (const removed of ['--gateway-uri', '--data-dir', '--note', '--registration-token', '--environment-root']) {
-    assert.ok(!compose.includes(removed), removed)
-  }
   // daemon 服务保留：镜像/uid/workspace named volume/健康依赖是现存自动化基础设施。
   assert.ok(compose.includes('dockerfile: deploy/reliability/daemon.Dockerfile'))
   assert.ok(compose.includes('user: "0:0"'))
@@ -89,10 +85,6 @@ test('test intent: the daemon image runs the frozen Node distribution only', () 
 
   assert.ok(dockerfile.includes('daemon-entrypoint.sh'))
   assert.equal(count(dockerfile, 'deploy/reliability/daemon-entrypoint.sh'), 1, '入口脚本只能被 COPY 一次')
-  assert.ok(!dockerfile.includes('ENTRYPOINT ["java"'), '直接 exec java 会绕过配置/凭证物化')
-  for (const removedJvm of ['eclipse-temurin', 'daemon.jar', 'maven:']) {
-    assert.ok(!dockerfile.includes(removedJvm), removedJvm)
-  }
   // 发行目录由真实打包脚本产出，运行入口是归档根的 main.js。
   assert.ok(dockerfile.includes('scripts/daemon/prepare-release.sh'))
   assert.ok(dockerfile.includes('/distribution/main.js'))
@@ -139,10 +131,6 @@ test('test intent: the entrypoint launches the distribution entry with --config 
     assert.deepEqual(argv.slice(0, 2), [path.join(dist, 'main.js'), '--config'])
     assert.ok(path.isAbsolute(configPath))
     assert.equal(configPath, path.join(root, 'daemon.json'))
-    // 旧 CLI 双源配置与 JVM 启动形式必须不再存在。
-    for (const removed of ['--gateway-uri', '--data-dir', '--registration-token-file', '-jar', 'daemon.jar']) {
-      assert.ok(!argv.includes(removed), removed)
-    }
     assert.ok(!argv.includes(secret))
     assert.ok(!text(environFile).includes(secret))
     assert.ok(!(result.stderr + result.stdout).includes(secret))

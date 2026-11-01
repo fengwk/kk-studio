@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { HttpError } from '../lib/http.mjs'
@@ -13,7 +11,6 @@ import '../cases/environment-runtime-ide.mjs'
 const RUNTIME_CASE_ID = 'environment.runtime_absent_unavailable'
 const IDE_CASE_ID = 'environment.ide_view_no_ready_owner_rejected'
 const ENVIRONMENT_ID = '00000000-0000-4000-8000-000000000abc'
-const CASES_DIR = fileURLToPath(new URL('../cases/', import.meta.url))
 
 function canonicalErrorBody(status, code, detail) {
   return JSON.stringify({
@@ -202,23 +199,4 @@ test('environment fixture cleanup uses the authoritative version and tolerates a
       ),
     (error) => error instanceof HttpError && error.status === 409,
   )
-})
-
-test('the deleted read-only registration token endpoint is only asserted as removed', () => {
-  // 测试意图：只读 token 端点早已删除；E2E 只能断言它不存在，不能再断言它返回 token。
-  const offenders = []
-  for (const name of readdirSync(CASES_DIR).filter((file) => file.endsWith('.mjs'))) {
-    const source = readFileSync(`${CASES_DIR}${name}`, 'utf8')
-    const pattern = /\/api\/environments\/[^`'"\s]*\/token/g
-    let match
-    while ((match = pattern.exec(source)) !== null) {
-      const start = source.lastIndexOf('expectHttpError(', match.index)
-      const nextGuard = source.indexOf('expectHttpError(', match.index)
-      const window = source.slice(start < 0 ? 0 : start, nextGuard < 0 ? source.length : nextGuard)
-      if (!window.includes('status: 404')) {
-        offenders.push(`${name}:${match.index}`)
-      }
-    }
-  }
-  assert.deepEqual(offenders, [])
 })

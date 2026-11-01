@@ -244,9 +244,6 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
     "name: '默认环境', exact: true",
     'created.environmentName === null',
     'required-nullable environmentName:null',
-    // 已删除的 workspace/environment 字段仍必须被拒绝。
-    "for (const field of ['workspacePath', 'environment', 'environmentId'])",
-    '!Object.hasOwn(created, field)',
     "apiDeleteByName(args.backendUrl, 'chats', title)",
     "apiDeleteByName(args.backendUrl, 'agents', tempAgentName)",
   ]

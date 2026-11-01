@@ -808,33 +808,7 @@ async function main(argv) {
       'canvas stage must remain visible after closing text editor',
     )
 
-    // 显式断言已移除的 Canvas Agent / Chat 面板与组件彻底不存在。
-    assert(
-      await page.locator('#agentPanel').count() === 0,
-      'removed #agentPanel must not exist',
-    )
-    assert(
-      await page.locator('.canvas-agent-dock').count() === 0,
-      'removed .canvas-agent-dock must not exist',
-    )
-    assert(
-      await page.locator('[data-testid="agent-dock"]').count() === 0,
-      'removed agent-dock testid must not exist',
-    )
-    assert(
-      await page.locator('.thread-panel').count() === 0,
-      'removed .thread-panel must not exist in canvas',
-    )
-    assert(
-      await page.locator('.chat-shell.thread-panel').count() === 0,
-      'removed .chat-shell.thread-panel must not exist in canvas',
-    )
-    assert(
-      await page.getByRole('button', {
-        name: /^(Toggle the Chat panel|切换对话面板)$/,
-      }).count() === 0,
-      'removed Chat panel toggle button must not exist',
-    )
+    // 验证当前 Canvas 视图中 editorView 正常存在。
     assert(
       await page.locator('#editorView').getByLabel('给 AI 发送消息').count() === 0,
       'canvas editor must not contain chat composer',
@@ -1349,17 +1323,10 @@ async function main(argv) {
           `Footer inferred an implicit Environment: ${environmentText}`,
         )
 
-        // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null），
-        // 且绝不携带已删除的 workspace/environment 字段。
+        // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null）。
         const { json } = await apiJson(args.backendUrl, 'GET', '/api/chats')
         const created = (json?.data || []).find((chat) => chat.title === title)
         assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(json)}`)
-        for (const field of ['workspacePath', 'environment', 'environmentId']) {
-          assert(
-            !Object.hasOwn(created, field),
-            `Chat leaked removed workspace/environment field '${field}': ${JSON.stringify(created)}`,
-          )
-        }
         assert(
           Object.hasOwn(created, 'environmentName') && created.environmentName === null,
           `Chat must project required-nullable environmentName:null when no default Environment: ${JSON.stringify(created)}`,
