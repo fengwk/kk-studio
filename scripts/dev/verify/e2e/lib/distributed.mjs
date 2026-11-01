@@ -15,6 +15,13 @@ export const ALLOWED_DISTRIBUTED_COMMANDS = Object.freeze([
   'disconnect-db-a',
   'reconnect-db-a',
   'status',
+  'stop-app-a',
+  'stop-app-b',
+  'start-app-a',
+  'start-app-b',
+  'kill-app-a',
+  'kill-app-b',
+  'restart-daemon-c',
 ])
 
 /**

@@ -34,8 +34,20 @@ const EXPECTED_SERVICE_NETWORKS = {
   'app-b': ['node-b-db', 'daemon-b', 'app-ingress-b'],
   'daemon-a': ['daemon-a'],
   'daemon-b': ['daemon-b'],
+  // daemon-ingress 是唯一同时接入 daemon-a 与 daemon-b 的受控转发服务，
+  // 内部受限仅接受来自 daemon-c 的入站连接，不构成 App-to-App 路径。
+  'daemon-ingress': ['daemon-a', 'daemon-b', 'daemon-c'],
+  'daemon-c': ['daemon-c'],
 }
-const EXPECTED_NETWORKS = ['node-a-db', 'node-b-db', 'daemon-a', 'daemon-b', 'app-ingress-a', 'app-ingress-b']
+const EXPECTED_NETWORKS = [
+  'node-a-db',
+  'node-b-db',
+  'daemon-a',
+  'daemon-b',
+  'daemon-c',
+  'app-ingress-a',
+  'app-ingress-b',
+]
 const EXPECTED_HOST_PORTS = {
   postgres: ['15433'],
   minio: ['19001'],

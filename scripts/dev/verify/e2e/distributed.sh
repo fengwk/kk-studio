@@ -41,11 +41,13 @@ APP_A_URL="http://127.0.0.1:$DISTRIBUTED_APP_A_PORT"
 APP_B_URL="http://127.0.0.1:$DISTRIBUTED_APP_B_PORT"
 DISTRIBUTED_ENV_A_NAME=${DISTRIBUTED_ENV_A_NAME:-distributed-a}
 DISTRIBUTED_ENV_B_NAME=${DISTRIBUTED_ENV_B_NAME:-distributed-b}
+DISTRIBUTED_ENV_C_NAME=${DISTRIBUTED_ENV_C_NAME:-distributed-c}
 DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
 DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
-export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
+DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN=${DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN:-e2e-token-dist-c}
+export DISTRIBUTED_APP_A_PORT DISTRIBUTED_APP_B_PORT DISTRIBUTED_ENV_A_NAME DISTRIBUTED_ENV_B_NAME DISTRIBUTED_ENV_C_NAME DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN DISTRIBUTED_DAEMON_C_REGISTRATION_TOKEN
 
-SERVICES=(postgres minio minio-init http-mock app-a app-b workspace-init daemon-a daemon-b)
+SERVICES=(postgres minio minio-init http-mock app-a app-b workspace-init daemon-a daemon-b daemon-ingress daemon-c)
 NODE_A_DB_NETWORK=kk-studio-distributed_node-a-db
 APP_A_CONTAINER=kk-studio-distributed-app-a-1
 
@@ -65,6 +67,10 @@ Commands:
   disconnect-db-a        Idempotently disconnect app-a from the shared node-a-db
                          network (DB fault injection). daemon-a is untouched.
   reconnect-db-a         Idempotently reconnect app-a to node-a-db.
+  stop-app-a|stop-app-b  Gracefully stop app-a or app-b via SIGTERM.
+  start-app-a|start-app-b Start app-a or app-b and wait for health.
+  kill-app-a|kill-app-b  Force kill app-a or app-b via SIGKILL.
+  restart-daemon-c       Restart daemon-c container.
   verify                 Validate Compose config and network invariants without
                          starting any container.
   down [--volumes]       Remove containers and networks; add --volumes to drop
@@ -168,6 +174,7 @@ cmd_up() {
   wait_http "$APP_B_URL/actuator/health" "app-b health"
   wait_environment_ready "$APP_A_URL" "$DISTRIBUTED_ENV_A_NAME" a
   wait_environment_ready "$APP_B_URL" "$DISTRIBUTED_ENV_B_NAME" b
+  wait_environment_ready "$APP_A_URL" "$DISTRIBUTED_ENV_C_NAME" c
   step "Distributed stack is up"
   step "app-a: $APP_A_URL  app-b: $APP_B_URL"
 }
@@ -230,6 +237,50 @@ cmd_reconnect_db_a() {
   fi
 }
 
+cmd_stop_app_a() {
+  require_docker
+  step "Stopping app-a"
+  "${COMPOSE[@]}" stop app-a
+}
+
+cmd_stop_app_b() {
+  require_docker
+  step "Stopping app-b"
+  "${COMPOSE[@]}" stop app-b
+}
+
+cmd_start_app_a() {
+  require_docker
+  step "Starting app-a"
+  "${COMPOSE[@]}" start app-a
+  wait_http "$APP_A_URL/actuator/health" "app-a health"
+}
+
+cmd_start_app_b() {
+  require_docker
+  step "Starting app-b"
+  "${COMPOSE[@]}" start app-b
+  wait_http "$APP_B_URL/actuator/health" "app-b health"
+}
+
+cmd_kill_app_a() {
+  require_docker
+  step "Killing app-a"
+  "${COMPOSE[@]}" kill app-a
+}
+
+cmd_kill_app_b() {
+  require_docker
+  step "Killing app-b"
+  "${COMPOSE[@]}" kill app-b
+}
+
+cmd_restart_daemon_c() {
+  require_docker
+  step "Restarting daemon-c"
+  "${COMPOSE[@]}" restart daemon-c
+}
+
 cmd_down() {
   require_docker
   local -a volumes=()
@@ -269,6 +320,27 @@ case "${1:-help}" in
     ;;
   reconnect-db-a)
     cmd_reconnect_db_a
+    ;;
+  stop-app-a)
+    cmd_stop_app_a
+    ;;
+  stop-app-b)
+    cmd_stop_app_b
+    ;;
+  start-app-a)
+    cmd_start_app_a
+    ;;
+  start-app-b)
+    cmd_start_app_b
+    ;;
+  kill-app-a)
+    cmd_kill_app_a
+    ;;
+  kill-app-b)
+    cmd_kill_app_b
+    ;;
+  restart-daemon-c)
+    cmd_restart_daemon_c
     ;;
   verify)
     cmd_verify

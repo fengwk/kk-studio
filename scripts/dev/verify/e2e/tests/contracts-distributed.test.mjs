@@ -155,7 +155,7 @@ function topology(overrides = {}) {
   const port = (published) => ({ ports: [{ published }] })
   return {
     networks: Object.fromEntries(
-      ['node-a-db', 'node-b-db', 'daemon-a', 'daemon-b', 'app-ingress-a', 'app-ingress-b'].map((name) => [name, {}]),
+      ['node-a-db', 'node-b-db', 'daemon-a', 'daemon-b', 'daemon-c', 'app-ingress-a', 'app-ingress-b'].map((name) => [name, {}]),
     ),
     services: {
       postgres: service(['node-a-db', 'node-b-db'], port(15433)),
@@ -167,6 +167,8 @@ function topology(overrides = {}) {
       'app-b': service(['node-b-db', 'daemon-b', 'app-ingress-b'], { ...port(18083), ...shared }),
       'daemon-a': service(['daemon-a']),
       'daemon-b': service(['daemon-b']),
+      'daemon-ingress': service(['daemon-a', 'daemon-b', 'daemon-c']),
+      'daemon-c': service(['daemon-c']),
       ...overrides,
     },
   }

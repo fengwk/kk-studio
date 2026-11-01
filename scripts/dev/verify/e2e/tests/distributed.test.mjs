@@ -254,6 +254,10 @@ test('runDistributedCommand forwards whitelisted commands with exact arguments a
   assert.equal(invocations[0].opts.timeout, 5000)
   assert.deepEqual(invocations[1].args, ['reconnect-db-a'])
   assert.deepEqual(invocations[2].args, ['status'])
+  assert.deepEqual(
+    invocations.map((i) => i.args[0]),
+    ALLOWED_DISTRIBUTED_COMMANDS,
+  )
 })
 
 test('runDistributedCommand rejects arbitrary or disallowed commands fail-closed', () => {
