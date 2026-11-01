@@ -341,6 +341,36 @@ public final class DurableWorkStore {
         });
   }
 
+  /**
+   * 释放仍由 {@code claim} 持有的租约，使 Work 立即可被认领。
+   *
+   * <p>在 claim 仍被持有（token 与未过期租约都匹配）的前提下，让 Work 立即可被认领，不改变 Work 状态，也不增加 wake version；claim
+   * 已失效（行不存在、token 不匹配或租约过期）时返回 false。
+   */
+  public boolean release(WorkClaim claim) {
+    Objects.requireNonNull(claim, "claim");
+    return Boolean.TRUE.equals(
+        jdbc.inTransaction(
+            () -> {
+              Optional<Row> candidate =
+                  jdbc.queryOne(SELECT_ROW_FOR_UPDATE, ROW_MAPPER, targetType, claim.targetId());
+              if (candidate.isEmpty()) {
+                return false;
+              }
+              Row row = candidate.get();
+              WorkState state = row.work().state();
+              if (state.leaseToken() == null
+                  || !state.leaseToken().equals(claim.leaseToken())
+                  || !state.hasActiveLeaseAt(row.now())) {
+                return false;
+              }
+              WorkState released = state.release(claim.leaseToken(), row.now());
+              update(claim.targetId(), released);
+              notifyIfClaimable(claim.targetId());
+              return true;
+            }));
+  }
+
   /** 以数据库时钟判断 claim 是否仍持有有效租约。 */
   public boolean isOwned(WorkClaim claim) {
     Objects.requireNonNull(claim, "claim");

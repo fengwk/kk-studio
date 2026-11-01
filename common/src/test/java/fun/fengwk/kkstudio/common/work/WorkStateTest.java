@@ -153,6 +153,33 @@ class WorkStateTest {
   }
 
   @Test
+  void releaseClearsLeaseKeepsWakeVersionAndPullsDueIfFuture() {
+    WorkState claimed = WorkState.initial(T0, ENV).claim(T0, "token", T0.plusSeconds(30));
+    WorkState released = claimed.release("token", T0);
+    assertEquals(T0, released.availableAt());
+    assertEquals(1L, released.wakeVersion());
+    assertNull(released.leaseToken());
+    assertNull(released.leaseUntil());
+    assertEquals(ENV, released.requiredEnvironmentId());
+
+    WorkState futureClaimed =
+        new WorkState(T0.plusSeconds(60), 2L, "token", T0.plusSeconds(30), null);
+    WorkState futureReleased = futureClaimed.release("token", T0);
+    assertEquals(T0, futureReleased.availableAt());
+    assertEquals(2L, futureReleased.wakeVersion());
+    assertNull(futureReleased.leaseToken());
+    assertNull(futureReleased.leaseUntil());
+  }
+
+  @Test
+  void releaseRejectsLostOwnership() {
+    WorkState claimed = WorkState.initial(T0, null).claim(T0, "token", T0.plusSeconds(30));
+    assertThrows(IllegalArgumentException.class, () -> claimed.release("other", T0));
+    assertThrows(
+        IllegalArgumentException.class, () -> claimed.release("token", T0.plusSeconds(30)));
+  }
+
+  @Test
   void constructorRejectsInvalidLeasePairsAndVersions() {
     assertThrows(IllegalArgumentException.class, () -> new WorkState(T0, 0L, null, null, null));
     assertThrows(IllegalArgumentException.class, () -> new WorkState(T0, 1L, "token", null, null));
