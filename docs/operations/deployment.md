@@ -357,7 +357,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | Stack/用途 | 责任组 | 典型变量 |
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
-| local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
+| local | Harness dispatcher/runtime | `KK_STUDIO_HARNESS_DISPATCHER_*`、`KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` |
 | local/test/reliability/distributed/NAS App | execution-exit journal | `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（每个 App 实例独立持久卷） |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
@@ -500,6 +500,9 @@ tag 不同：
 `kk-studio.cluster.secret`。节点用既有 15 秒心跳续租 `cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
 只有某个 Thread 在其它节点存在有效订阅时，该 Thread 的普通 realtime 才写 NOTIFY。正常退出删除本节点订阅，
 异常退出由租约到期收敛；未配置内部 origin/secret 的节点保持单节点模式，不登记订阅，也不发布 realtime NOTIFY。
+节点优雅退出时，`HarnessRuntimeLifecycle`（Phase = `Integer.MAX_VALUE`）先于 `ClusterNodeLifecycle`（Phase = `Integer.MAX_VALUE - 1`）停止：
+停止新 claim 派发，等待在途执行（至多 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`，默认 60s），向远端 Daemon 发送 GOAWAY 并释放环境路由租约，
+移交在途远端工具执行并 release 对应的 TOOL Work，最后由 `ClusterNodeLifecycle` 反注册节点并清理订阅。
 
 ### 本机 preview 与 NAS 数据面
 

@@ -47,7 +47,8 @@ Skill 同步与 PluginResourceGateway 留在 Harness 组合内，因为它们需
 
 | 生命周期 owner | 启停职责 |
 | --- | --- |
-| HarnessRuntimeLifecycle、`issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
+| `HarnessRuntimeLifecycle` | 节点优雅退出排空编排（Phase `Integer.MAX_VALUE`，早于 `ClusterNodeLifecycle`）：1) 停止 claim；2) 轮询等待本机 Model/Tool 完成（≤ `drainTimeout`）；3) `EnvironmentDaemonServer.drain()` GOAWAY 与释放环境租约；4) `ToolProcessor.drain()` 移交远端工具执行并 release TOOL Work；5) 标记停止。`workersEnabled=false` 时不启动 dispatcher |
+| `issueReconcileRuntimeLifecycle` | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
 | `canvasFunctionDispatcherLifecycle` | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
