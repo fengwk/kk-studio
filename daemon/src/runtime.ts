@@ -1745,20 +1745,6 @@ function encodeProgressProto(result: CapabilityResult): Progress {
             body: { case: 'json', value: create(JsonContentSchema, { json: JSON.stringify(content.json) }) },
           })
         }
-        if (content.type === 'resource') {
-          return create(ContentSchema, {
-            body: {
-              case: 'resource',
-              value: create(ResourceContentSchema, {
-                uploadId: content.uploadId,
-                mediaType: content.mediaType,
-                name: content.name ?? undefined,
-                size: BigInt(content.size),
-                sha256: content.sha256,
-              }),
-            },
-          })
-        }
         throw new Error('progress does not allow binary content')
       }),
     }),

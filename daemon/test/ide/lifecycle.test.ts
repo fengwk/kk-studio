@@ -21,6 +21,7 @@ import {
   IDE_IDLE_STOP_MILLIS,
   IDE_PROOF_EXCLUSIVITY_MILLIS,
   IDE_VIEW_EXPIRY_MILLIS,
+  assertIdeEpoch,
   createIdeService,
   type IdeScheduler,
   type IdeServiceEvent,
@@ -976,6 +977,25 @@ describe('managed IDE claim and tenant lifecycle', () => {
     upstream.release()
     expect(service.activeStreamCount()).toBe(0)
     expect(manager.closes).toHaveLength(0)
+  })
+
+  it('throws AggregateError on close when subcomponents fail', async () => {
+    const { service, bridge } = await setup()
+    bridge.close = async () => {
+      throw new Error('bridge close failed')
+    }
+    await expect(service.close()).rejects.toThrow('ide service shutdown failed')
+  })
+})
+
+describe('assertIdeEpoch', () => {
+  it('validates canonical positive integer epoch up to LONG_MAX', () => {
+    expect(assertIdeEpoch('1')).toBe('1')
+    expect(assertIdeEpoch('9223372036854775807')).toBe('9223372036854775807')
+    expect(() => assertIdeEpoch('0')).toThrow(/bindingEpoch is invalid/)
+    expect(() => assertIdeEpoch('-1')).toThrow(/bindingEpoch is invalid/)
+    expect(() => assertIdeEpoch('abc')).toThrow(/bindingEpoch is invalid/)
+    expect(() => assertIdeEpoch('9223372036854775808')).toThrow(/bindingEpoch is invalid/)
   })
 })
 

@@ -46,4 +46,10 @@ describe('RuntimeStatusTracker', () => {
     expect(tracker.getUpdate()).toEqual({ targetVersion: '4.0.4', downloadedBytes: 0, totalBytes: null })
     expect(tracker.snapshot().revision).toBe(2n)
   })
+
+  it('throws RangeError when revision exceeds LONG_MAX', () => {
+    const tracker = new RuntimeStatusTracker('4.0.3')
+    ;(tracker as any).revision = 9223372036854775807n
+    expect(() => tracker.beginUpdate('4.0.4')).toThrow(RangeError)
+  })
 })

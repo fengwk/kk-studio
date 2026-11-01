@@ -443,15 +443,6 @@ export async function handleIdeConnectRequest(
       return
     }
 
-    if (upstreamRes.statusCode !== 101) {
-      upstreamSocket.destroy()
-      if (!stream.headersSent) {
-        stream.respond({ [HTTP2_HEADER_STATUS]: 502 }, { endStream: true })
-      }
-      releaseUpstream()
-      return
-    }
-
     const resHeaders: Record<string, string | string[] | number> = {
       [HTTP2_HEADER_STATUS]: 200,
     }

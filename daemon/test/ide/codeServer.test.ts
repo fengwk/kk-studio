@@ -363,6 +363,7 @@ describe('code-server process manager', () => {
     cleanups.push(() => supervisor.close())
     const manager = createCodeServerManager(config(root), supervisor, credentials)
     await manager.ensureStarted(signal())
+    await expect(manager.listViews(signal())).rejects.toThrow('managed view rejected (UNAVAILABLE)')
 
     supervisor.options.terminateError = new Error('cannot terminate')
     await expect(manager.close()).rejects.toThrow('cannot terminate')

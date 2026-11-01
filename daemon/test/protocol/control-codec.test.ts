@@ -63,6 +63,7 @@ import {
   decodeFrame,
   encodeBinary,
   encodeFrame,
+  validate,
   validateUpgrade,
 } from '../../src/protocol/control/codec.js'
 import { frame, unframe } from '../../src/protocol/control/framing.js'
@@ -1410,6 +1411,71 @@ describe('control framing', () => {
 
   it('uses a big-endian prefix for small messages', () => {
     expect(frame(new Uint8Array([1, 2, 3]))).toEqual(new Uint8Array([0, 0, 0, 3, 1, 2, 3]))
+  })
+
+  it('validates ide list result constraints (extra fields, view limit, duplicate viewId)', () => {
+    const makeValidView = (viewId = '7c9e6679-7425-40de-944b-e07fc1f90ae7') =>
+      create(IdeViewSummarySchema, {
+        viewId,
+        documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        eventNodeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        connectionId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        claimId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+        bindingEpoch: 1n,
+        directory: '/workspace/dir',
+        workspacePath: '/workspace/dir/project.code-workspace',
+        state: IdeViewState.OPEN,
+      })
+
+    // 1. IDE list result 声明了非 views 字段 (例如 documentId)
+    const extraField = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          action: IdeAction.LIST_VIEWS,
+          documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+          views: [makeValidView()],
+        }),
+      },
+    })
+    expect(() => validate(extraField)).toThrow(/must only declare views/)
+
+    // 2. views 超过上限 64
+    const tooManyViews = Array.from({ length: 65 }, () => makeValidView())
+    const excessViews = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          action: IdeAction.LIST_VIEWS,
+          views: tooManyViews,
+        }),
+      },
+    })
+    expect(() => validate(excessViews)).toThrow(/must not exceed 64/)
+
+    // 3. 重复 viewId
+    const duplicateViews = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT,
+      environmentId: ENVIRONMENT_ID,
+      invocationId: INVOCATION_ID,
+      payload: {
+        case: 'ideResult',
+        value: create(IdeResultSchema, {
+          ok: true,
+          action: IdeAction.LIST_VIEWS,
+          views: [makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7'), makeValidView('7c9e6679-7425-40de-944b-e07fc1f90ae7')],
+        }),
+      },
+    })
+    expect(() => validate(duplicateViews)).toThrow(/must not repeat viewId/)
   })
 })
 

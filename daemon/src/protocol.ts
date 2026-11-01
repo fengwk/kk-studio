@@ -15,13 +15,6 @@ export interface StrictLimits {
   maxStringBytes: number
 }
 
-export const CONTROL_LIMITS: StrictLimits = {
-  maxBytes: 1024 * 1024,
-  maxNestingDepth: 20,
-  maxNumberLength: 64,
-  maxStringBytes: 1024 * 1024,
-}
-
 /** 精确计算 UTF-8 字节数；拒绝未配对代理项，避免静默替换后突破协议边界。 */
 export function utf8ByteLength(value: string, name: string): number {
   let bytes = 0
@@ -95,10 +88,6 @@ function detectViolations(text: string, limits: StrictLimits): string | null {
           return
         }
         const currentPath = pathSupplier()
-        if (currentPath.length + 1 > limits.maxNestingDepth) {
-          violation = `exceeds maximum nesting depth ${limits.maxNestingDepth}`
-          return
-        }
         const key = pathKey(currentPath)
         let properties = seen.get(key)
         if (properties === undefined) {

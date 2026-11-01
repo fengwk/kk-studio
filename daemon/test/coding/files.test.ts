@@ -301,4 +301,42 @@ describe('fs.edit', () => {
     expect(result.error).toBe(true)
     expect(textOf(result)).toContain('old_string must not be empty')
   })
+
+  it('rejects writing to a directory', async () => {
+    const dir = await tempDir()
+    const subDir = join(dir, 'sub')
+    await mkdir(subDir)
+    const result = await callCapability(
+      write,
+      'fs.write',
+      { path: subDir, content: 'hello' },
+      makeContext(dir),
+    )
+    expect(result.error).toBe(true)
+    expect(textOf(result)).toContain('path is a directory')
+  })
+
+  it('handles mixed line endings with multi-line replacements and non-newline endings', async () => {
+    const dir = await tempDir()
+    const mixedFile = join(dir, 'mixed.txt')
+    await writeFile(mixedFile, 'line1\r\nline2\nline3\r\n')
+    const mixedResult = await callCapability(
+      edit,
+      'fs.edit',
+      { path: mixedFile, old_string: 'line2\n', new_string: 'sub1\nsub2\nsub3\n' },
+      makeContext(dir),
+    )
+    expect(mixedResult.error).toBe(false)
+
+    const noEndingFile = join(dir, 'no-ending.txt')
+    await writeFile(noEndingFile, 'hello')
+    const noEndingResult = await callCapability(
+      edit,
+      'fs.edit',
+      { path: noEndingFile, old_string: 'o', new_string: 'p' },
+      makeContext(dir),
+    )
+    expect(noEndingResult.error).toBe(false)
+    expect(await readFile(noEndingFile, 'utf8')).toBe('hellp')
+  })
 })
