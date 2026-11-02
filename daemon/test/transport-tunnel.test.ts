@@ -601,10 +601,12 @@ describe('ide-tunnel unit tests', () => {
     })
 
     it('destroys upstreamRes and releases upstream if stream is closed before non-upgrade response', async () => {
+      // 等待真实事件而不是轮询：负载高的运行器上本地请求可能超过轮询的默认时限。
       let resolveRes: () => void = () => {}
-      let serverReceived = false
+      let markReceived: () => void = () => {}
+      const received = new Promise<void>((r) => { markReceived = r })
       const server = http.createServer((_req, res) => {
-        serverReceived = true
+        markReceived()
         new Promise<void>((r) => { resolveRes = r }).then(() => {
           res.writeHead(403)
           res.end('forbidden')
@@ -613,21 +615,18 @@ describe('ide-tunnel unit tests', () => {
       const port = await new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as net.AddressInfo).port)))
 
       const stream = new MockServerHttp2Stream()
-      let released = false
+      let markReleased: () => void = () => {}
+      const released = new Promise<void>((r) => { markReleased = r })
       const ide = {
-        resolveView: async () => makeValidUpstream({ port, release: () => { released = true } }),
+        resolveView: async () => makeValidUpstream({ port, release: () => markReleased() }),
       } as unknown as IdeService
 
       const p = handleIdeConnectRequest(stream as any, { ':path': '/ide/11111111-1111-4111-8111-111111111111/1/' }, ide)
-      await vi.waitFor(() => {
-        expect(serverReceived).toBe(true)
-      })
+      await received
       stream.closed = true
       resolveRes()
       await p
-      await vi.waitFor(() => {
-        expect(released).toBe(true)
-      })
+      await released
       await new Promise<void>((r) => server.close(() => r()))
     })
 
