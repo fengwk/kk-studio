@@ -8,6 +8,9 @@ public enum WorkTargetType {
   /** 由 ModelProcessor 消费，用于分派或恢复单个模型调用。 */
   MODEL,
 
+  /** 由 Agent 处理器消费，用于进程外 Agent 派发、事件接收与清理。 */
+  AGENT,
+
   /** 由 ToolProcessor 消费，用于预检、分派或恢复单个工具调用。 */
   TOOL
 }

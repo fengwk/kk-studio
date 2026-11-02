@@ -32,7 +32,7 @@ public interface WorkStore {
   /** 请求一次立即可处理的 wake；要求 owning Thread 已锁定。 */
   void request(WorkTarget target);
 
-  /** 请求一次带环境亲和性的 TOOL wake。 */
+  /** 请求一次带环境亲和性的 TOOL 或 AGENT wake。 */
   void request(WorkTarget target, EnvironmentId requiredEnvironmentId);
 
   /** 领取下一个 due Work（无节点亲和性）。 */

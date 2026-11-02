@@ -211,7 +211,7 @@ public abstract class HarnessStoreWorkContract {
   private void lockWorkOwner(HarnessStore.Transaction tx, WorkTarget target) {
     UUID threadId =
         switch (target.type()) {
-          case THREAD -> target.id();
+          case THREAD, AGENT -> target.id();
           case MODEL -> builtin(store, tx)
               .findModelInvocation(target.id())
               .orElseThrow()

@@ -99,20 +99,20 @@ public record ExecutionExitFact(
         && Objects.equals(environmentId, other.environmentId);
   }
 
-  /** 远端事实只能挂在同 Thread / invocation / attempt / lease 的本地 TOOL 代次下。 */
+  /** 远端事实只能挂在同 Thread / invocation / attempt / lease 的本地 TOOL 或 AGENT 代次下。 */
   public void requireRemoteParent(ExecutionExitFact parent) {
     Objects.requireNonNull(parent, "parent");
     if (kind != ExecutionExitKind.REMOTE) {
       throw new IllegalArgumentException("only a remote execution has a parent");
     }
-    if (parent.kind() != ExecutionExitKind.TOOL
+    if ((parent.kind() != ExecutionExitKind.TOOL && parent.kind() != ExecutionExitKind.AGENT)
         || !parent.executionId().equals(parentExecutionId)
         || !parent.threadId().equals(threadId)
         || !parent.invocationId().equals(invocationId)
         || parent.attempt() != attempt
         || !parent.ownerLeaseToken().equals(ownerLeaseToken)) {
       throw new IllegalArgumentException(
-          "remote execution parent must be the same generation's TOOL execution");
+          "remote execution parent must be the same generation's TOOL or AGENT execution");
     }
   }
 

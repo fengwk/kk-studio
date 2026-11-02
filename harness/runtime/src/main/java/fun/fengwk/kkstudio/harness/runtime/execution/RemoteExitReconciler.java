@@ -76,6 +76,15 @@ public final class RemoteExitReconciler {
                 List<ExecutionExitFact> attachable = new ArrayList<>();
                 Map<UUID, Boolean> runningByInvocationId = new HashMap<>();
                 for (ExecutionExitFact fact : unconfirmed) {
+                  // 父执行为 AGENT 的远端事实留给对应 Driver 自己恢复（K2），此处只处理父执行为 TOOL 的 REMOTE 事实。
+                  boolean isToolParent =
+                      tx.exits()
+                          .find(fact.parentExecutionId())
+                          .map(parent -> parent.kind() == ExecutionExitKind.TOOL)
+                          .orElse(false);
+                  if (!isToolParent) {
+                    continue;
+                  }
                   boolean isRunning =
                       runningByInvocationId.computeIfAbsent(
                           fact.invocationId(),

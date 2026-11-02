@@ -89,6 +89,22 @@ class RemoteExitReconcilerTest {
   }
 
   @Test
+  void skipsRemoteFactsWhoseParentIsAgentExecution() {
+    ToolBaseline baseline = seedToolBaseline(store);
+    UUID remoteExecId = registerAgentRemoteFact(baseline.threadId(), baseline.toolId());
+
+    RemoteExitReconciler reconciler =
+        new RemoteExitReconciler(store, transport, confirmer, Runnable::run);
+    reconciler.onEnvironmentReady(ENV_ID);
+
+    assertTrue(
+        transport.attachedInvocations.isEmpty(),
+        "Remote exit with AGENT parent must be skipped by reconciler");
+    ExecutionExitFact stored = store.transaction(tx -> tx.exits().find(remoteExecId).orElseThrow());
+    assertEquals(ExecutionExitState.UNCONFIRMED, stored.state());
+  }
+
+  @Test
   void attachesNonRunningAndMissingToolFacts() {
     MultiToolBaseline baseline = seedToolBaseline(store, 2);
     UUID succeededToolId = baseline.toolIds().get(0);
@@ -265,6 +281,35 @@ class RemoteExitReconcilerTest {
               OWNER_LEASE,
               ExecutionExitKind.REMOTE,
               toolExecId,
+              ENV_ID);
+          return remoteExecId;
+        });
+  }
+
+  private UUID registerAgentRemoteFact(UUID threadId, UUID invocationId) {
+    return store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          UUID agentExecId = tx.nextId();
+          ExecutionExitLedger.register(
+              tx,
+              agentExecId,
+              threadId,
+              invocationId,
+              1,
+              OWNER_LEASE,
+              ExecutionExitKind.AGENT,
+              null);
+          UUID remoteExecId = tx.nextId();
+          ExecutionExitLedger.register(
+              tx,
+              remoteExecId,
+              threadId,
+              invocationId,
+              1,
+              OWNER_LEASE,
+              ExecutionExitKind.REMOTE,
+              agentExecId,
               ENV_ID);
           return remoteExecId;
         });

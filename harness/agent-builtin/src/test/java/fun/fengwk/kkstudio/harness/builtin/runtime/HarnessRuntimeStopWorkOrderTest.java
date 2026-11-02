@@ -64,6 +64,8 @@ class HarnessRuntimeStopWorkOrderTest {
     List<WorkTarget> expected =
         List.of(
             new WorkTarget(WorkTargetType.THREAD, baseline.threadId()),
+            // Stop fences an AGENT mailbox even when no model invocation exists.
+            new WorkTarget(WorkTargetType.AGENT, baseline.threadId()),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(0)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(1)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(2)));
