@@ -15,6 +15,7 @@ class ToolInvocationStatusTest {
     assertTrue(ToolInvocationStatus.CANCELLED.isTerminal());
     assertTrue(ToolInvocationStatus.UNKNOWN.isTerminal());
     assertFalse(ToolInvocationStatus.WAITING_APPROVAL.isTerminal());
+    assertFalse(ToolInvocationStatus.WAITING_REQUEST.isTerminal());
     assertFalse(ToolInvocationStatus.READY.isTerminal());
     assertFalse(ToolInvocationStatus.RUNNING.isTerminal());
   }

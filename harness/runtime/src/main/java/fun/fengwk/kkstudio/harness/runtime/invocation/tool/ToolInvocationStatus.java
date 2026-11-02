@@ -13,6 +13,13 @@ public enum ToolInvocationStatus {
    */
   WAITING_INPUT,
 
+  /**
+   * Agent 原生协议已完整声明、等待对应业务适配器以精确 toolUseId 激活。
+   *
+   * <p>该状态不是公共 Tool Work：在 Bridge 校验 active execution、名称与原始参数并转为 READY 之前，任何执行器都不得运行它。
+   */
+  WAITING_REQUEST,
+
   /** 工具调用已就绪，等待分派执行。 */
   READY,
 

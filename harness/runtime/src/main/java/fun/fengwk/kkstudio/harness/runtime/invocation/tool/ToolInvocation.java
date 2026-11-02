@@ -185,6 +185,10 @@ public record ToolInvocation(
           case WAITING_INPUT -> next == ToolInvocationStatus.WAITING_INPUT
               || next == ToolInvocationStatus.SUCCEEDED
               || next == ToolInvocationStatus.CANCELLED;
+          case WAITING_REQUEST -> next == ToolInvocationStatus.WAITING_REQUEST
+              || next == ToolInvocationStatus.READY
+              || next == ToolInvocationStatus.FAILED
+              || next == ToolInvocationStatus.CANCELLED;
           case READY -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.WAITING_APPROVAL
               || next == ToolInvocationStatus.WAITING_INPUT
@@ -430,6 +434,18 @@ public record ToolInvocation(
   }
 
   /**
+   * WAITING_REQUEST -&gt; READY：原生 Agent 适配器已按业务调用身份与冻结参数确认声明。该转换不经过审批，也不消耗 attempt；后续执行仍由公共
+   * ToolProcessor 接管。
+   */
+  public ToolInvocation activateRequest(Instant now) {
+    if (status != ToolInvocationStatus.WAITING_REQUEST) {
+      throw new IllegalArgumentException("activateRequest requires WAITING_REQUEST status");
+    }
+    return withState(
+        ToolInvocationStatus.READY, attempt, null, null, ToolEffectBatch.EMPTY, null, now);
+  }
+
+  /**
    * READY -&gt; RUNNING：本地 admission 已通过，副作用之前持久化执行意图；要求预检 approval 已完成（非 null 且为 not-required 或
    * ALLOWED）；attempt 恰好 +1。
    */
@@ -470,20 +486,26 @@ public record ToolInvocation(
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 被拒绝： undecided
-   * approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
+   * WAITING_REQUEST / READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL
+   * 被拒绝： undecided approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.RUNNING) {
+    if (status != ToolInvocationStatus.WAITING_REQUEST
+        && status != ToolInvocationStatus.READY
+        && status != ToolInvocationStatus.RUNNING) {
       throw new IllegalArgumentException(
-          "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped");
+          "fail requires WAITING_REQUEST, READY or RUNNING status; WAITING_APPROVAL must be"
+              + " decided or stopped");
     }
     return withState(
         ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
-  /** WAITING_APPROVAL / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt 不变。 */
+  /**
+   * WAITING_APPROVAL / WAITING_REQUEST / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal
+   * error；attempt 不变。
+   */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
     return withState(
@@ -607,6 +629,15 @@ public record ToolInvocation(
       if (approval != null) {
         throw new IllegalArgumentException(
             "WAITING_INPUT must not carry an approval: a questionnaire never authorizes a tool");
+      }
+      requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
+    } else if (status == ToolInvocationStatus.WAITING_REQUEST) {
+      if (attempt != 0) {
+        throw new IllegalArgumentException("WAITING_REQUEST requires attempt 0");
+      }
+      if (approval != null) {
+        throw new IllegalArgumentException("WAITING_REQUEST must not carry an approval");
       }
       requireNoTerminalFacts(status, result, effects, error);
       requireNoInputReceipt(status, inputReceipt);

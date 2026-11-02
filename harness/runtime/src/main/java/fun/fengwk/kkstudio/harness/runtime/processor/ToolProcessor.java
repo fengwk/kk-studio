@@ -189,7 +189,7 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return switch (tool.status()) {
       case READY -> prepareReady(tx, claim, thread, tool);
-      case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
+      case WAITING_APPROVAL, WAITING_INPUT, WAITING_REQUEST -> waitingForHuman(tx, claim, now);
       case RUNNING -> prepareRunning(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };

@@ -35,6 +35,10 @@ class ToolInvocationTransitionTest {
     return invocation(ToolInvocationStatus.READY, attempt, approval, null, null);
   }
 
+  private static ToolInvocation waitingRequest() {
+    return invocation(ToolInvocationStatus.WAITING_REQUEST, 0, null, null, null);
+  }
+
   private static ToolInvocation waiting() {
     return invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, undecided(), null, null);
   }
@@ -533,6 +537,65 @@ class ToolInvocationTransitionTest {
         source.error(),
         source.createdAt(),
         T1);
+  }
+
+  @Test
+  void waitingRequestLifecycleAndValidation() {
+    ToolInvocation request = waitingRequest();
+    assertEquals(ToolInvocationStatus.WAITING_REQUEST, request.status());
+    assertEquals(0, request.attempt());
+    assertNull(request.approval());
+
+    ToolInvocation activated = request.activateRequest(T1);
+    assertEquals(ToolInvocationStatus.READY, activated.status());
+    assertEquals(0, activated.attempt());
+    assertNull(activated.approval());
+    assertEquals(T1, activated.updatedAt());
+
+    ToolInvocation failed = request.fail(error(), T1);
+    assertEquals(ToolInvocationStatus.FAILED, failed.status());
+    assertEquals(error(), failed.error());
+
+    ToolInvocation cancelled = request.cancel(error(), T1);
+    assertEquals(ToolInvocationStatus.CANCELLED, cancelled.status());
+
+    assertThrows(IllegalArgumentException.class, () -> ready(0, null).activateRequest(T1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(2L),
+                id(3L),
+                id(1L),
+                0,
+                call("bash", "{}"),
+                host("bash"),
+                ToolInvocationStatus.WAITING_REQUEST,
+                1,
+                null,
+                null,
+                null,
+                CREATED,
+                CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                id(1L),
+                id(2L),
+                id(3L),
+                id(1L),
+                0,
+                call("bash", "{}"),
+                host("bash"),
+                ToolInvocationStatus.WAITING_REQUEST,
+                0,
+                allowed(),
+                null,
+                null,
+                CREATED,
+                CREATED));
   }
 
   private static ToolInvocation withUpdatedAt(ToolInvocation source, Instant updatedAt) {

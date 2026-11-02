@@ -294,13 +294,23 @@ final class InMemoryToolStore implements ToolStore {
       InMemoryHarnessTransaction.requireAbsent(
           state.toolInvocations, invocation.id(), "tool invocation");
       // sibling 静态拒绝允许 unattached FAILED。初始均为 attempt=0、approval=null，
-      // effects 由 record 不变量保证为空。
-      if ((invocation.status() != ToolInvocationStatus.READY
-              && invocation.status() != ToolInvocationStatus.FAILED)
-          || invocation.attempt() != 0
-          || invocation.approval() != null) {
+      // effects 由 record 不变量保证为空；WAITING_REQUEST 要求 binding 非空。
+      boolean isReady =
+          invocation.status() == ToolInvocationStatus.READY
+              && invocation.attempt() == 0
+              && invocation.approval() == null;
+      boolean isFailed =
+          invocation.status() == ToolInvocationStatus.FAILED
+              && invocation.attempt() == 0
+              && invocation.approval() == null;
+      boolean isWaitingRequest =
+          invocation.status() == ToolInvocationStatus.WAITING_REQUEST
+              && invocation.attempt() == 0
+              && invocation.approval() == null
+              && invocation.binding() != null;
+      if (!isReady && !isFailed && !isWaitingRequest) {
         throw new IllegalArgumentException(
-            "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
+            "new tool invocations must be READY, WAITING_REQUEST (with binding), or unattached FAILED with attempt 0 and no approval");
       }
       requireUniqueToolOrdinal(invocation);
       requireValidToolReferences(invocation);
