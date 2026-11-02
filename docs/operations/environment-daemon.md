@@ -368,6 +368,7 @@ HOME 也不是默认工作目录。
 
 ## 改配置、轮换 token 与更新
 
+v6 Daemon 为全新安装，没有从旧版本原地升级的路径；部署 v6 后在每台主机重新执行安装命令。
 改配置与轮换 token 仍走 `install`：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行
 同一条 `install`，它会**整体替换程序、配置与 token 后重启**，保留数据目录与日志。
 
@@ -400,8 +401,7 @@ SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` �
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。
-- 只有与当前 Studio 协议兼容、且已在运行受管 Node Daemon 的安装才能远程更新。协议不兼容的
-  Daemon 在连接准入阶段即被拒绝，收不到更新命令。
+- 协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标制品 URL 与 SHA256），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。
 - 如需覆盖安装：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务，发布新程序、配置与 token 并重启服务。数据目录、日志与既有备份保留。重新 `READY` 后才继续正常使用。
 
 重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
@@ -444,7 +444,7 @@ SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` �
 | 输入文件名或目录不符 | 必须使用 Web 生成的暂存文件，且是私有同目录的 `daemon.json` / `daemon.token` |
 | `environment registration is rejected` 或安装器提示本次启动令牌被拒绝 | 回目标 Environment 重新生成安装命令并执行；不要重复使用旧 code 或恢复备份中的旧 token |
 | Linux 报 `start-limit-hit` | 查看服务状态与本次启动日志，先处理退出原因；覆盖安装会清除旧失败计数，无需放宽启动限流 |
-| WebSocket close code 1010 | 所有终止 WebSocket 的代理层启用 `permessage-deflate` |
+| WebSocket close code 1010 | 终止浏览器侧 WebSocket（`/api/events` 与 IDE 视图）的代理层启用 `permessage-deflate`（Daemon 与 Studio 之间的 WSS 不协商压缩扩展） |
 | 服务存活但未 READY | 核对 studioUrl、token、网络与压缩；Linux 看 journal，macOS 看日志，Windows 用前台复现 |
 | LSP 显示未安装或查询失败 | 检查弹窗 JSON、服务进程可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
 

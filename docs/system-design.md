@@ -54,14 +54,15 @@ flowchart LR
     PlatformRuntime --> S3
     Infra --> PG
     Harness --> Provider
-    Web <-->|compressed WebSocket| Daemon
+    Web <-->|单条 WSS 上的 HTTP/2| Daemon
     Daemon -->|presigned PUT| S3
     Browser -->|short-lived signed URL| S3
 ```
 
 [`web`](modules/web.md) 是生产 Spring Boot composition root，装配 HTTP、WebSocket、
-Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核依赖 Common、Environment 与 Model；
-具体模型生成由 Builtin Driver 承接，Driver 不反向依赖 Platform 或应用；平台需要应用参与的地方由平台定义 SPI、
+Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核依赖 Common、Environment 与 Model。
+Agent 执行经 Harness Runtime 的 [Agent Driver](modules/harness-runtime.md#agent-driver) SPI 接入；
+当前唯一的生产 Driver 是 Builtin（Studio 进程内调用模型），Driver 不反向依赖 Platform 或应用；平台需要应用参与的地方由平台定义 SPI、
 应用实现，平台从不依赖应用：
 
 ```text
@@ -97,26 +98,28 @@ Catalog 把连接、模型能力与行为定义分开：
 | Model | 单个 MODEL 的上游 wire 模型 ID、能力、Variant 与价格；GROUP 的有序 Fill First 成员、降级状态码与冷却 |
 | Agent | System Prompt、默认 Model、Tools、Skills 与可委派的 Agent |
 | Environment | 主机身份、Daemon 连接与能力 |
-| BranchSettings | 当前分支选择的 Agent、Model、Environment 与用户 Goal |
+| BranchSettings | 当前分支选择的 Agent、执行方式（Driver 与其设置）、Environment 与用户 Goal |
 
 普通对话的执行上下文来自 Branch 的完整设置：
 
 ```text
 BranchSettings
 ├── agentName
-├── model = modelName + variant?
+├── execution = ExecutionSelection(driver, settingsJson)
+│   └── Builtin: {"modelName": string, "variant": string | null}
 ├── environmentName?
 └── goal? = id + text
 ```
 
-Model 与 Model Group 共用全局唯一逻辑名称空间；`modelName` 只寻址该名称，单模型的可选
-`variant` 来自同一资源。组没有组级 Variant：成员顺序就是 Fill First 选择顺序，命中
-`fallbackStatusCodes` 或普通重试耗尽后按组配置降级，`cooldownSeconds = 0` 只影响本次逻辑调用。
-组本身没有价格，费用按实际执行的单模型计算。
+Runtime 只按 `ExecutionSelection.driver` 路由到对应 Agent Driver。模型名、Group 与
+`ModelRequestSpec` 冻结属于 Builtin Driver 的回合解析：Model 与 Model Group 共用全局唯一逻辑名称空间；
+`modelName` 只寻址该名称，单模型的可选 `variant` 来自同一资源。组没有组级 Variant：成员顺序就是
+Fill First 选择顺序，命中 `fallbackStatusCodes` 或普通重试耗尽后按组配置降级，`cooldownSeconds = 0`
+只影响本次逻辑调用。组本身没有价格，费用按实际执行的单模型计算。
 
 Root 保存初始设置，每个普通 TurnStart 冻结该回合设置。设置命令在下一轮归约为完整
-快照，fork 沿目标 Entry 的父链恢复当时设置。每轮再从 Catalog 解析当前 Agent 能力和
-模型配置，冻结最终 ModelRequestSpec。设置的模型已被删除或改名时，本回合改用 Agent 默认模型并记入
+快照，fork 沿目标 Entry 的父链恢复当时设置。Builtin 每轮再从 Catalog 解析当前 Agent 能力和
+模型配置，冻结最终 ModelRequestSpec。设置的模型已被删除或改名时，Builtin 本回合改用 Agent 默认模型并记入
 `TURN_START.fallbackModel`；其余引用缺失或能力失效时明确拒绝规划。Environment
 以全局唯一且不可变的 name 进入历史，每轮解析为执行路由使用的内部 UUID。
 
@@ -230,7 +233,7 @@ MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消�
        command mailbox + THREAD Work
   -> HarnessWorkDispatcher claim
   -> ThreadProcessor 选择下一项 durable action
-  -> ModelProcessor / ToolProcessor 执行
+  -> Driver 的 Work 处理器（Builtin 为 ModelProcessor）/ ToolProcessor 执行
   -> fenced checkpoint / terminal
   -> ThreadProcessor 追加 Entry、推进 head 或结束 turn
 ```
@@ -250,6 +253,15 @@ Thread version 用于结构和控制状态 CAS。模型 checkpoint 可在同一 
 模型输出把真实 `usage`（连同 stop reason 与可选流式计时）作为 durable 事实随 assistant Entry 保存，
 金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价；
 模型组按本次实际执行的成员计价。
+
+### Agent Driver
+
+Runtime 与 Driver 各自持有独立的职责与状态边界：Runtime 拥有公共的 append-only Entry Tree、Thread 状态、命令邮箱、`ToolInvocation` 与审批、`durable_work` 调度邮箱和代次退出事实；Driver 负责具体回合的 generation 解析、持有 generation 期间的私有持久化状态，并在事务外执行后把终态物化为公共 Entry。
+
+- **Builtin**：使用 `MODEL` Work 在 Studio 进程内调用模型，请求冻结、流式投影与状态机见 [Harness Agent Builtin](modules/harness-agent-builtin.md)。
+- **进程外 Agent**：使用以 Thread 为键、可带 `requiredEnvironmentId` 环境亲和的 `AGENT` Work，并经工具桥（`AssistantHistoryAppender` 追加 `WAITING_REQUEST` 槽位，外部激活为 `READY` 后由 ToolProcessor 审批与执行）复用平台的工具能力。
+
+完整契约、方法与锁序见 [Harness Runtime](modules/harness-runtime.md#agent-driver)。
 
 ### Canvas Function 与 Project Run
 
@@ -276,11 +288,11 @@ Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas�
 
 ## 执行权与恢复
 
-Harness 的 `THREAD`、`MODEL`、`TOOL` Work 共享调度池。到期 Work 经 claim 获得随机
+全部持久调度位于单一 `durable_work` 邮箱表，包括 Harness 的 `THREAD`、`MODEL`、`AGENT`、`TOOL`，
+以及 Canvas 的 `CANVAS_RUN`、Project 的 `ISSUE`。到期 Work 经 claim 获得随机
 token 与 lease，heartbeat 仅续租当前 owner；checkpoint、terminal 与 reschedule 再次
-复验执行权。绑定 Environment 的 TOOL Work 同时要求该 Environment 的 READY route
-lease 属于当前节点。Canvas Function 与 Project Issue 使用各自的 Work 协议，均采用
-持久调度、租约与围栏。
+复验执行权。绑定 Environment 的 TOOL 与 AGENT Work 同时要求该 Environment 的 READY route
+lease 属于当前节点。Canvas Function 与 Project Issue 复用该邮箱表，均采用持久调度、租约与围栏。
 
 Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provider 或发送工具请求前
 返回可重试结果。节点容量控制用于限流，PostgreSQL Work 用于恢复；Subagent 额度由
@@ -290,10 +302,12 @@ Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provid
 | --- | --- |
 | `NOTIFY` 丢失或监听重建 | 固定轮询发现到期 Work |
 | Worker 退出 | lease 到期后由合格节点重新 claim |
+| 节点滚动发布 | SIGTERM 后排空，依次停止认领、等待本机执行（`drain-timeout`）、向 Daemon 发送 GOAWAY 并释放路由租约、移交在途远端工具给其它节点、最后反注册节点 |
+| 节点崩溃 | 租约到期由合格节点重新认领；结果不确定的外部执行收敛为 UNKNOWN；没有退出证据的执行代次保留未确认事实，Thread 需要显式放弃才离开 RUNNING |
 | 旧 callback 晚到 | token、attempt、version 围栏使写回成为 no-op 或内部取消 |
 | 重复 Command | idempotency key、cursor 与 CAS 返回已有结果或拒绝冲突 |
 | 浏览器断线、漏帧或缓冲溢出 | 回读 REST Snapshot |
-| Daemon 连接中断 | 同实例通过 invocation journal 重放；新实例接管后收敛旧调用 |
+| Daemon 连接中断 | 同实例重连按 journal 重放；在途远端工具可被认领该 TOOL Work 的节点重新挂接（attach，不重发 INVOKE），在 reattach 窗口内等待终态；跨实例由远端退出对账确认 REMOTE 退出事实 |
 | Blob 清理中断 | 持久 cleanup state 与 token 支持后台继续处理 |
 | 外部副作用结果不明 | UNKNOWN 路径保留核实所需事实，人工核查后显式处理 |
 
@@ -318,16 +332,17 @@ Model delta、Tool partial 用于临时 overlay；交互、执行树与环境只
 Canvas 展示由确认快照、待确认操作和本地草稿组成，回读保留未保存
 输入。合并与恢复见 [Frontend](modules/frontend.md)，通道见 [Web](modules/web.md)。
 
-Thread Debug 区分 `NEXT_REQUEST_PREVIEW` 与 `FROZEN_INVOCATION`：前者按当前
+Thread Debug 区分 `NEXT_REQUEST_PREVIEW` 与 `FROZEN_INVOCATION`（后者与 Provider 请求预览属于 Builtin）：前者按当前
 Branch 重新规划，后者从冻结的 ModelRequestSpec 和 EntryPath 物化实际请求。
 Debug 展示工具声明、Skill 路径与执行事件，并对凭据和私有存储地址做保密处理。
 Provider 请求预览在同一规划/物化/编码路径上按点击瞬间（历史取该输出记录时间）只读重建请求体，不等于原始发送字节。
 
-Environment 按数据类型使用四条路径：
+Environment 按数据类型使用五条路径：
 
 | 路径 | 内容 |
 | --- | --- |
-| 压缩 WebSocket 控制面 | INVOKE、CANCEL、heartbeat、上传票据与有界 progress |
+| HTTP/2 控制流（单条 WSS 连接上的 Protobuf Envelope） | stream 1 承载 INVOKE、CANCEL、heartbeat、上传票据、有界 progress 与 IDE 元数据命令 |
+| IDE 数据面：同一连接上的独立 HTTP/2 流 | code-server 静态资源与 HTTP 接口透传，WebSocket 经 RFC 8441 extended CONNECT 隧道透传 |
 | Daemon 本地文本 | 完整命令输出与大文本写入本地资源，UI 展示有界 tail，Agent 分页读取 |
 | Daemon Skill 安装 | 同步人工确认的 commit；安装一致后提供本地 Skill 路径 |
 | Blob 数据面 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3 |

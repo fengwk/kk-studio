@@ -71,7 +71,7 @@ App 镜像由 [deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建，
 | 阶段 | 内容 |
 | --- | --- |
 | builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven/npm cache，`mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package` |
-| runtime | `eclipse-temurin:21.0.8_9-jre-jammy`，安装 `ffmpeg`/`ffprobe`，清理 apt lists |
+| runtime | `eclipse-temurin:21.0.12.1_1-jre-jammy`，安装 `ffmpeg`/`ffprobe`，清理 apt lists |
 | user | `kkstudio:kkstudio`，uid/gid `10001`，`USER kkstudio` |
 | process | `java -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
 | health | `curl -fsS http://127.0.0.1:8080/actuator/health`，15s interval、5s timeout、60s start period、6 retries |
@@ -175,7 +175,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[模型用量与计价](../modules/model-pricing.md#协议来源)。
 
-兼容的数据面继续复用，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，并把仍在运行的远端工具调用交给下一个节点继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
+兼容的数据面继续复用，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，接手节点通过重新挂接在途远端调用（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#toolprocessor-执行)）继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
 
 Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_history` 或用 `repair` 伪造 checksum
 会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
@@ -192,7 +192,7 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据
 1. 在旧部署“设置 → 同步”导出配置 YAML，另存旧 App/Daemon 镜像、运行配置与密钥文件、
    全库 dump 与 S3 业务对象；确认备份可恢复后保留旧库，不把旧库作为新库目标。
 2. 新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用新版本产物初始化当前 Schema。同时清空各 App 实例的 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` journal 卷，新版本 journal 记录包含固定的 `environmentId` 等字段，不兼容旧版本未确认文件。
-3. 部署新版本 App 与同版本 Daemon 并指向新库。旧 YAML 只作重建参考，不能原样导入：按当前契约整理
+3. 部署新版本 App 与同版本 Daemon 并指向新库。v6 Daemon 为全新安装，没有从旧版本原地升级的路径；部署 v6 后需要在每台主机重新执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标制品 URL 与 SHA256），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。旧 YAML 只作重建参考，不能原样导入：按当前契约整理
    全局模型名、Agent 引用与价格后，经界面或配置导入校验写入；Provider 凭据、Environment 注册令牌与
    安装设置逐项核对。会话、项目、画布、运行历史与 Blob 引用只保留在旧库和备份中。
 4. 验收健康、关键业务操作、Environment `READY` 与 Daemon 重连后再切换入口；旧库、备份与旧镜像
@@ -238,9 +238,9 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。
 
 预签名 URL 与 WebSocket 是部署时最容易出错的两处：前者要求
-`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 使用浏览器可达的 origin，后者要求每个终止 WebSocket
-的代理层都启用压缩扩展。Daemon 侧安装与故障处理见
-[Environment Daemon 安装与运行](environment-daemon.md)。
+`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 使用浏览器可达的 origin；后者要求终止浏览器侧 WebSocket
+（`/api/events` 与 IDE 视图）的代理层启用 `permessage-deflate` 压缩扩展，而 Daemon 与 Studio 之间的
+WSS 传输不协商压缩扩展（见 [Environment Daemon 安装与运行](environment-daemon.md)）。
 
 ## 隔离栈与可靠性栈
 
@@ -505,7 +505,7 @@ tag 不同：
 `kk-studio.cluster.secret`。节点用既有 15 秒心跳续租 `cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
 只有某个 Thread 在其它节点存在有效订阅时，该 Thread 的普通 realtime 才写 NOTIFY。正常退出删除本节点订阅，
 异常退出由租约到期收敛；未配置内部 origin/secret 的节点保持单节点模式，不登记订阅，也不发布 realtime NOTIFY。
-节点优雅退出时自动执行排空流程：停止新 claim 派发，等待在途执行（至多 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`，默认 60s），向远端 Daemon 发送 GOAWAY 并释放环境路由租约，移交在途远端工具执行并 release 对应的 TOOL Work，最后反注册节点并清理订阅。
+节点优雅退出时自动执行排空流程：停止新 claim 派发，等待在途执行（至多 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT`，默认 60s），向远端 Daemon 发送 GOAWAY 并释放环境路由租约，移交在途远端工具执行并 release 对应的 TOOL Work，由接手节点重新挂接（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#toolprocessor-执行)），最后反注册节点并清理订阅。
 
 ### 本机 preview 与 NAS 数据面
 
