@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -124,6 +125,10 @@ class DaemonCrossLanguageIntegrationTest {
 
   @BeforeEach
   void setUp() throws Exception {
+    assumeTrue(
+        Files.isRegularFile(repoRoot().resolve("daemon/dist/main.js")),
+        "daemon/dist/main.js not found. Run `npm --prefix daemon ci && npm --prefix daemon run build` first.");
+
     scheduler = new ScheduledExecutorScheduler("test-transport-", false);
     scheduler.start();
     executor = Executors.newVirtualThreadPerTaskExecutor();

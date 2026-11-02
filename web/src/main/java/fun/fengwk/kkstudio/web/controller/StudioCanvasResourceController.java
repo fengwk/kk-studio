@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -71,11 +72,13 @@ public class StudioCanvasResourceController {
   }
 
   private CanvasResource findResource(UUID canvasId, UUID resourceId) {
-    return queryService
-        .findResource(canvasId, resourceId)
-        .orElseThrow(
-            () ->
-                new ResponseStatusException(
-                    HttpStatus.NOT_FOUND, "unknown resource: " + resourceId));
+    Optional<CanvasResource> resource = queryService.findResource(canvasId, resourceId);
+    if (resource.isPresent()) {
+      return resource.get();
+    }
+    if (queryService.findDocument(canvasId).isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown canvas: " + canvasId);
+    }
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown resource: " + resourceId);
   }
 }

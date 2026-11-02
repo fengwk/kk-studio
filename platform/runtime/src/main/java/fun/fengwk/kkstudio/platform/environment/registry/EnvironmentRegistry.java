@@ -156,8 +156,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                   then (recent_events - 0) || :releasedEvent::jsonb
                   else recent_events || :releasedEvent::jsonb
               end,
-          last_seen_at = statement_timestamp() - interval '1 millisecond',
-          lease_until = statement_timestamp()
+          last_seen_at = statement_timestamp() - interval '2 milliseconds',
+          lease_until = statement_timestamp() - interval '1 millisecond'
       where environment_id = :environmentId
         and owner_node_id = :ownerNodeId
         and lease_token = :leaseToken

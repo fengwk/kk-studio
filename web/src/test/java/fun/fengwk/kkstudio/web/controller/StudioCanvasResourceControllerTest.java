@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -62,6 +63,7 @@ class StudioCanvasResourceControllerTest {
     when(queryService.findResource(CANVAS, MEDIA_RESOURCE)).thenReturn(Optional.of(media));
     when(queryService.findResource(CANVAS, TEXT_RESOURCE)).thenReturn(Optional.of(text));
     when(queryService.findResource(CANVAS, MISSING_RESOURCE)).thenReturn(Optional.empty());
+    when(queryService.findDocument(CANVAS)).thenReturn(Optional.of(mock(CanvasDocument.class)));
   }
 
   /** 原图与 preview URL 都只返回方法、URL、headers 和 expiry，不暴露 bucket/key。 */

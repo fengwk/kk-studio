@@ -67,6 +67,12 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
   }
 
   @Override
+  public Optional<CanvasDocument> findDocument(UUID canvasId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    return canvasStore.findDocument(canvasId);
+  }
+
+  @Override
   public Optional<CanvasResource> findResource(UUID canvasId, UUID resourceId) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(resourceId, "resourceId");
