@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.chat;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.util.Objects;
@@ -17,23 +18,11 @@ public final class ChatIds {
 
   public static UUID parseUuid(String value, String field) {
     Objects.requireNonNull(field, "field");
-    if (value == null) {
-      throw new AiValidationException("chat", field + " must not be null");
-    }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-      throw new AiValidationException("chat", field + " must not be blank");
-    }
-    UUID parsed;
     try {
-      parsed = UUID.fromString(trimmed);
+      return Uuids.parseCanonical(value, field);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException("chat", field + " must be a canonical UUID: " + value);
+      throw new AiValidationException("chat", error.getMessage());
     }
-    if (!parsed.toString().equals(trimmed)) {
-      throw new AiValidationException("chat", field + " must be a canonical UUID: " + value);
-    }
-    return parsed;
   }
 
   public static String format(UUID value) {

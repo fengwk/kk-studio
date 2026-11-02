@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -67,7 +68,8 @@ public class StudioInteractionController {
             () -> {
               UUID root =
                   rootThreadId == null ? null : Uuids.parseCanonical(rootThreadId, "rootThreadId");
-              return interactionQueryService.listInteractions(root, cursor, parseLimit(limit));
+              return interactionQueryService.listInteractions(
+                  root, cursor, RequestParameters.limit(limit, DEFAULT_LIMIT, MAX_LIMIT));
             }));
   }
 
@@ -93,23 +95,6 @@ public class StudioInteractionController {
               return HarnessRuntimeResponseMapper.toToolInputResultDto(
                   interactionService.submitInput(command));
             }));
-  }
-
-  /** 解析分页上限：缺省 {@value DEFAULT_LIMIT}，显式给出时必须是 {@code [1, }{@value MAX_LIMIT}{@code ]} 内的十进制整数。 */
-  private static int parseLimit(String limit) {
-    if (limit == null) {
-      return DEFAULT_LIMIT;
-    }
-    int parsed;
-    try {
-      parsed = Integer.parseInt(limit);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException("limit must be a decimal integer", error);
-    }
-    if (parsed < 1 || parsed > MAX_LIMIT) {
-      throw new IllegalArgumentException("limit must be within [1, " + MAX_LIMIT + "]");
-    }
-    return parsed;
   }
 
   /** 操作者只取自部署边界建立的认证主体；没有主体时回退到单用户边界的固定操作者，绝不信任客户端传入的身份。 */

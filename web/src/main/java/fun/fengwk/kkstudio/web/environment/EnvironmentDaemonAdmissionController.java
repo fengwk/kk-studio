@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
@@ -95,10 +96,10 @@ public class EnvironmentDaemonAdmissionController {
       response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Missing daemon protocol version");
       return;
     }
-    int protocolVersion;
+    long protocolVersion;
     try {
-      protocolVersion = Integer.parseInt(protocolStr.trim());
-    } catch (NumberFormatException e) {
+      protocolVersion = DecimalLongs.parseNonNegative(protocolStr, HEADER_PROTOCOL);
+    } catch (IllegalArgumentException e) {
       response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Malformed daemon protocol version");
       return;
     }

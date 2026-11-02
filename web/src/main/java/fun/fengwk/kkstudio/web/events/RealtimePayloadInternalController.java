@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
@@ -18,7 +19,6 @@ import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * Origin 节点内部 realtime payload 回拉入口。
@@ -49,7 +49,8 @@ public class RealtimePayloadInternalController {
         request.getMethod(),
         ClusterInternalRequests.canonicalPath(request),
         ClusterInternalRequests.authHeaders(request));
-    Optional<RealtimePayloadBuffer.Payload> payload = payloadBuffer.get(UUID.fromString(payloadId));
+    Optional<RealtimePayloadBuffer.Payload> payload =
+        payloadBuffer.get(Uuids.parseCanonical(payloadId, "payloadId"));
     if (payload.isEmpty()) {
       return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
