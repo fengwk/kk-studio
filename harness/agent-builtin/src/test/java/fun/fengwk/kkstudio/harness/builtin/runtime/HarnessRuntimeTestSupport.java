@@ -272,7 +272,7 @@ public final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** MODEL_ACTIVE baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
+  /** GENERATION_ACTIVE baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
   static ModelBaseline seedRunningModel(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -295,8 +295,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * MODEL_ACTIVE baseline，按指定的活动状态（READY / RUNNING）： ROOT -&gt; TURN_START(INPUT) -&gt; USER，thread
-   * head 指向 USER entry，model requestHead = USER entry。
+   * GENERATION_ACTIVE baseline，按指定的活动状态（READY / RUNNING）： ROOT -&gt; TURN_START(INPUT) -&gt;
+   * USER，thread head 指向 USER entry，model requestHead = USER entry。
    */
   static ModelBaseline seedModel(InMemoryBuiltinHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
@@ -325,7 +325,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * CONTINUATION turn 上的 MODEL_ACTIVE：裸的 TURN_START(CONTINUATION) head（真实 plan 形态 没有 input
+   * CONTINUATION turn 上的 GENERATION_ACTIVE：裸的 TURN_START(CONTINUATION) head（真实 plan 形态 没有 input
    * entry），并在该 TURN_START requestHead 上挂一个 RUNNING 的 Model。
    */
   static ModelBaseline seedRunningContinuationModel(InMemoryBuiltinHarnessStore store) {
