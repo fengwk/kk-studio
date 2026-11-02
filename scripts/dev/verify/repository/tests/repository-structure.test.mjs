@@ -517,6 +517,7 @@ const CORE_STATE_ENUMS = [
     constants: [
       'WAITING_APPROVAL',
       'WAITING_INPUT',
+      'WAITING_REQUEST',
       'READY',
       'RUNNING',
       'SUCCEEDED',
@@ -550,6 +551,7 @@ const CORE_STATE_ENUMS = [
       'TURN_FAILED',
       'OUTPUT_TRUNCATED',
       'CONTENT_FILTERED',
+      'EXECUTION_FAILED',
     ],
   },
   {

@@ -294,12 +294,14 @@ final class PostgresqlToolStore implements ToolStore {
       if (tx.tools().find(invocation.id()).isPresent()) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }
-      if ((invocation.status() != ToolInvocationStatus.READY
-              && invocation.status() != ToolInvocationStatus.FAILED)
-          || invocation.attempt() != 0
-          || invocation.approval() != null) {
+      boolean allowedStatus =
+          invocation.status() == ToolInvocationStatus.READY
+              || invocation.status() == ToolInvocationStatus.FAILED
+              || (invocation.status() == ToolInvocationStatus.WAITING_REQUEST
+                  && invocation.binding() != null);
+      if (!allowedStatus || invocation.attempt() != 0 || invocation.approval() != null) {
         throw new IllegalArgumentException(
-            "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
+            "new tool invocations must be READY, bound WAITING_REQUEST, or unattached FAILED with attempt 0 and no approval");
       }
       requireUniqueToolCallIndex(invocation);
       requireValidToolReferences(invocation);

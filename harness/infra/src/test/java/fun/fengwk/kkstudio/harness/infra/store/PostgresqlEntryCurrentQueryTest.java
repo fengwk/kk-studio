@@ -26,10 +26,12 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NativeCompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
@@ -124,6 +126,39 @@ class PostgresqlEntryCurrentQueryTest {
           assertEquals(1, fullPathCounter.get(), "冷 current 的锚点不得进入完整路径缓存");
           return null;
         });
+  }
+
+  /** 测试意图：尾部 NATIVE_COMPACTION 后，冷 loadCurrent 与完整 EntryPath 派生得到的 EntryCurrentState 完全一致。 */
+  @Test
+  void trailingNativeCompactionYieldsConsistentEntryCurrentState() {
+    Baseline baseline = seedThreadBaseline(store);
+    BranchSettings live = settings("live");
+    UUID start =
+        insert(baseline, baseline.rootEntryId(), turn(baseline, TurnStartReason.INPUT, live), 1);
+    UUID user = insert(baseline, start, userPayload(), 2);
+    UUID end = insert(baseline, user, closed(start), 3);
+    NativeCompactionPayload payload =
+        new NativeCompactionPayload("auto", null, 0L, 12L, null, "native", null, null);
+    UUID compactionAudit = insert(baseline, end, payload, 4);
+
+    EntryCurrentState coldState =
+        store.transaction(tx -> tx.entries().loadCurrent(compactionAudit));
+
+    EntryPath fullPath = store.transaction(tx -> tx.entries().loadPath(compactionAudit));
+    EntryCurrentState fromPath = EntryCurrentState.from(fullPath);
+
+    assertEquals(fromPath.head().id(), coldState.head().id());
+    assertEquals(
+        fromPath.headIgnoringTrailingControlEntries().id(),
+        coldState.headIgnoringTrailingControlEntries().id());
+    assertEquals(end, coldState.headIgnoringTrailingControlEntries().id());
+    assertEquals(fromPath.openTurnStart().map(Entry::id), coldState.openTurnStart().map(Entry::id));
+    assertTrue(coldState.openTurnStart().isEmpty());
+    assertEquals(
+        fromPath.referencedTurnStartEntry().id(), coldState.referencedTurnStartEntry().id());
+    assertEquals(start, coldState.referencedTurnStartEntry().id());
+    assertEquals(fromPath.baseSettings(), coldState.baseSettings());
+    assertEquals(live, coldState.baseSettings());
   }
 
   /** 测试意图：open compaction 的 settings 不替换真实模型，且递归在该 TURN_START 停止。 */

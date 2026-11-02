@@ -887,6 +887,7 @@ create table harness_entry (
             'MESSAGE',
             'CUSTOM',
             'MODEL_ATTEMPT_FAILURE',
+            'NATIVE_COMPACTION',
             'CUSTOM_MESSAGE',
             'ASSISTANT_ERROR',
             'ASSISTANT_ABORTED',
@@ -918,7 +919,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/NATIVE_COMPACTION/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION/SETTINGS/FORK）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
 comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
@@ -1226,10 +1227,14 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_binding check (
         binding is not null or status in ('FAILED', 'CANCELLED', 'UNKNOWN')
     ),
+    constraint ck_harness_tool_invocation_waiting_request check (
+        status <> 'WAITING_REQUEST' or (binding is not null and approval is null and result is null and error is null)
+    ),
     constraint ck_harness_tool_invocation_status check (
         status in (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
+            'WAITING_REQUEST',
             'READY',
             'RUNNING',
             'SUCCEEDED',
@@ -1275,7 +1280,7 @@ comment on column harness_tool_invocation.assistant_entry_id is '携带对应 To
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL 与 WAITING_INPUT）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_REQUEST、WAITING_APPROVAL 与 WAITING_INPUT）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
@@ -1287,7 +1292,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_thread_nonterminal
     on harness_tool_invocation (thread_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'WAITING_REQUEST', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 

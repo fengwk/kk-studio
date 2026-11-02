@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NativeCompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
@@ -166,7 +167,7 @@ final class PostgresqlEntryStore implements EntryStore {
               coalesce(
                   a.non_control_id,
                   case
-                      when e.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK') then e.id
+                      when e.entry_type not in ('NOTIFICATION', 'SETTINGS', 'FORK', 'NATIVE_COMPACTION') then e.id
                   end
               ),
               coalesce(
@@ -696,7 +697,8 @@ final class PostgresqlEntryStore implements EntryStore {
   private static boolean isControl(Entry entry) {
     return entry.payload() instanceof NotificationPayload
         || entry.payload() instanceof SettingsPayload
-        || entry.payload() instanceof ForkPayload;
+        || entry.payload() instanceof ForkPayload
+        || entry.payload() instanceof NativeCompactionPayload;
   }
 
   private static BranchSettings settingsOf(Entry entry) {

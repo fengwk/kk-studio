@@ -501,7 +501,8 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
     // 未收尾 ToolInvocation 的公共查找路径必须只覆盖全部非终态（含人工输入等待），且按 thread_id 建键。
     assertTrue(toolNonterminal.contains("(thread_id)"));
-    for (String nonterminal : List.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "RUNNING")) {
+    for (String nonterminal :
+        List.of("WAITING_APPROVAL", "WAITING_INPUT", "WAITING_REQUEST", "READY", "RUNNING")) {
       assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
     }
     for (String terminal : List.of("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")) {
@@ -709,6 +710,116 @@ class PostgresqlHarnessSchemaTest {
                 resultJson,
                 null,
                 receiptJson));
+  }
+
+  /** 测试意图：真实 PostgreSQL 约束 ck_harness_tool_invocation_waiting_request 物理门禁验证。 */
+  @Test
+  void harnessToolInvocationWaitingRequestConstraintRequiresBindingAndNoTerminalFactsOrApproval() {
+    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000040");
+    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000041");
+    UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000042");
+    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000043");
+    UUID assistantEntryId = UUID.fromString("00000000-0000-0000-0000-000000000044");
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, 'session-waiting-req', statement_timestamp())",
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
+        rootEntryId,
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb, statement_timestamp())",
+        turnStartEntryId,
+        sessionId,
+        rootEntryId);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        threadId,
+        sessionId,
+        turnStartEntryId,
+        threadId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\"}}'::jsonb, statement_timestamp())",
+        assistantEntryId,
+        sessionId,
+        turnStartEntryId);
+
+    String callJson = "{\"id\":\"call-req\",\"toolName\":\"bash\",\"argumentsJson\":\"{}\"}";
+    String bindingJson = "{\"tool\":{\"descriptor\":{\"name\":\"bash\"}}}";
+    String resultJson =
+        "{\"toolCallId\":\"call-req\",\"contents\":[],\"error\":false,\"details\":{}}";
+    String approvalJson = "{\"decision\":\"ALLOWED\"}";
+
+    // 1. 无 binding 插入 WAITING_REQUEST 报错
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                threadId,
+                turnStartEntryId,
+                assistantEntryId,
+                callJson,
+                null,
+                "WAITING_REQUEST",
+                null,
+                null,
+                null));
+
+    // 2. 带 approval 插入 WAITING_REQUEST 报错
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                threadId,
+                turnStartEntryId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "WAITING_REQUEST",
+                approvalJson,
+                null,
+                null));
+
+    // 3. 带 result 插入 WAITING_REQUEST 报错
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                threadId,
+                turnStartEntryId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "WAITING_REQUEST",
+                null,
+                resultJson,
+                null));
+
+    // 4. 正向：合法 WAITING_REQUEST 成功插入
+    assertDoesNotThrow(
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                threadId,
+                turnStartEntryId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "WAITING_REQUEST",
+                null,
+                null,
+                null));
   }
 
   private void insertToolInvocation(
