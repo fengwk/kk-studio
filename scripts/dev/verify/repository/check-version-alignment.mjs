@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify that the repository version is aligned: the root POM `<version>`, its
- * `kk-studio.version` property, the daemon package version, the daemon runtime constant and,
+ * `kk-studio.version` property, the daemon package version, the daemon IDE extension package version, the daemon runtime constant and,
  * when `RELEASE_TAG` is provided, the release tag (optionally `v`-prefixed) must be exactly equal.
  * No version is hard-coded here, so bumping the version never requires editing this script or the
  * workflow that runs it.
@@ -13,7 +13,7 @@
  * Release: `RELEASE_TAG=v1.2.3 node scripts/dev/verify/repository/check-version-alignment.mjs`
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -42,7 +42,7 @@ function requiredDaemonVersion(source) {
 }
 
 /** 返回 `{ expected, mismatches }`；未提供 tag 时只比较仓库内部版本。 */
-export function checkAlignment({ pomXml, packageJson, configTs, tag }) {
+export function checkAlignment({ pomXml, packageJson, ideExtensionPackageJson, configTs, tag }) {
   // The project's own coordinates come before its dependencies; the parent block carries a different version.
   const withoutParent = pomXml.replace(/<!--[\s\S]*?-->/g, '').replace(/<parent>[\s\S]*?<\/parent>/, '')
   const expected = requiredText(withoutParent, 'version', 'the root <version>')
@@ -57,8 +57,15 @@ export function checkAlignment({ pomXml, packageJson, configTs, tag }) {
     'pom.xml <version>': expected,
     'pom.xml kk-studio.version': declared,
     'daemon/package.json version': daemonVersion.trim(),
-    'daemon/src/config.ts DAEMON_VERSION': runtimeVersion,
   }
+  if (ideExtensionPackageJson !== undefined) {
+    const ideExtensionVersion = JSON.parse(ideExtensionPackageJson).version
+    if (typeof ideExtensionVersion !== 'string' || ideExtensionVersion.trim() === '') {
+      throw new Error('cannot read the daemon IDE extension package version')
+    }
+    sources['daemon/ide-extension/package.json version'] = ideExtensionVersion.trim()
+  }
+  sources['daemon/src/config.ts DAEMON_VERSION'] = runtimeVersion
   if (tag !== undefined) {
     if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
       throw new Error(`invalid RELEASE_TAG ${JSON.stringify(tag)}`)
@@ -74,10 +81,17 @@ export function checkAlignment({ pomXml, packageJson, configTs, tag }) {
 
 export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   let result
+  let ideExtensionChecked = false
   try {
+    const ideExtensionPath = path.join(root, 'daemon/ide-extension/package.json')
+    const ideExtensionPackageJson = existsSync(ideExtensionPath)
+      ? readFileSync(ideExtensionPath, 'utf8')
+      : undefined
+    ideExtensionChecked = ideExtensionPackageJson !== undefined
     result = checkAlignment({
       pomXml: readFileSync(path.join(root, 'pom.xml'), 'utf8'),
       packageJson: readFileSync(path.join(root, 'daemon/package.json'), 'utf8'),
+      ideExtensionPackageJson,
       configTs: readFileSync(path.join(root, 'daemon/src/config.ts'), 'utf8'),
       tag,
     })
@@ -89,7 +103,9 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
     process.stderr.write(`repository version alignment failed:\n${result.mismatches.map((line) => `- ${line}\n`).join('')}`)
     return 1
   }
-  const sources = 'pom.xml, kk-studio.version, daemon/package.json and daemon/src/config.ts'
+  const sources = ideExtensionChecked
+    ? 'pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json and daemon/src/config.ts'
+    : 'pom.xml, kk-studio.version, daemon/package.json and daemon/src/config.ts'
   const tagSuffix = tag === undefined ? '' : ` and release tag ${tag}`
   process.stdout.write(`repository version ${result.expected} is aligned across ${sources}${tagSuffix}\n`)
   return 0

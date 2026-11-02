@@ -11,7 +11,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 使用证明：  Server -> IDE_LEASE（随心跳轮次批量下发的浏览器持有列表）
 ```
 
-元数据命令打开、切换目录、聚焦终端、分离或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节从不经过这条连接。
+元数据命令打开、切换目录、聚焦终端、分离或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节不经过控制命令（stream 1），而是在同一物理连接的独立 HTTP/2 流上多路复用。
 
 ## 命令通道
 

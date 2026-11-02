@@ -205,6 +205,8 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 | Driver 自有 Work（Builtin 的 `MODEL` Work） | Driver 私有身份 | Driver 经 `LockedDriverState.workTarget()` 声明，Stop 锁定并删除 |
 | `AGENT` Work | Thread id，可带 `requiredEnvironmentId` 环境亲和 | Stop 为每个停止的 Thread 统一锁定并删除，不经 `workTarget()` 声明 |
 
+`HarnessWorkDispatcher` 每种 `WorkTargetType` 只注册一个处理器，因此进程外 Driver 共用 AGENT Work 时，由该处理器按 Thread 的 driver 分派。
+
 `stop` 返回的 `executionIds` 在 Stop 事务提交后，交给组合根提供的 Driver 执行取消函数 best-effort 取消。
 
 ### 进程外 Driver 的公共构件

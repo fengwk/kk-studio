@@ -113,6 +113,12 @@ const forbiddenDocumentationTerms = [
   ['本切片', /本切片/],
   ['路线图', /路线图/],
   ['TODO', /\bTODO\b/i],
+  ['SET_MODEL', /\bSET_MODEL\b/],
+  ['compressed WebSocket', /compressed\s+WebSocket/i],
+  ['X-Daemon-', /\bX-Daemon-\b/],
+  ['/api/events/v2', /\/api\/events\/v2\b/],
+  ['ProtoIdeBridge', /\bProtoIdeBridge\b/],
+  ['DATA_BIND', /\bDATA_BIND\b/],
 ]
 
 const errors = []

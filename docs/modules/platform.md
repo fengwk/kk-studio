@@ -195,7 +195,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 平台对 Issue Agent 的全部感知收敛在 [`IssueAgentOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/IssueAgentOwnership.java) SPI：
 Project 应用实现它，负责在调用方事务内锁定 Project → Issue 层级、读写 `(issueId, agentName) -> threadId` 绑定，并按执行根解析 Issue 归属。
 显式的 Issue Agent 操作在没有实现时失败关闭；按执行根发现交互时视为没有 Issue 根。
-Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
+Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
 Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
@@ -204,7 +204,7 @@ Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事�
 `DatabaseAgentTurnContextResolver` 每个 live turn 只租用一次工具目录，解析 Agent、Environment、工具、Skill、
 subagent 与 system instruction，形成与模型无关的 `AgentTurnContext`。`DatabaseTurnResolver` 只在这份快照上规划 Model、Variant、
 模型组、压缩、缓存与输出预算；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
-Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
+Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、业务工具与身份上下文都在接受 Run 时
 显式提交或冻结到 branch state。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。

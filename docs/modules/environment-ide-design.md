@@ -288,9 +288,9 @@ READY、心跳和关键变化使用同一完整 runtime status 结构；关键�
 {
   "revision": "12",
   "status": {
-    "daemonVersion": "5.0.0",
+    "daemonVersion": "6.0.0",
     "update": {
-      "targetVersion": "5.0.1",
+      "targetVersion": "6.0.1",
       "downloadedBytes": 8388608,
       "totalBytes": 134217728
     }
