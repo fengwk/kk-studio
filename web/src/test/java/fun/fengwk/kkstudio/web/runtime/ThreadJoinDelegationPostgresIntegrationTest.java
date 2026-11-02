@@ -82,6 +82,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -1168,7 +1169,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     Duration lease = Duration.ofSeconds(30);
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
-            lease, lease, lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
+            lease, lease, lease, lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
     ExecutorService drainExecutor =
         Executors.newSingleThreadExecutor(daemonThreads("thread-join-test-drain-"));
     ExecutorService workerExecutor =
@@ -1193,9 +1194,13 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             drainExecutor,
             workerExecutor,
             pollScheduler,
-            threadProcessor,
-            modelProcessor,
-            toolProcessor);
+            Map.of(
+                WorkTargetType.THREAD,
+                threadProcessor::process,
+                WorkTargetType.MODEL,
+                modelProcessor::process,
+                WorkTargetType.TOOL,
+                toolProcessor::process));
     testDispatchers.add(dispatcher);
     dispatcher.start();
     return dispatcher;

@@ -35,7 +35,9 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
@@ -76,8 +78,17 @@ class HarnessWorkDispatcherLifecycleTest {
     if (store instanceof InMemoryHarnessStore memory) {
       memory.setClock(clock);
     }
-    return new HarnessWorkDispatcher(
-        store, config(), drain, worker, poll, threadHandler, modelHandler, toolHandler);
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new EnumMap<>(WorkTargetType.class);
+    if (threadHandler != null) {
+      handlers.put(WorkTargetType.THREAD, threadHandler);
+    }
+    if (modelHandler != null) {
+      handlers.put(WorkTargetType.MODEL, modelHandler);
+    }
+    if (toolHandler != null) {
+      handlers.put(WorkTargetType.TOOL, toolHandler);
+    }
+    return new HarnessWorkDispatcher(store, config(), drain, worker, poll, handlers);
   }
 
   @Test

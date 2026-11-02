@@ -3,14 +3,12 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
@@ -57,21 +55,18 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   private static final String NAME = "harness work dispatcher";
 
-  private static final List<WorkTargetType> ROUND_ROBIN_TYPES =
-      List.of(WorkTargetType.THREAD, WorkTargetType.MODEL, WorkTargetType.TOOL);
-
-  /** 当前 Dispatcher 实例在节点集群中的唯一标识，传递给底层用于 Environment route 亲和性路由围栏校验。 */
   private final UUID nodeInstanceId;
 
   private final HarnessStore store;
   private final HarnessWorkDispatcherConfig config;
+  private final List<WorkTargetType> registeredTypes;
   private final Map<WorkTargetType, Consumer<ClaimedWork>> handlers;
   private final BoundedWorkDispatcher<ClaimedWork> dispatcher;
   private int roundRobinCursor;
 
   /**
-   * 生产 wiring 构造：按 {@link WorkTargetType} 把 claim 路由给对应 Processor 的 {@code process}；返回值
-   * 被有意忽略（dispatcher 绝不解释 typed 结果）。自动分配随机 nodeInstanceId。
+   * 生产 wiring 构造：按已注册的 {@link WorkTargetType} 将 claim 路由给对应处理器。 必须包含 {@link WorkTargetType#THREAD}
+   * 处理器。自动分配随机 nodeInstanceId。
    */
   public HarnessWorkDispatcher(
       HarnessStore store,
@@ -79,92 +74,15 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
-      ThreadProcessor threadProcessor,
-      ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor) {
-    this(
-        UUID.randomUUID(),
-        store,
-        config,
-        drainExecutor,
-        workerExecutor,
-        pollScheduler,
-        threadProcessor,
-        modelProcessor,
-        toolProcessor);
+      Map<WorkTargetType, Consumer<ClaimedWork>> handlers) {
+    this(UUID.randomUUID(), store, config, drainExecutor, workerExecutor, pollScheduler, handlers);
   }
 
-  /** 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 */
+  /**
+   * 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 必须包含 {@link
+   * WorkTargetType#THREAD} 处理器。
+   */
   public HarnessWorkDispatcher(
-      UUID nodeInstanceId,
-      HarnessStore store,
-      HarnessWorkDispatcherConfig config,
-      Executor drainExecutor,
-      Executor workerExecutor,
-      ScheduledExecutorService pollScheduler,
-      ThreadProcessor threadProcessor,
-      ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor) {
-    this(
-        nodeInstanceId,
-        store,
-        config,
-        drainExecutor,
-        workerExecutor,
-        pollScheduler,
-        routing(
-            Objects.requireNonNull(threadProcessor, "threadProcessor")::process,
-            Objects.requireNonNull(modelProcessor, "modelProcessor")::process,
-            Objects.requireNonNull(toolProcessor, "toolProcessor")::process));
-  }
-
-  /** 包级组合 / 测试构造：直接把 claim handoff 给三个显式 consumer（全部 fail-fast non-null）。自动分配随机 nodeInstanceId。 */
-  HarnessWorkDispatcher(
-      HarnessStore store,
-      HarnessWorkDispatcherConfig config,
-      Executor drainExecutor,
-      Executor workerExecutor,
-      ScheduledExecutorService pollScheduler,
-      Consumer<ClaimedWork> threadHandler,
-      Consumer<ClaimedWork> modelHandler,
-      Consumer<ClaimedWork> toolHandler) {
-    this(
-        UUID.randomUUID(),
-        store,
-        config,
-        drainExecutor,
-        workerExecutor,
-        pollScheduler,
-        threadHandler,
-        modelHandler,
-        toolHandler);
-  }
-
-  /** 显式指定 nodeInstanceId 的包级组合 / 测试构造。 */
-  HarnessWorkDispatcher(
-      UUID nodeInstanceId,
-      HarnessStore store,
-      HarnessWorkDispatcherConfig config,
-      Executor drainExecutor,
-      Executor workerExecutor,
-      ScheduledExecutorService pollScheduler,
-      Consumer<ClaimedWork> threadHandler,
-      Consumer<ClaimedWork> modelHandler,
-      Consumer<ClaimedWork> toolHandler) {
-    this(
-        nodeInstanceId,
-        store,
-        config,
-        drainExecutor,
-        workerExecutor,
-        pollScheduler,
-        routing(
-            Objects.requireNonNull(threadHandler, "threadHandler"),
-            Objects.requireNonNull(modelHandler, "modelHandler"),
-            Objects.requireNonNull(toolHandler, "toolHandler")));
-  }
-
-  private HarnessWorkDispatcher(
       UUID nodeInstanceId,
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
@@ -175,7 +93,24 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.nodeInstanceId = Objects.requireNonNull(nodeInstanceId, "nodeInstanceId");
     this.store = Objects.requireNonNull(store, "store");
     this.config = Objects.requireNonNull(config, "config");
-    this.handlers = handlers;
+    Objects.requireNonNull(handlers, "handlers");
+    if (handlers.isEmpty() || !handlers.containsKey(WorkTargetType.THREAD)) {
+      throw new IllegalArgumentException("handlers must be non-empty and contain THREAD handler");
+    }
+    Map<WorkTargetType, Consumer<ClaimedWork>> copy = new EnumMap<>(WorkTargetType.class);
+    for (Map.Entry<WorkTargetType, Consumer<ClaimedWork>> entry : handlers.entrySet()) {
+      Objects.requireNonNull(entry.getKey(), "targetType");
+      Objects.requireNonNull(entry.getValue(), "handler for " + entry.getKey());
+      copy.put(entry.getKey(), entry.getValue());
+    }
+    this.handlers = Collections.unmodifiableMap(copy);
+    List<WorkTargetType> types = new ArrayList<>();
+    for (WorkTargetType type : WorkTargetType.values()) {
+      if (this.handlers.containsKey(type)) {
+        types.add(type);
+      }
+    }
+    this.registeredTypes = List.copyOf(types);
     this.dispatcher =
         new BoundedWorkDispatcher<>(
             NAME,
@@ -191,17 +126,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   public UUID nodeInstanceId() {
     return nodeInstanceId;
-  }
-
-  private static Map<WorkTargetType, Consumer<ClaimedWork>> routing(
-      Consumer<ClaimedWork> threadHandler,
-      Consumer<ClaimedWork> modelHandler,
-      Consumer<ClaimedWork> toolHandler) {
-    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new EnumMap<>(WorkTargetType.class);
-    handlers.put(WorkTargetType.THREAD, threadHandler);
-    handlers.put(WorkTargetType.MODEL, modelHandler);
-    handlers.put(WorkTargetType.TOOL, toolHandler);
-    return Collections.unmodifiableMap(handlers);
   }
 
   /**
@@ -231,13 +155,13 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   }
 
   /**
-   * 按实例级 round-robin 游标扫描 THREAD / MODEL / TOOL：单次调用最多扫描三种类型，返回首个成功 claim；全部无 due 时返回 {@code
+   * 按实例级 round-robin 游标扫描已注册的 target types：单次调用最多扫描一轮，返回首个成功 claim；全部无 due 时返回 {@code
    * null}。游标每扫描一个类型即前进一格，命中时已指向其后一个类型，全 empty 时回到原值并跨 wake / drain 保留。
    */
   private ClaimedWork claimNext() {
-    for (int scanned = 0; scanned < ROUND_ROBIN_TYPES.size(); scanned++) {
-      WorkTargetType type = ROUND_ROBIN_TYPES.get(roundRobinCursor);
-      roundRobinCursor = (roundRobinCursor + 1) % ROUND_ROBIN_TYPES.size();
+    for (int scanned = 0; scanned < registeredTypes.size(); scanned++) {
+      WorkTargetType type = registeredTypes.get(roundRobinCursor);
+      roundRobinCursor = (roundRobinCursor + 1) % registeredTypes.size();
       ClaimedWork claim = claimNext(type);
       if (claim != null) {
         return claim;

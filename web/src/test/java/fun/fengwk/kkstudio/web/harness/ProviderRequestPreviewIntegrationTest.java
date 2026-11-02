@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
@@ -164,9 +165,13 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             Runnable::run,
             Runnable::run,
             fixturePollScheduler,
-            threadProcessor,
-            modelProcessor,
-            toolProcessor);
+            Map.of(
+                WorkTargetType.THREAD,
+                threadProcessor::process,
+                WorkTargetType.MODEL,
+                modelProcessor::process,
+                WorkTargetType.TOOL,
+                toolProcessor::process));
     fixtureDispatcher.start();
   }
 
@@ -778,6 +783,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   private HarnessWorkDispatcherConfig fixtureDispatcherConfig() {
     return new HarnessWorkDispatcherConfig(
+        Duration.ofMinutes(1),
         Duration.ofMinutes(1),
         Duration.ofMinutes(1),
         Duration.ofMinutes(1),
