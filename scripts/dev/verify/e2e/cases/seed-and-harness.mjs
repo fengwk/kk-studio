@@ -741,11 +741,7 @@ registerCase({
       agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
-    const requested = {
-      agentName: ctx.vars.agent.name,
-      model: modelSelectionOf(ctx),
-      environmentName: null,
-    }
+    const requested = branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx))
     // 请求方向不携带 goal（Goal 只由 typed GOAL 命令设置为用户维护的事实）；完整快照语义要求
     // Thread 投影总是显式出现 goal，未设置时为 null。
     const expectedSettings = { ...requested, goal: null }
@@ -2366,13 +2362,13 @@ registerCase({
       const root = nodes[0]
       assertExactFields(
         root,
-        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'execution', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
         'HarnessThreadTreeNodeDTO',
       )
       assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
       assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
-      assert(isDeepStrictEqual(root.model, before.thread.branchSettings.execution.settings), JSON.stringify(root))
+      assert(isDeepStrictEqual(root.execution, before.thread.branchSettings.execution), JSON.stringify(root))
       // updateTime 是 Thread.updatedAt 的只读投影：非空有限的 epoch seconds，且与权威 Thread 快照精确相同。
       assert(
         typeof root.updateTime === 'number'

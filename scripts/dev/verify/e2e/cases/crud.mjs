@@ -677,15 +677,11 @@ registerCase({
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
       // 更新 Chat 不影响既有 Thread 的 branchSettings（Thread 快照是运行时事实）。
-      const requested = {
-        agentName: agent.name,
-        model: modelSelectionFor(agent),
-        environmentName: null,
-      }
+      const requested = branchSettingsOf(agent, modelSelectionFor(agent))
       // 请求方向不携带 goal；Thread 完整快照总是显式投影 goal（未设置时为 null）。
       const expectedSettings = {
         agentName: requested.agentName,
-        model: requested.model,
+        execution: requested.execution,
         environmentName: requested.environmentName,
         goal: null,
       }
