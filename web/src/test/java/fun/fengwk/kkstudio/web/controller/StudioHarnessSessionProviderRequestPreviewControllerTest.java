@@ -21,10 +21,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
@@ -52,7 +54,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
   private static final String SESSION_ID = "00000000-0000-0000-0000-000000000001";
   private static final String START_ENTRY_ID = "00000000-0000-0000-0000-000000000002";
   private static final String OUTPUT_ENTRY_ID = "00000000-0000-0000-0000-000000000003";
-  private static final String SET_MODEL_KEY = "00000000-0000-0000-0000-000000000004";
+  private static final String SET_EXECUTION_KEY = "00000000-0000-0000-0000-000000000004";
   private static final String USER_MESSAGE_KEY = "00000000-0000-0000-0000-000000000005";
 
   private ProviderRequestPreviewService previewService;
@@ -135,20 +137,23 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
         .previewDraft(eq(UUID.fromString(SESSION_ID)), eq(UUID.fromString(START_ENTRY_ID)), any());
     List<NewThreadCommand> commands = captured.get();
     assertEquals(
-        List.of(ThreadCommandType.SET_MODEL, ThreadCommandType.USER_MESSAGE),
+        List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.USER_MESSAGE),
         commands.stream().map(command -> command.payload().type()).toList());
-    SetModelCommandPayload setModel =
-        assertInstanceOf(SetModelCommandPayload.class, commands.getFirst().payload());
-    assertEquals("acceptance-stub", setModel.model().modelName());
+    SetExecutionCommandPayload setExecution =
+        assertInstanceOf(SetExecutionCommandPayload.class, commands.getFirst().payload());
+    assertEquals("builtin", setExecution.execution().driver());
+    assertEquals(
+        new ModelSelection("acceptance-stub", "default"),
+        BuiltinExecution.model(setExecution.execution()));
     assertTrue(
         commands.getFirst().requestHash().matches("[0-9a-f]{64}"),
-        "SET_MODEL 必须携带 canonical request hash");
+        "SET_EXECUTION 必须携带 canonical request hash");
     UserMessageCommandPayload user =
         assertInstanceOf(UserMessageCommandPayload.class, commands.get(1).payload());
     assertEquals(
         "hello",
         assertInstanceOf(TextMessageContent.class, user.message().contents().getFirst()).text());
-    assertEquals(UUID.fromString(SET_MODEL_KEY), commands.getFirst().idempotencyKey());
+    assertEquals(UUID.fromString(SET_EXECUTION_KEY), commands.getFirst().idempotencyKey());
     assertEquals(UUID.fromString(USER_MESSAGE_KEY), commands.get(1).idempotencyKey());
   }
 
@@ -217,11 +222,11 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                     {"startEntryId":"%s","commands":[{
                       "type":"USER_MESSAGE","idempotencyKey":"%s","contents":[{"type":"TEXT","text":"hi"}]
                     },{
-                      "type":"SET_MODEL","idempotencyKey":"%s",
-                      "model":{"modelName":"acceptance-stub","variant":"default"}
+                      "type":"SET_EXECUTION","idempotencyKey":"%s",
+                      "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}
                     }]}
                     """
-                        .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, SET_MODEL_KEY)))
+                        .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, SET_EXECUTION_KEY)))
         .andExpect(status().isBadRequest());
 
     verify(previewService, never()).previewDraft(any(UUID.class), any(UUID.class), any());
@@ -322,9 +327,9 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
   private static String draftCommands() {
     return """
         [{
-          "type":"SET_MODEL",
+          "type":"SET_EXECUTION",
           "idempotencyKey":"%s",
-          "model":{"modelName":"acceptance-stub","variant":"default"}
+          "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}
         },
         {
           "type":"USER_MESSAGE",
@@ -332,6 +337,6 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
           "contents":[{"type":"TEXT","text":"hello"}]
         }]
         """
-        .formatted(SET_MODEL_KEY, USER_MESSAGE_KEY);
+        .formatted(SET_EXECUTION_KEY, USER_MESSAGE_KEY);
   }
 }

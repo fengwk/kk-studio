@@ -133,7 +133,7 @@ YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的�
 [Thread 控制与展示](modules/thread-control-and-presentation.md)。
 
 Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
-Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_MODEL` / `SET_ENVIRONMENT` /
+Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` /
 `SET_CONTRIBUTOR_STATE`），并冻结本次 Run 的 `ProjectRunScope`。每个 live turn 只按该分支设置规划；
 `issue_transition` 等业务工具从冻结 scope 取得 runId，在业务锁内复核 Run/Issue/阶段/版本与调用
 Thread 身份。产品行为见 [Canvas、Project 与交互](canvas-project.md)，规划适配见

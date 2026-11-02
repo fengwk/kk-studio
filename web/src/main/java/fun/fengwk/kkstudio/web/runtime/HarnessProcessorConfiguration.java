@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmationRetry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
@@ -172,8 +172,8 @@ public class HarnessProcessorConfiguration {
 
   @Bean
   public ThreadProcessor threadProcessor(
-      HarnessStore store, AgentDriver agentDriver, ThreadProcessorConfig config) {
-    return new ThreadProcessor(store, agentDriver, config);
+      HarnessStore store, DriverRegistry driverRegistry, ThreadProcessorConfig config) {
+    return new ThreadProcessor(store, driverRegistry, config);
   }
 
   /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */

@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -361,7 +362,9 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
+        "default-assistant",
+        BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+        null);
   }
 
   private int count(String table, String column, UUID value) {

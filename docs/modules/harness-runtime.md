@@ -42,8 +42,8 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 | 类型 | 语义 |
 | --- | --- |
-| `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)：agent、`ModelSelection`（全局 `modelName` + 可空 `variant`）、可空的 Environment name 与用户 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java) |
-| `TURN_START` | 打开回合，冻结完整 settings、模型回退时的实际型号 `fallbackModel`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
+| `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)：agent、[`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/ExecutionSelection.java)（`driver` + `settings` JSON 对象）、可空的 Environment name 与用户 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java) |
+| `TURN_START` | 打开回合，冻结完整 settings、实际执行配置 `executedSelection`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
 | `MESSAGE` | USER / ASSISTANT / TOOL 消息；只有 ASSISTANT 消息可以携带 `providerReplayState` |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |
 | `MODEL_ATTEMPT_FAILURE` | 与 Provider 无关的重试审计 |
@@ -85,7 +85,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `NEW_FORKED_SESSION`：把执行根在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从切点处的生效快照推导，不复制 Join、命令或调用。
 - `THREAD`：续写既有 Thread。精确的有序重放先于一切游标与 preflight 准入；单条纯 `USER_MESSAGE` 不带游标、按锁内邮箱尾部入队，其它批次必须携带 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 并精确匹配（不匹配为 `STALE_COMMAND_CURSOR`）。
 
-命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
+命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
 
 - 创建型 target 与统一 `spawn` 批次必须以恰好一条 user-like 任务输入结尾。
 - 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。`SET_CONTRIBUTOR_STATE` 是分支配置，只随普通输入回合生效。

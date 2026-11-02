@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -101,14 +102,16 @@ class HarnessRuntimeResponseMapperTest {
     ThreadTreeNode parent =
         new ThreadTreeNode(
             HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)).thread(),
-            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            new BranchSettings(
+                "demo-agent", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null),
             ThreadRuntimeStatus.IDLE,
             null,
             new EntryPathMetrics(0, 0));
     ThreadTreeNode continuing =
         new ThreadTreeNode(
             HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3)).thread(),
-            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            new BranchSettings(
+                "demo-agent", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null),
             ThreadRuntimeStatus.RUNNING,
             null,
             new EntryPathMetrics(1, 0));
@@ -121,7 +124,9 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(id(2).toString(), node.getParentThreadId());
     assertEquals(parent.thread().name(), node.getName());
     assertEquals(parent.branchSettings().agentName(), node.getAgentName());
-    assertEquals("gpt-5", node.getModel().getModelName());
+    assertEquals("builtin", node.getExecution().getDriver());
+    assertEquals("gpt-5", node.getExecution().getSettings().get("modelName"));
+    assertEquals("default", node.getExecution().getSettings().get("variant"));
     assertEquals("IDLE", node.getStatus());
     assertEquals("RUNNABLE", node.getExecutionControl());
     assertEquals(0, node.getTurnCount());
@@ -178,7 +183,8 @@ class HarnessRuntimeResponseMapperTest {
     ThreadTreeNode waitingWithTurnEnd =
         new ThreadTreeNode(
             HarnessRuntimeTestFixtures.completedTurnSnapshot(id(3)).thread(),
-            new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+            new BranchSettings(
+                "demo-agent", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null),
             ThreadRuntimeStatus.WAITING,
             null,
             new EntryPathMetrics(1, 0));
@@ -225,8 +231,9 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(dto.getThreadId(), dto.getRootThreadId());
     assertTrue(dto.isYoloEnabled());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
-    assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
-    assertEquals("default", dto.getBranchSettings().getModel().getVariant());
+    assertEquals("builtin", dto.getBranchSettings().getExecution().getDriver());
+    assertEquals("gpt-5", dto.getBranchSettings().getExecution().getSettings().get("modelName"));
+    assertEquals("default", dto.getBranchSettings().getExecution().getSettings().get("variant"));
     // Environment 引用投影为 nullable name（该 fixture 未选择环境）。
     assertNull(dto.getBranchSettings().getEnvironmentName());
     assertEquals(NOW, dto.getCreateTime());

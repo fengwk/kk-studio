@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -38,10 +38,10 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessAssistantErrorDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionExitDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessGenerationFailureDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
@@ -94,7 +94,7 @@ public final class HarnessRuntimeResponseMapper {
         node.thread().parentThreadId() == null ? null : node.thread().parentThreadId().toString());
     dto.setName(node.thread().name());
     dto.setAgentName(node.branchSettings().agentName());
-    dto.setModel(toModelSelectionDto(node.branchSettings().model()));
+    dto.setExecution(toExecutionSelectionDto(node.branchSettings().execution()));
     dto.setStatus(node.status().name());
     dto.setExecutionControl(node.thread().executionControl().name());
     dto.setTurnCount(node.metrics().turnCount());
@@ -138,11 +138,21 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(settings, "settings");
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
     dto.setAgentName(settings.agentName());
-    dto.setModel(toModelSelectionDto(settings.model()));
+    dto.setExecution(toExecutionSelectionDto(settings.execution()));
     // Environment 引用平铺为 nullable canonical name；null 显式保留（@JsonInclude(ALWAYS)）。
     dto.setEnvironmentName(settings.environmentName());
     // 用户 Goal 同样显式输出：null 表示当前没有用户设定 Goal。
     dto.setGoal(toGoalSettingDto(settings.goal()));
+    return dto;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static HarnessExecutionSelectionDTO toExecutionSelectionDto(
+      ExecutionSelection selection) {
+    Objects.requireNonNull(selection, "selection");
+    HarnessExecutionSelectionDTO dto = new HarnessExecutionSelectionDTO();
+    dto.setDriver(selection.driver());
+    dto.setSettings(JSON.read(selection.settingsJson(), Map.class, "execution.settings"));
     return dto;
   }
 
@@ -153,14 +163,6 @@ public final class HarnessRuntimeResponseMapper {
     HarnessGoalSettingDTO dto = new HarnessGoalSettingDTO();
     dto.setId(goal.id().toString());
     dto.setText(goal.text());
-    return dto;
-  }
-
-  private static HarnessModelSelectionDTO toModelSelectionDto(ModelSelection selection) {
-    Objects.requireNonNull(selection, "selection");
-    HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
-    dto.setModelName(selection.modelName());
-    dto.setVariant(selection.variant());
     return dto;
   }
 

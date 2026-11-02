@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
@@ -227,13 +228,19 @@ class StudioHarnessThreadControllerTest {
             List.of(
                 new ThreadTreeNode(
                     HarnessRuntimeTestFixtures.idleSnapshot(id(2)).thread(),
-                    new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+                    new BranchSettings(
+                        "demo-agent",
+                        BuiltinExecution.of(new ModelSelection("gpt-5", "default")),
+                        null),
                     ThreadRuntimeStatus.IDLE,
                     null,
                     new EntryPathMetrics(0, 0)),
                 new ThreadTreeNode(
                     HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)).thread(),
-                    new BranchSettings("demo-agent", new ModelSelection("gpt-5", "default"), null),
+                    new BranchSettings(
+                        "demo-agent",
+                        BuiltinExecution.of(new ModelSelection("gpt-5", "default")),
+                        null),
                     ThreadRuntimeStatus.IDLE,
                     null,
                     new EntryPathMetrics(0, 0))));
@@ -247,7 +254,8 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data[0].parentThreadId").value(nullValue()))
         .andExpect(jsonPath("$.data[0].outcome").hasJsonPath())
         .andExpect(jsonPath("$.data[0].outcome").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$.data[0].execution.driver").value("builtin"))
+        .andExpect(jsonPath("$.data[0].execution.settings.modelName").value("gpt-5"))
         .andExpect(jsonPath("$.data[0].turnCount").value(0))
         .andExpect(jsonPath("$.data[0].toolCallCount").value(0))
         .andExpect(jsonPath("$.data[0].entries").doesNotExist())

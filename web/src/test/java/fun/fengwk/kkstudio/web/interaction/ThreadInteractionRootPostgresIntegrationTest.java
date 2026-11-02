@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -139,7 +140,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
+          "default-assistant",
+          BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+          null);
 
   private static final String AGENT = "default-assistant";
   private static final String HASH = "a".repeat(64);

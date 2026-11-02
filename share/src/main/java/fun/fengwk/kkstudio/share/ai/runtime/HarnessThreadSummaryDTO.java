@@ -33,8 +33,8 @@ public class HarnessThreadSummaryDTO {
   /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */
   private String executionControl;
 
-  /** 当前 head branch 的完整 Model selection。 */
-  private HarnessModelSelectionDTO model;
+  /** 当前 head branch 的完整 Execution selection。 */
+  private HarnessExecutionSelectionDTO execution;
 
   /** 当前 head 上最近的用户可读消息预览；没有消息时显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)

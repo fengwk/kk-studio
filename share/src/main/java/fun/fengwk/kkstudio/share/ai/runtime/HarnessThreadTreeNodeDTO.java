@@ -27,8 +27,8 @@ public class HarnessThreadTreeNodeDTO {
   /** 当前 head 路径生效的 agent 名。 */
   private String agentName;
 
-  /** 当前 head 路径生效的模型选择。 */
-  private HarnessModelSelectionDTO model;
+  /** 当前 head 路径生效的执行选择。 */
+  private HarnessExecutionSelectionDTO execution;
 
   /** Runtime 运行状态：{@code RUNNING / WAITING / IDLE}。 */
   private String status;

@@ -3,9 +3,10 @@ package fun.fengwk.kkstudio.platform.orchestration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -22,7 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
@@ -30,6 +31,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -160,13 +162,13 @@ public class HarnessOwnerQueryService {
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
     dto.setExecutionControl(thread.executionControl().name());
-    var execution = snapshot.entryState().baseSettings().execution();
-    if (BuiltinExecution.DRIVER.equals(execution.driver())) {
-      var selection = BuiltinExecution.model(execution);
-      HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-      model.setModelName(selection.modelName());
-      model.setVariant(selection.variant());
-      dto.setModel(model);
+    ExecutionSelection execution = snapshot.entryState().baseSettings().execution();
+    if (execution != null) {
+      HarnessExecutionSelectionDTO executionDto = new HarnessExecutionSelectionDTO();
+      executionDto.setDriver(execution.driver());
+      executionDto.setSettings(
+          StrictJson.standard().read(execution.settingsJson(), Map.class, "execution.settings"));
+      dto.setExecution(executionDto);
     }
     dto.setHeadMessagePreview(headMessagePreview(snapshot));
     return dto;

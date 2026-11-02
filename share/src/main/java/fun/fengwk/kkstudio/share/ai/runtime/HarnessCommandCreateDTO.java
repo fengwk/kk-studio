@@ -16,7 +16,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** USER_MESSAGE、GOAL、SET_AGENT、SET_MODEL 或 SET_ENVIRONMENT。 */
+  /** USER_MESSAGE、GOAL、SET_AGENT、SET_EXECUTION 或 SET_ENVIRONMENT。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -28,8 +28,8 @@ public class HarnessCommandCreateDTO {
   /** SET_AGENT 的目标 Agent 名。 */
   private @Nullable String agentName;
 
-  /** SET_MODEL 的目标模型。 */
-  private @Nullable HarnessModelSelectionDTO model;
+  /** SET_EXECUTION 的目标执行配置。 */
+  private @Nullable HarnessExecutionSelectionDTO execution;
 
   /**
    * SET_ENVIRONMENT 的目标 Environment 名；null 表示解除该 branch 的环境选择。
@@ -63,7 +63,7 @@ public class HarnessCommandCreateDTO {
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
-  private boolean modelFieldPresent;
+  private boolean executionFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -92,10 +92,10 @@ public class HarnessCommandCreateDTO {
     this.agentNameFieldPresent = true;
   }
 
-  @JsonSetter("model")
-  public void setModel(HarnessModelSelectionDTO value) {
-    this.model = value;
-    this.modelFieldPresent = true;
+  @JsonSetter("execution")
+  public void setExecution(HarnessExecutionSelectionDTO value) {
+    this.execution = value;
+    this.executionFieldPresent = true;
   }
 
   @JsonSetter("environmentName")
@@ -122,8 +122,8 @@ public class HarnessCommandCreateDTO {
   }
 
   @JsonIgnore
-  public boolean hasModelField() {
-    return modelFieldPresent;
+  public boolean hasExecutionField() {
+    return executionFieldPresent;
   }
 
   @JsonIgnore

@@ -18,14 +18,14 @@ import org.jspecify.annotations.Nullable;
  * Jackson 的方法遍次会把它们排到隐式字段之后，破坏既有字段位置。
  */
 @Data
-@JsonPropertyOrder({"agentName", "model", "environmentName", "goal"})
+@JsonPropertyOrder({"agentName", "execution", "environmentName", "goal"})
 public class HarnessBranchSettingsDTO {
 
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
   private String agentName;
 
-  /** 必填模型选择：全局逻辑模型名 + 单 Model 的可选 Variant（模型组为 null）。 */
-  private HarnessModelSelectionDTO model;
+  /** 必填执行选择：driver 名 + driver-specific 设置。 */
+  private HarnessExecutionSelectionDTO execution;
 
   /**
    * Environment 引用：nullable canonical name（非 blank、无首尾空白、不含 {@code '/'}、≤64 字符）。

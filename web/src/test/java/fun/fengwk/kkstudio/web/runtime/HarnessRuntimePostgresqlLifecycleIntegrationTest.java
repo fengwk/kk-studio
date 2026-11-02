@@ -144,8 +144,8 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   // ROOT payload 必须是 canonical 完整快照：settings 的 goal 字段（null 表示未设置）必须显式出现。
   private static final String ROOT_PAYLOAD_JSON =
       """
-      {"settings": {"agentName": "lifecycle-test", "model": \
-      {"modelName": "gpt-test", "variant": "default"}, \
+      {"settings": {"agentName": "lifecycle-test", "execution": \
+      {"driver": "builtin", "settings": {"modelName": "gpt-test", "variant": "default"}}, \
       "environmentName": null, "goal": null}}
       """;
 

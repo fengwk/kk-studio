@@ -25,6 +25,7 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
@@ -49,7 +50,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
@@ -699,11 +700,12 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     throw new AssertionError(message);
   }
 
-  /** 草稿命令：SET_MODEL 设置前缀 + 恰好一条末尾 USER_MESSAGE，与产品 HTTP 请求形状一致。 */
+  /** 草稿命令：SET_EXECUTION 设置前缀 + 恰好一条末尾 USER_MESSAGE，与产品 HTTP 请求形状一致。 */
   private static List<NewThreadCommand> draftCommands(UserMessageCommandPayload message) {
     return List.of(
         new NewThreadCommand(
-            new SetModelCommandPayload(new ModelSelection("acceptance-stub", "default")),
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(new ModelSelection("acceptance-stub", "default"))),
             UUID.randomUUID()),
         new NewThreadCommand(message, UUID.randomUUID()));
   }
@@ -714,7 +716,9 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
+        "default-assistant",
+        BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+        null);
   }
 
   private UUID createChat(String title) {

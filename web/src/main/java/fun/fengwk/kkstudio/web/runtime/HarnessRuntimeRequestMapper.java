@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -25,7 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -38,6 +40,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -51,6 +54,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Harness Runtime HTTP 请求的严格解析与 DTO-to-domain 映射。 */
@@ -333,8 +337,16 @@ public final class HarnessRuntimeRequestMapper {
     }
     return new BranchSettings(
         requireText(dto.getAgentName(), "branchSettings.agentName"),
-        toModelSelection(dto.getModel()),
+        toExecutionSelection(dto.getExecution()),
         dto.getEnvironmentName());
+  }
+
+  private static ExecutionSelection toExecutionSelection(HarnessExecutionSelectionDTO dto) {
+    requireNonNull(dto, "execution");
+    String driver = requireText(dto.getDriver(), "execution.driver");
+    Map<String, Object> settings = requireNonNull(dto.getSettings(), "execution.settings");
+    String settingsJson = StrictJson.standard().write(settings, "execution.settings");
+    return new ExecutionSelection(driver, settingsJson);
   }
 
   private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
@@ -372,7 +384,7 @@ public final class HarnessRuntimeRequestMapper {
     return switch (type) {
       case "USER_MESSAGE" -> {
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         requireForbidden(dto.hasTextField(), "text", "command type " + type);
         yield new UserMessageCommandPayload(
@@ -381,7 +393,7 @@ public final class HarnessRuntimeRequestMapper {
       case "GOAL" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         // GOAL 必须显式携带 text（显式 null 表示清除），与「字段缺失」严格区分。
         if (!dto.hasTextField()) {
@@ -392,22 +404,23 @@ public final class HarnessRuntimeRequestMapper {
       case "SET_AGENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasTextField(), "text", "command type " + type);
-        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
-      case "SET_MODEL" -> {
+      case "SET_EXECUTION" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasTextField(), "text", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
-        yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
+        yield new SetExecutionCommandPayload(
+            toExecutionSelection(requireNonNull(dto.getExecution(), "execution")));
       }
       case "SET_ENVIRONMENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasTextField(), "text", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
-        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasExecutionField(), "execution", "command type " + type);
         // SET_ENVIRONMENT 必须显式携带 environmentName（显式 null 表示解除选择），与「字段缺失」严格区分。
         if (!dto.hasEnvironmentNameField()) {
           throw new IllegalArgumentException(
@@ -437,7 +450,7 @@ public final class HarnessRuntimeRequestMapper {
     List<ThreadCommandType> prefixOrder =
         List.of(
             ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT);
     int lastSetOrder = -1;
     int userLikeCount = 0;

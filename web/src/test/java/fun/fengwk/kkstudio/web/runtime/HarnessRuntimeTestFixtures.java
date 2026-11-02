@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -71,7 +72,8 @@ public final class HarnessRuntimeTestFixtures {
   private HarnessRuntimeTestFixtures() {}
 
   public static BranchSettings settings() {
-    return new BranchSettings("default-assistant", new ModelSelection("gpt-5", "default"), null);
+    return new BranchSettings(
+        "default-assistant", BuiltinExecution.of(new ModelSelection("gpt-5", "default")), null);
   }
 
   public static Entry rootEntry() {

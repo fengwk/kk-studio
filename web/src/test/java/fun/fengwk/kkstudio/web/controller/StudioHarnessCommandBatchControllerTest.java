@@ -407,9 +407,9 @@ class StudioHarnessCommandBatchControllerTest {
             newThreadTarget(),
             """
             [{
-              "type":"SET_MODEL",
+              "type":"SET_EXECUTION",
               "idempotencyKey":"00000000-0000-0000-0000-000000000021",
-              "model":{"modelName":"gpt-5","variant":"default"}
+              "execution":{"driver":"builtin","settings":{"modelName":"gpt-5","variant":"default"}}
             },
             {
               "type":"SET_AGENT",
@@ -689,7 +689,7 @@ class StudioHarnessCommandBatchControllerTest {
     return """
         {
           "agentName":"default-assistant",
-          "model":{"modelName":"gpt-5","variant":"default"},
+          "execution":{"driver":"builtin","settings":{"modelName":"gpt-5","variant":"default"}},
           "environmentName":null
         }
         """;

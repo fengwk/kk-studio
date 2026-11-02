@@ -74,7 +74,7 @@ Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事�
 
 Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初始化其
 YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代读取根的开关，
-后续人工开关只更新根行。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_MODEL` /
+后续人工开关只更新根行。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_EXECUTION` /
 `SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE` 与末尾任务输入；阶段 Environment 就来自该 Run 的
 显式命令，Platform 不按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
 Thread `BranchSettings` 的带外重写。

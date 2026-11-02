@@ -24,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -253,7 +254,10 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     UUID rootEntryId = UUID.randomUUID();
     Session session = new Session(sessionId, "session", now);
     BranchSettings branchSettings =
-        new BranchSettings(agentName, new ModelSelection(configuredModelName, "default"), null);
+        new BranchSettings(
+            agentName,
+            BuiltinExecution.of(new ModelSelection(configuredModelName, "default")),
+            null);
     Entry rootEntry = new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), now);
 
     harnessStore.transaction(

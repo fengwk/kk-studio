@@ -160,14 +160,14 @@ class HarnessRuntimeDtoContractTest {
     HarnessBranchSettingsDTO explicitNull =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
+            {"agentName":"assistant","execution":{"driver":"builtin","settings":{"modelName":"m","variant":"v"}},
              "environmentName":null}
             """,
             HarnessBranchSettingsDTO.class);
     HarnessBranchSettingsDTO missing =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"modelName":"m","variant":"v"}}
+            {"agentName":"assistant","execution":{"driver":"builtin","settings":{"modelName":"m","variant":"v"}}}
             """,
             HarnessBranchSettingsDTO.class);
 
@@ -242,10 +242,10 @@ class HarnessRuntimeDtoContractTest {
     node.setParentThreadId(null);
     node.setName("root-thread");
     node.setAgentName("default-assistant");
-    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setModelName("gpt-5");
-    model.setVariant("default");
-    node.setModel(model);
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver("builtin");
+    execution.setSettings(Map.of("modelName", "gpt-5", "variant", "default"));
+    node.setExecution(execution);
     node.setStatus("IDLE");
     node.setExecutionControl("RUNNABLE");
     node.setTurnCount(2);
@@ -298,8 +298,8 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000001",
-                 "model":{"modelName":"m","variant":"v","unknown":true}}
+                {"type":"SET_EXECUTION","idempotencyKey":"00000000-0000-0000-0000-000000000001",
+                 "execution":{"driver":"builtin","settings":{},"unknown":true}}
                 """,
                 HarnessCommandCreateDTO.class));
     assertThrows(
@@ -634,14 +634,14 @@ class HarnessRuntimeDtoContractTest {
     HarnessBranchSettingsDTO cleared =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
+            {"agentName":"assistant","execution":{"driver":"builtin","settings":{"modelName":"m","variant":"v"}},
              "environmentName":null,"goal":null}
             """,
             HarnessBranchSettingsDTO.class);
     HarnessBranchSettingsDTO set =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
+            {"agentName":"assistant","execution":{"driver":"builtin","settings":{"modelName":"m","variant":"v"}},
              "environmentName":null,
              "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it"}}
             """,
@@ -656,7 +656,7 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
+                {"agentName":"assistant","execution":{"driver":"builtin","settings":{"modelName":"m","variant":"v"}},
                  "environmentName":null,
                  "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it","extra":1}}
                 """,

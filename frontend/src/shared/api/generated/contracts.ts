@@ -1040,7 +1040,7 @@ export interface HarnessAssistantErrorDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO */
 export interface HarnessBranchSettingsDTO {
   agentName: string
-  model: HarnessModelSelectionDTO
+  execution: HarnessExecutionSelectionDTO
   environmentName: string | null
   goal: HarnessGoalSettingDTO | null
 }
@@ -1066,7 +1066,7 @@ export interface HarnessCommandCreateDTO {
   idempotencyKey: string
   contents?: HarnessUserMessageContentDTO[] | null
   agentName?: string | null
-  model?: HarnessModelSelectionDTO | null
+  execution?: HarnessExecutionSelectionDTO | null
   environmentName?: string | null
   text?: string | null
 }
@@ -1109,6 +1109,12 @@ export interface HarnessExecutionExitDTO {
   attempt: number
   kind: string
   registeredAt: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO */
+export interface HarnessExecutionSelectionDTO {
+  driver: string
+  settings: Record<string, unknown>
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGenerationFailureDTO */
@@ -1360,7 +1366,7 @@ export interface HarnessThreadSummaryDTO {
   updatedAt: number
   status: string
   executionControl: string
-  model: HarnessModelSelectionDTO
+  execution: HarnessExecutionSelectionDTO
   headMessagePreview: string | null
 }
 
@@ -1370,7 +1376,7 @@ export interface HarnessThreadTreeNodeDTO {
   parentThreadId: string | null
   name: string
   agentName: string
-  model: HarnessModelSelectionDTO
+  execution: HarnessExecutionSelectionDTO
   status: string
   executionControl: string
   turnCount: number

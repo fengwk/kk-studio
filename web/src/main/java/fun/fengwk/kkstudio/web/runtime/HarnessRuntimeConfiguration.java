@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -49,6 +50,7 @@ import javax.sql.DataSource;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -129,15 +131,20 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
+  public DriverRegistry driverRegistry(List<AgentDriver> drivers) {
+    return new DriverRegistry(drivers);
+  }
+
+  @Bean
   public HarnessRuntime harnessRuntime(
       HarnessStore store,
-      AgentDriver agentDriver,
+      DriverRegistry driverRegistry,
       CompactionConfigProvider compactionConfigProvider,
       ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
     return new HarnessRuntime(
         store,
-        agentDriver,
+        driverRegistry,
         compactionConfigProvider,
         modelProcessor::cancel,
         toolProcessor::cancel);

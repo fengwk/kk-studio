@@ -26,6 +26,7 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
@@ -133,7 +134,9 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
+          "default-assistant",
+          BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+          null);
 
   private static final String AGENT = "default-assistant";
 

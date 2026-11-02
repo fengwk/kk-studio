@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 class HarnessRuntimeRequestMapperTest {
@@ -75,7 +77,7 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandTargetDTO missing = newSessionTarget();
     HarnessBranchSettingsDTO missingSettings = new HarnessBranchSettingsDTO();
     missingSettings.setAgentName(missing.getRootSettings().getAgentName());
-    missingSettings.setModel(missing.getRootSettings().getModel());
+    missingSettings.setExecution(missing.getRootSettings().getExecution());
     missing.setRootSettings(missingSettings);
     assertThrows(
         IllegalArgumentException.class,
@@ -228,15 +230,15 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void mapsFixedSetPrefixAndRawRequestHash() {
-    // 只允许稳定 SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
+    // 只允许稳定 SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
     HarnessThreadCommandBatchDTO request = cursorBatch(userCommand("user"));
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
-    HarnessCommandCreateDTO model = command("SET_MODEL", "model");
-    model.setModel(modelSelection());
+    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "execution");
+    execution.setExecution(executionSelection());
     HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "environment");
     environment.setEnvironmentName("local");
-    request.setCommands(List.of(agent, model, environment, userCommand("user")));
+    request.setCommands(List.of(agent, execution, environment, userCommand("user")));
 
     AcceptCommandsCommand mapped =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, request);
@@ -244,7 +246,7 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(
         List.of(
             ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
@@ -272,7 +274,7 @@ class HarnessRuntimeRequestMapperTest {
                 THREAD_ID,
                 threadBatch(command("SET_ENVIRONMENT", "missing"), userCommand("tail"))));
 
-    for (String otherType : List.of("USER_MESSAGE", "SET_AGENT", "SET_MODEL")) {
+    for (String otherType : List.of("USER_MESSAGE", "SET_AGENT", "SET_EXECUTION")) {
       HarnessCommandCreateDTO crossField;
       if ("USER_MESSAGE".equals(otherType)) {
         crossField = userCommand("with-environment");
@@ -280,8 +282,8 @@ class HarnessRuntimeRequestMapperTest {
         crossField = command("SET_AGENT", "with-environment");
         crossField.setAgentName("default-assistant");
       } else {
-        crossField = command("SET_MODEL", "with-environment");
-        crossField.setModel(modelSelection());
+        crossField = command("SET_EXECUTION", "with-environment");
+        crossField.setExecution(executionSelection());
       }
       crossField.setEnvironmentName("local");
       assertThrows(
@@ -292,16 +294,16 @@ class HarnessRuntimeRequestMapperTest {
           otherType + " must reject environmentName");
     }
 
-    // SET_ENVIRONMENT 与 SET_MODEL 的顺序必须固定：environment 不允许出现在 model 之前。
-    HarnessCommandCreateDTO model = command("SET_MODEL", "model-order");
-    model.setModel(modelSelection());
+    // SET_ENVIRONMENT 与 SET_EXECUTION 的顺序必须固定：environment 不允许出现在 execution 之前。
+    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "execution-order");
+    execution.setExecution(executionSelection());
     HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "environment-order");
     environment.setEnvironmentName("local");
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(environment, model, userCommand("tail"))));
+                THREAD_ID, threadBatch(environment, execution, userCommand("tail"))));
   }
 
   @Test
@@ -610,13 +612,13 @@ class HarnessRuntimeRequestMapperTest {
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, threadBatch(agent, duplicateAgent, userCommand("user"))));
 
-    HarnessCommandCreateDTO model = command("SET_MODEL", "model");
-    model.setModel(modelSelection());
+    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "execution");
+    execution.setExecution(executionSelection());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                THREAD_ID, threadBatch(model, agent, userCommand("user"))));
+                THREAD_ID, threadBatch(execution, agent, userCommand("user"))));
 
     HarnessThreadCommandBatchDTO empty = threadBatch(userCommand("unused"));
     empty.setCommands(List.of());
@@ -626,25 +628,25 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   /**
-   * 测试意图：纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持 SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT
-   * 固定顺序；创建型 target 与本地草稿预览仍要求恰一条末尾 user-like 输入。
+   * 测试意图：纯设置批次（0 条 user-like）只在既有 Thread 上被接受，且保持 SET_AGENT -&gt; SET_EXECUTION -&gt;
+   * SET_ENVIRONMENT 固定顺序；创建型 target 与本地草稿预览仍要求恰一条末尾 user-like 输入。
    */
   @Test
   void acceptsSettingsOnlyBatchOnExistingThreadButNotOnCreationTargets() {
     HarnessCommandCreateDTO agent = command("SET_AGENT", "settings-agent");
     agent.setAgentName("coder");
-    HarnessCommandCreateDTO model = command("SET_MODEL", "settings-model");
-    model.setModel(modelSelection());
+    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "settings-execution");
+    execution.setExecution(executionSelection());
     HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "settings-environment");
     environment.setEnvironmentName(null);
 
     AcceptCommandsCommand mapped =
         HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-            THREAD_ID, threadBatch(agent, model, environment));
+            THREAD_ID, threadBatch(agent, execution, environment));
     assertEquals(
         List.of(
             ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
 
@@ -653,11 +655,12 @@ class HarnessRuntimeRequestMapperTest {
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(newSessionTarget(), agent, model)));
+                request(newSessionTarget(), agent, execution)));
     // 本地分支草稿预览沿用创建契约，同样拒绝纯设置批次。
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toNewThreadCommands(List.of(agent, model), "commands"));
+        () ->
+            HarnessRuntimeRequestMapper.toNewThreadCommands(List.of(agent, execution), "commands"));
   }
 
   /** 测试意图：既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
@@ -751,15 +754,15 @@ class HarnessRuntimeRequestMapperTest {
     user.setAgentName("forbidden");
     assertCommandRejected(user);
 
-    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent-with-model");
+    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent-with-execution");
     agent.setAgentName("default-assistant");
-    agent.setModel(modelSelection());
+    agent.setExecution(executionSelection());
     assertCommandRejected(agent);
 
-    HarnessCommandCreateDTO model = command("SET_MODEL", "model-with-agent");
-    model.setModel(modelSelection());
-    model.setAgentName("forbidden");
-    assertCommandRejected(model);
+    HarnessCommandCreateDTO execution = command("SET_EXECUTION", "execution-with-agent");
+    execution.setExecution(executionSelection());
+    execution.setAgentName("forbidden");
+    assertCommandRejected(execution);
 
     // SET_ENVIRONMENT 必须携带 environmentName；缺失与跨字段都拒绝，canonical 约束由 domain payload 承担。
     assertCommandRejected(command("SET_ENVIRONMENT", "missing-environment"));
@@ -775,9 +778,9 @@ class HarnessRuntimeRequestMapperTest {
     blankAgent.setAgentName(" ");
     assertCommandRejected(blankAgent);
 
-    HarnessCommandCreateDTO missingModel = command("SET_MODEL", "missing-model");
-    missingModel.setModel(null);
-    assertCommandRejected(missingModel);
+    HarnessCommandCreateDTO missingExecution = command("SET_EXECUTION", "missing-execution");
+    missingExecution.setExecution(null);
+    assertCommandRejected(missingExecution);
   }
 
   @Test
@@ -1062,9 +1065,16 @@ class HarnessRuntimeRequestMapperTest {
   private static HarnessBranchSettingsDTO branchSettings() {
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
     settings.setAgentName("default-assistant");
-    settings.setModel(modelSelection());
+    settings.setExecution(executionSelection());
     settings.setEnvironmentName(null);
     return settings;
+  }
+
+  private static HarnessExecutionSelectionDTO executionSelection() {
+    HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
+    selection.setDriver("builtin");
+    selection.setSettings(Map.of("modelName", "gpt-5", "variant", "default"));
+    return selection;
   }
 
   private static HarnessModelSelectionDTO modelSelection() {

@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 import java.util.Date;
@@ -79,27 +79,30 @@ class StrictJacksonConfigurationTest {
         context -> {
           JsonMapper mapper = context.getBean(JsonMapper.class);
 
-          HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-          model.setModelName("claude-3-5-sonnet");
-          model.setVariant("default");
+          HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+          execution.setDriver("builtin");
+          Map<String, Object> settingsMap = new LinkedHashMap<>();
+          settingsMap.put("modelName", "claude-3-5-sonnet");
+          settingsMap.put("variant", "default");
+          execution.setSettings(settingsMap);
 
           HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
           settings.setAgentName("code-assistant");
-          settings.setModel(model);
+          settings.setExecution(execution);
 
           // 完整快照要求 environmentName 总是显式出现：全局 NON_NULL 必须被 @JsonInclude(ALWAYS) 覆盖。
           String expectedWithNullEnvironment =
-              "{\"agentName\":\"code-assistant\",\"model\":{"
-                  + "\"modelName\":\"claude-3-5-sonnet\","
-                  + "\"variant\":\"default\"},"
+              "{\"agentName\":\"code-assistant\",\"execution\":{"
+                  + "\"driver\":\"builtin\","
+                  + "\"settings\":{\"modelName\":\"claude-3-5-sonnet\",\"variant\":\"default\"}},"
                   + "\"environmentName\":null,\"goal\":null}";
           assertEquals(expectedWithNullEnvironment, mapper.writeValueAsString(settings));
 
           settings.setEnvironmentName("local");
           String expectedWithEnvironment =
-              "{\"agentName\":\"code-assistant\",\"model\":{"
-                  + "\"modelName\":\"claude-3-5-sonnet\","
-                  + "\"variant\":\"default\"},"
+              "{\"agentName\":\"code-assistant\",\"execution\":{"
+                  + "\"driver\":\"builtin\","
+                  + "\"settings\":{\"modelName\":\"claude-3-5-sonnet\",\"variant\":\"default\"}},"
                   + "\"environmentName\":\"local\",\"goal\":null}";
           assertEquals(expectedWithEnvironment, mapper.writeValueAsString(settings));
 

@@ -23,14 +23,16 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -61,7 +63,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   private static final String HEAD_ENTRY_ID = "00000000-0000-0000-0000-000000000013";
   private static final String UPLOAD_ID = "00000000-0000-0000-0000-000000000014";
   private static final String BLOB_ID = "00000000-0000-0000-0000-000000000015";
-  private static final String SET_MODEL_KEY = "00000000-0000-0000-0000-000000000016";
+  private static final String SET_EXECUTION_KEY = "00000000-0000-0000-0000-000000000016";
   private static final String USER_MESSAGE_KEY = "00000000-0000-0000-0000-000000000017";
 
   private ProviderRequestPreviewService previewService;
@@ -152,16 +154,19 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                     new NewThreadCommandPayloadView(command.payload(), command.requestHash()))
             .toList();
     assertEquals(
-        List.of(ThreadCommandType.SET_MODEL, ThreadCommandType.USER_MESSAGE),
+        List.of(ThreadCommandType.SET_EXECUTION, ThreadCommandType.USER_MESSAGE),
         payloads.stream().map(view -> view.payload().type()).toList());
-    SetModelCommandPayload setModel =
-        assertInstanceOf(SetModelCommandPayload.class, payloads.get(0).payload());
-    assertEquals("acceptance-stub", setModel.model().modelName());
+    SetExecutionCommandPayload setExecution =
+        assertInstanceOf(SetExecutionCommandPayload.class, payloads.get(0).payload());
+    assertEquals("builtin", setExecution.execution().driver());
+    assertEquals(
+        new ModelSelection("acceptance-stub", "default"),
+        BuiltinExecution.model(setExecution.execution()));
     assertTrue(
         payloads.get(0).requestHash().matches("[0-9a-f]{64}"),
-        "SET_MODEL 必须携带 canonical request hash");
+        "SET_EXECUTION 必须携带 canonical request hash");
     assertEquals(
-        UUID.fromString(SET_MODEL_KEY),
+        UUID.fromString(SET_EXECUTION_KEY),
         commandCaptor.getValue().commands().get(0).idempotencyKey());
     assertEquals(
         UUID.fromString(USER_MESSAGE_KEY),
@@ -341,9 +346,9 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   private static String draftCommands() {
     return """
         [{
-          "type":"SET_MODEL",
+          "type":"SET_EXECUTION",
           "idempotencyKey":"%s",
-          "model":{"modelName":"acceptance-stub","variant":"default"}
+          "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}
         },
         {
           "type":"USER_MESSAGE",
@@ -355,7 +360,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
           ]
         }]
         """
-        .formatted(SET_MODEL_KEY, USER_MESSAGE_KEY, UPLOAD_ID, BLOB_ID);
+        .formatted(SET_EXECUTION_KEY, USER_MESSAGE_KEY, UPLOAD_ID, BLOB_ID);
   }
 
   /** 预览请求体与既有 Thread 发送完全同源：只携带 path Thread 的 cursor 与命令，不再携带 owner/target。 */

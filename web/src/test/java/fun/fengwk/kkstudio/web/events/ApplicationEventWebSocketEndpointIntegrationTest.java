@@ -237,9 +237,9 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             "threadId":"%s",
             "rootSettings":{
               "agentName":"default-assistant",
-              "model":{
-                "modelName":"acceptance-stub",
-                "variant":"default"
+              "execution":{
+                "driver":"builtin",
+                "settings":{"modelName":"acceptance-stub","variant":"default"}
               },
               "environmentName":null
             },

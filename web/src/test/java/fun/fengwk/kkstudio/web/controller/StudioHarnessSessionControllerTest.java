@@ -20,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
@@ -34,7 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
@@ -172,10 +173,10 @@ class StudioHarnessSessionControllerTest {
     thread.setCreatedAt(Instant.parse("2026-08-10T00:00:00Z"));
     thread.setUpdatedAt(Instant.parse("2026-08-10T00:01:00Z"));
     thread.setStatus("IDLE");
-    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setModelName("gpt-5");
-    model.setVariant("default");
-    thread.setModel(model);
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver("builtin");
+    execution.setSettings(Map.of("modelName", "gpt-5", "variant", "default"));
+    thread.setExecution(execution);
     thread.setHeadMessagePreview("hello");
     // 真实 Session HTTP 出口必须保留同名根/子及显式的根 null 父身份。
     HarnessThreadSummaryDTO child = new HarnessThreadSummaryDTO();
@@ -185,7 +186,7 @@ class StudioHarnessSessionControllerTest {
     child.setCreatedAt(thread.getCreatedAt());
     child.setUpdatedAt(thread.getUpdatedAt());
     child.setStatus(thread.getStatus());
-    child.setModel(model);
+    child.setExecution(execution);
     when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread, child));
 
     mockMvc
@@ -200,8 +201,9 @@ class StudioHarnessSessionControllerTest {
         .andExpect(jsonPath("$.data[1].name").value("thread"))
         .andExpect(jsonPath("$.data[0].name").value("thread"))
         .andExpect(jsonPath("$.data[0].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
-        .andExpect(jsonPath("$.data[0].model.variant").value("default"))
+        .andExpect(jsonPath("$.data[0].execution.driver").value("builtin"))
+        .andExpect(jsonPath("$.data[0].execution.settings.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$.data[0].execution.settings.variant").value("default"))
         .andExpect(jsonPath("$.data[0].headMessagePreview").value("hello"));
     verify(harnessQueryService).listThreadSummaries(SESSION_ID);
 
@@ -211,7 +213,10 @@ class StudioHarnessSessionControllerTest {
             SESSION_ID,
             null,
             new RootPayload(
-                new BranchSettings("assistant", new ModelSelection("gpt-5", "default"), null)),
+                new BranchSettings(
+                    "assistant",
+                    BuiltinExecution.of(new ModelSelection("gpt-5", "default")),
+                    null)),
             Instant.parse("2026-08-10T00:00:00Z"));
     Entry user =
         new Entry(

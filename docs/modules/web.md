@@ -102,7 +102,7 @@ Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入�
 Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
 以及创建型 target 各自互斥字段（`NEW_SESSION` 携带 `rootSettings`；`NEW_THREAD` 携带 `threadName`；
 `NEW_FORKED_SESSION` 必填 `sourceThreadId` 且禁止 `rootSettings`/`threadName`）与续写面的精确 cursor。
-产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
+产品命令批为 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
 `CUSTOM_MESSAGE`、`NOTIFICATION` 与 `SET_CONTRIBUTOR_STATE` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
 Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。

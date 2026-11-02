@@ -6,7 +6,7 @@
 
 ## Driver 边界
 
-[`BuiltinAgentDriver`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/driver/BuiltinAgentDriver.java) 由组合根直接装配，使用分支 `BranchSettings.model` 中的 `ModelSelection` 选择模型。Driver 方法在 Runtime 已开启的事务内执行，不开启新事务、不执行外部 I/O；Provider I/O 由 MODEL Work 路径承担。
+[`BuiltinAgentDriver`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/driver/BuiltinAgentDriver.java) 由组合根直接装配，使用分支 `BranchSettings.execution` 中的 `ExecutionSelection`（`driver = "builtin"`，settings 经 [`BuiltinExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/driver/BuiltinExecution.java) 解析为 `ModelSelection`）选择模型。Driver 方法在 Runtime 已开启的事务内执行，不开启新事务、不执行外部 I/O；Provider I/O 由 MODEL Work 路径承担。
 
 | 方法 | Builtin 行为 |
 | --- | --- |
