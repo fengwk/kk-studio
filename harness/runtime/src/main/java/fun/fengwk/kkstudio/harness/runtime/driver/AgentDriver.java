@@ -66,6 +66,20 @@ public interface AgentDriver {
   CompactionPreparation prepareAutomaticCompaction(
       ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage);
 
+  /**
+   * 是否允许在本安全边界先消费 queued settings / 输入再继续。
+   *
+   * <p>Builtin 默认保持既有优先队列语义；外部 Driver 在已冻结的输入周期仍 active 时返回 {@code false}，使该边界只启动 CONTINUATION，
+   * 不把新输入或设置混入同一周期。实现只在调用方事务内读取状态，不开启事务、不执行外部 I/O。
+   */
+  default boolean allowsQueuedInputHarvest(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    return true;
+  }
+
+  /** Stop 已推进公共 Thread head 后调用；默认 no-op。外部 Driver 用来把私有 record 的 current head 与已提交 Thread 对齐。 */
+  default void completeStop(HarnessStore.Transaction tx, ThreadState thread, DriverCommit commit) {}
+
   /** 撤销 Driver 执行资格；返回已追加 barrier 与需要提交后取消的本地执行身份。 */
   DriverStopResult stop(
       HarnessStore.Transaction tx,

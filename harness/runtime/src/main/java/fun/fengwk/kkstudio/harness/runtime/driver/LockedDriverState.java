@@ -13,6 +13,14 @@ public interface LockedDriverState {
 
   DriverActivity activity();
 
+  /**
+   * Pending failure may atomically terminate its declared tool batch; ordinary model results may
+   * not.
+   */
+  default boolean cancelsToolBatch() {
+    return false;
+  }
+
   /** 本次 generation 冻结的 request head；无状态时为 {@code null}。 */
   UUID requestHeadEntryId();
 

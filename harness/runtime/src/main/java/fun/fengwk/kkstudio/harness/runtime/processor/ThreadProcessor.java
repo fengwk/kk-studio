@@ -285,7 +285,8 @@ public final class ThreadProcessor {
         }
         // 压缩判断完成后，已关闭 turn 是安全边界：有序消费完整输入快照，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
-        if (ThreadInputDemand.hasInputDemand(tx, thread)) {
+        if (ThreadInputDemand.hasInputDemand(tx, thread)
+            && driver.allowsQueuedInputHarvest(tx, thread, path)) {
           planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
           return;
         }
@@ -343,6 +344,9 @@ public final class ThreadProcessor {
       EntryPath path,
       Instant now) {
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
+    if (!driverRegistry.of(path.baseSettings()).allowsQueuedInputHarvest(tx, thread, path)) {
+      return false;
+    }
     List<ThreadCommand> settings = new ArrayList<>();
     for (ThreadCommand command : queued) {
       if (isStandaloneSetting(command.type())) {
@@ -741,7 +745,12 @@ public final class ThreadProcessor {
             thread.id(),
             path,
             reason,
-            queued,
+            reason == TurnStartReason.CONTINUATION
+                    && !driverRegistry
+                        .of(path.baseSettings())
+                        .allowsQueuedInputHarvest(tx, thread, path)
+                ? List.of()
+                : queued,
             thread.nextCommandSequence() - 1,
             tx::nextId,
             now,

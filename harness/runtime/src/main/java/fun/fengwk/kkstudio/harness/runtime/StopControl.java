@@ -415,6 +415,7 @@ final class StopControl {
           isForeignOpenTurn(path, thread.id())
               ? node.thread()
               : materializeQueuedNotifications(tx, node.thread(), queuedNotifications, now);
+      driver.completeStop(tx, stoppedThread, commit(tx));
       stoppedStates.add(stoppedThread);
       receipts.add(
           new StoppedThreadReceipt(
@@ -968,7 +969,9 @@ final class StopControl {
       LockedDriverState driverState) {
     Entry semanticHead = path.headIgnoringTrailingControlEntries();
     if (isForeignOpenTurn(path, thread.id())
-        || (driverState.requestHeadEntryId() != null && !driverState.resultAt(thread.headEntryId()))
+        || (driverState.requestHeadEntryId() != null
+            && !driverState.resultAt(thread.headEntryId())
+            && !driverState.cancelsToolBatch())
         || !(semanticHead.payload() instanceof MessagePayload message)
         || message.message().role() != AgentMessageRole.ASSISTANT) {
       return List.of();

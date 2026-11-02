@@ -55,7 +55,10 @@ public final class ThreadContextClassifier {
         requireEmptySiblings(toolSiblings, "while driver state is not at its request basis");
         return new ThreadContext.IdleOrHistorical();
       }
-      requireEmptySiblings(toolSiblings, "at the driver basis");
+      if (driverState.activity() != DriverActivity.RESPONSE_PENDING
+          || !driverState.cancelsToolBatch()) {
+        requireEmptySiblings(toolSiblings, "at the driver basis");
+      }
       return driverState.activity() == DriverActivity.ACTIVE
           ? new ThreadContext.ModelActive(driverState)
           : new ThreadContext.ModelTerminalPending(driverState);
