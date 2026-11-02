@@ -131,7 +131,7 @@ export function CustomMessageQueueHarness() {
       executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         environmentName: null,
         goal: null,
       },

@@ -117,8 +117,9 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       environmentName: null,
+      goal: null,
     },
     createTime: 1790812800,
     updateTime: 1790812800,
@@ -304,7 +305,7 @@ async function installChatApi(
       await route.fulfill({ json: { status: 200, data: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
-        executionControl: 'RUNNABLE', model: boundThread.branchSettings.model, headMessagePreview: 'hello',
+        executionControl: 'RUNNABLE', model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: 'hello',
       }] } })
       return
     }
@@ -343,7 +344,7 @@ async function installChatApi(
           headEntryId: grandchild && grandCompleted ? 'entry-background' : boundThread.headEntryId,
           parentThreadId: grandchild ? CHILD_ID : THREAD_ID,
           branchSettings: { ...boundThread.branchSettings, agentName: grandchild ? 'researcher' : 'worker',
-            model: { modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
+            execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } } },
         },
         entries: [
           ...entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
@@ -386,13 +387,13 @@ async function installChatApi(
       recorded.treeReads += 1
       await route.fulfill({ json: { status: 200, data: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
-          model: boundThread.branchSettings.model, status: 'IDLE', executionControl: 'RUNNABLE',
+          model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
           turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: 1790812800 },
         { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
-          model: boundThread.branchSettings.model, status: 'IDLE', executionControl: 'RUNNABLE',
+          model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
           turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: 1790812860 },
         { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
-          model: { ...boundThread.branchSettings.model, variant: 'deep' },
+          model: { modelName: 'MiniMax', variant: 'deep' },
           status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE',
           turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: 1790812920 },
       ] } })
@@ -415,8 +416,8 @@ async function installChatApi(
         const accepted = (body.commands ?? []).map((command, index) => {
           const payload = command.type === 'SET_AGENT'
             ? { agentName: command.agentName }
-            : command.type === 'SET_MODEL'
-              ? { model: command.model }
+            : command.type === 'SET_EXECUTION'
+              ? { execution: command.execution }
               : { environmentName: command.environmentName ?? null }
           return {
             threadId: THREAD_ID,
@@ -999,8 +1000,8 @@ test('busy thread settings selection submits a standalone SET batch and shows th
     expectedHeadEntryId: string
     commands: Array<Record<string, unknown>>
   }
-  // 纯设置批次：固定顺序的 SET_MODEL，且没有伪造末尾 USER_MESSAGE/GOAL。
-  expect(batch.commands.map((command) => command.type)).toEqual(['SET_MODEL'])
+  // 纯设置批次：固定顺序的 SET_EXECUTION，且没有伪造末尾 USER_MESSAGE/GOAL。
+  expect(batch.commands.map((command) => command.type)).toEqual(['SET_EXECUTION'])
   expect(batch.expectedHeadEntryId).toBe('entry-3')
 
   const chip = page.locator('.thread-composer-settings-status[data-settings-status="pending"]').first()

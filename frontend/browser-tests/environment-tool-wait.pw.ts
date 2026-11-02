@@ -43,7 +43,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
             nextCommandSequence: '1', version: '1', status: 'RUNNING',
             executionControl: 'RUNNABLE',
             branchSettings: { agentName: 'assistant',
-              model: { modelName: 'VeryLongModelName', variant: 'default' },
+              execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
               environmentName: null, goal: null },
             createTime: now / 1000, updateTime: now / 1000,
           },

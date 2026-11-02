@@ -69,7 +69,7 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'assistant',
-          model: { modelName: 'minimax-m2.7', variant: 'default' },
+          execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
           environmentName: 'dev-node',
           goal: null,
         },
@@ -218,7 +218,7 @@ async function installPreviewApiMock(
           json: draftRequestPreview({
             headEntryId: body.expectedHeadEntryId,
             nextCommandSequence: body.expectedNextCommandSequence,
-          }, body.commands.find((command) => command.type === 'SET_MODEL')?.model?.modelName),
+          }, (body.commands.find((command) => command.type === 'SET_EXECUTION')?.execution?.settings as { modelName?: string } | undefined)?.modelName),
         })
         return
       }
@@ -246,7 +246,7 @@ async function installPreviewApiMock(
               parentThreadId: null,
               name: thread.name,
               agentName: thread.branchSettings.agentName,
-              model: thread.branchSettings.model,
+              model: (thread.branchSettings.execution.settings as { modelName: string; variant: string | null }),
               status: thread.status,
               executionControl: 'RUNNABLE',
               turnCount: 0,
