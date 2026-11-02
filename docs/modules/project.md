@@ -22,7 +22,7 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
 | [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
 | [repo](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/repo) | 按实体拆分的具体 `JdbcClient` Repository（直接承载 SQL、参数绑定与 RowMapper）及项目变更通知 |
-| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
+| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
 | [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 等业务工具与 Run 上下文 projector |
@@ -97,7 +97,11 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)、
 [`IssueRunService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueRunService.java)
 与 [`IssueEvidenceService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEvidenceService.java)
-是写用例的事务边界，`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
+是写用例的事务边界，`IssueEditingService.appendActivity` 统一了评论与指示等活动的追加、锁序与幂等回执；
+读侧由 [`ProjectSnapshotAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSnapshotAssembler.java) 与
+[`IssueDetailAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueDetailAssembler.java)
+在模块内部完成快照用例聚合；
+`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
 [`IssueMutationSupport`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueMutationSupport.java)
 只集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、幂等 receipt、版本/归档门禁与活动落库，
 不承载具体动作或状态/额度规则；Repository 只做单表读写与 CAS 行数判定。

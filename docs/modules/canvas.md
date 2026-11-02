@@ -60,7 +60,7 @@ Infra 用 `JdbcClient` 实现 Core 的端口：[`PostgresqlCanvasStore`](../../a
 
 删除画布先锁 Document：存在 `READY`、`RUNNING` 或 `UNKNOWN` Run 时整体拒绝；否则依次释放 pin、删除终态 Run、删除 Resource 行并释放全局 Blob 引用、删除 Node、Group、幂等记账，最后删除 Document。Blob 引用释放失败使整个事务回滚。
 
-[`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。
+[`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供资源下载/预览直接定位，无需全量加载画布快照。
 
 ## Function Run
 
