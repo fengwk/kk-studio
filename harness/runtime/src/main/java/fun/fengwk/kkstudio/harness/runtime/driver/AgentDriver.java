@@ -14,8 +14,9 @@ import java.util.UUID;
 /**
  * Runtime 内部的窄 Agent Driver 契约。
  *
- * <p>Driver 是 Runtime 端口的实现者：只按锁定 Thread 视图准备 Turn、推进已完成响应、投影中立活动/诊断与停止私有执行。Runtime 只装配 Builtin
- * 实现，不动态加载 Driver，不传递 ServiceLocator，也不读取 Driver 私有状态类型。
+ * <p>Driver 是 Runtime 端口的实现者：只按锁定 Thread 视图准备 Turn、推进已完成响应、投影中立活动/诊断与停止私有执行。组合根向 {@link
+ * DriverRegistry} 注册所有可用 Driver，Runtime 按 {@code ExecutionSelection.driver} 路由；未安装 Driver 由 {@link
+ * UninstalledAgentDriver} 承接。Runtime 不动态加载 Driver，不传递 ServiceLocator，也不读取 Driver 私有状态类型。
  *
  * <p>所有方法都在调用方已有事务内执行：不得开启新事务、不得执行外部 I/O、不得执行工具或绕过历史校验。
  */
@@ -77,7 +78,7 @@ public interface AgentDriver {
    *   <li>在 {@code IdleOrHistorical} 边界判定是否收割排队输入以开启新 {@code INPUT} 回前后。
    * </ul>
    *
-   * <p>Builtin 默认返回 {@code true} 保持既有优先队列语义；外部 Driver 在私有周期冻结或仍 active 时返回 {@code false}，
+   * <p>默认返回 {@code true}（如 Builtin 保持既有优先队列语义）；Driver 在私有周期冻结或仍 active 时可返回 {@code false}，
    * 阻止新输入或设置在此时被收割。实现只在调用方事务内读取状态，不开启事务、不执行外部 I/O。
    */
   default boolean allowsQueuedInputHarvest(

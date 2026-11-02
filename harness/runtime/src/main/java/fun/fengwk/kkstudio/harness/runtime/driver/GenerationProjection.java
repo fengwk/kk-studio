@@ -11,8 +11,8 @@ import java.util.UUID;
 /**
  * Driver 当前 generation 的公共快照投影。
  *
- * <p>字段只承载稳定身份、生命周期状态、已完成的文本/思考片段与结构化错误；不包含 ModelInvocation、ProviderRequest/Response、
- * StreamCheckpoint 或任何 Driver 实现类型。Provider raw 仅保留在 Driver 私有状态中。
+ * <p>字段只承载稳定身份、生命周期状态、已完成的文本/思考片段与结构化错误；不包含 Driver 私有调用实体、底层 Provider 请求/响应、流式检查点或任何 Driver
+ * 实现私有类型。底层协议与诊断细节仅保留在 Driver 私有状态中。
  */
 public record GenerationProjection(
     UUID generationId,

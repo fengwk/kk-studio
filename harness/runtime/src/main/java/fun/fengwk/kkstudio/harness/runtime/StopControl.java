@@ -304,8 +304,8 @@ final class StopControl {
     List<WorkTarget> allWorkTargets = new ArrayList<>();
     for (ThreadStopContext ctx : contexts) {
       allWorkTargets.add(new WorkTarget(WorkTargetType.THREAD, ctx.thread().id()));
-      if (ctx.driverState().executionId() != null) {
-        allWorkTargets.add(new WorkTarget(WorkTargetType.MODEL, ctx.driverState().executionId()));
+      if (ctx.driverState().workTarget() != null) {
+        allWorkTargets.add(ctx.driverState().workTarget());
       }
       allWorkTargets.add(new WorkTarget(WorkTargetType.AGENT, ctx.thread().id()));
       for (ToolInvocation sibling : ctx.toolSiblings()) {
@@ -321,9 +321,9 @@ final class StopControl {
     }
 
     // Stage 8: 自底向上收敛。每节点重新读取最新 ThreadState 并按最新事实分类（子节点收敛不改动父节点自身
-    // Turn，但重新读取可保证只基于 tx 内最新状态 mutation）；必要时先物化已提交的 terminal Model / Tool batch
+    // Turn，但重新读取可保证只基于 tx 内最新状态 mutation）；必要时先物化已提交的 terminal generation / Tool batch
     // 结果，再取消 Commands、写自有边界、置 STOPPED、固化排队通知。所需行锁均已在 Stage 4-7 取得，遍历中不再新增锁。
-    Set<UUID> modelExecutionIds = new LinkedHashSet<>();
+    Set<UUID> driverExecutionIds = new LinkedHashSet<>();
     Set<UUID> toolExecutionIds = new LinkedHashSet<>();
     List<StoppedThreadReceipt> receipts = new ArrayList<>();
     List<ThreadState> stoppedStates = new ArrayList<>();
@@ -342,10 +342,10 @@ final class StopControl {
       List<ToolInvocation> siblings = original.toolSiblings();
       ThreadContext context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       AgentDriver driver = driverRegistry.of(path.baseSettings());
-      if (context instanceof ThreadContext.ModelTerminalPending pending) {
+      if (context instanceof ThreadContext.GenerationTerminalPending pending) {
         // 提交先于 Stop：用 Driver 的公共物化把已提交的 terminal 结果写入历史（绝不 409），再正常 Stop。
         Materialized materialized =
-            materializeTerminalModel(tx, thread, path, pending.driverState(), driver);
+            materializeTerminalGeneration(tx, thread, path, pending.driverState(), driver);
         if (materialized.terminalEntryId() != null) {
           committedTerminals.add(materialized);
         }
@@ -364,7 +364,7 @@ final class StopControl {
         siblings = List.of();
         context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       }
-      if (context instanceof ThreadContext.ModelTerminalPending
+      if (context instanceof ThreadContext.GenerationTerminalPending
           || context instanceof ThreadContext.ToolTerminalPending) {
         throw new IllegalStateException(
             "terminal invocation still pending after materialization for thread " + thread.id());
@@ -390,11 +390,11 @@ final class StopControl {
         }
       }
 
-      // 所有上下文都先撤销 Driver 执行权：Model/Tool 由 Driver 写私有边界，idle/continuation 只收敛私有状态。
-      // 返回的 opaque executionId 在本事务提交后交给既有本地 canceller。
+      // 所有上下文都先撤销 Driver 执行权：generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
+      // 返回的 executionIds 在本事务提交后交给组合根提供的 Driver 执行取消函数。
       DriverStopResult driverStop =
           driver.stop(tx, thread, path, driverState, commit(tx), stopRequestId);
-      modelExecutionIds.addAll(driverStop.executionIds());
+      driverExecutionIds.addAll(driverStop.executionIds());
 
       NodeStop node =
           switch (context) {
@@ -402,12 +402,12 @@ final class StopControl {
                 tx, thread, path, queuedNotifications, stopRequestId, now);
             case ThreadContext.ContinuationDue ignored -> stopContinuation(
                 tx, thread, path, stopRequestId, now);
-            case ThreadContext.ModelActive active -> stopModel(
+            case ThreadContext.GenerationActive active -> stopGeneration(
                 tx, thread, path, driverStop, stopRequestId, now);
             case ThreadContext.ToolActive active -> stopTools(
                 tx, thread, path, driverState, active, stopRequestId, now);
-            case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
-                "terminal Model context escaped the Stop guard");
+            case ThreadContext.GenerationTerminalPending ignored -> throw new IllegalStateException(
+                "terminal generation context escaped the Stop guard");
             case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
                 "terminal Tool context escaped the Stop guard");
           };
@@ -463,7 +463,7 @@ final class StopControl {
     ThreadState target = tx.threads().find(command.threadId()).orElse(lockedTarget);
     return new Commit(
         new StopResult(false, target, receipts),
-        List.copyOf(modelExecutionIds),
+        List.copyOf(driverExecutionIds),
         List.copyOf(toolExecutionIds));
   }
 
@@ -726,7 +726,7 @@ final class StopControl {
         null);
   }
 
-  private NodeStop stopModel(
+  private NodeStop stopGeneration(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
@@ -902,7 +902,7 @@ final class StopControl {
    * 提交先于 Stop：让 Driver 把已提交的 terminal generation 物化进历史（ASSISTANT 结果 + TURN_END，或 tool batch 的
    * siblings），关闭 turn 时由 Driver 删除私有状态；Stop 随后自行收敛该节点。
    */
-  private Materialized materializeTerminalModel(
+  private Materialized materializeTerminalGeneration(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
@@ -1009,12 +1009,12 @@ final class StopControl {
   }
 
   /** Durable Stop 结果，加上 transaction 提交后需取消的全部 process-local execution。 */
-  record Commit(StopResult result, List<UUID> modelExecutionIds, List<UUID> toolExecutionIds) {
+  record Commit(StopResult result, List<UUID> driverExecutionIds, List<UUID> toolExecutionIds) {
 
     Commit {
       result = Objects.requireNonNull(result, "result");
-      modelExecutionIds =
-          List.copyOf(Objects.requireNonNull(modelExecutionIds, "modelExecutionIds"));
+      driverExecutionIds =
+          List.copyOf(Objects.requireNonNull(driverExecutionIds, "driverExecutionIds"));
       toolExecutionIds = List.copyOf(Objects.requireNonNull(toolExecutionIds, "toolExecutionIds"));
     }
   }

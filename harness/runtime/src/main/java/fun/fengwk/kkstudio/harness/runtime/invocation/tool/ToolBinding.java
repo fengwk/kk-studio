@@ -18,7 +18,7 @@ import java.util.Objects;
  *
  * <p>环境组合规则是封闭的：{@link EnvironmentSupport#NONE} 不得携带环境；{@link EnvironmentSupport#OPTIONAL}
  * 可以携带当前选择，也可以完全不携带；{@link EnvironmentSupport#REQUIRED} 的正常规划结果必须携带环境——无选择的 {@code REQUIRED} 工具在
- * {@code ModelRequestSpec} 构造之前就已被过滤，因此缺环境的 REQUIRED binding 一定是陈旧或伪造的。
+ * 请求规划构造之前就已被过滤，因此缺环境的 REQUIRED binding 一定是陈旧或伪造的。
  *
  * <p>{@code environmentId} 与 {@code environmentName} 同源，必须同时存在或同时缺失。{@code environmentName}
  * 是该分支冻结的用户可见 Environment 名，是历史投影判定 native 资格的 durable 事实：branch 后来切换 Environment 时，既有

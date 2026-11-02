@@ -11,11 +11,15 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 
 import java.util.List;
 import java.util.Objects;
@@ -26,7 +30,8 @@ import java.util.function.Supplier;
  * Runtime 内核测试用的最小确定性 Driver。
  *
  * <p>默认行为是“没有 Driver 私有状态”：turn resolution 返回 {@code null}、自动压缩返回 {@code null}、read/lock 返回 {@link
- * DriverActivity#NONE}、stop 不追加 barrier。需要 Driver 参与的用例可配置 turn resolution、活动投影、响应物化结果与停止结果。
+ * DriverActivity#NONE}。stop 未配置 barrier 时，只为位于 request basis 的活跃 generation 追加 CANCELLED
+ * barrier，与真实 Driver 撤销执行资格的契约一致。需要 Driver 参与的用例可配置 turn resolution、活动投影、响应物化结果与停止结果。
  *
  * <p>私有状态只存在内存，不参与 Store 事务提交/回滚；这正是 runtime 内核测试需要的边界：Runtime 只能观察 {@link LockedDriverState}
  * 中立投影，不能读取 Driver 私有实现类型。需要验证 Driver 私有行与核心事务同快照/回滚的测试应放到 builtin 的 typed store 测试中。
@@ -168,6 +173,25 @@ public final class FakeAgentDriver implements AgentDriver {
       LockedDriverState state,
       DriverCommit commit,
       UUID stopRequestId) {
+    if (stopResult.barrierEntryId() != null) {
+      return stopResult;
+    }
+    if (state != null
+        && state.activity() == DriverActivity.ACTIVE
+        && commit != null
+        && path != null
+        && state.atBasis(path.head().id())) {
+      UUID barrierId = commit.nextId();
+      commit.insertEntry(
+          new Entry(
+              barrierId,
+              path.root().sessionId(),
+              path.head().id(),
+              new AssistantErrorPayload(
+                  new AssistantError(AssistantError.CANCELLED_CODE, "cancelled"), null),
+              commit.now()));
+      return new DriverStopResult(barrierId, stopResult.executionIds());
+    }
     return stopResult;
   }
 
@@ -206,7 +230,7 @@ public final class FakeAgentDriver implements AgentDriver {
       UUID requestHeadEntryId,
       UUID resultEntryId,
       GenerationProjection projection,
-      UUID executionId,
+      WorkTarget workTarget,
       boolean cancelsToolBatch)
       implements LockedDriverState {
 
@@ -219,8 +243,8 @@ public final class FakeAgentDriver implements AgentDriver {
         UUID requestHeadEntryId,
         UUID resultEntryId,
         GenerationProjection projection,
-        UUID executionId) {
-      this(activity, requestHeadEntryId, resultEntryId, projection, executionId, false);
+        WorkTarget workTarget) {
+      this(activity, requestHeadEntryId, resultEntryId, projection, workTarget, false);
     }
 
     @Override

@@ -193,7 +193,7 @@ function formatDisplayJson(value: unknown): string {
  * 跟踪当前 TURN_START entryId 与 turnNumber，并把 Turn usage 挂起至该 Turn 的
  * TURN_END（读取该 Turn Assistant metadata 的完整 usage/cost）。
  *
- * snapshot 在 ModelTerminalPending / ToolTerminalPending 窗口内会同时携带 durable
+ * snapshot 在 GenerationTerminalPending / ToolTerminalPending 窗口内会同时携带 durable
  * Entry 与尚未物化的活跃 overlay；按「Turn 内」的稳定 identity 去重，durable Entry
  * 是权威记录——旧 Turn 的 durable Entry 绝不能抑制新 Turn 相同
  * (attempt, sequence) / toolCallId 的活跃 overlay。

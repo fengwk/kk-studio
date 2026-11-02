@@ -17,7 +17,7 @@ import java.util.UUID;
  *
  * <p>SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；返回的 {@code headEntryId} 即 ToolResult Entry。本
  * appender 绝不 attach/更新 ToolInvocation 行，也绝不消费 upload：资源已在单工具 terminal 事务内转移为 Session 引用， 此处只做稳定内容到
- * Entry 的纯映射。调用方在同一事务完成 Entry append 后物理删除子行与父 ModelInvocation。
+ * Entry 的纯映射。调用方在同一事务完成 Entry append 后物理删除工具子行并通知 Driver 清理私有 generation 状态。
  */
 public final class ToolOutcomeAppender {
 

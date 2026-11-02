@@ -73,20 +73,20 @@ import java.util.UUID;
  * single-action reducer（KISS），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。
  *
  * <p>处理流程：先用纯 {@link ThreadContextProbe} 把当前 Thread 分类为唯一的 live/historical 适用性上下文 （{@link
- * ThreadContext}，unlocked 读：Model 只按 (threadId, open TURN_START) 查找，Tool siblings 只在 Model 结果恰为当前
- * Assistant head 时加载），再按上下文恰执行一个动作：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
- * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出的
- * Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) MODEL_ACTIVE / TOOL_ACTIVE
- * —— 当前 applicable invocation 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY phase gap 启动
- * TURN_PREFIX，其它 continueModel obligation 启动 CONTINUATION；(e) queued USER_MESSAGE/CUSTOM_MESSAGE
- * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动新 INPUT Turn 时被
- * normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
+ * ThreadContext}，unlocked 读：Driver 状态按 (threadId, open TURN_START) 查找，Tool siblings 只在 generation
+ * 结果恰为当前 Assistant head 时加载），再按上下文恰执行一个动作：(a) GENERATION_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的
+ * terminal Driver generation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread generation
+ * 产出的 Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) GENERATION_ACTIVE /
+ * TOOL_ACTIVE —— 当前 applicable generation/tool 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY
+ * phase gap 启动 TURN_PREFIX，其它 continuation obligation 启动 CONTINUATION；(e) queued
+ * USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn
+ * 只在启动新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动在单个 store transaction 内完成：按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
  * cutoff、校验 claim、分配 candidate Entry ID 并构造完整合法 candidate EntryPath（不写任何持久化状态），随后在同一事务内同步调用 {@link
  * TurnResolver}。Resolved 请求先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model
  * / variant / tools / compaction）做机械一致性校验，再一次性原子提交 TURN_START + Message + Command markers + Thread
- * 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。因此不存在事务外
+ * 更新 + Driver generation/Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。因此不存在事务外
  * resolve、二次 head/Command CAS 或解析期 heartbeat：candidate 只在解析完成后写入同一事务，要么全部提交、要么全部回滚。
  *
  * <p>只有显式 typed {@link TurnResolveTransientException}（DB / 网络瞬断）会使当前事务完整回滚，随后由 {@link #process}
@@ -94,29 +94,29 @@ import java.util.UUID;
  * FAILED TURN_END。任何 claim 损失一律抛内部 {@link ClaimLostSignal} 使事务完整回滚（零部分写入）， 由 {@link #process} 映射为
  * LOST_OWNERSHIP。duplicate / stale THREAD claim 是 no-op。
  *
- * <p>锁序与最终所有权围栏（final fence）：Model terminal apply / Tool sibling batch / resolve commit
- * 都在同一事务内先完成全部低序写入（Session KEY SHARE -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
+ * <p>锁序与最终所有权围栏（final fence）：Driver generation terminal apply / Tool sibling batch / resolve commit
+ * 都在同一事务内先完成全部低序写入（Session KEY SHARE -&gt; Thread -&gt; Commands -&gt; Driver 私有行 -&gt;
  * ToolInvocation siblings），claimed THREAD Work 的最终所有权围栏最后执行；围栏失败抛出内部 {@link ClaimLostSignal}
- * 使事务完整回滚，再由 {@link #process} 映射为 LOST_OWNERSHIP，绝不存在带持久化变更的 LOST 提交。commit 与 applyModel 在同层 Work
- * 中按 (type, id) 升序请求（先 THREAD wake 再 MODEL / TOOL Work）。历史 / 非 applicable open Turn（head 不在
- * applicable 位置）在分类阶段只使用 unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
+ * 使事务完整回滚，再由 {@link #process} 映射为 LOST_OWNERSHIP，绝不存在带持久化变更的 LOST 提交。commit 与 applyDriver 在同层 Work
+ * 中按 (type, id) 升序请求（先 THREAD wake 再 Driver / TOOL Work）。历史 / 非 applicable open Turn（head 不在
+ * applicable 位置）在分类阶段只使用 unlocked 读，绝不先锁 Driver 私有行/Tool 再落到 Commands / INPUT normalization。
  *
  * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
- * complete，依赖 wakeVersion 保留新 wake。Model terminal apply 按 planner 决策落地：active Tool phase 仅为 READY
- * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
- * closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure / cancel /
- * unknown / compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有
- * queued user demand、HISTORY / OVERFLOW obligation、hard overflow 或 CONTINUE 的 continueModel
- * obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由
- * planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim 才由 durable
- * continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
- * children+parent。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
- * （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法 deferred messages 时先请求 THREAD 再
- * complete，绝不立即重排同一压缩。
+ * complete，依赖 wakeVersion 保留新 wake。Driver generation terminal apply 按 planner 决策落地：active Tool
+ * phase 仅为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经
+ * ToolTerminalPending 应用）；closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED /
+ * terminal failure / cancel / unknown / compaction 关闭结果）在同一事务追加 TURN_END
+ * 与严格物化校验（attach-then-delete）并由 Driver complete/物化清理私有状态，且仅在已有 queued user demand、HISTORY /
+ * OVERFLOW obligation、hard overflow 或 continuation obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft
+ * threshold 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构：
+ * 固定先请求 THREAD 再 complete，下一 claim 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加
+ * continueModel=true TURN_END 并同事务删除 children。resolve commit 的 resolved 只请求 Driver Work，绝不因
+ * deferred messages 制造无意义 THREAD claim （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法
+ * deferred messages 时先请求 THREAD 再 complete，绝不立即重排同一压缩。
  *
  * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。
- * 所有 trigger 共用 MODEL Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
- * wait、无父 ModelInvocation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
+ * 所有 trigger 共用 Driver Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
+ * wait、无父 generation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
  * Command，另一 Thread 拥有的共享历史 turn 不压缩，COMPACTION 子执行树内绝不再次规划压缩。
  */
 @Slf4j
@@ -233,7 +233,7 @@ public final class ThreadProcessor {
     ThreadContext context = threadContextProbe.probe(tx, thread, currentState);
     AgentDriver driver = driverRegistry.of(path.baseSettings());
     switch (context) {
-      case ThreadContext.ModelTerminalPending pending -> {
+      case ThreadContext.GenerationTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Driver：判断 pre-existing queued message 必须在 lock Driver 前加载。
         boolean hasQueuedMessage =
             ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
@@ -250,11 +250,11 @@ public final class ThreadProcessor {
             || !Objects.equals(pending.driverState().generationId(), driverState.generationId())) {
           throw new IllegalStateException("locked driver state no longer matches the pending turn");
         }
-        applyModel(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
+        applyGeneration(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
       }
-      case ThreadContext.ModelActive ignored -> completeClaim(tx, claim, now);
+      case ThreadContext.GenerationActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
-        // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Model；Driver 只在存在时参与附加校验。
+        // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Driver generation；Driver 只在存在时参与附加校验。
         LockedDriverState driverState = driver.lockState(tx, thread, currentState);
         List<ToolInvocation> lockedSiblings =
             tx.tools().lockByAssistantEntry(pending.assistant().id());
@@ -326,7 +326,7 @@ public final class ThreadProcessor {
   /**
    * 安全边界上应用 queued 的全部 standalone 设置（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）：从整段 queued snapshot
    * 按原序 提取这些命令，归约成完整 {@link BranchSettings} 快照并 append 一个 {@link SettingsPayload} Entry，标记命令
-   * applied（指向该 SETTINGS Entry）后推进 head。绝不打开 / 关闭 Turn、绝不创建 ModelInvocation，也绝不 resume STOPPED
+   * applied（指向该 SETTINGS Entry）后推进 head。绝不打开 / 关闭 Turn、绝不发起 Driver generation，也绝不 resume STOPPED
    * Thread——只有显式新输入才会 恢复 RUNNABLE。
    *
    * <p>从整段 snapshot 提取而非前导前缀：{@code [USER, SET_MODEL]} 这类交错必须让设置先于任何 input / 压缩生效，同时保留设置内部
@@ -398,7 +398,7 @@ public final class ThreadProcessor {
    * 恰好执行一次并完成 claim。结果物化、attempt 审计与私有 terminal 行清理全部由 Driver 在同一事务内完成；Runtime 只推进公共 Thread、结算 Join
    * 与规划 Work。
    */
-  private void applyModel(
+  private void applyGeneration(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -693,7 +693,7 @@ public final class ThreadProcessor {
     tx.tools().deleteByIds(siblings.stream().map(ToolInvocation::id).toList());
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.threads().update(advanced);
-    // Driver 回调必须看到已提交的 Thread head；Builtin 仍用原 path 校验已挂接结果。
+    // Driver 回调必须看到已提交的 Thread head，并用原 path 校验已挂接结果。
     driver.completeToolBatch(tx, thread, path, driverState, siblings, commit(tx));
     EntryPath updatedPath = tx.entries().loadPath(turnEndId);
     coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
@@ -735,7 +735,7 @@ public final class ThreadProcessor {
               + thread.id());
     }
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-    // claim 已在 process 入口用 Work-only 事务验证；本事务不再提前锁 Work（否则会在低序 Entry / ModelInvocation 之前
+    // claim 已在 process 入口用 Work-only 事务验证；本事务不再提前锁 Work（否则会在低序 Entry / Driver 私有行之前
     // 取得高序 WORK 锁并破坏锁序）。最终 commit fence 在全部低序 mutation 后校验所有权，失败即整体回滚。
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =

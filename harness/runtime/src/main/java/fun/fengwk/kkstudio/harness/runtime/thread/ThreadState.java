@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * 一事务推进，不因 Stop、压缩或模型重试而倒退。{@code nextCommandSequence} 保留为下一条待分配 Command sequence。
  *
  * <p>所有 Thread 行变更都通过下方纯转换方法执行，并把 {@code version} 严格 +1。该版本是 Thread 结构与控制状态的 CAS / invalidation
- * cursor，不是完整快照的内容版本：ModelInvocation 的高频流式 checkpoint 可在同一 Thread version 内推进。Store 必须在每次 {@code
+ * cursor，不是完整快照的内容版本：Driver generation 的高频流式 checkpoint 可在同一 Thread version 内推进。Store 必须在每次 {@code
  * updateThread} 写入前调用 {@link #validateTransition}。
  */
 public record ThreadState(

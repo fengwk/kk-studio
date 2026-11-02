@@ -163,7 +163,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                         now));
           }
 
-          // C：打开的 turn，terminal Model 已提交（ModelTerminalPending）。
+          // C：打开的 turn，terminal Model 已提交（GenerationTerminalPending）。
           UUID cStart = tx.nextId();
           UUID cUser = tx.nextId();
           tx.entries()

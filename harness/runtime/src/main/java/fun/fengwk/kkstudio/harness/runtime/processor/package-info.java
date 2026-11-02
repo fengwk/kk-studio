@@ -13,7 +13,7 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor} 输入必须是 TOOL target 的
  * claim，以 {@link fun.fengwk.kkstudio.harness.runtime.port.ToolGateway} 做本地
- * admission，并在独占虚拟线程上阻塞执行至终态。所有持久化状态变更都在短事务内通过 store 锁序（Thread -&gt; ModelInvocation -&gt;
+ * admission，并在独占虚拟线程上阻塞执行至终态。所有持久化状态变更都在短事务内通过 store 锁序（Thread -&gt; Driver 私有行 -&gt;
  * ToolInvocation -&gt; Work，同层 Work 按 (type, id) 升序）与 lease/token 校验完成，lost / stale 完整 no-op；Tool
  * 在副作用之前持久化 READY -&gt; RUNNING，取消即对执行线程 interrupt，资源只在终态决议与执行体返回之后释放。
  *

@@ -182,7 +182,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (tool == null) {
       return new Prepare.Lost();
     }
-    // 公共工具归属与能力已冻结在 TurnStart；执行路径不读取/锁定 ModelInvocation。
+    // 公共工具归属与能力已冻结在 TurnStart；执行路径不读取/锁定 Driver 私有行。
     if (!tool.threadId().equals(thread.id())) {
       throw new IllegalStateException(
           "tool invocation " + tool.id() + " changed its thread during preparation");

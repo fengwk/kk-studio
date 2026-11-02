@@ -1,21 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.driver;
 
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+
 import java.util.UUID;
 
 /**
  * 事务内 Driver 状态的中立视图。
  *
- * <p>实现可以持有 Driver 私有状态（例如 Builtin 的 ModelInvocation），但 Runtime 只能通过本接口读取活动类别与中立投影，
- * 不得强转或读取实现字段。实例只在产生它的 store transaction 内有效；只有 {@link AgentDriver#lockState} 返回的状态可用于执行和变更，{@link
- * AgentDriver#readState} 返回的状态仅供读取。
+ * <p>实现可以持有 Driver 私有状态，但 Runtime 只能通过本接口读取活动类别与中立投影，不得强转或读取实现字段。实例只在产生它的 store transaction 内有效；只有
+ * {@link AgentDriver#lockState} 返回的状态可用于执行和变更，{@link AgentDriver#readState} 返回的状态仅供读取。
  */
 public interface LockedDriverState {
 
   DriverActivity activity();
 
   /**
-   * Pending failure may atomically terminate its declared tool batch; ordinary model results may
-   * not.
+   * Pending failure may atomically terminate its declared tool batch; ordinary generation results
+   * may not.
    */
   default boolean cancelsToolBatch() {
     return false;
@@ -35,8 +36,12 @@ public interface LockedDriverState {
     return null;
   }
 
-  /** 需要提交后 best-effort 取消的本地执行身份；无执行或已终止时为 {@code null}。Runtime 只把它当作不透明 UUID 传递。 */
-  default UUID executionId() {
+  /**
+   * 当前 generation 持有、以 Driver 私有身份为键的 Work 邮箱，没有时为 null。
+   *
+   * <p>Stop 在 Work 锁阶段按规范顺序锁定并删除它；以 Thread 为键的 AGENT Work 由 Runtime 为每个停止的 Thread 统一围栏，不经本方法声明。
+   */
+  default WorkTarget workTarget() {
     return null;
   }
 

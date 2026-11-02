@@ -120,10 +120,5 @@ final class UninstalledAgentDriver implements AgentDriver {
     public GenerationProjection projection() {
       return null;
     }
-
-    @Override
-    public UUID executionId() {
-      return null;
-    }
   }
 }

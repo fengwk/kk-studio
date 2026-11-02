@@ -8,14 +8,15 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier} 是纯、非持久化的 Thread
- * live/historical 适用性分类：分类器以当前 ThreadState + root-to-head EntryPath + 本 Thread 当前 open Turn 的
- * ModelInvocation（无则 null）+ 仅在 Model 结果恰为当前 Assistant head 时加载的 Tool siblings 为输入，不接触
- * Store、不产生锁，返回唯一的 {@link fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext} 上下文（terminal
- * apply / Work-only 挂起 / continuation / 输入或静止）；{@link
- * fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus} 是该上下文唯一的对外状态投影。不变量被破坏的形状抛 {@link
- * IllegalStateException}。ThreadProcessor 与 root 包的 HarnessRuntime 控制面通过共享的锁定上下文辅助（ {@code
+ * live/historical 适用性分类：分类器以当前 ThreadState + root-to-head EntryPath + 本 Thread 当前适用的 Driver
+ * 状态（{@link fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState}，无则 null）+ 仅在 generation
+ * 结果恰为当前 Assistant head 时加载的 Tool siblings 为输入，不接触 Store、不产生锁，返回唯一的 {@link
+ * fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext} 上下文（terminal apply / Work-only 挂起 /
+ * continuation / 输入或静止）；{@link fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus}
+ * 是该上下文唯一的对外状态投影。不变量被破坏的形状抛 {@link IllegalStateException}。ThreadProcessor 与 root 包的 HarnessRuntime
+ * 控制面通过共享的锁定上下文辅助（ {@code
  * fun.fengwk.kkstudio.harness.runtime.ThreadContextLock}）使用同一分类作为适用性事实源，控制面先锁 Thread（以及需要的
- * Commands）再锁 Model/Tool，分类结果不会漂移。
+ * Commands）再锁 Driver 私有行/Tool，分类结果不会漂移。
  *
  * <p>{@code fun.fengwk.kkstudio.harness.runtime.thread.command} 包承载 Command mailbox 的持久化
  * payload、batch 与 harvest reducer。面向具体执行后端的请求投影与校验属于 Driver，而非 Thread 域。
