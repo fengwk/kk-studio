@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
@@ -131,7 +132,8 @@ class IssueThreadExecutionTest {
     UUID threadId = UUID.randomUUID();
     UUID head = UUID.randomUUID();
     BranchSettings settings =
-        new BranchSettings("worker", ModelSelection.model("model", "v1"), null);
+        new BranchSettings(
+            "worker", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
     NewThreadCommand input =
         new NewThreadCommand(
             new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID());

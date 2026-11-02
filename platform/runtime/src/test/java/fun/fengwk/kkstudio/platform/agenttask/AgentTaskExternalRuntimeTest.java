@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -47,7 +48,8 @@ import java.util.function.Supplier;
 class AgentTaskExternalRuntimeTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("test-agent", ModelSelection.model("provider", "model"), null);
+      new BranchSettings(
+          "test-agent", BuiltinExecution.of(ModelSelection.model("provider", "model")), null);
 
   private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
@@ -59,7 +61,9 @@ class AgentTaskExternalRuntimeTest {
     store = new InMemoryBuiltinHarnessStore();
     runtime =
         new HarnessRuntime(
-            store, builtinDriver(store, (tid, path, prep) -> null), () -> CompactionConfig.DEFAULT);
+            store,
+            builtinRegistry(store, (tid, path, prep) -> null),
+            () -> CompactionConfig.DEFAULT);
     ObjectProvider<HarnessRuntime> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(runtime);
     service = new AgentTaskService(provider);
@@ -227,9 +231,11 @@ class AgentTaskExternalRuntimeTest {
     String requestHash = AgentTaskRequest.requestHash(ticketId, agent, prompt, null);
 
     BranchSettings settingsA =
-        new BranchSettings("test-agent", ModelSelection.model("provider-a", "model-a"), null);
+        new BranchSettings(
+            "test-agent", BuiltinExecution.of(ModelSelection.model("provider-a", "model-a")), null);
     BranchSettings settingsB =
-        new BranchSettings("test-agent", ModelSelection.model("provider-b", "model-b"), null);
+        new BranchSettings(
+            "test-agent", BuiltinExecution.of(ModelSelection.model("provider-b", "model-b")), null);
 
     Supplier<AgentTaskRequest> supplierA =
         () ->

@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
@@ -224,7 +224,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     List<ThreadCommandPayload> payloads =
         List.of(
             new SetAgentCommandPayload(settings.agentName()),
-            new SetModelCommandPayload(settings.model()),
+            new SetExecutionCommandPayload(settings.execution()),
             new CustomMessageCommandPayload(AgentMessage.user(request.prompt())));
     List<NewThreadCommand> commands = new ArrayList<>(payloads.size());
     for (int i = 0; i < payloads.size(); i++) {

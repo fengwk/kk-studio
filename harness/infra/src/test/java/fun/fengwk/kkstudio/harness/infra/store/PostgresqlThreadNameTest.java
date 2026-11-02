@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,7 +34,7 @@ class PostgresqlThreadNameTest {
     var runtime =
         new HarnessRuntime(
             store,
-            builtinDriver(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
     UUID createdId = UUID.randomUUID();
     var commands =

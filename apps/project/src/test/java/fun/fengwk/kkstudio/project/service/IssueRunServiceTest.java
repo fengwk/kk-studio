@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
@@ -32,7 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -113,15 +114,16 @@ class IssueRunServiceTest {
           JsonMapper.builder().build());
 
   /**
-   * 新 Agent 接受 Run：五条命令按 SET_AGENT→SET_MODEL→SET_ENVIRONMENT→SET_CONTRIBUTOR_STATE→CUSTOM_MESSAGE
-   * 提交。
+   * 新 Agent 接受 Run：五条命令按
+   * SET_AGENT→SET_EXECUTION→SET_ENVIRONMENT→SET_CONTRIBUTOR_STATE→CUSTOM_MESSAGE 提交。
    */
   @Test
   void acceptsExplicitRunCommandBatchFrozenToRunTicket() {
     Issue issue = issue();
     Project project = project();
     BranchSettings settings =
-        new BranchSettings("worker", ModelSelection.model("model", "default"), null);
+        new BranchSettings(
+            "worker", BuiltinExecution.of(ModelSelection.model("model", "default")), null);
     AtomicReference<IssueRun> inserted = new AtomicReference<>();
     Entry rootEntry = mock(Entry.class);
     UUID rootEntryId = UUID.randomUUID();
@@ -170,13 +172,13 @@ class IssueRunServiceTest {
     assertEquals(
         List.of(
             ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.SET_CONTRIBUTOR_STATE,
             ThreadCommandType.CUSTOM_MESSAGE),
         commands.stream().map(command -> command.payload().type()).toList());
     assertInstanceOf(SetAgentCommandPayload.class, commands.get(0).payload());
-    assertInstanceOf(SetModelCommandPayload.class, commands.get(1).payload());
+    assertInstanceOf(SetExecutionCommandPayload.class, commands.get(1).payload());
     // SET_ENVIRONMENT 取当前 stage 的显式环境，而不是 Agent 默认 settings 的 environmentName（此处为 null）。
     SetEnvironmentCommandPayload environment =
         assertInstanceOf(SetEnvironmentCommandPayload.class, commands.get(2).payload());

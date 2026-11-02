@@ -48,6 +48,11 @@ public final class FakeAgentDriver implements AgentDriver {
     this(() -> null, () -> null);
   }
 
+  public FakeAgentDriver(String id) {
+    this(() -> null, () -> null);
+    this.id = Objects.requireNonNull(id, "id");
+  }
+
   public FakeAgentDriver(Supplier<TurnResolution> turnResolution) {
     this(turnResolution, () -> null);
   }

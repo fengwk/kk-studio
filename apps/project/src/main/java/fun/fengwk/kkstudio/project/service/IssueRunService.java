@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -750,7 +750,7 @@ public class IssueRunService {
     UUID runId = scope.runId();
     return List.of(
         command(new SetAgentCommandPayload(settings.agentName()), runId, "agent"),
-        command(new SetModelCommandPayload(settings.model()), runId, "model"),
+        command(new SetExecutionCommandPayload(settings.execution()), runId, "execution"),
         command(new SetEnvironmentCommandPayload(environmentName), runId, "environment"),
         command(
             new SetContributorStateCommandPayload(

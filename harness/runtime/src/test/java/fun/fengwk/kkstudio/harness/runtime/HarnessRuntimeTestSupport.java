@@ -111,7 +111,9 @@ public final class HarnessRuntimeTestSupport {
   static HarnessRuntime runtime(HarnessStore store, Clock clock) {
     useClock(store, clock);
     return new HarnessRuntime(
-        store, new DriverRegistry(List.of(new FakeAgentDriver())), DEFAULT_COMPACTION_PROVIDER);
+        store,
+        new DriverRegistry(List.of(new FakeAgentDriver("fake"), new FakeAgentDriver("builtin"))),
+        DEFAULT_COMPACTION_PROVIDER);
   }
 
   /** 创建带指定 Driver 与 compaction provider 的测试 Runtime。 */
@@ -133,7 +135,7 @@ public final class HarnessRuntimeTestSupport {
     useClock(store, clock);
     return new HarnessRuntime(
         store,
-        new DriverRegistry(List.of(new FakeAgentDriver())),
+        new DriverRegistry(List.of(new FakeAgentDriver("fake"), new FakeAgentDriver("builtin"))),
         DEFAULT_COMPACTION_PROVIDER,
         modelCanceller,
         toolCanceller);

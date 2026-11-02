@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
@@ -175,6 +176,11 @@ public final class ProviderRequestPreviewService {
     EntryPath candidatePath =
         TurnPlanPreview.inputCandidatePath(
             candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now);
+    if (!BuiltinExecution.DRIVER.equals(candidatePath.baseSettings().execution().driver())) {
+      throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_UNSUPPORTED,
+          "provider request preview is only supported for builtin execution driver");
+    }
     return planAndEncode(
         turnResolver.planLive(candidateThreadId, candidatePath, now),
         candidatePath,
@@ -209,6 +215,11 @@ public final class ProviderRequestPreviewService {
     }
     UUID requestHeadEntryId = requireRequestHead(output);
     EntryPath requestPath = entryPath(entries, requestHeadEntryId);
+    if (!BuiltinExecution.DRIVER.equals(requestPath.baseSettings().execution().driver())) {
+      throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_UNSUPPORTED,
+          "provider request preview is only supported for builtin execution driver");
+    }
     Instant recordedAt = output.createdAt();
     // 历史路径可能不属于任何一个现存 Thread；规划本身不回查 Thread 归属，因此这里同样只给 candidate id。
     UUID candidateThreadId = UUID.randomUUID();
@@ -249,6 +260,9 @@ public final class ProviderRequestPreviewService {
           "compaction result has no enclosing COMPACTION turn", error);
     }
     CompactionStart frozen = turn.freezing();
+    if (!BuiltinExecution.DRIVER.equals(frozen.execution().driver())) {
+      throw frozenCompactionUnavailable("compaction execution driver is not builtin");
+    }
     UUID ownerThreadId = turn.start().ownerThreadId();
     if (frozen.childThreadId() == null || frozen.joinInvocationId() == null) {
       // pending 压缩 TURN_START 尚未创建子执行，没有可预览的真实调用。
@@ -615,6 +629,12 @@ public final class ProviderRequestPreviewService {
           Reason.PREVIEW_COMPACTION_REQUIRED,
           "the next step for this thread is automatic compaction; the request cannot be previewed "
               + "precisely");
+    }
+    if (!BuiltinExecution.DRIVER.equals(
+        snapshot.entryState().baseSettings().execution().driver())) {
+      throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_UNSUPPORTED,
+          "provider request preview is only supported for builtin execution driver");
     }
   }
 

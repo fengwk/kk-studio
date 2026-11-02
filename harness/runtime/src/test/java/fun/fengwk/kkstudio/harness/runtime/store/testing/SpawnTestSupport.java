@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -102,21 +101,30 @@ public final class SpawnTestSupport {
   }
 
   private static BranchSettings defaultSettings() {
-    return new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
+    return StoreTestSupport.branchSettings();
   }
 
   public static AcceptedCommands acceptAndJoin(
-      HarnessRuntime runtime, Child source, Ticket ticket, AcceptancePreflight preflight) {
+      HarnessRuntime runtime,
+      Child source,
+      BranchSettings settings,
+      Ticket ticket,
+      AcceptancePreflight preflight) {
     return runtime.spawn(
         request(
             source.thread(),
             source.session(),
-            defaultSettings(),
+            settings,
             source.commands(),
             preflight,
             null,
             false,
             ticket));
+  }
+
+  public static AcceptedCommands acceptAndJoin(
+      HarnessRuntime runtime, Child source, Ticket ticket, AcceptancePreflight preflight) {
+    return acceptAndJoin(runtime, source, defaultSettings(), ticket, preflight);
   }
 
   /** 根 ticket（NewRootSession）或续用既有 Thread（Thread target）。 */

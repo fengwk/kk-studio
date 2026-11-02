@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -153,7 +154,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                       new RootPayload(
                           new BranchSettings(
                               "default-assistant",
-                              ModelSelection.model("acceptance-stub", "default"),
+                              BuiltinExecution.of(
+                                  ModelSelection.model("acceptance-stub", "default")),
                               null)),
                       Instant.parse("2026-08-02T00:00:00Z"))));
       TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, null);

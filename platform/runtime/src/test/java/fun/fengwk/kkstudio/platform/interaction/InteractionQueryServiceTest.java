@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -802,7 +803,9 @@ class InteractionQueryServiceTest {
     when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
     EntryCurrentState entryState = mock(EntryCurrentState.class);
     when(entryState.baseSettings())
-        .thenReturn(new BranchSettings("worker", ModelSelection.model("m", "v1"), null));
+        .thenReturn(
+            new BranchSettings(
+                "worker", BuiltinExecution.of(ModelSelection.model("m", "v1")), null));
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.entryState()).thenReturn(entryState);

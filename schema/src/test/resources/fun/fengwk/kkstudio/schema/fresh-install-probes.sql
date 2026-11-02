@@ -1009,13 +1009,13 @@ insert into harness_thread_command (thread_id, sequence, command_type, payload, 
     (pg_temp.uid(311), 1, 'CUSTOM_MESSAGE', '{"text":"done"}', pg_temp.uid(1311), repeat('4', 64), now());
 insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key,
     request_hash, created_at) values
-    (pg_temp.uid(310), 2, 'SET_MODEL', '{"model":{"modelName":"m","variant":null}}',
+    (pg_temp.uid(310), 2, 'SET_EXECUTION', '{"execution":{"driver":"builtin","settings":{}}}',
         pg_temp.uid(1312), repeat('7', 64), now());
-select pg_temp.assert_true('SET_MODEL is a supported command',
-    (select command_type = 'SET_MODEL' from harness_thread_command
+select pg_temp.assert_true('SET_EXECUTION is a supported command',
+    (select command_type = 'SET_EXECUTION' from harness_thread_command
         where thread_id = pg_temp.uid(310) and sequence = 2));
-select pg_temp.rejects('SET_EXECUTION is not a command type',
-    $$update harness_thread_command set command_type='SET_EXECUTION'
+select pg_temp.rejects('NOT_A_COMMAND is not a command type',
+    $$update harness_thread_command set command_type='NOT_A_COMMAND'
       where thread_id=pg_temp.uid(310) and sequence=2$$,
     '23514', 'ck_harness_thread_command_type');
 delete from harness_thread_command where thread_id = pg_temp.uid(310) and sequence = 2;

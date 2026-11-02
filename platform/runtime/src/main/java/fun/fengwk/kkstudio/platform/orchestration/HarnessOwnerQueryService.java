@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
@@ -159,11 +160,14 @@ public class HarnessOwnerQueryService {
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
     dto.setExecutionControl(thread.executionControl().name());
-    var selection = snapshot.entryState().baseSettings().model();
-    HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setModelName(selection.modelName());
-    model.setVariant(selection.variant());
-    dto.setModel(model);
+    var execution = snapshot.entryState().baseSettings().execution();
+    if (BuiltinExecution.DRIVER.equals(execution.driver())) {
+      var selection = BuiltinExecution.model(execution);
+      HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
+      model.setModelName(selection.modelName());
+      model.setVariant(selection.variant());
+      dto.setModel(model);
+    }
     dto.setHeadMessagePreview(headMessagePreview(snapshot));
     return dto;
   }

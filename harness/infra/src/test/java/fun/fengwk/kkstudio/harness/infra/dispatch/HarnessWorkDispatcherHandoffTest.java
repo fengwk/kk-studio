@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.dispatch;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.MODEL_LEASE;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.THREAD_LEASE;
@@ -408,7 +408,7 @@ class HarnessWorkDispatcherHandoffTest {
     ThreadProcessor threadProcessor =
         new ThreadProcessor(
             store,
-            builtinDriver(
+            builtinRegistry(
                 store,
                 (threadId, path, preparation) -> {
                   throw new AssertionError("resolver must not be called for a quiescent thread");

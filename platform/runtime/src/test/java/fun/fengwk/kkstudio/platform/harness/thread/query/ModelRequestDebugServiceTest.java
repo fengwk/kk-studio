@@ -21,6 +21,7 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
@@ -239,12 +240,18 @@ class ModelRequestDebugServiceTest {
     verifyNoMoreInteractions(turnResolver);
 
     BranchSettings draft = settingsCaptor.getValue();
-    assertEquals(branchSettings().withModel(DRAFT_MODEL).withEnvironmentName(DRAFT_ENV), draft);
+    assertEquals(
+        branchSettings()
+            .withExecution(BuiltinExecution.of(DRAFT_MODEL))
+            .withEnvironmentName(DRAFT_ENV),
+        draft);
     assertEquals("assistant", draft.agentName());
     assertEquals(GOAL, draft.goal());
     // EntryPath 与真实 base settings 完全未被草稿覆写。
     assertEquals(branchSettings(), snapshot.entryState().baseSettings());
-    assertEquals("model", snapshot.entryState().baseSettings().model().modelName());
+    assertEquals(
+        "model",
+        BuiltinExecution.model(snapshot.entryState().baseSettings().execution()).modelName());
     assertEquals("env-b", snapshot.entryState().baseSettings().environmentName());
   }
 
@@ -596,7 +603,8 @@ class ModelRequestDebugServiceTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("assistant", new ModelSelection("model", "default"), "env-b", GOAL);
+    return new BranchSettings(
+        "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), "env-b", GOAL);
   }
 
   /** 成功共享规划：SENT 候选在前、FILTERED 候选在后，附 Skill 交付事实、subagent 与 cache control。 */

@@ -25,6 +25,7 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -109,7 +110,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
       new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
   private static final OwnerRef ISSUE_AGENT_OWNER = ISSUE_AGENT;
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", new ModelSelection("model", "default"), null);
+      new BranchSettings(
+          "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), null);
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;

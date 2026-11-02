@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
@@ -106,7 +106,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinDriver(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 
@@ -275,7 +275,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                 new AssistantError("RESOLVER_REJECT", "no continuation in test"));
     return new ThreadProcessor(
         store,
-        builtinDriver(store, resolver),
+        builtinRegistry(store, resolver),
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -364,7 +364,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     HarnessRuntime latchingRuntime =
         new HarnessRuntime(
             latchingStore,
-            builtinDriver(latchingStore, (t, p, c) -> null),
+            builtinRegistry(latchingStore, (t, p, c) -> null),
             () -> CompactionConfig.DEFAULT);
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

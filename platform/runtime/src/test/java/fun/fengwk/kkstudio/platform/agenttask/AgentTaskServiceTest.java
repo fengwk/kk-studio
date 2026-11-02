@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -55,7 +56,7 @@ class AgentTaskServiceTest {
   private static final Instant NOW = Instant.parse("2026-10-20T00:00:00Z");
   private static final String HASH = "a".repeat(64);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("worker", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("worker", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
 
   private HarnessRuntime runtime;
   private AgentTaskService service;

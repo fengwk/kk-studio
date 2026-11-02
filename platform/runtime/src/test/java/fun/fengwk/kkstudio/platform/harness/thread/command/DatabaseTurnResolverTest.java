@@ -28,6 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
@@ -541,7 +542,10 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
 
     BranchSettings missingName =
-        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME);
+        new BranchSettings(
+            "assistant",
+            BuiltinExecution.of(new ModelSelection("model", "default")),
+            ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(missingName));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals("environment not found: " + ENV_MISSING_NAME, rejected.error().message());
@@ -570,7 +574,9 @@ class DatabaseTurnResolverTest {
             .resolved(
                 matching.path(
                     new BranchSettings(
-                        "assistant", new ModelSelection("model", "default"), ENV_B_NAME)))
+                        "assistant",
+                        BuiltinExecution.of(new ModelSelection("model", "default")),
+                        ENV_B_NAME)))
             .toolBindings()
             .getFirst()
             .environmentId());
@@ -667,7 +673,10 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.Planned custom =
         fixture.plannedWithSettings(
             path,
-            new BranchSettings("assistant", new ModelSelection("model", "custom"), ENV_A_NAME));
+            new BranchSettings(
+                "assistant",
+                BuiltinExecution.of(new ModelSelection("model", "custom")),
+                ENV_A_NAME));
     assertEquals("custom", custom.spec().variant().id());
 
     // 规划只读：path 的 base settings 与最初完全一致，Draft 绝不写回 EntryPath。
@@ -684,7 +693,9 @@ class DatabaseTurnResolverTest {
             .rejected(
                 fixture.path(
                     new BranchSettings(
-                        "assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME)))
+                        "assistant",
+                        BuiltinExecution.of(new ModelSelection("model", "default")),
+                        ENV_MISSING_NAME)))
             .error()
             .message());
   }
@@ -753,7 +764,8 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings =
-        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_B_NAME);
+        new BranchSettings(
+            "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), ENV_B_NAME);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
@@ -1587,7 +1599,8 @@ class DatabaseTurnResolverTest {
             true);
     ModelSelection compactor = new ModelSelection("model", "default");
     fixture.compactionAgent(compactor);
-    BranchSettings compactorSettings = new BranchSettings("Compaction", compactor, ENV_A_NAME);
+    BranchSettings compactorSettings =
+        new BranchSettings("Compaction", BuiltinExecution.of(compactor), ENV_A_NAME);
 
     // 两次独立规划代表压缩子的连续 turn（第二个 turn 即工具 loop 之后的续作），都必须 NONE。
     assertEquals(
@@ -1841,7 +1854,10 @@ class DatabaseTurnResolverTest {
     // 显式业务 Rejection 是确定性规划结果，不是可重试的 SQL / 基础设施失败。
     Fixture deterministic = new Fixture(List.of("read"), List.of(), List.of());
     BranchSettings missingEnvironment =
-        new BranchSettings("assistant", ModelSelection.model("model", "default"), ENV_MISSING_NAME);
+        new BranchSettings(
+            "assistant",
+            BuiltinExecution.of(ModelSelection.model("model", "default")),
+            ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = deterministic.rejected(deterministic.path(missingEnvironment));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertTrue(rejected.error().message().startsWith("environment not found:"));
@@ -1928,12 +1944,14 @@ class DatabaseTurnResolverTest {
 
   /** BranchSettings 冻结 agent/model 与可空 environmentName；解析出的 EnvironmentId 只能来自该 name。 */
   private static BranchSettings settings(String variant) {
-    return new BranchSettings("assistant", new ModelSelection("model", variant), ENV_A_NAME);
+    return new BranchSettings(
+        "assistant", BuiltinExecution.of(new ModelSelection("model", variant)), ENV_A_NAME);
   }
 
   /** 未选择 Environment 的 branch：环境工具仍需声明并可规划，调用时才失败。 */
   private static BranchSettings unboundSettings(String variant) {
-    return new BranchSettings("assistant", new ModelSelection("model", variant), null);
+    return new BranchSettings(
+        "assistant", BuiltinExecution.of(new ModelSelection("model", variant)), null);
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -2019,7 +2037,7 @@ class DatabaseTurnResolverTest {
         new CompactionStart(
             CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
-            executionModel,
+            BuiltinExecution.of(executionModel),
             1234L,
             id(3),
             null,
@@ -2144,7 +2162,7 @@ class DatabaseTurnResolverTest {
                 id(3),
                 new ModelAttemptFailurePayload(
                     new ModelAttemptSnapshot(1, 4, "retry-only-secret", ""),
-                    settings.model(),
+                    BuiltinExecution.model(settings.execution()),
                     NOW.plusSeconds(1),
                     new AssistantError("TRANSIENT", "provider unavailable"),
                     NOW.plusSeconds(2)),
@@ -2221,7 +2239,7 @@ class DatabaseTurnResolverTest {
   void compactionResolvesCompactorAgentAndBudget() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings("default");
-    ModelSelection compactorModel = settings.model();
+    ModelSelection compactorModel = BuiltinExecution.model(settings.execution());
     fixture.compactionAgent(compactorModel);
     List<AgentMessage> messages =
         List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
@@ -2239,11 +2257,11 @@ class DatabaseTurnResolverTest {
     EntryPath historyPath = compactionHistoryPath(settings, preparation);
     TurnResolver.CompactionResolved resolved = fixture.resolvedCompaction(historyPath, preparation);
 
-    assertEquals(compactorModel, resolved.executionModel());
+    assertEquals(BuiltinExecution.of(compactorModel), resolved.execution());
     assertEquals(4096, resolved.contextWindow());
     assertEquals(123, resolved.outputBudget());
     assertEquals("Compaction", resolved.childSettings().agentName());
-    assertEquals(compactorModel, resolved.childSettings().model());
+    assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertNull(resolved.childSettings().goal());
     assertEquals(settings.environmentName(), resolved.childSettings().environmentName());
   }
@@ -2321,7 +2339,7 @@ class DatabaseTurnResolverTest {
   void compactionOutputBudgetUsesActualModelLimitAndRemovedPrefixTokens() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelGlobalOutputLimit(600);
-    ModelSelection compactorModel = settings("default").model();
+    ModelSelection compactorModel = BuiltinExecution.model(settings("default").execution());
     fixture.compactionAgent(compactorModel);
     List<AgentMessage> messages =
         List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
@@ -2406,9 +2424,9 @@ class DatabaseTurnResolverTest {
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
 
-    assertEquals(compactorModel, resolved.executionModel());
+    assertEquals(BuiltinExecution.of(compactorModel), resolved.execution());
     assertEquals("Compaction", resolved.childSettings().agentName());
-    assertEquals(compactorModel, resolved.childSettings().model());
+    assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertEquals(8192, resolved.contextWindow());
     // fallback model 的 limit.output = 4096 经 FULL 预算公式 floor(0.8 * 4096) = 3276 裁剪。
     assertEquals(3276, resolved.outputBudget());
@@ -2432,7 +2450,9 @@ class DatabaseTurnResolverTest {
         assertInstanceOf(
             LiveTurnPlan.Rejected.class,
             fixture.resolver.planHistorical(
-                THREAD_ID, compactionRequestPath(settings("default").model()), NOW));
+                THREAD_ID,
+                compactionRequestPath(BuiltinExecution.model(settings("default").execution())),
+                NOW));
 
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
     assertTrue(rejected.detail().contains("compaction child thread"), rejected.detail());
@@ -2774,7 +2794,7 @@ class DatabaseTurnResolverTest {
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
 
     assertEquals("Compaction", resolved.childSettings().agentName());
-    assertEquals(compactorModel, resolved.childSettings().model());
+    assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertNull(resolved.childSettings().goal());
   }
 
@@ -2783,7 +2803,9 @@ class DatabaseTurnResolverTest {
   void groupFreezesOrderedMembersAndMinimumBudgets() {
     Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
     EntryPath path =
-        fixture.path(new BranchSettings("assistant", ModelSelection.group("group"), null));
+        fixture.path(
+            new BranchSettings(
+                "assistant", BuiltinExecution.of(ModelSelection.group("group")), null));
     TurnResolver.Resolved resolved = fixture.resolvedResult(path, null);
     LiveTurnPlan.Planned planned = fixture.planned(path);
     assertEquals(2048, resolved.contextWindow());
@@ -2824,11 +2846,15 @@ class DatabaseTurnResolverTest {
             .rejected(
                 fixture.path(
                     new BranchSettings(
-                        "assistant", ModelSelection.model("group", "default"), null)))
+                        "assistant",
+                        BuiltinExecution.of(ModelSelection.model("group", "default")),
+                        null)))
             .error()
             .message());
     EntryPath path =
-        fixture.path(new BranchSettings("assistant", ModelSelection.group("group"), null));
+        fixture.path(
+            new BranchSettings(
+                "assistant", BuiltinExecution.of(ModelSelection.group("group")), null));
     when(fixture.models.getByName("second")).thenReturn(null);
     assertEquals("group member model not found: second", fixture.rejected(path).error().message());
     AgentModel nested = AgentModel.builder().name("second").kind(AgentModelKind.GROUP).build();
@@ -2858,7 +2884,8 @@ class DatabaseTurnResolverTest {
             123L);
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
-    assertEquals(ModelSelection.group("group"), resolved.childSettings().model());
+    assertEquals(
+        BuiltinExecution.of(ModelSelection.group("group")), resolved.childSettings().execution());
     assertEquals(2048, resolved.contextWindow());
     assertEquals(256, resolved.maxOutputTokens());
     assertEquals(123, resolved.outputBudget());

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.thread.query;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
@@ -95,8 +96,14 @@ public final class ModelRequestDebugService {
     Objects.requireNonNull(model, "model");
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
     EntryPath path = snapshot.requireFullPath();
+    if (!BuiltinExecution.DRIVER.equals(path.baseSettings().execution().driver())) {
+      throw new IllegalArgumentException(
+          "model request debug is only supported for builtin execution driver");
+    }
     BranchSettings draftSettings =
-        path.baseSettings().withModel(model).withEnvironmentName(environmentName);
+        path.baseSettings()
+            .withExecution(BuiltinExecution.of(model))
+            .withEnvironmentName(environmentName);
 
     HarnessModelRequestDebugDTO dto = new HarnessModelRequestDebugDTO();
     dto.setKind(PREVIEW_KIND);

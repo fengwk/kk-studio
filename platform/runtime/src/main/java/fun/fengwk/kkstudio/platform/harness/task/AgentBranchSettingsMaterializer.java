@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
@@ -93,7 +94,9 @@ public final class AgentBranchSettingsMaterializer {
             "subagent model group must not select a variant: " + agentName);
       }
       return new BranchSettings(
-          agent.name(), ModelSelection.group(agent.modelName()), environmentName);
+          agent.name(),
+          BuiltinExecution.of(ModelSelection.group(agent.modelName())),
+          environmentName);
     }
     ParsedAgentModelConfig parsed;
     try {
@@ -115,6 +118,8 @@ public final class AgentBranchSettingsMaterializer {
                 new IllegalArgumentException(
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
-        agent.name(), ModelSelection.model(agent.modelName(), variantName), environmentName);
+        agent.name(),
+        BuiltinExecution.of(ModelSelection.model(agent.modelName(), variantName)),
+        environmentName);
   }
 }

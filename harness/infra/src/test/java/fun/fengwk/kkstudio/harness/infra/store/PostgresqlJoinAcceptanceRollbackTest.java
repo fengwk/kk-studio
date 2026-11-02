@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
@@ -95,7 +95,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinDriver(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
@@ -658,7 +658,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
       ThreadProcessor processor =
           new ThreadProcessor(
               store,
-              builtinDriver(store, resolver),
+              builtinRegistry(store, resolver),
               new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
 
       ClaimedWork childWork1 =

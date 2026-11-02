@@ -623,7 +623,7 @@ public final class StoreTestSupport {
   }
 
   public static ExecutionSelection executionSelection() {
-    return new ExecutionSelection("fake", "{}");
+    return new ExecutionSelection("builtin", "{\"modelName\":\"model\",\"variant\":\"v1\"}");
   }
 
   public static BranchSettings branchSettings() {

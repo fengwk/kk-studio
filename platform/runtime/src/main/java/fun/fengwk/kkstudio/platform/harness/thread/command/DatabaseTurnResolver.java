@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -200,7 +202,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
     AgentTurnContext context = contextResolver.resolve(path, settings, now);
-    ResolvedSelection resolved = resolveSelection(settings.model(), context.agent());
+    ResolvedSelection resolved =
+        resolveSelection(BuiltinExecution.model(settings.execution()), context.agent());
     MemberRuntime first = resolved.members().getFirst();
 
     for (MemberRuntime member : resolved.members()) {
@@ -445,11 +448,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
       throw rejection("compaction output budget must be a positive int, got " + outputBudget);
     }
+    ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
     BranchSettings childSettings =
         new BranchSettings(
-            compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
+            compactionAgentName,
+            compactorExecution,
+            parentPath.baseSettings().environmentName(),
+            null);
     return new TurnResolver.CompactionResolved(
-        compactorModel, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
+        compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */

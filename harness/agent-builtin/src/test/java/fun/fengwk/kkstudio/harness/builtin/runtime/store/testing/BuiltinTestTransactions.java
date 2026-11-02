@@ -3,8 +3,11 @@ package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -31,5 +34,9 @@ public final class BuiltinTestTransactions {
       return new BuiltinAgentDriver(builtin, resolver);
     }
     throw new IllegalArgumentException("test runtime requires a BuiltinStore");
+  }
+
+  public static DriverRegistry builtinRegistry(HarnessStore store, TurnResolver resolver) {
+    return new DriverRegistry(List.of(builtinDriver(store, resolver), new FakeAgentDriver()));
   }
 }

@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
@@ -207,7 +207,7 @@ class PostgresqlThreadProcessorReplayTest {
       ThreadProcessor processor =
           new ThreadProcessor(
               store,
-              builtinDriver(store, resolver),
+              builtinRegistry(store, resolver),
               new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
       ClaimedWork first =
           store

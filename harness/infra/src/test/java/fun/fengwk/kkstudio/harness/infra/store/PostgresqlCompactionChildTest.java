@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
@@ -19,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
@@ -444,12 +445,15 @@ class PostgresqlCompactionChildTest {
           if (preparation != null) {
             ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
             return new TurnResolver.CompactionResolved(
-                compactorModel,
+                BuiltinExecution.of(compactorModel),
                 4096L,
                 CONTEXT_WINDOW,
                 MAX_OUTPUT_TOKENS,
                 new BranchSettings(
-                    "compaction", compactorModel, path.baseSettings().environmentName(), null));
+                    "compaction",
+                    BuiltinExecution.of(compactorModel),
+                    path.baseSettings().environmentName(),
+                    null));
           }
           ModelRequestSpec spec = resolvedSpec(path.baseSettings());
           observedResolvedSpecs.add(spec);
@@ -459,11 +463,11 @@ class PostgresqlCompactionChildTest {
               resolvedOutputTokens != null ? resolvedOutputTokens : MAX_OUTPUT_TOKENS);
         };
     runtime =
-        new HarnessRuntime(store, builtinDriver(store, resolver), () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(store, builtinRegistry(store, resolver), () -> CompactionConfig.DEFAULT);
     processor =
         new ThreadProcessor(
             store,
-            builtinDriver(store, resolver),
+            builtinRegistry(store, resolver),
             new ThreadProcessorConfig(Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
     gateway = new ScriptedChildGateway();
     modelProcessor =
@@ -513,8 +517,9 @@ class PostgresqlCompactionChildTest {
     // 父 TURN_START.compaction 的 run group 完整
     CompactionStart compaction = startPayload.compaction();
     assertNotNull(compaction);
-    assertNotNull(compaction.executionModel());
-    assertEquals("compactor-model", compaction.executionModel().modelName());
+    assertNotNull(compaction.execution());
+    assertEquals(
+        BuiltinExecution.of(ModelSelection.model("compactor-model", "v1")), compaction.execution());
     assertNotNull(compaction.outputBudget());
     assertTrue(compaction.outputBudget() > 0);
     assertNotNull(compaction.childThreadId());
@@ -1026,7 +1031,7 @@ class PostgresqlCompactionChildTest {
       HarnessRuntime stoppingRuntime =
           new HarnessRuntime(
               store,
-              builtinDriver(store, resolver),
+              builtinRegistry(store, resolver),
               () -> CompactionConfig.DEFAULT,
               stoppingModelProcessor::cancel,
               toolProcessor::cancel);
@@ -1881,17 +1886,18 @@ class PostgresqlCompactionChildTest {
   }
 
   private static ModelRequestSpec requestFor(BranchSettings settings) {
+    ModelSelection model = BuiltinExecution.model(settings.execution());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
             "provider",
-            settings.model().modelName(),
-            settings.model().modelName(),
+            model.modelName(),
+            model.modelName(),
             Set.of(ModelInputModality.TEXT),
             true,
             true),
-        new ModelVariant(settings.model().variant()),
+        new ModelVariant(model.variant()),
         1024,
         "Test system instruction.",
         List.of(),

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
@@ -105,7 +106,7 @@ class DatabaseContributorBranchViewLoaderTest {
   private static BranchSettings settings(UUID goalId, String goalText) {
     return new BranchSettings(
         "coding",
-        new ModelSelection("claude-sonnet", "default"),
+        BuiltinExecution.of(new ModelSelection("claude-sonnet", "default")),
         null,
         goalId == null ? null : new GoalSetting(goalId, goalText));
   }

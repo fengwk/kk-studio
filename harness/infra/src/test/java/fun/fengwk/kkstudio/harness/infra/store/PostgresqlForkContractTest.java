@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,7 +65,7 @@ class PostgresqlForkContractTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinDriver(store, (threadId, path, preparation) -> null),
+            builtinRegistry(store, (threadId, path, preparation) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 

@@ -21,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
@@ -84,7 +85,8 @@ class PluginPromptTaskServiceTest {
 
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("worker", new ModelSelection("model", "default"), null);
+      new BranchSettings(
+          "worker", BuiltinExecution.of(new ModelSelection("model", "default")), null);
   private static final UUID SESSION_ID = UUID.randomUUID();
   private static final UUID UPLOAD_ID = UUID.randomUUID();
   private static final UUID BLOB_ID = UUID.randomUUID();
@@ -592,7 +594,8 @@ class PluginPromptTaskServiceTest {
     UUID sessionId = UUID.randomUUID();
     UUID headEntryId = UUID.randomUUID();
     BranchSettings settings =
-        new BranchSettings("prompt-agent", ModelSelection.group("gpt-4o"), "default");
+        new BranchSettings(
+            "prompt-agent", BuiltinExecution.of(ModelSelection.group("gpt-4o")), "default");
     Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW, null);
     ThreadState thread =
         new ThreadState(

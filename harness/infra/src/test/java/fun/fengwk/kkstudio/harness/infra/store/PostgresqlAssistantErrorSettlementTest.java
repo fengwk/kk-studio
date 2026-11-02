@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -127,7 +127,7 @@ class PostgresqlAssistantErrorSettlementTest {
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
       ThreadProcessor processor =
-          new ThreadProcessor(store, builtinDriver(store, resolver), config);
+          new ThreadProcessor(store, builtinRegistry(store, resolver), config);
       ClaimedWork claimed =
           store
               .transaction(
@@ -156,7 +156,7 @@ class PostgresqlAssistantErrorSettlementTest {
       // durable 状态经既有 snapshot 投影读到 IDLE（不再 RUNNABLE/挂起）。
       HarnessRuntime snapshotRuntime =
           new HarnessRuntime(
-              store, builtinDriver(store, resolver), () -> new CompactionConfig(20_000));
+              store, builtinRegistry(store, resolver), () -> new CompactionConfig(20_000));
       assertEquals(
           ThreadRuntimeStatus.IDLE,
           snapshotRuntime.getThreadSnapshot(baseline.threadId()).runtimeStatus());

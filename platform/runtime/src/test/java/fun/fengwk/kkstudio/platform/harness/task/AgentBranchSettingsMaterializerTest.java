@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
@@ -80,7 +81,7 @@ class AgentBranchSettingsMaterializerTest {
 
     // branch settings 只冻结 Agent 与 model selection：环境与目录都不进入历史。
     assertEquals("alpha", settings.agentName());
-    assertEquals(new ModelSelection("gpt-x", "quality"), settings.model());
+    assertEquals(BuiltinExecution.of(new ModelSelection("gpt-x", "quality")), settings.execution());
     // root/普通调用没有父调用，environmentName 恒为 null。
     assertNull(settings.environmentName());
   }
@@ -93,7 +94,8 @@ class AgentBranchSettingsMaterializerTest {
     BranchSettings inherited = materializer.materializeSubagent("alpha", "env-a");
 
     assertEquals("env-a", inherited.environmentName());
-    assertEquals(new ModelSelection("gpt-x", "quality"), inherited.model());
+    assertEquals(
+        BuiltinExecution.of(new ModelSelection("gpt-x", "quality")), inherited.execution());
 
     stub("beta", null, validModelConfig(), false);
     BranchSettings isolated = materializer.materializeSubagent("beta", "env-a");
@@ -116,7 +118,7 @@ class AgentBranchSettingsMaterializerTest {
 
     BranchSettings settings = materializer.materialize("alpha");
 
-    assertEquals(new ModelSelection("gpt-x", "fast"), settings.model());
+    assertEquals(BuiltinExecution.of(new ModelSelection("gpt-x", "fast")), settings.execution());
   }
 
   /** Agent 缺失、model 缺失、variant 缺失与非法配置都以稳定 IllegalArgumentException 失败。 */

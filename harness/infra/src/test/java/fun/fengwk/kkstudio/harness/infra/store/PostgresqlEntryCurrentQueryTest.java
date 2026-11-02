@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -358,6 +359,7 @@ class PostgresqlEntryCurrentQueryTest {
   }
 
   private static BranchSettings settings(String agent) {
-    return new BranchSettings(agent, ModelSelection.model("claude", "default"), null);
+    return new BranchSettings(
+        agent, BuiltinExecution.of(ModelSelection.model("claude", "default")), null);
   }
 }

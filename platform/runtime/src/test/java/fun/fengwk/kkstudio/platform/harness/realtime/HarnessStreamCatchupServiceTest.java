@@ -27,6 +27,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -152,7 +153,8 @@ class HarnessStreamCatchupServiceTest {
     ThreadState foreignThread = mock(ThreadState.class);
     when(foreignThread.id()).thenReturn(foreignThreadId);
     when(foreignThread.headEntryId()).thenReturn(foreignTurnId);
-    BranchSettings settings = new BranchSettings("agent", new ModelSelection("model", "v1"), null);
+    BranchSettings settings =
+        new BranchSettings("agent", BuiltinExecution.of(new ModelSelection("model", "v1")), null);
     Entry foreignTurn = mock(Entry.class);
     when(foreignTurn.id()).thenReturn(foreignTurnId);
     when(foreignTurn.payload())

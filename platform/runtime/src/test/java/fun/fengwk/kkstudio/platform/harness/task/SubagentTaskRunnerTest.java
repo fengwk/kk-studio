@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
@@ -47,7 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.time.Instant;
@@ -69,7 +70,8 @@ class SubagentTaskRunnerTest {
   private final UUID parentThreadId = UUID.randomUUID();
   private final UUID invocationId = UUID.randomUUID();
   private final UUID parentHeadEntryId = UUID.randomUUID();
-  private final BranchSettings target = new BranchSettings(AGENT, MODEL, "env");
+  private final BranchSettings target =
+      new BranchSettings(AGENT, BuiltinExecution.of(MODEL), "env");
 
   private final HarnessRuntime runtime = mock(HarnessRuntime.class);
   private final AgentBranchSettingsMaterializer materializer =
@@ -123,7 +125,7 @@ class SubagentTaskRunnerTest {
     EntryCurrentState parentState = mock(EntryCurrentState.class);
     when(parent.entryState()).thenReturn(parentState);
     when(parentState.baseSettings())
-        .thenReturn(new BranchSettings("parent-agent", MODEL, "parent-env"));
+        .thenReturn(new BranchSettings("parent-agent", BuiltinExecution.of(MODEL), "parent-env"));
     List<SubagentBinding> allowed =
         allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList();
     when(turnStartEntry.payload()).thenReturn(turnStart);
@@ -354,7 +356,8 @@ class SubagentTaskRunnerTest {
     assertEquals(3, commands.size());
     // 续接前缀只由本次目标 settings 决定：SET_AGENT + SET_MODEL + prompt。
     assertEquals(new SetAgentCommandPayload(AGENT), commands.get(0).payload());
-    assertEquals(new SetModelCommandPayload(MODEL), commands.get(1).payload());
+    assertEquals(
+        new SetExecutionCommandPayload(BuiltinExecution.of(MODEL)), commands.get(1).payload());
     assertTrue(commands.get(2).payload() instanceof CustomMessageCommandPayload);
     // 关键契约：既有子 Thread 保留自身环境。父环境 "parent-env" 与子环境 "child-env" 不同，
     // 因此续接绝不重发 SET_ENVIRONMENT，避免把父环境写进既有子。
@@ -738,7 +741,7 @@ class SubagentTaskRunnerTest {
                 NOW));
     EntryCurrentState childState = mock(EntryCurrentState.class);
     when(childState.baseSettings())
-        .thenReturn(new BranchSettings("child-agent", MODEL, "child-env"));
+        .thenReturn(new BranchSettings("child-agent", BuiltinExecution.of(MODEL), "child-env"));
     when(child.entryState()).thenReturn(childState);
     return child;
   }

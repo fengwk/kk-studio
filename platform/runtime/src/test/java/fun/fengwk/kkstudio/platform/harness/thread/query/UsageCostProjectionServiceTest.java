@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -552,7 +553,8 @@ class UsageCostProjectionServiceTest {
   }
 
   private static BranchSettings settings(String providerName, String modelName) {
-    return new BranchSettings("assistant", new ModelSelection(modelName, "default"), null);
+    return new BranchSettings(
+        "assistant", BuiltinExecution.of(new ModelSelection(modelName, "default")), null);
   }
 
   private static Entry root(BranchSettings settings) {
@@ -574,7 +576,7 @@ class UsageCostProjectionServiceTest {
             new CompactionStart(
                 CompactionPhase.FULL,
                 CompactionTrigger.THRESHOLD,
-                new ModelSelection("model-b", "default"),
+                BuiltinExecution.of(new ModelSelection("model-b", "default")),
                 1024L,
                 ROOT_ID,
                 null,

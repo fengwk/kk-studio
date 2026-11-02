@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -78,7 +79,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
@@ -124,7 +125,7 @@ class ProviderRequestPreviewServiceTest {
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
       new ModelUsage(1_000L, 2L, 0L, 0L, Map.of(), 0L, 1_002L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("model", "v1"), null);
+      new BranchSettings("agent", BuiltinExecution.of(new ModelSelection("model", "v1")), null);
 
   private static final UUID SESSION_ID = id(1L);
   private static final UUID THREAD_ID = id(2L);
@@ -168,7 +169,7 @@ class ProviderRequestPreviewServiceTest {
   private static final int COMPACTION_OUTPUT_BUDGET = 4_096;
   private static final ModelSelection COMPACTION_MODEL = ModelSelection.model("compactor", "v1");
   private static final BranchSettings CHILD_SETTINGS =
-      new BranchSettings("Compaction", COMPACTION_MODEL, null);
+      new BranchSettings("Compaction", BuiltinExecution.of(COMPACTION_MODEL), null);
   private static final byte[] BODY = "{\"model\":\"wire-model\"}".getBytes(StandardCharsets.UTF_8);
 
   /** 历史输出的记录时间：与固定 clock 明显不同，用来证明历史预览用的是记录时间而不是「现在」。 */
@@ -279,7 +280,7 @@ class ProviderRequestPreviewServiceTest {
                 THREAD_ID,
                 command(
                     new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
-                    setting(ThreadCommandKind.SET_MODEL),
+                    setting(ThreadCommandKind.SET_EXECUTION),
                     new NewThreadCommand(new GoalCommandPayload("goal"), id(22L)))));
     // 多于一条 USER_MESSAGE 或 USER_MESSAGE 不在末尾一律拒绝。
     assertThrows(
@@ -299,7 +300,7 @@ class ProviderRequestPreviewServiceTest {
                 command(
                     new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                     userMessage("first"),
-                    setting(ThreadCommandKind.SET_MODEL))));
+                    setting(ThreadCommandKind.SET_EXECUTION))));
     // 形状拒绝必须发生在任何快照读取之前。
     verify(runtime, never()).getThreadSnapshot(any());
   }
@@ -476,7 +477,7 @@ class ProviderRequestPreviewServiceTest {
             THREAD_ID,
             command(
                 new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 3L),
-                setting(ThreadCommandKind.SET_MODEL),
+                setting(ThreadCommandKind.SET_EXECUTION),
                 setting(ThreadCommandKind.SET_AGENT),
                 new NewThreadCommand(
                     new UserMessageCommandPayload(
@@ -514,7 +515,9 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(OWNED_BLOB_ID, owned.blobId());
     assertEquals("owned.pdf", owned.name());
     // 设置前缀进入同一 TURN_START 快照（SET_MODEL 生效）。
-    assertEquals("model", pathCaptor.getValue().baseSettings().model().modelName());
+    assertEquals(
+        "model",
+        BuiltinExecution.model(pathCaptor.getValue().baseSettings().execution()).modelName());
 
     // 预览绝不消费、绝不 retain、绝不写任何 owner 关系。
     verify(uploadService).peekReady(UPLOAD_ID);
@@ -676,7 +679,7 @@ class ProviderRequestPreviewServiceTest {
             SESSION_ID,
             TURN_TWO_END_ID,
             List.of(
-                setting(ThreadCommandKind.SET_MODEL),
+                setting(ThreadCommandKind.SET_EXECUTION),
                 new NewThreadCommand(
                     new UserMessageCommandPayload(
                         new AgentMessage(
@@ -710,7 +713,7 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(TURN_TWO_END_ID, appendedStart.parentEntryId());
     assertEquals(appendedStart.id(), appended.parentEntryId());
     // SET_MODEL 作为设置前缀冻结进 candidate 的 TURN_START，不产生模型可见消息。
-    assertEquals("model", candidate.baseSettings().model().modelName());
+    assertEquals("model", BuiltinExecution.model(candidate.baseSettings().execution()).modelName());
     List<AgentMessageContent> contents = lastUserMessage(candidate).message().contents();
     assertEquals(2, contents.size());
     assertEquals("draft input", ((TextMessageContent) contents.getFirst()).text());
@@ -1060,7 +1063,7 @@ class ProviderRequestPreviewServiceTest {
         new CompactionStart(
             CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
-            COMPACTION_MODEL,
+            BuiltinExecution.of(COMPACTION_MODEL),
             (long) COMPACTION_OUTPUT_BUDGET,
             assistant,
             null,
@@ -1325,14 +1328,15 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private enum ThreadCommandKind {
-    SET_MODEL,
+    SET_EXECUTION,
     SET_AGENT
   }
 
   private static NewThreadCommand setting(ThreadCommandKind kind) {
     return switch (kind) {
-      case SET_MODEL -> new NewThreadCommand(
-          new SetModelCommandPayload(new ModelSelection("model", "v1")), id(201L));
+      case SET_EXECUTION -> new NewThreadCommand(
+          new SetExecutionCommandPayload(BuiltinExecution.of(new ModelSelection("model", "v1"))),
+          id(201L));
       case SET_AGENT -> new NewThreadCommand(new SetAgentCommandPayload("agent"), id(202L));
     };
   }

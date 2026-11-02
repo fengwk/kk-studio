@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -664,7 +665,8 @@ final class DispatcherTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings(
+        "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
 
   private static ModelRequestSpec modelRequest() {

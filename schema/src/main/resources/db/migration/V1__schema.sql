@@ -1077,7 +1077,7 @@ create table harness_thread_command (
             'GOAL',
             'CUSTOM_MESSAGE',
             'SET_AGENT',
-            'SET_MODEL',
+            'SET_EXECUTION',
             'SET_ENVIRONMENT',
             'NOTIFICATION',
             'SET_CONTRIBUTOR_STATE'

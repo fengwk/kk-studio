@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
@@ -59,7 +59,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
     runtime =
         new HarnessRuntime(
             store,
-            builtinDriver(store, (threadId, path, prep) -> null),
+            builtinRegistry(store, (threadId, path, prep) -> null),
             () -> CompactionConfig.DEFAULT);
   }
 

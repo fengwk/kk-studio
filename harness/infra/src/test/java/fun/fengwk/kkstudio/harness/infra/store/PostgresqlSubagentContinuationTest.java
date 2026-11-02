@@ -6,7 +6,6 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTes
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -33,8 +33,10 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -55,7 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -88,13 +90,13 @@ class PostgresqlSubagentContinuationTest {
     TurnResolver resolver =
         (threadId, path, preparation) ->
             new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
-    runtime =
-        new HarnessRuntime(store, builtinDriver(store, resolver), () -> CompactionConfig.DEFAULT);
+    DriverRegistry registry = new DriverRegistry(List.of(builtinDriver(store, resolver)));
+    runtime = new HarnessRuntime(store, registry, () -> CompactionConfig.DEFAULT);
     scheduler = Executors.newSingleThreadScheduledExecutor();
     processor =
         new ThreadProcessor(
             store,
-            builtinDriver(store, resolver),
+            registry,
             new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -106,6 +108,11 @@ class PostgresqlSubagentContinuationTest {
   }
 
   private record Delegation(AcceptedCommands parent, AcceptedCommands child, UUID firstJoin) {}
+
+  private static BranchSettings branchSettings() {
+    return new BranchSettings(
+        "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
+  }
 
   private Delegation runningChild() {
     AcceptedCommands parent =
@@ -127,6 +134,7 @@ class PostgresqlSubagentContinuationTest {
                 UUID.randomUUID(),
                 parent.thread().id(),
                 List.of(prompt("first task"))),
+            branchSettings(),
             joinRequest(invocation, parent.thread().id()),
             AcceptancePreflight.IDENTITY);
     assertNotEquals(parent.session().id(), child.session().id());
@@ -161,7 +169,7 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(
         List.of(
             new SetAgentCommandPayload(settings.agentName()),
-            new SetModelCommandPayload(settings.model()),
+            new SetExecutionCommandPayload(settings.execution()),
             new SetEnvironmentCommandPayload(settings.environmentName()),
             new CustomMessageCommandPayload(AgentMessage.user("second task"))),
         pendingBatch.stream().map(ThreadCommand::payload).toList());
@@ -358,7 +366,8 @@ class PostgresqlSubagentContinuationTest {
         List.of(
             new NewThreadCommand(
                 new SetAgentCommandPayload(settings.agentName()), UUID.randomUUID()),
-            new NewThreadCommand(new SetModelCommandPayload(settings.model()), UUID.randomUUID()),
+            new NewThreadCommand(
+                new SetExecutionCommandPayload(settings.execution()), UUID.randomUUID()),
             new NewThreadCommand(
                 new SetEnvironmentCommandPayload(settings.environmentName()), UUID.randomUUID()),
             prompt));

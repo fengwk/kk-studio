@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -74,7 +75,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   private static final String HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("model", "v1"), null);
+      new BranchSettings("agent", BuiltinExecution.of(new ModelSelection("model", "v1")), null);
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
