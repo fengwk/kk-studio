@@ -1342,18 +1342,8 @@ create index idx_durable_work_lease_until
     on durable_work (lease_until, target_type, target_id)
     where lease_until is not null;
 
-create index idx_durable_work_agent_available
-    on durable_work (available_at, target_id)
-    where target_type = 'AGENT';
-
-create index idx_durable_work_agent_lease_until
-    on durable_work (lease_until, target_id)
-    where target_type = 'AGENT' and lease_until is not null;
-
 comment on index idx_durable_work_available is 'claim 按 (available_at, target_type, target_id) 选取候选';
 comment on index idx_durable_work_lease_until is '过期 lease 扫描索引';
-comment on index idx_durable_work_agent_available is 'AGENT Work 按 (available_at, target_id) 的专用 claim 索引';
-comment on index idx_durable_work_agent_lease_until is 'AGENT Work 过期 lease 扫描索引';
 
 -- Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、
 -- 子 Thread 终止边界（terminal_entry_id/final_answer_entry_id）、以及交付给父

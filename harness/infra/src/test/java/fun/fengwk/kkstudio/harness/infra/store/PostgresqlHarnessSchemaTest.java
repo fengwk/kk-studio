@@ -472,20 +472,11 @@ class PostgresqlHarnessSchemaTest {
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");
     String childPending = indexDefinition("idx_harness_thread_join_child_pending");
     String toolNonterminal = indexDefinition("idx_harness_tool_invocation_thread_nonterminal");
-    // 同一 Environment 内只允许一个 native writer 的唯一键已随 Claude 执行表移除；剩余索引必须保持既定形状。
+    // 索引必须保持既定形状；Work 的 claim 与过期扫描索引覆盖全部 target type。
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
     assertTrue(workLease.contains("WHERE (lease_until IS NOT NULL)"));
-    String agentWorkAvailable = indexDefinition("idx_durable_work_agent_available");
-    String agentWorkLease = indexDefinition("idx_durable_work_agent_lease_until");
-    assertTrue(agentWorkAvailable.contains("(available_at, target_id)"));
-    assertTrue(agentWorkAvailable.contains("target_type"));
-    assertTrue(agentWorkAvailable.contains("'AGENT'"));
-    assertTrue(agentWorkLease.contains("(lease_until, target_id)"));
-    assertTrue(agentWorkLease.contains("target_type"));
-    assertTrue(agentWorkLease.contains("'AGENT'"));
-    assertTrue(agentWorkLease.contains("lease_until IS NOT NULL"));
     assertTrue(threadParent.contains("(parent_thread_id)"));
     assertTrue(threadSession.contains("(session_id, created_at, id)"));
     String rootName = indexDefinition("uk_harness_thread_root_name");
