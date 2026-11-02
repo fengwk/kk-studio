@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -84,7 +85,15 @@ class HarnessWorkDispatcherDrainTest {
       memory.setClock(clock);
     }
     return new HarnessWorkDispatcher(
-        store, config(maxDispatchTasks), drain, worker, poll, handler, handler, handler);
+        store,
+        config(maxDispatchTasks),
+        drain,
+        worker,
+        poll,
+        Map.of(
+            WorkTargetType.THREAD, handler,
+            WorkTargetType.MODEL, handler,
+            WorkTargetType.TOOL, handler));
   }
 
   @Test
@@ -499,9 +508,10 @@ class HarnessWorkDispatcherDrainTest {
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
-            otherClaims::add,
-            otherClaims::add,
-            otherClaims::add);
+            Map.of(
+                WorkTargetType.THREAD, otherClaims::add,
+                WorkTargetType.MODEL, otherClaims::add,
+                WorkTargetType.TOOL, otherClaims::add));
 
     otherDispatcher.start();
     // otherDispatcher should not claim the tool work because its nodeInstanceId does not match the
@@ -520,9 +530,10 @@ class HarnessWorkDispatcherDrainTest {
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
-            allowedClaims::add,
-            allowedClaims::add,
-            allowedClaims::add);
+            Map.of(
+                WorkTargetType.THREAD, allowedClaims::add,
+                WorkTargetType.MODEL, allowedClaims::add,
+                WorkTargetType.TOOL, allowedClaims::add));
 
     allowedDispatcher.start();
     awaitTrue(() -> !allowedClaims.isEmpty());

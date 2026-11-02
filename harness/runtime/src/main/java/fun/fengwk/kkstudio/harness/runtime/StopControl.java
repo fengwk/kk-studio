@@ -307,6 +307,7 @@ final class StopControl {
       if (ctx.driverState().executionId() != null) {
         allWorkTargets.add(new WorkTarget(WorkTargetType.MODEL, ctx.driverState().executionId()));
       }
+      allWorkTargets.add(new WorkTarget(WorkTargetType.AGENT, ctx.thread().id()));
       for (ToolInvocation sibling : ctx.toolSiblings()) {
         allWorkTargets.add(new WorkTarget(WorkTargetType.TOOL, sibling.id()));
       }
@@ -469,7 +470,8 @@ final class StopControl {
     return switch (type) {
       case THREAD -> 0;
       case MODEL -> 1;
-      case TOOL -> 2;
+      case AGENT -> 2;
+      case TOOL -> 3;
     };
   }
 

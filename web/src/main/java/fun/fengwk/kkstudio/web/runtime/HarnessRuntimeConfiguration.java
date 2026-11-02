@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
@@ -51,6 +52,7 @@ import javax.sql.DataSource;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -239,6 +241,7 @@ public class HarnessRuntimeConfiguration {
             dispatcherLease,
             dispatcherLease,
             dispatcherLease,
+            dispatcherLease,
             dispatcherProperties.getPollInterval(),
             dispatcherProperties.getRejectionDelay(),
             dispatcherProperties.getMaxDispatchTasks());
@@ -249,9 +252,13 @@ public class HarnessRuntimeConfiguration {
         drainExecutor,
         workerExecutor,
         pollScheduler,
-        threadProcessor,
-        modelProcessor,
-        toolProcessor);
+        Map.of(
+            WorkTargetType.THREAD,
+            threadProcessor::process,
+            WorkTargetType.MODEL,
+            modelProcessor::process,
+            WorkTargetType.TOOL,
+            toolProcessor::process));
   }
 
   @Bean

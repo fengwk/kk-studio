@@ -228,6 +228,13 @@ class ExecutionExitFactTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> model().confirm(ExecutionExitState.REMOTE_ACKNOWLEDGED, CONFIRMED_AT));
+    ExecutionExitFact agent =
+        unconfirmed(
+            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.AGENT, null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> agent.confirm(ExecutionExitState.REMOTE_ACKNOWLEDGED, CONFIRMED_AT));
+    assertDoesNotThrow(() -> agent.confirm(ExecutionExitState.STUDIO_EXITED, CONFIRMED_AT));
     assertThrows(
         IllegalArgumentException.class,
         () -> remote().confirm(ExecutionExitState.STUDIO_EXITED, CONFIRMED_AT));
@@ -290,17 +297,21 @@ class ExecutionExitFactTest {
   }
 
   @Test
-  void remoteParentMustBeTheSameGenerationLocalTool() {
+  void remoteParentMustBeTheSameGenerationLocalToolOrAgent() {
     ExecutionExitFact remote = remote();
     ExecutionExitFact tool = tool();
+    ExecutionExitFact agentParent =
+        unconfirmed(
+            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.AGENT, null);
 
     assertDoesNotThrow(() -> remote.requireRemoteParent(tool));
-    // 除 kind 外与合法 TOOL 父代完全相同，确保拒绝原因不是另一执行 id。
+    assertDoesNotThrow(() -> remote.requireRemoteParent(agentParent));
+    // 除 kind 外与合法 TOOL/AGENT 父代完全相同，确保拒绝原因不是另一执行 id。
     ExecutionExitFact modelParent =
         unconfirmed(
             TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.MODEL, null);
     assertEquals(
-        "remote execution parent must be the same generation's TOOL execution",
+        "remote execution parent must be the same generation's TOOL or AGENT execution",
         assertThrows(IllegalArgumentException.class, () -> remote.requireRemoteParent(modelParent))
             .getMessage());
     assertThrows(

@@ -1287,7 +1287,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     Duration lease = Duration.ofSeconds(30);
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
-            lease, lease, lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
+            lease, lease, lease, lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
     ExecutorService drainExecutor =
         Executors.newSingleThreadExecutor(daemonThreads("interaction-test-drain-"));
     ExecutorService workerExecutor =
@@ -1312,9 +1312,13 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             drainExecutor,
             workerExecutor,
             pollScheduler,
-            threadProcessor,
-            modelProcessor,
-            toolProcessor);
+            Map.of(
+                WorkTargetType.THREAD,
+                threadProcessor::process,
+                WorkTargetType.MODEL,
+                modelProcessor::process,
+                WorkTargetType.TOOL,
+                toolProcessor::process));
     testDispatchers.add(dispatcher);
     dispatcher.start();
     return dispatcher;

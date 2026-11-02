@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
+import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.AGENT_LEASE;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.MODEL_LEASE;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.THREAD_LEASE;
@@ -67,7 +68,10 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -112,15 +116,18 @@ class HarnessWorkDispatcherHandoffTest {
     if (store instanceof InMemoryHarnessStore memory) {
       memory.setClock(clock);
     }
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new EnumMap<>(WorkTargetType.class);
+    if (threadHandler != null) {
+      handlers.put(WorkTargetType.THREAD, threadHandler);
+    }
+    if (modelHandler != null) {
+      handlers.put(WorkTargetType.MODEL, modelHandler);
+    }
+    if (toolHandler != null) {
+      handlers.put(WorkTargetType.TOOL, toolHandler);
+    }
     return new HarnessWorkDispatcher(
-        store,
-        config(maxDispatchTasks),
-        drain,
-        worker,
-        poll,
-        threadHandler,
-        modelHandler,
-        toolHandler);
+        store, config(maxDispatchTasks), drain, worker, poll, handlers);
   }
 
   @Test
@@ -182,6 +189,7 @@ class HarnessWorkDispatcherHandoffTest {
           switch (claim.target().type()) {
             case THREAD -> THREAD_LEASE;
             case MODEL -> MODEL_LEASE;
+            case AGENT -> AGENT_LEASE;
             case TOOL -> TOOL_LEASE;
           };
       assertEquals(NOW.plus(expectedLease), claim.leaseUntil());
@@ -200,6 +208,47 @@ class HarnessWorkDispatcherHandoffTest {
     ClaimedWork secondThreadClaim = claims.get(3);
     assertEquals(WorkTargetType.THREAD, secondThreadClaim.target().type());
     assertNotEquals(firstThreadClaim.leaseToken(), secondThreadClaim.leaseToken());
+  }
+
+  @Test
+  void onlyClaimsAndDispatchesRegisteredWorkTargetTypesInCanonicalOrder() {
+    InMemoryHarnessStore store = newStore();
+    ThreadSeed threadSeed = seedThread(store);
+    ModelSeed modelSeed = seedModel(store);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadSeed.threadId());
+          tx.work().request(new WorkTarget(WorkTargetType.AGENT, threadSeed.threadId()));
+          return null;
+        });
+    ToolSeed toolSeed = seedTool(store);
+
+    CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
+    HarnessWorkDispatcher dispatcher =
+        new HarnessWorkDispatcher(
+            store,
+            config(4),
+            singleThread(),
+            singleThread(),
+            new RecordingScheduler(),
+            Map.of(
+                WorkTargetType.AGENT, claims::add,
+                WorkTargetType.THREAD, claims::add));
+
+    dispatcher.start();
+    awaitTrue(() -> claims.size() == 2);
+    // 轮转顺序严格按 WorkTargetType 声明顺序：THREAD 优先于 AGENT，即便注册 Map 的插入顺序相反
+    assertEquals(WorkTargetType.THREAD, claims.get(0).target().type());
+    assertEquals(WorkTargetType.AGENT, claims.get(1).target().type());
+
+    // 未注册的 MODEL 和 TOOL 绝不能被 claim
+    Work modelWork =
+        work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()));
+    Work toolWork = work(store, new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId()));
+    assertEquals(null, modelWork.leaseToken());
+    assertEquals(null, toolWork.leaseToken());
+    assertEquals(NOW, modelWork.availableAt());
+    assertEquals(NOW, toolWork.availableAt());
   }
 
   @Test
@@ -448,9 +497,13 @@ class HarnessWorkDispatcherHandoffTest {
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
-            threadProcessor,
-            modelProcessor,
-            toolProcessor);
+            Map.of(
+                WorkTargetType.THREAD,
+                threadProcessor::process,
+                WorkTargetType.MODEL,
+                modelProcessor::process,
+                WorkTargetType.TOOL,
+                toolProcessor::process));
 
     dispatcher.start();
     awaitTrue(
@@ -653,66 +706,44 @@ class HarnessWorkDispatcherHandoffTest {
   void constructorsFailFastOnNullArguments() {
     HarnessWorkDispatcherConfig config = config(1);
     Consumer<ClaimedWork> handler = claim -> {};
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers =
+        Map.of(
+            WorkTargetType.THREAD,
+            handler,
+            WorkTargetType.MODEL,
+            handler,
+            WorkTargetType.TOOL,
+            handler);
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                null,
-                config,
-                singleThread(),
-                singleThread(),
-                new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessWorkDispatcher(
-                newStore(),
-                null,
-                singleThread(),
-                singleThread(),
-                new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                null, config, singleThread(), singleThread(), new RecordingScheduler(), handlers));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
                 newStore(),
-                config,
                 null,
                 singleThread(),
+                singleThread(),
                 new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                handlers));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                newStore(),
-                config,
-                singleThread(),
-                null,
-                new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                newStore(), config, null, singleThread(), new RecordingScheduler(), handlers));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                newStore(),
-                config,
-                singleThread(),
-                singleThread(),
-                null,
-                handler,
-                handler,
-                handler));
+                newStore(), config, singleThread(), null, new RecordingScheduler(), handlers));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessWorkDispatcher(
+                newStore(), config, singleThread(), singleThread(), null, handlers));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -722,9 +753,27 @@ class HarnessWorkDispatcherHandoffTest {
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
-                null,
-                handler,
-                handler));
+                (Map<WorkTargetType, Consumer<ClaimedWork>>) null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new HarnessWorkDispatcher(
+                newStore(),
+                config,
+                singleThread(),
+                singleThread(),
+                new RecordingScheduler(),
+                Map.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new HarnessWorkDispatcher(
+                newStore(),
+                config,
+                singleThread(),
+                singleThread(),
+                new RecordingScheduler(),
+                Map.of(WorkTargetType.MODEL, handler)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -734,33 +783,7 @@ class HarnessWorkDispatcherHandoffTest {
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
-                handler,
-                null,
-                handler));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessWorkDispatcher(
-                newStore(),
-                config,
-                singleThread(),
-                singleThread(),
-                new RecordingScheduler(),
-                handler,
-                handler,
-                null));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessWorkDispatcher(
-                newStore(),
-                config,
-                singleThread(),
-                singleThread(),
-                new RecordingScheduler(),
-                (ThreadProcessor) null,
-                null,
-                null));
+                Collections.singletonMap(WorkTargetType.THREAD, null)));
   }
 
   @Test
@@ -793,6 +816,14 @@ class HarnessWorkDispatcherHandoffTest {
     ownedExecutors.add(discard);
     ownedExecutors.add(discardOldest);
     Consumer<ClaimedWork> handler = claim -> {};
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers =
+        Map.of(
+            WorkTargetType.THREAD,
+            handler,
+            WorkTargetType.MODEL,
+            handler,
+            WorkTargetType.TOOL,
+            handler);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -803,21 +834,12 @@ class HarnessWorkDispatcherHandoffTest {
                 callerRuns,
                 Runnable::run,
                 new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                handlers));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new HarnessWorkDispatcher(
-                newStore(),
-                config(1),
-                discard,
-                Runnable::run,
-                new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                newStore(), config(1), discard, Runnable::run, new RecordingScheduler(), handlers));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -827,9 +849,7 @@ class HarnessWorkDispatcherHandoffTest {
                 Runnable::run,
                 discardOldest,
                 new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
+                handlers));
   }
 
   /** 给指定 logger 临时挂一个 logback ListAppender，用于断言日志的 level、格式化消息与 throwable。 */

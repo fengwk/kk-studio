@@ -477,7 +477,7 @@ const CORE_STATE_ENUMS = [
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTargetType.java',
     enumName: 'WorkTargetType',
-    constants: ['THREAD', 'MODEL', 'TOOL'],
+    constants: ['THREAD', 'MODEL', 'AGENT', 'TOOL'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java',

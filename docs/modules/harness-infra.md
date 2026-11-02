@@ -93,12 +93,12 @@ conflict: available_at = least(current, statement_timestamp())
 [`HarnessWorkDispatcher`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcher.java) 只做 claim、路由、有界 handoff、wake 合并、周期 poll 与 stop：它从不读取 Thread 或 Invocation 业务状态，claims 一律是 claim-only 短事务，typed 结果完全由 Processor 解释。
 
 ```text
-wake merge -> round-robin claim THREAD/MODEL/TOOL（携带 nodeInstanceId）
+wake merge -> round-robin claim 注册的 WorkTargetType（携带 nodeInstanceId）
   -> bounded worker handoff -> Processor.process(ClaimedWork)
   -> 任务收尾触发一次新的 wake
 ```
 
-调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；THREAD / MODEL / TOOL 之间用实例级 round-robin 游标轮转，避免类型饥饿；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，运行期间重复调用是 no-op，`stop()` 后再调用则抛 `IllegalStateException`。外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
+调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；已注册的 `WorkTargetType`（规范顺序 `THREAD -> MODEL -> AGENT -> TOOL` 的子集，必须包含 `THREAD`）之间用实例级 round-robin 游标轮转，避免类型饥饿并跳过未注册类型；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，运行期间重复调用是 no-op，`stop()` 后再调用则抛 `IllegalStateException`。外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
 
 合并 wake 的单 drain、bounded handoff、容量计数、executor 拒绝归还、接收前拒绝与接收后失败的区分、stop 收尾与 fail-fast executor 校验收敛在 [`work`](../../work/) 的 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)；Harness 只保留 round-robin 类型 claim、按类型路由的 Processor handoff 与 ownership-fenced 归还，因此同一份调度骨架被 Harness / Issue / Canvas 三个域复用，而各自的 claim、fencing 与失败策略仍在域内。
 
@@ -109,11 +109,11 @@ Work 完成与业务写入在同一事务提交：[`completeWork`](../../harness
 [`HarnessWorkDispatcherConfig`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfig.java) 是调度器的部署级配置契约，也是本模块唯一暴露给进程启动参数的部分：
 
 ```text
-threadLeaseDuration / modelLeaseDuration / toolLeaseDuration
+threadLeaseDuration / modelLeaseDuration / agentLeaseDuration / toolLeaseDuration
 periodicPollInterval / executorRejectionDelay / maxDispatchTasks
 ```
 
-前五个 Duration 必须是正的整毫秒，与 Store 的毫秒精度时间边界一致；`maxDispatchTasks` 只约束本机排队与运行中的 processor handoff 总数（到达上限即停止 claim），绝不约束异步 Model / Tool 的执行并发——那由各 Processor 及其注入的 Gateway / executor 决定。生产组合由 [`HarnessDispatcherProperties`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessDispatcherProperties.java)（前缀 `kk-studio.harness.dispatcher`）提供，它另外承载 worker 池容量 `worker.concurrency` / `worker.queue-capacity`，生产装配当前用同一个 `lease-duration` 填充 THREAD / MODEL / TOOL 三个 lease 字段。
+前六个 Duration 必须是正的整毫秒，与 Store 的毫秒精度时间边界一致；`maxDispatchTasks` 只约束本机排队与运行中的 processor handoff 总数（到达上限即停止 claim），绝不约束异步 Model / Tool 的执行并发——那由各 Processor 及其注入的 Gateway / executor 决定。生产组合由 [`HarnessDispatcherProperties`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessDispatcherProperties.java)（前缀 `kk-studio.harness.dispatcher`）提供，它另外承载 worker 池容量 `worker.concurrency` / `worker.queue-capacity`，生产装配当前用同一个 `lease-duration` 填充 THREAD / MODEL / AGENT / TOOL 各类 lease 字段。
 
 ## Realtime source / sink
 

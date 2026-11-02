@@ -1298,7 +1298,7 @@ create index idx_harness_tool_invocation_pending
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
--- Durable Work：全部后台调度共用的唯一 mailbox 表。Harness 的 THREAD/MODEL/TOOL、Project 的 ISSUE 与
+-- Durable Work：全部后台调度共用的唯一 mailbox 表。Harness 的 THREAD/MODEL/AGENT/TOOL、Project 的 ISSUE 与
 -- Canvas 的 CANVAS_RUN 都是一种 target_type；due、租约与 wake 围栏一律以数据库时钟判定。
 create table durable_work (
     target_type varchar(16) not null,
@@ -1312,7 +1312,7 @@ create table durable_work (
     constraint fk_durable_work_environment foreign key (required_environment_id)
         references environment (id) on delete restrict,
     constraint ck_durable_work_target_type check (
-        target_type in ('THREAD', 'MODEL', 'TOOL', 'ISSUE', 'CANVAS_RUN')
+        target_type in ('THREAD', 'MODEL', 'AGENT', 'TOOL', 'ISSUE', 'CANVAS_RUN')
     ),
     constraint ck_durable_work_lease_pair check (
         (lease_token is null) = (lease_until is null)
@@ -1322,18 +1322,18 @@ create table durable_work (
         or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
     ),
     constraint ck_durable_work_required_environment check (
-        required_environment_id is null or target_type = 'TOOL'
+        required_environment_id is null or target_type in ('TOOL', 'AGENT')
     )
 );
 
 comment on table durable_work is 'Durable Work：一个调度 target 的 mailbox 状态；wake_version 递增防止旧 worker 完成时吞掉新的 wake';
-comment on column durable_work.target_type is 'target 类型（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN），决定由哪个 dispatcher 领取';
+comment on column durable_work.target_type is 'target 类型（THREAD/MODEL/AGENT/TOOL/ISSUE/CANVAS_RUN），决定由哪个 dispatcher 领取';
 comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
 comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
 comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
 comment on column durable_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
 comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
-comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID（仅 TOOL 可非空；非空时仅持有该 environment READY 连接租约的节点可 claim）';
+comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID（仅 TOOL/AGENT 可非空；非空时仅持有该 environment READY 连接租约的节点可 claim）';
 
 create index idx_durable_work_available
     on durable_work (available_at, target_type, target_id);
@@ -1496,7 +1496,7 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('MODEL', 'TOOL') and parent_execution_id is null and environment_id is null)
+        (kind in ('MODEL', 'TOOL', 'AGENT') and parent_execution_id is null and environment_id is null)
         or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
     ),
     constraint ck_harness_execution_exit_state check (
@@ -1506,7 +1506,7 @@ create table harness_execution_exit (
     ),
     constraint ck_harness_execution_exit_kind_state check (
         state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('MODEL', 'TOOL') and state = 'STUDIO_EXITED')
+        or (kind in ('MODEL', 'TOOL', 'AGENT') and state = 'STUDIO_EXITED')
         or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
     ),
     constraint ck_harness_execution_exit_time check (
@@ -1521,8 +1521,8 @@ comment on column harness_execution_exit.thread_id is '所属 Thread；按 Threa
 comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 TOOL 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 执行代次；本地执行为空';
+comment on column harness_execution_exit.kind is 'MODEL、TOOL、AGENT 或挂在本地 TOOL/AGENT 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 AGENT 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';

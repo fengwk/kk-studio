@@ -765,14 +765,16 @@ select pg_temp.rejects('a work lease token and its deadline are stored together'
     $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
       values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
     'ck_durable_work_lease_pair');
-select pg_temp.rejects('only TOOL work may require an Environment',
+select pg_temp.rejects('only TOOL and AGENT work may require an Environment',
     $$insert into durable_work (target_type, target_id, available_at, wake_version,
           required_environment_id)
       values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
     'ck_durable_work_required_environment');
-select pg_temp.rejects('AGENT is not a durable work target',
-    $$insert into durable_work (target_type, target_id, available_at, wake_version)
-      values ('AGENT', pg_temp.uid(700), now(), 1)$$, '23514', 'ck_durable_work_target_type');
+insert into durable_work (target_type, target_id, available_at, wake_version, required_environment_id)
+    values ('AGENT', pg_temp.uid(700), now(), 1, pg_temp.uid(9000));
+select pg_temp.assert_true('AGENT work accepts required environment',
+    (select count(*) = 1 from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700)));
+delete from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700);
 insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
     values (pg_temp.uid(800), pg_temp.uid(700), pg_temp.uid(1000), 'INPUT', pg_temp.uid(900));
 select pg_temp.rejects('a pin cannot reference a missing Resource',
@@ -1156,8 +1158,8 @@ insert into harness_execution_exit (execution_id, thread_id, invocation_id, atte
     owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
     values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'TOOL',
         null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
-select pg_temp.rejects('AGENT is not an execution exit kind',
-    $$update harness_execution_exit set kind='AGENT' where execution_id=pg_temp.uid(1700)$$,
+select pg_temp.rejects('BOGUS is not an execution exit kind',
+    $$update harness_execution_exit set kind='BOGUS' where execution_id=pg_temp.uid(1700)$$,
     '23514', 'ck_harness_execution_exit_kind');
 select pg_temp.assert_true('execution exit stores an optional millisecond abandonment time',
     (select is_nullable = 'YES' and data_type = 'timestamp with time zone'

@@ -93,7 +93,9 @@ final class InMemoryWorkStore implements WorkStore {
     tx.checkOpen();
     Instant now = tx.now();
     Objects.requireNonNull(target, "target");
-    if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
+    if (requiredEnvironmentId != null
+        && target.type() != WorkTargetType.TOOL
+        && target.type() != WorkTargetType.AGENT) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
@@ -111,7 +113,7 @@ final class InMemoryWorkStore implements WorkStore {
   private void requireWorkOwnerLocked(WorkTarget target) {
     UUID threadId =
         switch (target.type()) {
-          case THREAD -> {
+          case THREAD, AGENT -> {
             if (!state.threads.containsKey(target.id())) {
               throw new IllegalArgumentException("work target does not exist: " + target);
             }
@@ -138,7 +140,7 @@ final class InMemoryWorkStore implements WorkStore {
   private void requireTargetExists(WorkTarget target) {
     boolean exists =
         switch (target.type()) {
-          case THREAD -> state.threads.containsKey(target.id());
+          case THREAD, AGENT -> state.threads.containsKey(target.id());
           case MODEL -> state.driverRows.containsKey(target.id());
           case TOOL -> state.toolInvocations.containsKey(target.id());
         };

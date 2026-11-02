@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.runtime;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.runtime;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedAgentWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedModelFreeToolBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolWork;
@@ -52,6 +53,7 @@ class HarnessRuntimeStopWorkOrderTest {
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(delegate, 3);
     seedThreadWork(delegate, baseline.threadId());
+    seedAgentWork(delegate, baseline.threadId());
     for (UUID id : baseline.toolIds()) {
       seedToolWork(delegate, id);
     }
@@ -64,6 +66,7 @@ class HarnessRuntimeStopWorkOrderTest {
     List<WorkTarget> expected =
         List.of(
             new WorkTarget(WorkTargetType.THREAD, baseline.threadId()),
+            new WorkTarget(WorkTargetType.AGENT, baseline.threadId()),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(0)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(1)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(2)));
@@ -104,6 +107,7 @@ class HarnessRuntimeStopWorkOrderTest {
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(delegate, 2);
     seedThreadWork(delegate, baseline.threadId());
+    seedAgentWork(delegate, baseline.threadId());
     for (UUID id : baseline.toolIds()) {
       seedToolWork(delegate, id);
     }
@@ -125,6 +129,7 @@ class HarnessRuntimeStopWorkOrderTest {
     List<WorkTarget> expected =
         List.of(
             new WorkTarget(WorkTargetType.THREAD, baseline.threadId()),
+            new WorkTarget(WorkTargetType.AGENT, baseline.threadId()),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(0)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(1)));
     for (WorkTarget target : expected) {
