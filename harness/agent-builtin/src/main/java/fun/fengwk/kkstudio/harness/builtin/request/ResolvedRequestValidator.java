@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.request;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -35,7 +36,7 @@ public final class ResolvedRequestValidator {
         && start.reason() == TurnStartReason.COMPACTION) {
       throw new IllegalStateException("a normal turn must not carry a COMPACTION TURN_START");
     }
-    ModelSelection expectedModel = settings.model();
+    ModelSelection expectedModel = BuiltinExecution.model(settings.execution());
     // BranchSettings 只持久化 agent/model 选择与可空 environmentName；Environment 每轮按 name 解析并冻结进
     // binding，binding 之间的一致性（同一环境、skill source 与该环境一致）由 ModelRequestSpec 构造边界保证。
     if (!spec.model().modelName().equals(expectedModel.modelName())) {

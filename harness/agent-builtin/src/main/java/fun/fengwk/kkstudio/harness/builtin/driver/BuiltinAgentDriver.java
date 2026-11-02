@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -81,6 +83,21 @@ public final class BuiltinAgentDriver implements AgentDriver {
   }
 
   @Override
+  public String id() {
+    return BuiltinExecution.DRIVER;
+  }
+
+  @Override
+  public DriverCapabilities capabilities() {
+    return new DriverCapabilities(true, true);
+  }
+
+  @Override
+  public void validateSettings(String settingsJson) {
+    BuiltinExecution.parseSettings(settingsJson);
+  }
+
+  @Override
   public TurnResolution resolveTurn(
       HarnessStore.Transaction tx,
       ThreadState thread,
@@ -99,7 +116,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
       case TurnResolver.Rejected rejected -> new TurnResolution.Rejected(rejected.error());
       case TurnResolver.CompactionResolved resolved -> new TurnResolution.Compaction(
           new CompactionResolution(
-              resolved.executionModel(),
+              resolved.execution(),
               resolved.outputBudget(),
               resolved.contextWindow(),
               resolved.maxOutputTokens(),
@@ -149,9 +166,10 @@ public final class BuiltinAgentDriver implements AgentDriver {
                 spec.model().inputModalities(),
                 spec.providerType().mediaCapabilities().userModalities(),
                 spec.providerType().mediaCapabilities().toolResultModalities())),
-        spec.groupExecution() == null
-            ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
-            : ModelSelection.group(spec.groupExecution().groupName()));
+        BuiltinExecution.of(
+            spec.groupExecution() == null
+                ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
+                : ModelSelection.group(spec.groupExecution().groupName())));
   }
 
   @Override
@@ -475,14 +493,14 @@ public final class BuiltinAgentDriver implements AgentDriver {
     private final Integer contextWindow;
     private final Integer maxOutputTokens;
     private final TurnCapabilities capabilities;
-    private final ModelSelection executedSelection;
+    private final ExecutionSelection executedSelection;
 
     private AcceptedTurn(
         ModelRequestSpec spec,
         int contextWindow,
         int maxOutputTokens,
         TurnCapabilities capabilities,
-        ModelSelection executedSelection) {
+        ExecutionSelection executedSelection) {
       this.spec = spec;
       this.contextWindow = contextWindow;
       this.maxOutputTokens = maxOutputTokens;
@@ -506,7 +524,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
     }
 
     @Override
-    public ModelSelection executedSelection() {
+    public ExecutionSelection executedSelection() {
       return executedSelection;
     }
 

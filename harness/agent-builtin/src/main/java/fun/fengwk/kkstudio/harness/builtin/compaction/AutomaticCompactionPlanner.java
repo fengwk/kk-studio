@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -37,7 +37,7 @@ public final class AutomaticCompactionPlanner {
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(compaction, "compaction");
-    ModelSelection executionModel = path.baseSettings().model();
+    ExecutionSelection execution = path.baseSettings().execution();
 
     CompactionHistory.ClosedTurn latestTurn = CompactionHistory.latestClosedTurn(path);
     if (latestTurn == null) {
@@ -76,7 +76,7 @@ public final class AutomaticCompactionPlanner {
     if (!thresholdEligible) {
       return null;
     }
-    return thresholdPreparation(thread, path, latestTurn, compaction, executionModel, planner);
+    return thresholdPreparation(thread, path, latestTurn, compaction, execution, planner);
   }
 
   /** owned completed HISTORY turn 的机械 TURN_PREFIX obligation；其它 head 返回 null。 */
@@ -109,7 +109,7 @@ public final class AutomaticCompactionPlanner {
       EntryPath path,
       CompactionHistory.ClosedTurn latestTurn,
       CompactionConfig compaction,
-      ModelSelection executionModel,
+      ExecutionSelection execution,
       CompactionPlanner planner) {
     CompactionHistory.ClosedTurn candidate = latestTurn;
     while (candidate != null) {
@@ -130,7 +130,7 @@ public final class AutomaticCompactionPlanner {
         candidate = CompactionHistory.previousClosedTurn(path, candidate);
         continue;
       }
-      if (!start.settings().model().equals(executionModel)) {
+      if (!start.settings().execution().equals(execution)) {
         return null;
       }
       Entry resultEntry = CompactionHistory.turnResultEntry(path, candidate.start());

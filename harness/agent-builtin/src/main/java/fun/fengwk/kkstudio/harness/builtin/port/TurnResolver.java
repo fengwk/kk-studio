@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin.port;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 
@@ -55,16 +55,16 @@ public interface TurnResolver {
     }
   }
 
-  /** 压缩 turn 解析成功：冻结 compactor 执行模型、输出预算与子 Thread 设置。 */
+  /** 压缩 turn 解析成功：冻结 compactor 执行选择、输出预算与子 Thread 设置。 */
   record CompactionResolved(
-      ModelSelection executionModel,
+      ExecutionSelection execution,
       long outputBudget,
       int contextWindow,
       int maxOutputTokens,
       BranchSettings childSettings)
       implements Result {
     public CompactionResolved {
-      executionModel = Objects.requireNonNull(executionModel, "executionModel");
+      execution = Objects.requireNonNull(execution, "execution");
       if (outputBudget <= 0L) {
         throw new IllegalArgumentException("outputBudget must be positive");
       }
