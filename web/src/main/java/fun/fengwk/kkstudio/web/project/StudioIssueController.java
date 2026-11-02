@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.PauseReason;
-import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 import java.util.List;
 import java.util.Locale;
@@ -70,7 +71,6 @@ public class StudioIssueController {
   private final IssueStageBudgetService issueStageBudgetService;
   private final IssueEvidenceService issueEvidenceService;
   private final ProjectDtoMapper mapper;
-  private final IssueActivityRepository issueActivityRepository;
   private final IssueDetailAssembler issueDetailAssembler;
 
   @Autowired
@@ -80,7 +80,6 @@ public class StudioIssueController {
       IssueStageBudgetService issueStageBudgetService,
       IssueEvidenceService issueEvidenceService,
       ProjectDtoMapper mapper,
-      IssueActivityRepository issueActivityRepository,
       IssueDetailAssembler issueDetailAssembler) {
     this.issueEditingService = Objects.requireNonNull(issueEditingService, "issueEditingService");
     this.issueLifecycleService =
@@ -90,7 +89,6 @@ public class StudioIssueController {
     this.issueEvidenceService =
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
-    this.issueActivityRepository = issueActivityRepository;
     this.issueDetailAssembler =
         Objects.requireNonNull(issueDetailAssembler, "issueDetailAssembler");
   }
@@ -111,10 +109,11 @@ public class StudioIssueController {
       @PathVariable("issueId") String issueIdStr,
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
-      @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
+      @RequestParam(value = "limit", required = false, defaultValue = "50") String limitStr) {
     UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
-    int activityLimit = parseActivityLimit(limit);
+    int activityLimit =
+        RequestParameters.limit(limitStr, DEFAULT_ACTIVITY_LIMIT, MAX_ACTIVITY_LIMIT);
     return ApiResponse.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
   }
 
@@ -123,10 +122,11 @@ public class StudioIssueController {
       @PathVariable("issueId") String issueIdStr,
       @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
           String afterSequenceStr,
-      @RequestParam(value = "limit", required = false, defaultValue = "50") int limit) {
+      @RequestParam(value = "limit", required = false, defaultValue = "50") String limitStr) {
     UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
-    int activityLimit = parseActivityLimit(limit);
+    int activityLimit =
+        RequestParameters.limit(limitStr, DEFAULT_ACTIVITY_LIMIT, MAX_ACTIVITY_LIMIT);
     issueEditingService.getIssue(issueId);
     List<IssueActivity> activities =
         issueEditingService.listActivities(issueId, afterSequence, activityLimit);
@@ -312,38 +312,13 @@ public class StudioIssueController {
     if (request.getBody() == null || request.getBody().isBlank()) {
       throw new IllegalArgumentException("body must not be blank");
     }
-    String kind = request.getKind();
-    if ("INSTRUCTION".equalsIgnoreCase(kind)) {
-      issueEditingService.appendInstruction(
-          issueId, expectedVersion, request.getRequestKey(), request.getBody());
-    } else if (kind == null || kind.isBlank() || "COMMENT".equalsIgnoreCase(kind)) {
-      issueEditingService.appendComment(
-          issueId, expectedVersion, request.getRequestKey(), request.getBody());
-    } else {
-      throw new IllegalArgumentException("kind is invalid");
-    }
-
-    String activityKey =
-        (kind != null && "INSTRUCTION".equalsIgnoreCase(kind) ? "instruction:" : "comment:")
-            + request.getRequestKey();
-    IssueActivity activity = null;
-    if (issueActivityRepository != null) {
-      activity = issueActivityRepository.findByIdempotencyKey(issueId, activityKey);
-    }
-    if (activity == null) {
-      List<IssueActivity> recent =
-          issueEditingService.listActivities(issueId, 0, MAX_ACTIVITY_LIMIT);
-      for (IssueActivity a : recent) {
-        if (Objects.equals(activityKey, a.getIdempotencyKey())) {
-          activity = a;
-          break;
-        }
-      }
-    }
-    if (activity == null) {
-      throw new IllegalStateException("appended activity could not be found");
-    }
-
+    IssueActivity activity =
+        issueEditingService.appendActivity(
+            issueId,
+            expectedVersion,
+            request.getKind(),
+            request.getRequestKey(),
+            request.getBody());
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(ApiResponse.created(mapper.toDto(activity)));
   }
@@ -375,13 +350,6 @@ public class StudioIssueController {
       return 0;
     }
     return DecimalLongs.parseNonNegative(value, "afterSequence");
-  }
-
-  private static int parseActivityLimit(int limit) {
-    if (limit < 1 || limit > MAX_ACTIVITY_LIMIT) {
-      throw new IllegalArgumentException("limit must be between 1 and " + MAX_ACTIVITY_LIMIT);
-    }
-    return limit;
   }
 
   private static <E extends Enum<E>> E parseEnum(String value, Class<E> type, String fieldName) {

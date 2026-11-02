@@ -14,9 +14,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -98,9 +100,10 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
               if (injected.compareAndSet(false, true)) {
                 commitInNewTransaction(
                     () ->
-                        issueEditingService.appendComment(
+                        issueEditingService.appendActivity(
                             issue.getId(),
                             resolved.getVersion(),
+                            "COMMENT",
                             "rr-concurrent-comment",
                             "concurrent"));
               }

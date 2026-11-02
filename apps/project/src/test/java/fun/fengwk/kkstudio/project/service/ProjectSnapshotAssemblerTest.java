@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -11,8 +11,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -22,11 +29,7 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueEditingService;
-import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
-import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -48,14 +51,14 @@ class ProjectSnapshotAssemblerTest {
 
   private final UUID projectId = UUID.randomUUID();
   private final Instant now = Instant.now();
+  private final JsonMapper jsonMapper = httpMapper();
 
   @BeforeEach
   void setUp() {
     projectService = mock(ProjectService.class);
     issueEditingService = mock(IssueEditingService.class);
     issueRunService = mock(IssueRunService.class);
-    mapper =
-        new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), StrictHttpJsonMapperTestSupport.get());
+    mapper = new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), jsonMapper);
     assembler =
         new ProjectSnapshotAssembler(projectService, issueEditingService, issueRunService, mapper);
   }
@@ -164,10 +167,9 @@ class ProjectSnapshotAssemblerTest {
         snapshot.getIssues().stream()
             .map(item -> item.getIssue().getId())
             .collect(Collectors.toSet()));
-    var json = StrictHttpJsonMapperTestSupport.get().valueToTree(snapshot);
+    var json = jsonMapper.valueToTree(snapshot);
     assertEquals(
-        StrictHttpJsonMapperTestSupport.get()
-            .valueToTree(List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK")),
+        jsonMapper.valueToTree(List.of("BLOCKED", "DONE", "INIT", "REVIEW", "WORK")),
         json.get("referencedStateCodes"));
     verify(issueRunService).listRuns(active.getId());
     verify(issueRunService).listRuns(activeInit.getId());
@@ -188,7 +190,7 @@ class ProjectSnapshotAssemblerTest {
 
     assertEquals(List.of(), snapshot.getReferencedStateCodes());
     assertEquals(List.of(), snapshot.getIssues());
-    var json = StrictHttpJsonMapperTestSupport.get().valueToTree(snapshot);
+    var json = jsonMapper.valueToTree(snapshot);
     assertTrue(json.get("referencedStateCodes").isArray());
     assertEquals(0, json.get("referencedStateCodes").size());
     verifyNoInteractions(issueRunService);
@@ -305,5 +307,22 @@ class ProjectSnapshotAssemblerTest {
     IllegalStateException ex =
         assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
     assertTrue(ex.getMessage().contains("Foreign run"));
+  }
+
+  private static JsonMapper httpMapper() {
+    SimpleModule longToString = new SimpleModule("LongToStringModule");
+    longToString.addSerializer(Long.class, new ToStringSerializer(Long.class));
+    longToString.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
+    return JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .changeDefaultPropertyInclusion(
+            inclusion ->
+                inclusion
+                    .withValueInclusion(JsonInclude.Include.NON_NULL)
+                    .withContentInclusion(JsonInclude.Include.NON_NULL))
+        .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+        .addModule(longToString)
+        .build();
   }
 }
