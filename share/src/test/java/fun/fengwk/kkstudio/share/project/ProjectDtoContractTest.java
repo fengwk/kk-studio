@@ -98,7 +98,7 @@ class ProjectDtoContractTest {
     "AppendIssueActivityRequestDTO.expectedVersion"
   };
 
-  /** 测试意图：精确验证全包 32 个 DTO 的实例字段集合，确保无多余冗余字段，且所有遗留字段被彻底移除。 */
+  /** 测试意图：精确验证全包 33 个 DTO 的实例字段集合，确保无多余冗余字段，且所有遗留字段被彻底移除。 */
   @Test
   void exactFieldSetsMatchCurrentContract() {
     // Response DTOs

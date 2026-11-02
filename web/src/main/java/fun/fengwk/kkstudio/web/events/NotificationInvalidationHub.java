@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.web.events;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -44,8 +46,7 @@ class NotificationInvalidationHub implements InvalidationEventSource {
       return null;
     }
     try {
-      UUID parsed = UUID.fromString(value);
-      return parsed.toString().equals(value) ? parsed : null;
+      return Uuids.parseCanonical(value, "payload");
     } catch (IllegalArgumentException error) {
       return null;
     }

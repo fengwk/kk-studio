@@ -24,6 +24,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
@@ -33,7 +34,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
-import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
@@ -72,7 +73,6 @@ class StudioIssueControllerTest {
   private IssueRunService issueRunService;
   private IssueEvidenceService issueEvidenceService;
   private ProjectService projectService;
-  private IssueActivityRepository issueActivityRepository;
 
   private MockMvc mockMvc;
   private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
@@ -89,7 +89,6 @@ class StudioIssueControllerTest {
     issueRunService = mock(IssueRunService.class);
     issueEvidenceService = mock(IssueEvidenceService.class);
     projectService = mock(ProjectService.class);
-    issueActivityRepository = mock(IssueActivityRepository.class);
 
     // ProjectDtoMapper 的依赖在测试 fixture 显式提供，与生产注入同一 Jackson 3 mapper 实例。
     IssueDetailAssembler issueDetailAssembler =
@@ -107,7 +106,6 @@ class StudioIssueControllerTest {
             issueStageBudgetService,
             issueEvidenceService,
             new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
-            issueActivityRepository,
             issueDetailAssembler);
 
     mockMvc =
@@ -453,7 +451,8 @@ class StudioIssueControllerTest {
             .idempotencyKey("comment:k1")
             .createdAt(now)
             .build();
-    when(issueActivityRepository.findByIdempotencyKey(issueId, "comment:k1")).thenReturn(act);
+    when(issueEditingService.appendActivity(issueId, 1L, "COMMENT", "k1", "A human comment"))
+        .thenReturn(act);
 
     mockMvc
         .perform(
@@ -464,7 +463,7 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.body").value("A human comment"))
         .andExpect(jsonPath("$.data.kind").value("COMMENT"));
 
-    verify(issueEditingService).appendComment(issueId, 1L, "k1", "A human comment");
+    verify(issueEditingService).appendActivity(issueId, 1L, "COMMENT", "k1", "A human comment");
   }
 
   @Test
@@ -486,7 +485,9 @@ class StudioIssueControllerTest {
             .idempotencyKey("instruction:k2")
             .createdAt(now)
             .build();
-    when(issueActivityRepository.findByIdempotencyKey(issueId, "instruction:k2")).thenReturn(act);
+    when(issueEditingService.appendActivity(
+            issueId, 1L, "INSTRUCTION", "k2", "A human instruction"))
+        .thenReturn(act);
 
     mockMvc
         .perform(
@@ -497,7 +498,44 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.body").value("A human instruction"))
         .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"));
 
-    verify(issueEditingService).appendInstruction(issueId, 1L, "k2", "A human instruction");
+    verify(issueEditingService)
+        .appendActivity(issueId, 1L, "INSTRUCTION", "k2", "A human instruction");
+  }
+
+  @Test
+  void testAppendActivityReplayConflictReturns409() throws Exception {
+    AppendIssueActivityRequestDTO req =
+        AppendIssueActivityRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .kind("COMMENT")
+            .body("Different content reusing key")
+            .build();
+    when(issueEditingService.appendActivity(
+            issueId, 1L, "COMMENT", "k1", "Different content reusing key"))
+        .thenThrow(
+            new ProjectDuplicateException(
+                "issue_activity", "Request key was reused with a different request payload"));
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/activities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isConflict());
+  }
+
+  @Test
+  void testGetIssueInvalidLimitReturns400() throws Exception {
+    mockMvc
+        .perform(get("/api/issues/" + issueId).param("limit", "abc"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/issues/" + issueId).param("limit", "0"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/issues/" + issueId).param("limit", "201"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test

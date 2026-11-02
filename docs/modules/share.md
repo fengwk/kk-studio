@@ -1,6 +1,6 @@
 # Share 模块
 
-`share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖为 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），契约测试可独立运行。
+`share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖为 `com.fasterxml.jackson.core:jackson-annotations`、`tools.jackson.core:jackson-databind` 与 `org.jspecify:jspecify`（见 [`share/pom.xml`](../../share/pom.xml)），契约测试可独立运行。
 
 DTO 表达 HTTP 请求与投影。Canvas 与 Project 的领域到 DTO 转换分别在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java) 与 [`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java)；内核领域类型仍由 [Web](web.md) 映射。version CAS、幂等、引用计数与调度由 [Platform](platform.md)、[Canvas](canvas.md) 与 [Project](project.md) 维护。
 

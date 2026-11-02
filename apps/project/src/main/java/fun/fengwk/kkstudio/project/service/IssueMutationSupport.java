@@ -51,14 +51,21 @@ final class IssueMutationSupport {
    * <p>未命中不能作为最终结论；调用方必须在 {@link #lockOwner(UUID)} 之后再次判定。
    */
   boolean replayed(UUID issueId, Identity identity) {
+    return replayedActivity(issueId, identity) != null;
+  }
+
+  IssueActivity replayedActivity(UUID issueId, Identity identity) {
     currentIssue(issueId);
-    return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity) != null;
+    return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
   }
 
   /** owner 锁内的精确重试判定。 */
   boolean replayedUnderLock(Issue issue, Identity identity) {
-    return IssueActivityIdempotency.findApplied(issueActivityRepository, issue.getId(), identity)
-        != null;
+    return replayedActivityUnderLock(issue, identity) != null;
+  }
+
+  IssueActivity replayedActivityUnderLock(Issue issue, Identity identity) {
+    return IssueActivityIdempotency.findApplied(issueActivityRepository, issue.getId(), identity);
   }
 
   /** 锁前重放返回的权威当前事实：重新读取已提交的行，不复用一级缓存快照。 */

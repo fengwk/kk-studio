@@ -178,7 +178,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         () -> issueLifecycleService.blockIssue(issue.getId(), 1L, key("b"), "阻塞原因"));
     assertThrows(
         ProjectValidationException.class,
-        () -> issueEditingService.appendComment(issue.getId(), 1L, key("c"), "普通评论"));
+        () -> issueEditingService.appendActivity(issue.getId(), 1L, "COMMENT", key("c"), "普通评论"));
     assertThrows(
         ProjectValidationException.class,
         () ->
@@ -281,11 +281,14 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
 
     String commentKey = key("cmt");
-    Issue afterComment =
-        issueEditingService.appendComment(issue.getId(), 0L, commentKey, "这是第一条需求讨论评论");
+    IssueActivity afterComment =
+        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, "这是第一条需求讨论评论");
 
-    assertEquals(1L, afterComment.getVersion());
-    assertEquals(2L, afterComment.getNextActivitySequence());
+    Issue afterIssue = issueEditingService.getIssue(issue.getId());
+    assertEquals(1L, afterIssue.getVersion());
+    assertEquals(2L, afterIssue.getNextActivitySequence());
+    assertEquals(1L, afterComment.getSequence());
+    assertNotNull(afterComment.getCreatedAt());
 
     // 验证恰好写入 1 条 COMMENT 活动，且绝对不产生 Work 行
     assertEquals(
@@ -336,11 +339,14 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Issue current = issueEditingService.getIssue(issue.getId());
     String instKey = key("inst");
     String instructionText = "请在方案中补充数据库索引设计";
-    Issue updated =
-        issueEditingService.appendInstruction(
-            current.getId(), current.getVersion(), instKey, instructionText);
+    IssueActivity updatedActivity =
+        issueEditingService.appendActivity(
+            current.getId(), current.getVersion(), "INSTRUCTION", instKey, instructionText);
 
+    Issue updated = issueEditingService.getIssue(issue.getId());
     assertEquals(current.getVersion() + 1, updated.getVersion());
+    assertEquals("INSTRUCTION", updatedActivity.getKind().name());
+    assertEquals(run.getId(), updatedActivity.getRunId());
     assertEquals(
         1L,
         count(
@@ -378,8 +384,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         assertThrows(
             ProjectValidationException.class,
             () ->
-                issueEditingService.appendInstruction(
-                    issue.getId(), issue.getVersion(), key("inst"), "没有 Run 时的指示"));
+                issueEditingService.appendActivity(
+                    issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "没有 Run 时的指示"));
     assertTrue(ex.getMessage().contains("Cannot deliver an instruction without an active run"));
 
     assertEquals(
@@ -403,8 +409,8 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     for (int i = 1; i <= 5; i++) {
       Issue current = issueEditingService.getIssue(issue.getId());
-      issueEditingService.appendComment(
-          current.getId(), current.getVersion(), key("cmt-" + i), "评论正文 " + i);
+      issueEditingService.appendActivity(
+          current.getId(), current.getVersion(), "COMMENT", key("cmt-" + i), "评论正文 " + i);
     }
 
     // 从头读取，limit 大于总条数
@@ -512,9 +518,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     String commentBody = "幂等评论正文";
 
     // 首次写评论
-    Issue firstResult =
-        issueEditingService.appendComment(issue.getId(), 0L, commentKey, commentBody);
-    assertEquals(1L, firstResult.getVersion());
+    IssueActivity firstResult =
+        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, commentBody);
+    assertEquals(1L, firstResult.getSequence());
+    assertEquals("comment:" + commentKey, firstResult.getIdempotencyKey());
+    assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
     assertEquals(
         1L,
         count(
@@ -522,9 +530,11 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             issue.getId()));
 
     // 同键同指纹重试（模拟丢响应后重发）：即使传入旧 expectedVersion 也必须精确重放成功，不重复写活动行，版本不增加
-    Issue replayedResult =
-        issueEditingService.appendComment(issue.getId(), 0L, commentKey, commentBody);
-    assertEquals(1L, replayedResult.getVersion());
+    IssueActivity replayedResult =
+        issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, commentBody);
+    assertEquals(firstResult.getSequence(), replayedResult.getSequence());
+    assertEquals(firstResult.getIdempotencyKey(), replayedResult.getIdempotencyKey());
+    assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
     assertEquals(
         1L,
         count(
@@ -534,7 +544,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     // 同键异指纹（请求键复用）：抛出 ProjectDuplicateException 冲突，且不写入新活动
     assertThrows(
         ProjectDuplicateException.class,
-        () -> issueEditingService.appendComment(issue.getId(), 1L, commentKey, "被篡改的不同评论正文"));
+        () ->
+            issueEditingService.appendActivity(
+                issue.getId(), 1L, "COMMENT", commentKey, "被篡改的不同评论正文"));
     assertEquals(
         1L,
         count(
@@ -767,22 +779,24 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     CyclicBarrier barrier = new CyclicBarrier(2);
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
-      Future<Issue> first =
+      Future<IssueActivity> first =
           executor.submit(
               () -> {
                 barrier.await(10, TimeUnit.SECONDS);
-                return issueEditingService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
+                return issueEditingService.appendActivity(
+                    issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
               });
-      Future<Issue> second =
+      Future<IssueActivity> second =
           executor.submit(
               () -> {
                 barrier.await(10, TimeUnit.SECONDS);
-                return issueEditingService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
+                return issueEditingService.appendActivity(
+                    issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
               });
-      Issue left = first.get(15, TimeUnit.SECONDS);
-      Issue right = second.get(15, TimeUnit.SECONDS);
-      assertEquals(left.getId(), right.getId());
-      assertEquals(left.getVersion(), right.getVersion());
+      IssueActivity left = first.get(15, TimeUnit.SECONDS);
+      IssueActivity right = second.get(15, TimeUnit.SECONDS);
+      assertEquals(left.getSequence(), right.getSequence());
+      assertEquals(left.getIdempotencyKey(), right.getIdempotencyKey());
     } finally {
       executor.shutdownNow();
     }
@@ -817,7 +831,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
               });
       Object left = first.get(15, TimeUnit.SECONDS);
       Object right = second.get(15, TimeUnit.SECONDS);
-      assertTrue(left instanceof Issue ^ right instanceof Issue);
+      assertTrue(left instanceof IssueActivity ^ right instanceof IssueActivity);
       assertTrue(
           left instanceof ProjectDuplicateException || right instanceof ProjectDuplicateException);
     } finally {
@@ -833,7 +847,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
   private Object invokeComment(UUID issueId, String commentKey, String body) {
     try {
-      return issueEditingService.appendComment(issueId, 0L, commentKey, body);
+      return issueEditingService.appendActivity(issueId, 0L, "COMMENT", commentKey, body);
     } catch (ProjectDuplicateException conflict) {
       return conflict;
     }
@@ -865,7 +879,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             })
         .when(issueActivityRepository)
         .findByIdempotencyKey(any(), any());
-    AtomicReference<Issue> replayed = new AtomicReference<>();
+    AtomicReference<IssueActivity> replayed = new AtomicReference<>();
     AtomicReference<Throwable> replayedError = new AtomicReference<>();
     Thread replayer =
         new Thread(
@@ -873,17 +887,19 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
               gated.set(true);
               try {
                 replayed.set(
-                    issueEditingService.appendComment(issue.getId(), 0L, commentKey, "同一条评论"));
+                    issueEditingService.appendActivity(
+                        issue.getId(), 0L, "COMMENT", commentKey, "同一条评论"));
               } catch (Throwable error) {
                 replayedError.set(error);
               }
             });
     replayer.start();
+    IssueActivity first = null;
     try {
       assertTrue(awaitingReceipt.await(10, TimeUnit.SECONDS), "第二个请求应停在锁前 receipt 检查");
       // 第一个请求在读走旧快照之后完整提交：数据库版本与 receipt 一起推进。
-      Issue first = issueEditingService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
-      assertEquals(1L, first.getVersion());
+      first = issueEditingService.appendActivity(issue.getId(), 0L, "COMMENT", commentKey, "同一条评论");
+      assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion());
       firstCommitted.countDown();
       replayer.join(15_000);
     } finally {
@@ -893,8 +909,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     }
     assertFalse(replayer.isAlive(), "重放请求不应悬挂");
     assertNull(replayedError.get());
-    assertEquals(issue.getId(), replayed.get().getId());
-    assertEquals(1L, replayed.get().getVersion(), "重放必须返回已提交的权威版本");
+    assertEquals(first.getSequence(), replayed.get().getSequence());
+    assertEquals(first.getIdempotencyKey(), replayed.get().getIdempotencyKey());
+    assertEquals(1L, issueEditingService.getIssue(issue.getId()).getVersion(), "重放必须返回已提交的权威版本");
     assertEquals(
         1L,
         count(

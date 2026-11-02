@@ -9,7 +9,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -73,17 +72,13 @@ public class StudioCanvasResourceController {
   }
 
   private CanvasResource findResource(UUID canvasId, UUID resourceId) {
-    Optional<CanvasSnapshot> snapshot = queryService.findSnapshot(canvasId);
-    if (snapshot.isEmpty()) {
+    Optional<CanvasResource> resource = queryService.findResource(canvasId, resourceId);
+    if (resource.isPresent()) {
+      return resource.get();
+    }
+    if (queryService.findDocument(canvasId).isEmpty()) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown canvas: " + canvasId);
     }
-    return snapshot.get().nodes().stream()
-        .flatMap(node -> node.resources().stream())
-        .filter(resource -> resource.id().equals(resourceId))
-        .findFirst()
-        .orElseThrow(
-            () ->
-                new ResponseStatusException(
-                    HttpStatus.NOT_FOUND, "unknown resource: " + resourceId));
+    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown resource: " + resourceId);
   }
 }

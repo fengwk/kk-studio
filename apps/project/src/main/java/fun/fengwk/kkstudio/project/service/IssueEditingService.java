@@ -114,22 +114,47 @@ public class IssueEditingService {
     return mutationSupport.persist(locked, expectedVersion);
   }
 
-  /** 追加普通评论：只留痕，不自动唤醒 Agent。 */
+  /**
+   * 追加 Issue 人工活动（普通评论或定向指示）。
+   *
+   * @param issueId 目标 Issue ID
+   * @param expectedVersion 预期的 Issue CAS 版本
+   * @param kind 活动种类，支持 COMMENT（默认）与 INSTRUCTION
+   * @param requestKey 幂等请求键
+   * @param body 活动内容
+   * @return 已落库或重放拿到的活动实体
+   */
   @Transactional
-  public Issue appendComment(UUID issueId, long expectedVersion, String requestKey, String body) {
+  public IssueActivity appendActivity(
+      UUID issueId, long expectedVersion, String kind, String requestKey, String body) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String validRequestKey = ProjectValidationUtils.requireRequestKey(requestKey);
     String validBody =
         ProjectValidationUtils.requireUtf8Text(
             body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    if ("INSTRUCTION".equalsIgnoreCase(kind)) {
+      return appendInstructionActivity(issueId, expectedVersion, validRequestKey, validBody);
+    } else if (kind == null || kind.isBlank() || "COMMENT".equalsIgnoreCase(kind)) {
+      return appendCommentActivity(issueId, expectedVersion, validRequestKey, validBody);
+    } else {
+      throw new IllegalArgumentException("kind is invalid");
+    }
+  }
+
+  private IssueActivity appendCommentActivity(
+      UUID issueId, long expectedVersion, String requestKey, String validBody) {
     Identity identity =
-        IssueActivityIdempotency.identity(IssueActivityKind.COMMENT, "COMMENT", key, validBody);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.COMMENT, "COMMENT", requestKey, validBody);
+    IssueActivity replayed = mutationSupport.replayedActivity(issueId, identity);
+    if (replayed != null) {
+      return replayed;
     }
     IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
+    IssueActivity replayedUnderLock =
+        mutationSupport.replayedActivityUnderLock(locked.issue(), identity);
+    if (replayedUnderLock != null) {
+      return replayedUnderLock;
     }
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
@@ -143,27 +168,27 @@ public class IssueEditingService {
         mutationSupport.newData());
     mutationSupport.persist(locked, expectedVersion);
     // 普通评论不自动唤醒 Agent（设计 §4.6）。
-    return mutationSupport.currentIssue(issueId);
+    IssueActivity created = issueActivityRepository.findByIdempotencyKey(issueId, identity.key());
+    if (created == null) {
+      throw new IllegalStateException("appended activity could not be found");
+    }
+    return created;
   }
 
-  /** 追加定向指示：必须投递给明确的当前 Run；没有活动 Run 时先明确启动或恢复，绝不构造隐藏的未来阶段队列。 */
-  @Transactional
-  public Issue appendInstruction(
-      UUID issueId, long expectedVersion, String requestKey, String body) {
-    Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    String validBody =
-        ProjectValidationUtils.requireUtf8Text(
-            body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+  private IssueActivity appendInstructionActivity(
+      UUID issueId, long expectedVersion, String requestKey, String validBody) {
     Identity identity =
         IssueActivityIdempotency.identity(
-            IssueActivityKind.INSTRUCTION, "INSTRUCTION", key, validBody);
-    if (mutationSupport.replayed(issueId, identity)) {
-      return mutationSupport.currentIssue(issueId);
+            IssueActivityKind.INSTRUCTION, "INSTRUCTION", requestKey, validBody);
+    IssueActivity replayed = mutationSupport.replayedActivity(issueId, identity);
+    if (replayed != null) {
+      return replayed;
     }
     IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return locked.issue();
+    IssueActivity replayedUnderLock =
+        mutationSupport.replayedActivityUnderLock(locked.issue(), identity);
+    if (replayedUnderLock != null) {
+      return replayedUnderLock;
     }
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
@@ -185,7 +210,11 @@ public class IssueEditingService {
     mutationSupport.persist(locked, expectedVersion);
     // 指示已持久接受，由 mailbox 在安全点投递给明确的当前 Run。
     issueWorkQueue.request(issueId, Duration.ZERO);
-    return mutationSupport.currentIssue(issueId);
+    IssueActivity created = issueActivityRepository.findByIdempotencyKey(issueId, identity.key());
+    if (created == null) {
+      throw new IllegalStateException("appended activity could not be found");
+    }
+    return created;
   }
 
   /** 读取 Issue 事实流的有界窗口，按序号升序。 */

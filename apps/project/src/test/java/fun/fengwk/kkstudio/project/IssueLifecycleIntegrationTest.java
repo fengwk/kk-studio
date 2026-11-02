@@ -547,8 +547,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueEditingService.appendComment(
-                archived.getId(), archived.getVersion(), key("c"), "body"));
+            issueEditingService.appendActivity(
+                archived.getId(), archived.getVersion(), "COMMENT", key("c"), "body"));
     assertThrows(
         ProjectValidationException.class,
         () ->
@@ -574,18 +574,22 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     // appendComment
-    Issue withComment =
-        issueEditingService.appendComment(
-            issue.getId(), issue.getVersion(), key("c1"), "Comment text");
+    issueEditingService.appendActivity(
+        issue.getId(), issue.getVersion(), "COMMENT", key("c1"), "Comment text");
     var activities = issueEditingService.listActivities(issue.getId(), 0, 10);
     assertTrue(activities.stream().anyMatch(a -> "Comment text".equals(a.getBody())));
 
     // 非活动 Run 时投递指示拒绝
+    Issue withComment = issueEditingService.getIssue(issue.getId());
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueEditingService.appendInstruction(
-                withComment.getId(), withComment.getVersion(), key("ins"), "Instruction text"));
+            issueEditingService.appendActivity(
+                withComment.getId(),
+                withComment.getVersion(),
+                "INSTRUCTION",
+                key("ins"),
+                "Instruction text"));
 
     // 流转到 DESIGN 阶段
     Issue fresh = issueEditingService.getIssue(issue.getId());
@@ -616,8 +620,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     // 启动 Run 并在有活动 Run 时投递指示
     IssueRun run = issueRunService.acceptRun(recovered.getId(), key("acc"));
     fresh = issueEditingService.getIssue(issue.getId());
-    issueEditingService.appendInstruction(
-        fresh.getId(), fresh.getVersion(), key("ins1"), "Do something");
+    issueEditingService.appendActivity(
+        fresh.getId(), fresh.getVersion(), "INSTRUCTION", key("ins1"), "Do something");
 
     // 完成并交接到 DONE
     UUID end = appendHistoryEntry(run.getThreadId());

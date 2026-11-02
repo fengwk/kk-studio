@@ -9,5 +9,9 @@ public interface CanvasQueryService {
 
   Optional<CanvasSnapshot> findSnapshot(UUID canvasId);
 
+  Optional<CanvasDocument> findDocument(UUID canvasId);
+
+  Optional<CanvasResource> findResource(UUID canvasId, UUID resourceId);
+
   List<CanvasDocument> listDocuments();
 }

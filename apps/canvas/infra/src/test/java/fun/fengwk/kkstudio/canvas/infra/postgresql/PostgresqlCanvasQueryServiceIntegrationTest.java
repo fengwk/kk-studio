@@ -91,4 +91,23 @@ class PostgresqlCanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTes
     assertEquals(List.of(document), queryService.listDocuments());
     assertTrue(queryService.findSnapshot(UUID.randomUUID()).isEmpty());
   }
+
+  /** findResource 仅返回归属于有效画布且挂接在节点上的资源；缺失画布、缺失资源或已解挂资源均返回 empty。 */
+  @Test
+  void findResourceResolvesAttachedResourceAndRejectsMissingOrDetached() {
+    UUID canvasId = addDocument();
+    NodeFixture source = addTextNode(canvasId, "attached");
+    CanvasResource resource = source.textResource(0, "attached");
+
+    CanvasResource found = queryService.findResource(canvasId, resource.id()).orElseThrow();
+    assertEquals(resource.id(), found.id());
+    assertEquals(resource.canvasId(), found.canvasId());
+    assertEquals(resource.ownerNodeId(), found.ownerNodeId());
+    assertEquals(resource.textContent(), found.textContent());
+    assertTrue(queryService.findResource(UUID.randomUUID(), resource.id()).isEmpty());
+    assertTrue(queryService.findResource(canvasId, UUID.randomUUID()).isEmpty());
+
+    assertTrue(resourceRepository.detachOwner(canvasId, resource.id(), source.nodeId));
+    assertTrue(queryService.findResource(canvasId, resource.id()).isEmpty());
+  }
 }

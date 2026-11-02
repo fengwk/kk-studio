@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.api;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -15,5 +16,17 @@ public final class RequestParameters {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
+  }
+
+  /** 解析分页上限：缺省返回 defaultLimit；显式给出时必须是 [1, maxLimit] 内的 canonical 十进制整数。 */
+  public static int limit(String limit, int defaultLimit, int maxLimit) {
+    if (limit == null) {
+      return defaultLimit;
+    }
+    long parsed = DecimalLongs.parsePositive(limit, "limit");
+    if (parsed > maxLimit) {
+      throw new IllegalArgumentException("limit must be within [1, " + maxLimit + "]");
+    }
+    return (int) parsed;
   }
 }

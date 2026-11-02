@@ -1,9 +1,10 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.service;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
@@ -11,9 +12,6 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueEditingService;
-import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
@@ -134,10 +132,8 @@ public class ProjectSnapshotAssembler {
   private List<ProjectIssueSnapshotDTO> sortByNumber(List<ProjectIssueSnapshotDTO> snapshots) {
     return snapshots.stream()
         .sorted(
-            (a, b) ->
-                Long.compare(
-                    Long.parseLong(a.getIssue().getNumber()),
-                    Long.parseLong(b.getIssue().getNumber())))
+            Comparator.comparingLong(
+                s -> DecimalLongs.parseNonNegative(s.getIssue().getNumber(), "number")))
         .toList();
   }
 }

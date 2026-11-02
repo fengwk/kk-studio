@@ -794,8 +794,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
     // 收尾窗口内到达的人工指示绑定在当前 Run 上。
     issue = issueEditingService.getIssue(issue.getId());
-    issueEditingService.appendInstruction(
-        issue.getId(), issue.getVersion(), key("inst"), "先处理这条人工指示");
+    issueEditingService.appendActivity(
+        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "先处理这条人工指示");
     Long instructionSequence =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -939,8 +939,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    issueEditingService.appendInstruction(
-        issue.getId(), issue.getVersion(), key("inst"), "请调整方案设计");
+    issueEditingService.appendActivity(
+        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "请调整方案设计");
     Long instSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="
@@ -980,7 +980,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issue = issueEditingService.getIssue(issue.getId());
-    issueEditingService.appendComment(issue.getId(), issue.getVersion(), key("c"), "这是一条普通评论");
+    issueEditingService.appendActivity(
+        issue.getId(), issue.getVersion(), "COMMENT", key("c"), "这是一条普通评论");
     Long commentSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
@@ -1449,14 +1450,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 插入 220 条普通评论（超过单页 200 限制）
     issue = issueEditingService.getIssue(issue.getId());
     for (int i = 1; i <= 220; i++) {
-      issue =
-          issueEditingService.appendComment(
-              issue.getId(), issue.getVersion(), key("c" + i), "评论 " + i);
+      issueEditingService.appendActivity(
+          issue.getId(), issue.getVersion() + (i - 1), "COMMENT", key("c" + i), "评论 " + i);
     }
+    issue = issueEditingService.getIssue(issue.getId());
     // 随后追加一条 INSTRUCTION
-    issue =
-        issueEditingService.appendInstruction(
-            issue.getId(), issue.getVersion(), key("inst"), "第221条是指示，必须先处理");
+    issueEditingService.appendActivity(
+        issue.getId(), issue.getVersion(), "INSTRUCTION", key("inst"), "第221条是指示，必须先处理");
     Long instSeq =
         jdbc.queryForObject(
             "select sequence from project_issue_activity where issue_id = ? and kind ="

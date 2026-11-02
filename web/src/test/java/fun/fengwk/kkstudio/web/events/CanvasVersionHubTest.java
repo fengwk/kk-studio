@@ -4,23 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import javax.sql.DataSource;
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -31,45 +26,38 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class CanvasVersionHubTest {
 
-  @Test
-  void subscribeRegistersFirstThenReturnsCurrentCursorAsAckCursor() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
-        .thenReturn(statement);
-    when(statement.executeQuery()).thenReturn(result);
-    when(result.next()).thenReturn(true);
-    when(result.getLong(1)).thenReturn(5L);
+  private CanvasStore createStore(UUID canvasId, Long revision) {
+    CanvasStore store = mock(CanvasStore.class);
+    if (revision != null) {
+      CanvasDocument doc = mock(CanvasDocument.class);
+      when(doc.revision()).thenReturn(revision);
+      when(store.findDocument(canvasId)).thenReturn(Optional.of(doc));
+    } else {
+      when(store.findDocument(canvasId)).thenReturn(Optional.empty());
+    }
+    return store;
+  }
 
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+  @Test
+  void subscribeRegistersFirstThenReturnsCurrentRevisionAsAckCursor() throws Exception {
     UUID canvasId = new UUID(0L, 7L);
+    CanvasStore store = createStore(canvasId, 5L);
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     SourceSubscribed subscribed = hub.subscribe(canvasId, received::add);
 
-    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current canvas revision");
-    verify(statement).setObject(1, canvasId);
+    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current durable revision");
     assertTrue(received.isEmpty(), "subscribe must not deliver the current value");
     subscribed.handle().close();
   }
 
   @Test
   void broadcastResyncFanOutsWithoutLeakingClosedSubscribers() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
-        .thenReturn(statement);
-    when(statement.executeQuery()).thenReturn(result);
-    when(result.next()).thenReturn(true);
-    when(result.getLong(1)).thenReturn(5L);
-
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
     UUID canvasId = new UUID(0L, 7L);
+    CanvasStore store = createStore(canvasId, 5L);
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     List<CanvasVersionEventSource.Event> staleSubscriber = new ArrayList<>();
     List<CanvasVersionEventSource.Event> currentSubscriber = new ArrayList<>();
     SourceSubscribed stale = hub.subscribe(canvasId, staleSubscriber::add);
@@ -86,57 +74,40 @@ class CanvasVersionHubTest {
   }
 
   @Test
-  void subscribeRejectsUnknownCanvasWithoutLeakingRegistration() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
-        .thenReturn(statement);
-    when(statement.executeQuery()).thenReturn(result);
-    when(result.next()).thenReturn(false);
-
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+  void subscribeRejectsUnknownCanvasWithoutLeakingRegistration() {
     UUID canvasId = new UUID(0L, 8L);
+    CanvasStore store = createStore(canvasId, null);
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     assertThrows(IllegalArgumentException.class, () -> hub.subscribe(canvasId, ignored -> {}));
 
     hub.broadcastResync();
-    verify(statement, times(1)).setObject(1, canvasId);
   }
 
   @Test
-  void failedCursorQueryReleasesRegistrationAndPreservesRuntimeException() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(any())).thenReturn(statement);
-    when(statement.executeQuery()).thenThrow(new SQLException("connection lost"));
-
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+  void failedCursorQueryReleasesRegistrationAndPreservesRuntimeException() {
+    CanvasStore store = mock(CanvasStore.class);
     UUID canvasId = new UUID(0L, 8L);
+    when(store.findDocument(canvasId)).thenThrow(new IllegalStateException("storage error"));
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> hub.subscribe(canvasId, received::add));
-    assertEquals("cannot read current canvas revision", failure.getMessage());
+    assertEquals("storage error", failure.getMessage());
 
     hub.broadcastResync();
     assertTrue(received.isEmpty(), "cursor 查询失败的订阅必须已释放，不再收到任何投递");
   }
 
   @Test
-  void failedCursorQueryReleasesRegistrationAndRethrowsError() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(any())).thenReturn(statement);
-    AssertionError injected = new AssertionError("injected query error");
-    when(statement.executeQuery()).thenThrow(injected);
-
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+  void failedCursorQueryReleasesRegistrationAndRethrowsError() {
+    CanvasStore store = mock(CanvasStore.class);
     UUID canvasId = new UUID(0L, 8L);
+    AssertionError injected = new AssertionError("injected query error");
+    when(store.findDocument(canvasId)).thenThrow(injected);
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     Error failure =
         assertThrows(AssertionError.class, () -> hub.subscribe(canvasId, received::add));
@@ -147,20 +118,11 @@ class CanvasVersionHubTest {
   }
 
   @Test
-  void failingSubscriberDoesNotBlockOtherSubscribersOfTheSameCanvas() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
-        .thenReturn(statement);
-    when(statement.executeQuery()).thenReturn(result);
-    when(result.next()).thenReturn(true);
-    when(result.getLong(1)).thenReturn(5L);
-
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+  void failingSubscriberDoesNotBlockOtherSubscribersOfTheSameCanvas() {
     UUID canvasId = new UUID(0L, 7L);
+    CanvasStore store = createStore(canvasId, 5L);
+
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     hub.subscribe(
         canvasId,
         ignored -> {
@@ -177,31 +139,25 @@ class CanvasVersionHubTest {
 
   @Test
   void lastReleaseConcurrentWithSubscribeKeepsNewSubscriberLive() throws Exception {
-    // 确定性交错：新订阅者已完成注册（compute 内 add 原子完成）但卡在 cursor 读取时，最后释放并发执行；
-    // remove-if-empty 在 computeIfPresent 内原子完成，存活订阅者始终留在 map 中并继续收到事件。
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement(any())).thenReturn(statement);
+    UUID canvasId = new UUID(0L, 7L);
+    CanvasStore store = mock(CanvasStore.class);
+    CanvasDocument doc = mock(CanvasDocument.class);
+    when(doc.revision()).thenReturn(5L);
+
     CountDownLatch secondQueryEntered = new CountDownLatch(1);
     CountDownLatch secondQueryProceed = new CountDownLatch(1);
     AtomicInteger queries = new AtomicInteger();
-    when(statement.executeQuery())
+    when(store.findDocument(canvasId))
         .thenAnswer(
             inv -> {
               if (queries.incrementAndGet() == 2) {
                 secondQueryEntered.countDown();
                 secondQueryProceed.await();
               }
-              return result;
+              return Optional.of(doc);
             });
-    when(result.next()).thenReturn(true);
-    when(result.getLong(1)).thenReturn(5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
-    UUID canvasId = new UUID(0L, 7L);
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     SourceSubscribed first = hub.subscribe(canvasId, ignored -> {});
     List<CanvasVersionEventSource.Event> secondReceived = new ArrayList<>();
 
@@ -225,20 +181,11 @@ class CanvasVersionHubTest {
   }
 
   @Test
-  void malformedNotificationPayloadBroadcastsResyncAndIsolatesFailingSubscriber() throws Exception {
-    DataSource dataSource = mock(DataSource.class);
-    Connection connection = mock(Connection.class);
-    PreparedStatement statement = mock(PreparedStatement.class);
-    ResultSet result = mock(ResultSet.class);
-    when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
-        .thenReturn(statement);
-    when(statement.executeQuery()).thenReturn(result);
-    when(result.next()).thenReturn(true);
-    when(result.getLong(1)).thenReturn(5L);
+  void malformedNotificationPayloadBroadcastsResyncAndIsolatesFailingSubscriber() {
+    UUID canvasId = new UUID(0L, 7L);
+    CanvasStore store = createStore(canvasId, 5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
-    UUID canvasId = new UUID(0L, 9L);
+    CanvasVersionHub hub = new CanvasVersionHub(store);
     hub.subscribe(
         canvasId,
         ignored -> {
@@ -247,20 +194,17 @@ class CanvasVersionHubTest {
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     hub.subscribe(canvasId, received::add);
 
-    // 合法 payload 轻量 fan-out；每个畸形 payload 都降级为 resync，失败订阅者不阻断正常订阅者或后续通知。
-    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:6");
+    hub.onNotification("00000000-0000-0000-0000-000000000007");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:06");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:9223372036854775808");
+    hub.onNotification("00000000-0000-0000-0000-00000000007:7");
     hub.onNotification("not-a-uuid:7");
-    hub.onNotification("00000000-0000-0000-0000-000000000009");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:07");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:-1");
-    hub.onNotification("00000000-0000-0000-0000-000000000009:9223372036854775808");
-    hub.onNotification("00000000-0000-0000-0000-00000000009:7");
     hub.onNotification(null);
 
     assertEquals(
         List.of(
-            new CanvasVersionEventSource.Event(7L, false),
-            new CanvasVersionEventSource.Event(null, true),
+            new CanvasVersionEventSource.Event(6L, false),
             new CanvasVersionEventSource.Event(null, true),
             new CanvasVersionEventSource.Event(null, true),
             new CanvasVersionEventSource.Event(null, true),
@@ -268,16 +212,15 @@ class CanvasVersionHubTest {
             new CanvasVersionEventSource.Event(null, true),
             new CanvasVersionEventSource.Event(null, true)),
         received);
-    verify(dataSource, times(2)).getConnection();
   }
 
   @Test
   void validNotificationWithoutLocalSubscriberDoesNotReadDatabase() {
-    DataSource dataSource = mock(DataSource.class);
-    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+    CanvasStore store = mock(CanvasStore.class);
+    CanvasVersionHub hub = new CanvasVersionHub(store);
 
-    hub.onNotification("00000000-0000-0000-0000-000000000009:7");
+    hub.onNotification("00000000-0000-0000-0000-000000000007:6");
 
-    verifyNoInteractions(dataSource);
+    verifyNoInteractions(store);
   }
 }

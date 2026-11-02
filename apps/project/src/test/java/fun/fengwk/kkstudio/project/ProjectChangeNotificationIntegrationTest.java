@@ -42,8 +42,8 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
       tx.executeWithoutResult(
           status -> {
-            issueEditingService.appendComment(
-                issue.getId(), issue.getVersion(), "notify-commit", "comment");
+            issueEditingService.appendActivity(
+                issue.getId(), issue.getVersion(), "COMMENT", "notify-commit", "comment");
             try {
               assertNoNotification(pg);
             } catch (Exception error) {
@@ -55,9 +55,10 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
 
       tx.executeWithoutResult(
           status -> {
-            issueEditingService.appendComment(
+            issueEditingService.appendActivity(
                 issue.getId(),
                 issueEditingService.getIssue(issue.getId()).getVersion(),
+                "COMMENT",
                 "notify-rollback",
                 "comment");
             status.setRollbackOnly();
