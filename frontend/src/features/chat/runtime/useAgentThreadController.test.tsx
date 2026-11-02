@@ -40,6 +40,7 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
   HarnessAcceptedCommandsDTO,
@@ -89,7 +90,7 @@ function branchSettings(
 ): HarnessBranchSettingsDTO {
   return {
     agentName: 'assistant',
-    model: modelSelection(),
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     goal: null,
     ...overrides,

@@ -3,7 +3,10 @@ import type {
   HarnessCommandBatchDTO,
   HarnessThreadCommandBatchDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type AgentRuntimeOwnerDTO,
+  createBuiltinExecution,
+} from '@/shared/api/contracts/ai-runtime'
 import {
   clearBoundPendingMessage,
   clearPendingAcceptance,
@@ -46,7 +49,7 @@ describe('pending-request-store', () => {
       threadId: 'thread-1',
       rootSettings: {
         agentName: 'assistant',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: createBuiltinExecution('MiniMax', 'default'),
         environmentName: null,
         goal: null,
       },
@@ -67,7 +70,7 @@ describe('pending-request-store', () => {
     request: acceptanceRequest,
     branchDraft: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: false,
     },
@@ -93,7 +96,7 @@ describe('pending-request-store', () => {
     request: boundBatchRequest,
     targetDraft: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: false,
     },

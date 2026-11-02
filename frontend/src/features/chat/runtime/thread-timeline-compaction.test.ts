@@ -5,6 +5,7 @@ import {
 import type { EntryEventDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import { FULL_COMPACTION_SUMMARY } from '@/test-support/resources/compaction-summary'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
@@ -228,7 +229,7 @@ function turnStart(startEntryId: string, reason: string, phase: string): Harness
     reason,
     settings: {
       agentName: 'coder',
-      model: { modelName: 'm', variant: 'high' },
+      execution: createBuiltinExecution('m', 'high'),
       environmentName: null,
     },
     ownerThreadId: 'thread-1',
@@ -237,7 +238,7 @@ function turnStart(startEntryId: string, reason: string, phase: string): Harness
     compaction: {
       phase,
       trigger: 'THRESHOLD',
-      executionModel: { modelName: 'm', variant: 'high' },
+      execution: createBuiltinExecution('m', 'high'),
       cutEntryId: 'cut-1',
       turnPrefixStartEntryId: phase === 'FULL' ? null : 'prefix-1',
       historyCompactionEntryId: null,

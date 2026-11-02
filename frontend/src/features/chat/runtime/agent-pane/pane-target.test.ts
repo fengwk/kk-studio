@@ -174,7 +174,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { modelName: 'm', variant: 'v' },
+            execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
             goal: null,
           },
@@ -188,7 +188,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -275,7 +275,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { modelName: 'm', variant: 'v' },
+            execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
             goal: null,
           },
@@ -289,7 +289,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -350,7 +350,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { modelName: 'm', variant: 'v' },
+            execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
             goal: null,
           },
@@ -364,7 +364,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -393,7 +393,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { modelName: 'm', variant: 'v' },
+            execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
             goal: null,
           },
@@ -407,7 +407,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -494,9 +494,9 @@ describe('PaneTarget durable-local FSM', () => {
     for (const command of [
       { type: 'SET_AGENT', idempotencyKey: 'c1', agentName: 'assistant' },
       {
-        type: 'SET_MODEL',
+        type: 'SET_EXECUTION',
         idempotencyKey: 'c1',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
       },
       {
         type: 'USER_MESSAGE',
@@ -552,7 +552,7 @@ describe('PaneTarget durable-local FSM', () => {
         type: 'NEW_SESSION',
         sessionId: 's1',
         threadId: 't1',
-        rootSettings: { ...validRequest.target.rootSettings, model: null },
+        rootSettings: { ...validRequest.target.rootSettings, execution: null },
         yoloEnabled: false,
       },
     })
@@ -574,7 +574,7 @@ describe('PaneTarget durable-local FSM', () => {
       target: { type: 'NEW_THREAD', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-    setPending({ branchDraft: { ...valid.branchDraft, model: null } })
+    setPending({ branchDraft: { ...valid.branchDraft, execution: null } })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     // exact own-key 拒绝 branchDraft 上的未知字段
     setPending({ branchDraft: { ...valid.branchDraft, unexpectedSetting: '.' } })
@@ -733,7 +733,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { modelName: 'm', variant: 'v' },
+            execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
             environmentName: null,
             goal: null,
           },
@@ -747,7 +747,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -784,7 +784,7 @@ describe('PaneTarget durable-local FSM', () => {
     // 3. rootSettings without environmentName is rejected (fail-closed)
     const rootSettingsWithoutEnv = {
       agentName: baseValid.request.target.rootSettings.agentName,
-      model: baseValid.request.target.rootSettings.model,
+      execution: baseValid.request.target.rootSettings.execution,
       goal: null,
     }
     storage.setItem(key, JSON.stringify({
@@ -834,7 +834,7 @@ describe('PaneTarget durable-local FSM', () => {
     // 6. branchDraft without environmentName is rejected (fail-closed)
     const branchDraftWithoutEnv = {
       agentName: baseValid.branchDraft.agentName,
-      model: baseValid.branchDraft.model,
+      execution: baseValid.branchDraft.execution,
       yoloEnabled: baseValid.branchDraft.yoloEnabled,
     }
     storage.setItem(key, JSON.stringify({
@@ -938,7 +938,7 @@ describe('PaneTarget durable-local FSM', () => {
         type: 'SET_ENVIRONMENT',
         idempotencyKey: 'cmd-env-6',
         environmentName: null,
-        model: { modelName: 'm', variant: 'v' },
+        execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
       },
       {
         type: 'SET_AGENT',
@@ -984,7 +984,7 @@ describe('PaneTarget durable-local FSM', () => {
       unknownOutcome: false,
       targetDraft: {
         agentName: 'assistant',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         environmentName: null,
         yoloEnabled: false,
       },

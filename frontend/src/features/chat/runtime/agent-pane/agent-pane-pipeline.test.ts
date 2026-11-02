@@ -21,11 +21,12 @@ import {
   createTextPart,
 } from '@/features/chat/composer/composer-parts'
 import { ApiError } from '@/shared/api/client'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
-  model: { modelName: 'model', variant: 'default' },
+  execution: createBuiltinExecution('model', 'default'),
   environmentName: null,
   yoloEnabled: false,
 }
@@ -44,7 +45,7 @@ const thread: HarnessThreadDTO = {
   executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',
-    model: { modelName: 'model', variant: 'default' },
+    execution: createBuiltinExecution('model', 'default'),
     environmentName: null,
     goal: null,
   },
@@ -74,7 +75,7 @@ describe('AgentPane acceptance pipeline', () => {
       type: 'NEW_SESSION',
       rootSettings: {
         agentName: 'assistant',
-        model: baseDraft.model,
+        execution: baseDraft.execution,
         environmentName: null,
       },
       yoloEnabled: false,
@@ -89,7 +90,7 @@ describe('AgentPane acceptance pipeline', () => {
     const settingsWithNull = createBranchSettings(baseDraft)
     expect(settingsWithNull).toEqual({
       agentName: 'assistant',
-      model: baseDraft.model,
+      execution: baseDraft.execution,
       environmentName: null,
       goal: null,
     })
@@ -100,7 +101,7 @@ describe('AgentPane acceptance pipeline', () => {
     })
     expect(settingsWithString).toEqual({
       agentName: 'assistant',
-      model: baseDraft.model,
+      execution: baseDraft.execution,
       environmentName: 'isolated-docker',
       goal: null,
     })

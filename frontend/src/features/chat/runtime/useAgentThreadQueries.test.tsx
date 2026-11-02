@@ -7,6 +7,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useAgentThreadQueries } from './useAgentThreadQueries'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessThreadSnapshotDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 const ROOT = '11111111-2222-4333-8444-555555555555'
@@ -22,7 +23,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       rootThreadId: ROOT, yoloEnabled: false,
       nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE',
-      branchSettings: { agentName: 'agent', model: { modelName: 'm', variant: 'default' },
+      branchSettings: { agentName: 'agent', execution: createBuiltinExecution('m', 'default'),
         environmentName: 'composer-is-not-the-route', goal: null },
       createTime: 0, updateTime: 0,
     },
