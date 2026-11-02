@@ -171,17 +171,50 @@ public final class FakeAgentDriver implements AgentDriver {
     return stopResult;
   }
 
+  private boolean allowsQueuedInputHarvest = true;
+  private int completeStopInvocations = 0;
+
+  public FakeAgentDriver withAllowsQueuedInputHarvest(boolean allowed) {
+    this.allowsQueuedInputHarvest = allowed;
+    return this;
+  }
+
+  @Override
+  public boolean allowsQueuedInputHarvest(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    return allowsQueuedInputHarvest;
+  }
+
+  @Override
+  public void completeStop(HarnessStore.Transaction tx, ThreadState thread, DriverCommit commit) {
+    this.completeStopInvocations++;
+  }
+
+  public int completeStopInvocations() {
+    return completeStopInvocations;
+  }
+
   /** 可直接构造生成结果、工具调用、失败与本地执行身份的中立投影。 */
   public record FakeLockedDriverState(
       DriverActivity activity,
       UUID requestHeadEntryId,
       UUID resultEntryId,
       GenerationProjection projection,
-      UUID executionId)
+      UUID executionId,
+      boolean cancelsToolBatch)
       implements LockedDriverState {
 
     public FakeLockedDriverState {
       activity = Objects.requireNonNull(activity, "activity");
+    }
+
+    public FakeLockedDriverState(
+        DriverActivity activity,
+        UUID requestHeadEntryId,
+        UUID resultEntryId,
+        GenerationProjection projection,
+        UUID executionId) {
+      this(activity, requestHeadEntryId, resultEntryId, projection, executionId, false);
     }
 
     @Override
