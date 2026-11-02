@@ -9,7 +9,7 @@ import {
   getThreadSnapshot,
   createNewSession,
   setAgentCommand,
-  setModelCommand,
+  setExecutionCommand,
   stopThread,
   threadTarget,
   userMessageCommand,
@@ -146,7 +146,7 @@ registerCase({
               }),
               commands: [
                 setAgentCommand(agent.name, cid()),
-                setModelCommand(
+                setExecutionCommand(
                   { modelName: model.name, variant: 'default' },
                   cid(),
                 ),

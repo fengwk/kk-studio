@@ -608,16 +608,19 @@ export function assertThreadSettings(accepted, testCase, agentName) {
   assertRootYoloEnabled(thread, true)
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
-    JSON.stringify(thread.branchSettings?.model)
+    JSON.stringify(thread.branchSettings?.execution)
       === JSON.stringify({
-        modelName: testCase.model.modelName,
-        variant: VARIANT,
+        driver: 'builtin',
+        settings: {
+          modelName: testCase.model.modelName,
+          variant: VARIANT,
+        },
       }),
-    `Thread ModelSelection mismatch: ${JSON.stringify(thread.branchSettings?.model)}`,
+    `Thread execution mismatch: ${JSON.stringify(thread.branchSettings?.execution)}`,
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,environmentName,goal,model',
+      === 'agentName,environmentName,execution,goal',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
   assert(thread.branchSettings.goal === null, 'New Thread must have no user Goal')

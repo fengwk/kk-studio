@@ -29,7 +29,7 @@ import {
   renameSession,
   renameThread,
   setAgentCommand,
-  setModelCommand,
+  setExecutionCommand,
   setThreadYolo,
   stopThread,
   threadTarget,
@@ -1990,7 +1990,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与 workspacePath 字段在任何 command type 上 => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_EXECUTION,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与 workspacePath 字段在任何 command type 上 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -2018,7 +2018,7 @@ registerCase({
     const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
     const commands = [
       setAgentCommand(missingAgentName, cid()),
-      setModelCommand(
+      setExecutionCommand(
         {
           modelName: modelSelection.modelName,
           variant: modelSelection.variant,
@@ -2040,7 +2040,7 @@ registerCase({
     const dto = accepted.acceptedCommands
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_AGENT,SET_MODEL,USER_MESSAGE',
+        'SET_AGENT,SET_EXECUTION,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -2059,9 +2059,12 @@ registerCase({
     const finalSnapshot = await getThreadSnapshot(ctx, threadId)
     const expectedSettings = {
       agentName: missingAgentName,
-      model: {
-        modelName: modelSelection.modelName,
-        variant: modelSelection.variant,
+      execution: {
+        driver: 'builtin',
+        settings: {
+          modelName: modelSelection.modelName,
+          variant: modelSelection.variant,
+        },
       },
       environmentName: null,
       // SET_* 不触碰 goal：未设置 Goal 的 branch 投影始终显式携带 goal:null。
@@ -2225,11 +2228,14 @@ registerCase({
           }),
           commands: [
             {
-              type: 'SET_MODEL',
+              type: 'SET_EXECUTION',
               idempotencyKey: cid(),
-              model: {
-                modelName: modelSelection.modelName,
-                variant: modelSelection.variant,
+              execution: {
+                driver: 'builtin',
+                settings: {
+                  modelName: modelSelection.modelName,
+                  variant: modelSelection.variant,
+                },
               },
               workspacePath: null,
             },
@@ -2366,7 +2372,7 @@ registerCase({
       assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
       assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
-      assert(isDeepStrictEqual(root.model, before.thread.branchSettings.model), JSON.stringify(root))
+      assert(isDeepStrictEqual(root.model, before.thread.branchSettings.execution.settings), JSON.stringify(root))
       // updateTime 是 Thread.updatedAt 的只读投影：非空有限的 epoch seconds，且与权威 Thread 快照精确相同。
       assert(
         typeof root.updateTime === 'number'

@@ -30,7 +30,7 @@ import {
  * - NEW_THREAD{sessionId,startEntryId,threadId,threadName,yoloEnabled}：在既有 Session 的合法 fork 边界
  *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
- * commands 必须是固定顺序 SET_AGENT,SET_MODEL,SET_ENVIRONMENT 前缀 +
+ * commands 必须是固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT 前缀 +
  * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION、SET_CONTRIBUTOR_STATE 在产品 HTTP 面被拒绝。
  */
 
@@ -209,17 +209,29 @@ export function canonicalEnvironmentName(value, field = 'environmentName') {
   return value
 }
 
-/** 由 Agent + Model + Environment 引用构造完整 branchSettings（当前契约精确为 agentName + model + environmentName）。 */
-export function branchSettingsOf(agent, model, environmentName = null) {
+/** 由模型名和 variant 构造 Builtin execution。 */
+export function builtinExecution(modelName, variant = 'default') {
+  assert(modelName, `modelName required: ${modelName}`)
+  return {
+    driver: 'builtin',
+    settings: {
+      modelName,
+      variant,
+    },
+  }
+}
+
+/** 由 Agent + Execution + Environment 引用构造完整 branchSettings（当前契约精确为 agentName + execution + environmentName）。 */
+export function branchSettingsOf(agent, executionOrModel, environmentName = null) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
-  assert(model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  const execution = executionOrModel?.driver
+    ? executionOrModel
+    : builtinExecution(executionOrModel?.modelName, executionOrModel?.variant)
+  assert(execution?.driver && execution?.settings, `execution required: ${JSON.stringify(executionOrModel)}`)
   canonicalEnvironmentName(environmentName, 'environmentName')
   return {
     agentName: agent.name,
-    model: {
-      modelName: model.modelName,
-      variant: model.variant,
-    },
+    execution,
     environmentName,
   }
 }
@@ -654,7 +666,7 @@ export async function listSessionThreads(ctx, sessionId) {
       JSON.stringify(item),
     )
     assert(typeof item.status === 'string', JSON.stringify(item))
-    assert(item.model?.modelName && item.model?.variant, JSON.stringify(item))
+    assert(item.execution?.driver && item.execution?.settings, JSON.stringify(item))
     assert(
       item.headMessagePreview === null || typeof item.headMessagePreview === 'string',
       JSON.stringify(item),
@@ -827,10 +839,13 @@ export function setAgentCommand(agentName, idempotencyKey) {
   return { type: 'SET_AGENT', idempotencyKey, agentName }
 }
 
-export function setModelCommand(model, idempotencyKey) {
-  assert(model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+export function setExecutionCommand(executionOrModel, idempotencyKey) {
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
-  return { type: 'SET_MODEL', idempotencyKey, model }
+  const execution = executionOrModel?.driver
+    ? executionOrModel
+    : builtinExecution(executionOrModel?.modelName, executionOrModel?.variant)
+  assert(execution?.driver && execution?.settings, `execution required: ${JSON.stringify(executionOrModel)}`)
+  return { type: 'SET_EXECUTION', idempotencyKey, execution }
 }
 
 export function setEnvironmentCommand(environmentName, idempotencyKey) {

@@ -44,7 +44,7 @@ test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
-test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName, model, and environmentName', () => {
+test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName, execution, and environmentName', () => {
   const chat = fakeChat()
   const agent = fakeAgent()
   const model = fakeModel()
@@ -55,13 +55,15 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentN
     prompt: 'investigate this case',
   })
   assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
-  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'model'])
-  // ModelSelection 只携带全局逻辑模型名与 variant。
-  assert.deepEqual(request.rootSettings.model, {
-    modelName: model.modelName,
-    variant: VARIANT,
+  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'execution'])
+  assert.deepEqual(request.rootSettings.execution, {
+    driver: 'builtin',
+    settings: {
+      modelName: model.modelName,
+      variant: VARIANT,
+    },
   })
-  assert.deepEqual(Object.keys(request.rootSettings.model).sort(), ['modelName', 'variant'])
+  assert.deepEqual(Object.keys(request.rootSettings.execution).sort(), ['driver', 'settings'])
   // 未选择 Environment 时必须显式携带 null，而不是省略字段。
   assert.equal(request.rootSettings.environmentName, null)
 })
@@ -84,16 +86,16 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
     ),
     /Thread Agent mismatch/,
   )
-  // 非规范模型字段必须被精确的 ModelSelection 校验拒绝。
-  const invalidModel = structuredClone(accepted)
-  invalidModel.thread.branchSettings.model.invalidField = 'unexpected'
+  // 非规范执行字段必须被精确的 execution 校验拒绝。
+  const invalidExecution = structuredClone(accepted)
+  invalidExecution.thread.branchSettings.execution.invalidField = 'unexpected'
   assert.throws(
     () => assertThreadSettings(
-      invalidModel,
+      invalidExecution,
       fakeCase(model),
       chat.agentName,
     ),
-    /Thread ModelSelection mismatch/,
+    /Thread execution mismatch/,
   )
   // 携带未预期字段时，branch settings shape 校验必须拒绝。
   const unexpectedShape = structuredClone(accepted)
