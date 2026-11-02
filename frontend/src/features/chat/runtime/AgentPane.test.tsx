@@ -51,7 +51,11 @@ import type {
   InteractionPageDTO,
 } from '@/shared/api/contracts/ai-interaction'
 import type { StorageBlobUrl } from '@/shared/api/contracts/storage'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type AgentRuntimeOwnerDTO,
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import type { ThreadCommand } from '@/features/chat/runtime/thread-panel/thread-commands'
 import {
   loadThreadDraft,
@@ -364,7 +368,7 @@ function thread(
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       goal: null,
     },
@@ -472,7 +476,7 @@ function pendingAcceptanceFor(
     },
     branchDraft: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: false,
     },
@@ -498,7 +502,7 @@ function pendingNewSessionAcceptanceFor(
         threadId: 'pending-thread',
         rootSettings: {
           agentName: 'assistant',
-          model: { modelName: 'MiniMax', variant: 'default' },
+          execution: createBuiltinExecution('MiniMax', 'default'),
           environmentName: null,
           goal: null,
         },
@@ -707,7 +711,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
       createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
-      model: thread().branchSettings.model, headMessagePreview: null,
+      model: getBuiltinModelSelection(thread().branchSettings.execution)!, headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -3118,7 +3122,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
 describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay', () => {
   const fallbackDraft: BranchDraft = {
     agentName: 'assistant',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: 'initial-env',
     yoloEnabled: false,
   }
@@ -3930,7 +3934,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           unknownOutcome: false,
           targetDraft: {
             agentName: 'assistant',
-            model: { modelName: 'MiniMax', variant: 'default' },
+            execution: createBuiltinExecution('MiniMax', 'default'),
             environmentName: null,
             yoloEnabled: false,
           },
@@ -4272,10 +4276,9 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       expect(hook.result.current.error).toBeNull()
       expect(hook.result.current.interaction).toBeNull()
       expect(hook.result.current.activeDraft?.agentName).toBe('coder')
-      expect(hook.result.current.activeDraft?.model).toEqual({
-                modelName: 'Claude',
-        variant: 'fast',
-      })
+      expect(hook.result.current.activeDraft?.execution).toEqual(
+        createBuiltinExecution('Claude', 'fast'),
+      )
       expect(partsToText(hook.result.current.composer.parts)).toBe('preserved draft text')
       expect(hook.result.current.composer.parts).toEqual(preservedParts)
 
@@ -4286,18 +4289,17 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           variant: 'v1',
         })
       })
-      expect(hook.result.current.activeDraft?.model.modelName).toBe('Custom')
+      expect(getBuiltinModelSelection(hook.result.current.activeDraft?.execution)?.modelName).toBe('Custom')
 
       act(() => {
         hook.result.current.selectAgent('coder')
       })
-      expect(hook.result.current.activeDraft?.model).toEqual({
-                modelName: 'Claude',
-        variant: 'fast',
-      })
+      expect(hook.result.current.activeDraft?.execution).toEqual(
+        createBuiltinExecution('Claude', 'fast'),
+      )
     })
 
-    it('atomically follows target agent model in bound mode, sending SET_AGENT+SET_MODEL+USER_MESSAGE on submit', async () => {
+    it('atomically follows target agent model in bound mode, sending SET_AGENT+SET_EXECUTION+USER_MESSAGE on submit', async () => {
       // 发送必须把 Agent 与模型设置放在同一消息批次，不能只更新 UI 标签。
       vi.mocked(agentService.listAgents).mockResolvedValue({
         pageNumber: 1,
@@ -4323,10 +4325,9 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         hook.result.current.selectAgent('coder')
       })
       expect(hook.result.current.activeDraft?.agentName).toBe('coder')
-      expect(hook.result.current.activeDraft?.model).toEqual({
-                modelName: 'Claude',
-        variant: 'fast',
-      })
+      expect(hook.result.current.activeDraft?.execution).toEqual(
+        createBuiltinExecution('Claude', 'fast'),
+      )
 
       await act(async () => {
         hook.result.current.composer.onSubmit(
@@ -4345,12 +4346,12 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       expect(batchRequest.expectedNextCommandSequence).toBe('1')
       expect(batchRequest.commands.map((c) => c.type)).toEqual([
         'SET_AGENT',
-        'SET_MODEL',
+        'SET_EXECUTION',
         'USER_MESSAGE',
       ])
       expect(batchRequest.commands[0]).toMatchObject({ agentName: 'coder' })
       expect(batchRequest.commands[1]).toMatchObject({
-        model: { modelName: 'Claude', variant: 'fast' },
+        execution: createBuiltinExecution('Claude', 'fast'),
       })
       expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     })

@@ -22,6 +22,10 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
+import {
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
@@ -129,7 +133,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       goal: null,
     },
@@ -959,7 +963,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
         threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
         createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
-        model: thread().branchSettings.model, headMessagePreview: null,
+        model: getBuiltinModelSelection(thread().branchSettings.execution)!, headMessagePreview: null,
       }])
     }
     if (scenario === 'offline') {

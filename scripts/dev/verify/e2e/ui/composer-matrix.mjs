@@ -22,7 +22,7 @@ import {
   createNewThread,
   createNewSession,
   setAgentCommand,
-  setModelCommand,
+  setExecutionCommand,
   stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
@@ -1443,7 +1443,7 @@ async function createHoldingQueueFixture(
       }),
       commands: [
         setAgentCommand(state.agent.name, cid()),
-        setModelCommand(
+        setExecutionCommand(
           {
             modelName: state.model.name,
             variant: 'default',

@@ -9,6 +9,7 @@ import {
 import type { ThreadEventRecord } from '@/features/chat/runtime/thread-events'
 import type { BoundThreadPanelController } from '@/features/chat/runtime/useBoundThreadPanelViews'
 import { harnessService } from '@/shared/api/harness-service'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type {
@@ -46,7 +47,7 @@ function boundController(): BoundThreadPanelController {
       parentThreadId: null, rootThreadId: 'thread', yoloEnabled: false,
       nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE', branchSettings: {
-        agentName: 'agent', model: DEBUG.model, environmentName: null, goal: null,
+        agentName: 'agent', execution: createBuiltinExecution(DEBUG.model.modelName, DEBUG.model.variant), environmentName: null, goal: null,
       }, createTime: 1790504400, updateTime: 1790504400,
     },
     activeAssistantOutput: {

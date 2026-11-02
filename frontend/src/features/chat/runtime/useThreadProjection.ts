@@ -12,6 +12,7 @@ import {
   extractQueuedCustomMessages,
   type QueuedCustomMessage,
 } from '@/features/chat/runtime/queued-custom-messages'
+import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { translate } from '@/shared/i18n'
 
 export type { QueuedCustomMessage }
@@ -119,7 +120,8 @@ function resolveRuntimeLabels(
   models: AgentModelView[],
 ) {
   const settings = thread?.branchSettings
-  const model = models.find((item) => item.name === settings?.model.modelName)
+  const builtinModel = getBuiltinModelSelection(settings?.execution)
+  const model = builtinModel ? models.find((item) => item.name === builtinModel.modelName) : undefined
   const contextWindow = extractContextWindow(model)
   const environmentName = settings?.environmentName ?? null
   return {

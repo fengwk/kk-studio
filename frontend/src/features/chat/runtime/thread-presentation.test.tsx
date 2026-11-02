@@ -2,6 +2,7 @@ import { act, fireEvent, renderHook, render, screen, waitFor } from '@testing-li
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import type { AgentModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
@@ -12,7 +13,7 @@ const thread: HarnessThreadDTO = {
   nextCommandSequence: '1', version: '1', status: 'IDLE',
   executionControl: 'RUNNABLE', createTime: 0, updateTime: 0,
   branchSettings: {
-    agentName: 'researcher', model: { modelName: 'model', variant: 'deep' },
+    agentName: 'researcher', execution: createBuiltinExecution('model', 'deep'),
     environmentName: null, goal: null,
   },
 }
@@ -60,7 +61,7 @@ describe('visible thread presentation', () => {
         ...thread,
         branchSettings: {
           ...thread.branchSettings,
-          model: { modelName: 'model', variant: '  ' },
+          execution: createBuiltinExecution('model', '  '),
         },
       },
     })).toBe('researcher · model')

@@ -3,12 +3,19 @@ import type {
   EntryEventKind,
 } from '@/features/chat/runtime/thread-timeline-types'
 import { formatModelLabel } from '@/features/catalog'
+import {
+  getBuiltinModelSelection,
+  isSameExecution,
+} from '@/shared/api/contracts/ai-runtime'
 import { translate, type TranslationKey } from '@/shared/i18n'
-import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessExecutionSelectionDTO,
+  HarnessSessionEntryDTO,
+} from '@/shared/api/generated/contracts'
 
 export type SettingsSnapshot = {
   agentName: string
-  model: { modelName: string; variant: string | null }
+  execution: HarnessExecutionSelectionDTO
   environmentName: string | null
 }
 
@@ -16,22 +23,27 @@ export type SettingsSnapshot = {
 export function parseSettingsSnapshot(value: unknown): SettingsSnapshot | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return null
   const settings = value as Record<string, unknown>
-  const model = settings.model
-  if (model == null || typeof model !== 'object' || Array.isArray(model)) return null
-  const selection = model as Record<string, unknown>
+  const execution = settings.execution
+  if (execution == null || typeof execution !== 'object' || Array.isArray(execution)) return null
+  const exec = execution as Record<string, unknown>
   const valid = (field: unknown): field is string =>
     typeof field === 'string' && field.trim().length > 0
   if (
-    !valid(settings.agentName) || !valid(selection.modelName)
-    || !(selection.variant === undefined || selection.variant === null || valid(selection.variant))
+    !valid(settings.agentName) || !valid(exec.driver)
+    || exec.settings == null || typeof exec.settings !== 'object' || Array.isArray(exec.settings)
     || !Object.hasOwn(settings, 'environmentName')
     || !(settings.environmentName === null || valid(settings.environmentName))
   ) return null
+  const execSettings = exec.settings as Record<string, unknown>
+  if (exec.driver === 'builtin') {
+    if (!valid(execSettings.modelName)) return null
+    if (!(execSettings.variant === undefined || execSettings.variant === null || valid(execSettings.variant))) return null
+  }
   return {
     agentName: settings.agentName,
-    model: {
-      modelName: selection.modelName,
-      variant: typeof selection.variant === 'string' ? selection.variant : null,
+    execution: {
+      driver: exec.driver,
+      settings: execSettings,
     },
     environmentName: settings.environmentName,
   }
@@ -41,12 +53,16 @@ export function projectRootSettings(
   entry: HarnessSessionEntryDTO,
   settings: SettingsSnapshot,
 ): EntryEventDialogueMessage {
+  const builtin = getBuiltinModelSelection(settings.execution)
+  const modelText = builtin
+    ? formatModelLabel(builtin.modelName, builtin.variant)
+    : settings.execution.driver
   return event(
     entry,
     'root',
     translate('ai.runtime.entry.rootSettings', {
       agent: settings.agentName,
-      model: formatModelLabel(settings.model.modelName, settings.model.variant),
+      model: modelText,
       environment: settings.environmentName ?? translate('ai.runtime.entry.noEnvironment'),
     }),
     '',
@@ -68,13 +84,13 @@ export function projectSettingsChanges(
       agent: after.agentName,
     }), ''), id: `entry:${entry.entryId}:agent` })
   }
-  if (
-    before.model.modelName !== after.model.modelName
-    || (before.model.variant ?? null) !== (after.model.variant ?? null)
-  ) {
-    changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
-      model: formatModelLabel(after.model.modelName, after.model.variant),
-    }), ''), id: `entry:${entry.entryId}:model` })
+  if (!isSameExecution(before.execution, after.execution)) {
+    const afterBuiltin = getBuiltinModelSelection(after.execution)
+    if (afterBuiltin) {
+      changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
+        model: formatModelLabel(afterBuiltin.modelName, afterBuiltin.variant),
+      }), ''), id: `entry:${entry.entryId}:model` })
+    }
   }
   if (before.environmentName !== after.environmentName) {
     changes.push({ ...event(entry, 'settings_change', after.environmentName === null
@@ -88,25 +104,28 @@ export function projectSettingsChanges(
 
 /**
  * 本轮因 Thread 设置的模型不可用而改用 Agent 默认模型时的提示；Thread 设置本身不变。
- * payload.fallbackModel 缺失或不完整时不产生提示。
+ * payload.executedSelection 缺失或不完整时不产生提示。
  */
 export function projectModelFallback(
   entry: HarnessSessionEntryDTO,
   settings: SettingsSnapshot,
-  fallbackModel: unknown,
+  executedSelection: unknown,
 ): EntryEventDialogueMessage | null {
-  if (fallbackModel == null || typeof fallbackModel !== 'object' || Array.isArray(fallbackModel)) {
+  const currentModel = getBuiltinModelSelection(settings.execution)
+  const executedModel = getBuiltinModelSelection(executedSelection)
+  if (currentModel == null || executedModel == null) {
     return null
   }
-  const fallback = fallbackModel as Record<string, unknown>
   if (
-    typeof fallback.modelName !== 'string'
-    || (fallback.variant != null && typeof fallback.variant !== 'string')
-  ) return null
+    currentModel.modelName === executedModel.modelName
+    && (currentModel.variant ?? null) === (executedModel.variant ?? null)
+  ) {
+    return null
+  }
   return {
     ...event(entry, 'settings_change', translate('ai.runtime.entry.modelFallback', {
-      model: formatModelLabel(settings.model.modelName, settings.model.variant),
-      fallback: formatModelLabel(fallback.modelName, fallback.variant),
+      model: formatModelLabel(currentModel.modelName, currentModel.variant),
+      fallback: formatModelLabel(executedModel.modelName, executedModel.variant),
     }), ''),
     id: `entry:${entry.entryId}:model-fallback`,
   }

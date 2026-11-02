@@ -40,11 +40,11 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
   HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
-  HarnessModelSelectionDTO,
   HarnessSessionEntryDTO,
   HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
@@ -74,22 +74,12 @@ vi.mock('@/shared/api/harness-service', () => ({
   },
 }))
 
-function modelSelection(
-  overrides: Partial<HarnessModelSelectionDTO> = {},
-): HarnessModelSelectionDTO {
-  return {
-        modelName: 'MiniMax',
-    variant: 'default',
-    ...overrides,
-  }
-}
-
 function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
     agentName: 'assistant',
-    model: modelSelection(),
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     goal: null,
     ...overrides,

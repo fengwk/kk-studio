@@ -20,6 +20,7 @@ import {
   useAgentThreadController,
 } from '@/features/chat/runtime/useAgentThreadController'
 import { buildThreadCommandBatchRequest } from '@/features/chat/runtime/agent-pane/agent-pane-pipeline'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 import { isConflictReason } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -540,12 +541,12 @@ export function useBoundBranchPanel({
     }
   }
 
-  function selectModel(model: BranchDraft['model']) {
+  function selectModel(model: { modelName: string; variant?: string | null }) {
     const current = draftRef.current
     if (current == null) {
       return
     }
-    commitDraft({ ...current, model })
+    commitDraft({ ...current, execution: createBuiltinExecution(model) })
   }
 
   function selectEnvironment(environmentName: string | null) {

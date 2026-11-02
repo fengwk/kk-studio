@@ -37,6 +37,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
   HarnessAcceptedCommandsDTO,
@@ -155,10 +156,7 @@ function threadFixture(
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: {
-        modelName: 'MiniMax',
-        variant: 'default',
-      },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       goal: null,
     },
@@ -250,7 +248,7 @@ function goalPendingMessage() {
     },
     targetDraft: {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: false,
     },

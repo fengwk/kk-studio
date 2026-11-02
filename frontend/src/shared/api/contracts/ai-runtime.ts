@@ -1,7 +1,86 @@
 import type {
   HarnessBranchSettingsDTO,
+  HarnessExecutionSelectionDTO,
   HarnessModelSelectionDTO,
 } from '@/shared/api/generated/contracts'
+
+export const BUILTIN_DRIVER = 'builtin'
+
+export interface BuiltinExecutionSettings {
+  modelName: string
+  variant: string | null
+}
+
+export interface BuiltinExecutionSelection {
+  driver: 'builtin'
+  settings: BuiltinExecutionSettings
+}
+
+export function createBuiltinExecution(
+  model: { modelName: string; variant?: string | null } | string,
+  variant?: string | null,
+): HarnessExecutionSelectionDTO {
+  if (typeof model === 'string') {
+    return {
+      driver: BUILTIN_DRIVER,
+      settings: {
+        modelName: model,
+        variant: variant ?? null,
+      },
+    }
+  }
+  return {
+    driver: BUILTIN_DRIVER,
+    settings: {
+      modelName: model.modelName,
+      variant: model.variant ?? null,
+    },
+  }
+}
+
+export function getBuiltinModelSelection(
+  execution: unknown,
+): HarnessModelSelectionDTO | null {
+  if (execution == null || typeof execution !== 'object' || Array.isArray(execution)) {
+    return null
+  }
+  const candidate = execution as { driver?: unknown; settings?: unknown }
+  if (candidate.driver !== BUILTIN_DRIVER) {
+    return null
+  }
+  const settings = candidate.settings
+  if (settings == null || typeof settings !== 'object' || Array.isArray(settings)) {
+    return null
+  }
+  const s = settings as { modelName?: unknown; variant?: unknown }
+  if (typeof s.modelName !== 'string' || !s.modelName.trim()) {
+    return null
+  }
+  const modelVariant = typeof s.variant === 'string' ? s.variant : null
+  return {
+    modelName: s.modelName,
+    variant: modelVariant,
+  }
+}
+
+export function isSameExecution(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false
+  const execA = a as { driver?: unknown; settings?: unknown }
+  const execB = b as { driver?: unknown; settings?: unknown }
+  if (execA.driver !== execB.driver) return false
+  if (execA.driver === BUILTIN_DRIVER) {
+    const modelA = getBuiltinModelSelection(a)
+    const modelB = getBuiltinModelSelection(b)
+    if (modelA == null || modelB == null) return false
+    return modelA.modelName === modelB.modelName && (modelA.variant ?? null) === (modelB.variant ?? null)
+  }
+  try {
+    return JSON.stringify(execA.settings) === JSON.stringify(execB.settings)
+  } catch {
+    return false
+  }
+}
 
 export type EntryType =
   | 'ROOT'
@@ -48,7 +127,7 @@ export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
   | { type: 'GOAL'; idempotencyKey: string; text: string | null }
   | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
-  | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
+  | { type: 'SET_EXECUTION'; idempotencyKey: string; execution: HarnessExecutionSelectionDTO }
   | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
 
 export type AgentRuntimeOwnerDTO =

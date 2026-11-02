@@ -98,7 +98,7 @@ export function projectDurableEntry(
           messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
         }
         if (settings !== null) {
-          const fallback = projectModelFallback(entry, settings, payload.fallbackModel)
+          const fallback = projectModelFallback(entry, settings, payload.executedSelection)
           if (fallback !== null) messages.push(fallback)
         }
         context.lastSettings = settings

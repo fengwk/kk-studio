@@ -25,7 +25,11 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApiError } from '@/shared/api/client'
-import type { HarnessCommandCreateDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type HarnessCommandCreateDTO,
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
@@ -80,7 +84,7 @@ function branchSettings(
 ): HarnessBranchSettingsDTO {
   return {
     agentName: 'assistant',
-    model: modelSelection(),
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     goal: null,
     ...overrides,
@@ -161,8 +165,8 @@ function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string
   switch (command.type) {
     case 'SET_AGENT':
       return { agentName: command.agentName }
-    case 'SET_MODEL':
-      return { model: command.model }
+    case 'SET_EXECUTION':
+      return { execution: command.execution }
     case 'SET_ENVIRONMENT':
       return { environmentName: command.environmentName }
     default:
@@ -437,7 +441,7 @@ describe('useBoundBranchPanel', () => {
 
     expect(result.current.draft).toEqual({
       agentName: 'coder',
-      model: { modelName: 'GPT-5', variant: 'v2' },
+      execution: createBuiltinExecution('GPT-5', 'v2'),
       environmentName: 'dev-env',
       yoloEnabled: true,
     })
@@ -449,10 +453,10 @@ describe('useBoundBranchPanel', () => {
 
     const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
-    // buildBranchDiffCommands 的固定顺序：AGENT/MODEL/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
+    // buildBranchDiffCommands 的固定顺序：AGENT/EXECUTION/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
-      'SET_MODEL',
+      'SET_EXECUTION',
       'SET_ENVIRONMENT',
       'USER_MESSAGE',
     ])
@@ -466,7 +470,7 @@ describe('useBoundBranchPanel', () => {
     })
   })
 
-  it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_MODEL+USER_MESSAGE', async () => {
+  it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_EXECUTION+USER_MESSAGE', async () => {
     const { result } = renderHook(() => useTestBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
@@ -485,7 +489,7 @@ describe('useBoundBranchPanel', () => {
 
     expect(result.current.draft).toEqual({
       agentName: 'writer',
-      model: { modelName: 'Claude', variant: 'fast' },
+      execution: createBuiltinExecution('Claude', 'fast'),
       environmentName: 'existing-env',
       yoloEnabled: true,
     })
@@ -498,13 +502,13 @@ describe('useBoundBranchPanel', () => {
     expect(batchThreadId).toBe(THREAD_ID)
     expect(batch.commands.map((cmd) => cmd.type)).toEqual([
       'SET_AGENT',
-      'SET_MODEL',
+      'SET_EXECUTION',
       'SET_ENVIRONMENT',
       'USER_MESSAGE',
     ])
     expect(batch.commands[0]).toMatchObject({ agentName: 'writer' })
     expect(batch.commands[1]).toMatchObject({
-      model: { modelName: 'Claude', variant: 'fast' },
+      execution: createBuiltinExecution('Claude', 'fast'),
     })
   })
 
@@ -538,16 +542,15 @@ describe('useBoundBranchPanel', () => {
     act(() => {
       result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
-    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
 
     act(() => {
       // 重新选中当前 agent assistant，显式恢复 preset 模型设置
       expect(result.current.selectAgent('assistant')).toBe(true)
     })
-    expect(result.current.draft?.model).toEqual({
-            modelName: 'MiniMax',
-      variant: 'default',
-    })
+    expect(result.current.draft?.execution).toEqual(
+      createBuiltinExecution('MiniMax', 'default'),
+    )
   })
 
   it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
@@ -883,7 +886,7 @@ describe('useBoundBranchPanel', () => {
                 yoloEnabled: true,
                 branchSettings: branchSettings({
                   agentName: 'assistant2',
-                  model: modelSelection({ modelName: 'Claude', variant: 'v1' }),
+                  execution: createBuiltinExecution('Claude', 'v1'),
                 }),
               }),
             )
@@ -910,7 +913,7 @@ describe('useBoundBranchPanel', () => {
     // 旧 Thread 的 draft 编辑绝不泄漏：draft 完全来自新 snapshot，且恢复干净。
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
-      model: { modelName: 'Claude', variant: 'v1' },
+      execution: createBuiltinExecution('Claude', 'v1'),
       environmentName: null,
       yoloEnabled: true,
     })
@@ -970,7 +973,7 @@ describe('useBoundBranchPanel', () => {
             yoloEnabled: true,
             branchSettings: branchSettings({
               agentName: 'assistant2',
-              model: modelSelection({ modelName: 'Claude', variant: 'v1' }),
+              execution: createBuiltinExecution('Claude', 'v1'),
             }),
           }),
         ),
@@ -979,7 +982,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
-      model: { modelName: 'Claude', variant: 'v1' },
+      execution: createBuiltinExecution('Claude', 'v1'),
       environmentName: null,
       yoloEnabled: true,
     })
@@ -1089,7 +1092,7 @@ describe('useBoundBranchPanel', () => {
 
     expect(result.current.branchState?.base.yoloEnabled).toBe(false)
     expect(result.current.draft?.yoloEnabled).toBe(false)
-    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(result.current.yoloError).toBeNull()
   })
 
@@ -1108,7 +1111,7 @@ describe('useBoundBranchPanel', () => {
     })
     await waitFor(() => expect(result.current.branchState?.base.yoloEnabled).toBe(true))
     expect(result.current.draft?.yoloEnabled).toBe(true)
-    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('CustomModel')
     expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
   })
 
@@ -1145,7 +1148,7 @@ describe('useBoundBranchPanel', () => {
     })
     expect(result.current.draft).toEqual({
       agentName: 'fresh',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: true,
     })
@@ -1173,7 +1176,7 @@ describe('useBoundBranchPanel', () => {
     const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(batchThreadId).toBe(THREAD_ID)
     // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE/GOAL 终止输入。
-    expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_MODEL'])
+    expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_EXECUTION'])
     expect(request.expectedHeadEntryId).toBe('e-assistant')
     expect(request.expectedNextCommandSequence).toBe('1')
 
@@ -1268,7 +1271,7 @@ describe('useBoundBranchPanel', () => {
     })
     // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
     expect(calls).toHaveLength(1)
-    expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_MODEL'])
+    expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_EXECUTION'])
     // DTO 允许纯消息省 cursor，但设置请求仍必须精确携带初始 cursor。
     expect(calls[0]!.headEntryId).toBe('e-assistant')
     expect(calls[0]!.nextCommandSequence).toBe('1')
@@ -1280,13 +1283,13 @@ describe('useBoundBranchPanel', () => {
     // 第二个请求复用接受响应推进后的 cursor，且只携带相对已提交 overlay 的最小 diff。
     expect(calls[1]!.headEntryId).toBe('e-assistant')
     expect(calls[1]!.nextCommandSequence).toBe('2')
-    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
+    expect(calls[1]!.commands).toEqual(['SET_EXECUTION'])
 
     await act(async () => {
       releases[1]!()
     })
     await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
-    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('GPT-5')
   })
 
   it('does not re-carry a just-submitted setting when a message is sent before the snapshot re-read', async () => {
@@ -1496,8 +1499,8 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(calls).toHaveLength(2))
     expect(calls[1]!.threadId).toBe(THREAD_ID_2)
-    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
-    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+    expect(calls[1]!.commands).toEqual(['SET_EXECUTION'])
+    expect(getBuiltinModelSelection(result.current.draft?.execution)?.modelName).toBe('GPT-5')
     expect(result.current.settingsStatus).toBe('pending')
   })
 })

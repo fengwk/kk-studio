@@ -9,6 +9,10 @@ import {
   projectPendingTarget,
 } from '@/features/chat/branch-draft'
 import type { BranchDraft } from '@/features/chat/branch-draft'
+import {
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
@@ -86,7 +90,7 @@ function draftWith(
 ): BranchDraft {
   return {
     agentName: 'assistant',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     yoloEnabled: false,
     ...overrides,
@@ -146,21 +150,23 @@ describe('BranchDraft materialization failures', () => {
     // 组不拥有 variant；初始化、持久命令回放和 HTTP 省略 null 时都不能继承旧模型的 variant。
     const group = { ...model, kind: 'GROUP' as const, name: 'group' }
     const draft = materializeBlankBranchDraft({ ...agent([], [], []), model: 'group' }, false, [group])
-    expect(draft?.model).toEqual({ modelName: 'group', variant: null })
+    expect(draft?.execution).toEqual(createBuiltinExecution('group', null))
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_MODEL', { model: { modelName: 'group', variant: null } }),
+      queuedSettingCommand('1', 'SET_EXECUTION', {
+        execution: createBuiltinExecution('group', null),
+      }),
     ])
-    expect(projected.model).toEqual({ modelName: 'group', variant: null })
+    expect(projected.execution).toEqual(createBuiltinExecution('group', null))
     expect(branchDraftFromBranchSettings({
-      agentName: 'root', model: { modelName: 'group' }, environmentName: null, goal: null,
-    }, false).model).toEqual({ modelName: 'group', variant: null })
+      agentName: 'root', execution: createBuiltinExecution('group', null), environmentName: null, goal: null,
+    }, false).execution).toEqual(createBuiltinExecution('group', null))
   })
 
   it('preserves existing draft environment when switching Agent and does not overwrite with Chat fallback', () => {
     const existing: BranchDraft = {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: 'existing-env',
       yoloEnabled: false,
     }
@@ -192,7 +198,7 @@ describe('BranchDraft conversion and diff semantics', () => {
   function createSettings(): HarnessBranchSettingsDTO {
     return {
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       goal: null,
     }
@@ -202,7 +208,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     const draft = branchDraftFromBranchSettings(createSettings(), true)
     expect(draft).toEqual({
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       yoloEnabled: true,
     })
@@ -229,7 +235,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     // 存在已有 draft 时切换 agent 保持已选 environmentName 不变
     const existing = draftWith({
       environmentName: 'my-custom-env',
-      model: { modelName: 'model', variant: 'default' },
+      execution: createBuiltinExecution('model', 'default'),
     })
     const switched = materializeAgentBranchDraft(rootAgent, [model], existing)
     expect(switched?.environmentName).toBe('my-custom-env')
@@ -237,7 +243,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     // 即使 existing 的 model 处于未就绪/空状态，environmentName 依然保留
     const existingEmptyModel = draftWith({
       environmentName: 'preserved-env',
-      model: { modelName: '', variant: '' },
+      execution: createBuiltinExecution('', ''),
     })
     const switchedFromEmpty = materializeAgentBranchDraft(rootAgent, [model], existingEmptyModel)
     expect(switchedFromEmpty?.environmentName).toBe('preserved-env')
@@ -265,14 +271,14 @@ describe('BranchDraft conversion and diff semantics', () => {
       }
       const existing = draftWith({
         agentName: 'assistant',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: createBuiltinExecution('MiniMax', 'default'),
         environmentName: 'env-1',
         yoloEnabled: true,
       })
       const result = materializeAgentBranchDraft(claudeAgent, [model, claudeModel], existing)
       expect(result).toEqual({
         agentName: 'claude-agent',
-        model: { modelName: 'claude', variant: 'v1' },
+        execution: createBuiltinExecution('claude', 'v1'),
         environmentName: 'env-1',
         yoloEnabled: true,
       })
@@ -286,10 +292,7 @@ describe('BranchDraft conversion and diff semantics', () => {
         variant: 'v2',
       }
       const result = materializeAgentBranchDraft(explicitVariantAgent, [model, claudeModel], null)
-      expect(result?.model).toEqual({
-        modelName: 'claude',
-        variant: 'v2',
-      })
+      expect(result?.execution).toEqual(createBuiltinExecution('claude', 'v2'))
     })
 
     it('falls back to model defaultVariant when agent variant is not specified', () => {
@@ -300,10 +303,7 @@ describe('BranchDraft conversion and diff semantics', () => {
         variant: null,
       }
       const result = materializeAgentBranchDraft(defaultVariantAgent, [model, claudeModel], null)
-      expect(result?.model).toEqual({
-        modelName: 'claude',
-        variant: 'v1',
-      })
+      expect(result?.execution).toEqual(createBuiltinExecution('claude', 'v1'))
     })
 
     it('updates variant when switching between agents using the same model but different variants', () => {
@@ -320,13 +320,10 @@ describe('BranchDraft conversion and diff semantics', () => {
         variant: 'v2',
       }
       const initial = materializeAgentBranchDraft(agentV1, [claudeModel], null)
-      expect(initial?.model.variant).toBe('v1')
+      expect(getBuiltinModelSelection(initial?.execution)?.variant).toBe('v1')
 
       const switched = materializeAgentBranchDraft(agentV2, [claudeModel], initial)
-      expect(switched?.model).toEqual({
-        modelName: 'claude',
-        variant: 'v2',
-      })
+      expect(switched?.execution).toEqual(createBuiltinExecution('claude', 'v2'))
       expect(switched?.agentName).toBe('agent-v2')
     })
 
@@ -334,15 +331,12 @@ describe('BranchDraft conversion and diff semantics', () => {
       const rootAgent = agent([], [], [])
       const existing = draftWith({
         agentName: 'root',
-        model: { modelName: 'custom-model', variant: 'custom' },
+        execution: createBuiltinExecution('custom-model', 'custom'),
         environmentName: 'prod',
         yoloEnabled: true,
       })
       const reselected = materializeAgentBranchDraft(rootAgent, [model], existing)
-      expect(reselected?.model).toEqual({
-                modelName: 'model',
-        variant: 'default',
-      })
+      expect(reselected?.execution).toEqual(createBuiltinExecution('model', 'default'))
       expect(reselected?.environmentName).toBe('prod')
       expect(reselected?.yoloEnabled).toBe(true)
     })
@@ -374,7 +368,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
   })
 
-  it('emits SET_AGENT/SET_MODEL only for the actually changed field', () => {
+  it('emits SET_AGENT/SET_EXECUTION only for the actually changed field', () => {
     const ids = (() => {
       let next = 0
       return () => `cid-${++next}`
@@ -392,13 +386,13 @@ describe('BranchDraft conversion and diff semantics', () => {
 
     const modelChanged = buildBranchDiffCommands(
       draftWith(),
-      draftWith({ model: { modelName: 'MiniMax', variant: 'pro' } }),
+      draftWith({ execution: createBuiltinExecution('MiniMax', 'pro') }),
       ids,
     )
     expect(modelChanged).toEqual([{
-      type: 'SET_MODEL',
+      type: 'SET_EXECUTION',
       idempotencyKey: 'cid-2',
-      model: { modelName: 'MiniMax', variant: 'pro' },
+      execution: createBuiltinExecution('MiniMax', 'pro'),
     }])
   })
 
@@ -444,7 +438,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       draftWith({ environmentName: 'old-env' }),
       draftWith({
         agentName: 'coder',
-        model: { modelName: 'Other', variant: 'v2' },
+        execution: createBuiltinExecution('Other', 'v2'),
         environmentName: 'new-env',
         yoloEnabled: true,
       }),
@@ -452,7 +446,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     )
     expect(commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
-      'SET_MODEL',
+      'SET_EXECUTION',
       'SET_ENVIRONMENT',
     ])
     expect(commands[2]).toEqual({
@@ -466,16 +460,16 @@ describe('BranchDraft conversion and diff semantics', () => {
 })
 
 describe('projectPendingTarget setting projection', () => {
-  it('projects queued SET_AGENT / SET_MODEL by sequence order', () => {
+  it('projects queued SET_AGENT / SET_EXECUTION by sequence order', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('2', 'SET_MODEL', {
-        model: { modelName: 'Other', variant: 'v2' },
+      queuedSettingCommand('2', 'SET_EXECUTION', {
+        execution: createBuiltinExecution('Other', 'v2'),
       }),
       queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' }),
     ])
     expect(projected.agentName).toBe('coder')
-    expect(projected.model).toEqual({ modelName: 'Other', variant: 'v2' })
+    expect(projected.execution).toEqual(createBuiltinExecution('Other', 'v2'))
   })
 
   it('ignores non-SET_ and non-QUEUED commands while keeping base values', () => {
@@ -491,23 +485,22 @@ describe('projectPendingTarget setting projection', () => {
     expect(projected.agentName).toBe('coder')
   })
 
-  it('keeps the base model fields when a SET_MODEL payload is not a record', () => {
+  it('keeps the base model fields when a SET_EXECUTION payload is not a record', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_MODEL', { model: 'minimax/MiniMax' }),
+      queuedSettingCommand('1', 'SET_EXECUTION', { execution: 'minimax/MiniMax' }),
     ])
-    expect(projected.model).toEqual(base.model)
+    expect(projected.execution).toEqual(base.execution)
   })
 
-  it('fills missing SET_MODEL fields from the base selection', () => {
+  it('fills missing SET_EXECUTION fields from the base selection', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
-      queuedSettingCommand('1', 'SET_MODEL', { model: { modelName: 'New' } }),
+      queuedSettingCommand('1', 'SET_EXECUTION', {
+        execution: { driver: 'builtin', settings: { modelName: 'New' } },
+      }),
     ])
-    expect(projected.model).toEqual({
-            modelName: 'New',
-      variant: 'default',
-    })
+    expect(projected.execution).toEqual(createBuiltinExecution('New', 'default'))
   })
 
   /**

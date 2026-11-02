@@ -210,7 +210,7 @@ test('Session summaries preserve same-named root and child parent identities', a
     updatedAt: '2026-01-01T00:00:00Z',
     status: 'IDLE',
     executionControl: 'RUNNABLE',
-    model: { modelName: 'model', variant: 'default' },
+    execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'default' } },
     headMessagePreview: null,
   }
   const child = { ...root, threadId: cid(), parentThreadId: root.threadId }

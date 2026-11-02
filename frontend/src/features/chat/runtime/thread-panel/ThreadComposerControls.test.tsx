@@ -32,7 +32,7 @@ const MODELS: readonly ThreadComposerModelOption[] = [
 
 function createSettings(overrides: Partial<ThreadComposerSettingsInput> = {}): ThreadComposerSettingsInput {
   return {
-    model: { modelName: 'MiniMax', variant: 'default' },
+    modelSelection: { modelName: 'MiniMax', variant: 'default' },
     models: MODELS,
     yoloEnabled: false,
     environmentName: null,
@@ -44,13 +44,13 @@ function createSettings(overrides: Partial<ThreadComposerSettingsInput> = {}): T
   }
 }
 
-/** 同步受控变体：onModelChange 立即把新选择写回 settings.model。 */
+/** 同步受控变体：onModelChange 立即把新选择写回 settings.modelSelection。 */
 function createLiveSettings(
   onModelChange?: (model: ThreadComposerModelSelection) => void,
 ): ThreadComposerSettingsInput & { onModelChange: (model: ThreadComposerModelSelection) => void } {
   const live = createSettings()
   live.onModelChange = (model) => {
-    live.model = model
+    live.modelSelection = model
     onModelChange?.(model)
   }
   return live
@@ -168,7 +168,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     render(
       <Harness
         settings={createSettings({
-          model: { modelName: 'grok-4.7', variant: 'xhigh' },
+          modelSelection: { modelName: 'grok-4.7', variant: 'xhigh' },
         })}
         menu={null}
       />,
@@ -293,7 +293,7 @@ describe('ThreadComposerControls model/variant menus', () => {
       'variant',
       createSettings({
         // 当前 model 不在任何目录项中：variantTarget 取不到，菜单渲染空列表。
-        model: { modelName: 'ghost', variant: 'none' },
+        modelSelection: { modelName: 'ghost', variant: 'none' },
       }),
     )
     const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
@@ -343,7 +343,7 @@ describe('ThreadComposerControls model/variant menus', () => {
       'variant',
       createSettings({
         // 当前 model 不在任何目录项中：variantTarget 为空，返回按钮显示通用 Model 文案。
-        model: { modelName: 'ghost', variant: 'none' },
+        modelSelection: { modelName: 'ghost', variant: 'none' },
       }),
     )
     expect(screen.getByRole('button', { name: 'Model' })).toBeInTheDocument()

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import {
+  type EntryType,
+  createBuiltinExecution,
+} from '@/shared/api/contracts/ai-runtime'
 import type {
   RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
@@ -49,7 +52,7 @@ describe('thread timeline', () => {
     const timeline = buildThreadTimeline(
       [
         entry('1', 'ROOT', { settings: {
-          agentName: 'JIJI', model: { modelName: 'model', variant: 'default' },
+          agentName: 'JIJI', execution: createBuiltinExecution('model', 'default'),
           environmentName: null,
         } }),
         entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '检查大纲' }])),
@@ -74,11 +77,11 @@ describe('thread timeline', () => {
   it('projects committed settings snapshots before messages, never compaction settings', () => {
     // 测试意图：配置事件来自持久快照，固定字段顺序且有稳定的复合 ID。
     const initial = {
-      agentName: 'coding', model: { modelName: 'm1', variant: 'default' },
+      agentName: 'coding', execution: createBuiltinExecution('m1', 'default'),
       environmentName: null,
     }
     const changed = {
-      agentName: 'reviewer', model: { modelName: 'm2', variant: 'high' },
+      agentName: 'reviewer', execution: createBuiltinExecution('m2', 'high'),
       environmentName: 'local',
     }
     const entries = [
@@ -104,7 +107,7 @@ describe('thread timeline', () => {
   it('clears the diff baseline on malformed snapshots and recovers without invented changes', () => {
     // 测试意图：损坏快照中断差值链；下一完整快照只重建基准，不虚构变更。
     const settings = {
-      agentName: 'coding', model: { modelName: 'm', variant: 'default' },
+      agentName: 'coding', execution: createBuiltinExecution('m', 'default'),
       environmentName: 'local',
     }
     const projected = buildThreadTimeline([
@@ -124,12 +127,12 @@ describe('thread timeline', () => {
     // 安全点变更立即生效，相同 SETTINGS 和下一 TURN_START 不重复展示。
     const rootSettings = {
       agentName: 'JIJI',
-      model: { modelName: 'glm-5.3-flash', variant: 'high' },
+      execution: createBuiltinExecution('glm-5.3-flash', 'high'),
       environmentName: 'linux-env',
     }
     const realPayloadSettings = {
       agentName: 'reviewer',
-      model: { modelName: 'glm-5.3-flash', variant: 'max' },
+      execution: createBuiltinExecution('glm-5.3-flash', 'max'),
       environmentName: null,
       goal: { id: 'goal-1', text: 'code review' },
     }
@@ -220,7 +223,7 @@ describe('thread timeline', () => {
   it('establishes a SETTINGS baseline without inventing changes and applies it after compaction', () => {
     const settings = {
       agentName: 'JIJI',
-      model: { modelName: 'grok-4.7', variant: 'high' },
+      execution: createBuiltinExecution('grok-4.7', 'high'),
       environmentName: null,
     }
     const messages = buildThreadTimeline([
@@ -233,7 +236,7 @@ describe('thread timeline', () => {
         outcome: 'COMPLETED', turnStartEntryId: 'compact',
       }),
       entry('changed', 'SETTINGS', {
-        settings: { ...settings, model: { ...settings.model, variant: 'xhigh' } },
+        settings: { ...settings, execution: createBuiltinExecution('grok-4.7', 'xhigh') },
       }),
     ], [], []).messages
     expect(messages.map(({ id }) => id)).toEqual(['entry:summary', 'entry:changed:model'])
@@ -247,12 +250,12 @@ describe('thread timeline', () => {
     // 下一次有效 SETTINGS 仅重新建立 baseline，绝不伪造虚假变更。
     const initial = {
       agentName: 'initial-agent',
-      model: { modelName: 'm', variant: 'v1' },
+      execution: createBuiltinExecution('m', 'v1'),
       environmentName: null,
     }
     const next = {
       agentName: 'next-agent',
-      model: { modelName: 'm', variant: 'v2' },
+      execution: createBuiltinExecution('m', 'v2'),
       environmentName: 'env-1',
     }
     const timeline = buildThreadTimeline([
@@ -833,7 +836,7 @@ describe('thread timeline', () => {
 
   it('projects control boundaries as no entry rows plus the TURN_END footer meta', () => {
     const settings = {
-      agentName: 'JIJI', model: { modelName: 'model', variant: 'default' },
+      agentName: 'JIJI', execution: createBuiltinExecution('model', 'default'),
       environmentName: null,
     }
     const timeline = buildThreadTimeline(

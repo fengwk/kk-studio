@@ -12,8 +12,8 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import type {
   HarnessBranchSettingsDTO,
+  HarnessExecutionSelectionDTO,
   HarnessGoalSettingDTO,
-  HarnessModelSelectionDTO,
 } from '@/shared/api/generated/contracts'
 
 export type PaneTarget =
@@ -63,16 +63,12 @@ function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
   )
 }
 
-function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
-  if (!isRecord(value) || !nonBlank(value.modelName)) {
+function isExecutionSelection(value: unknown): value is HarnessExecutionSelectionDTO {
+  if (!isRecord(value) || !nonBlank(value.driver) || !isRecord(value.settings)) {
     return false
   }
   const keys = Object.keys(value)
-  if (!keys.every((key) => key === 'modelName' || key === 'variant')) {
-    return false
-  }
-  // 组显式使用 null/缺省 variant；单 Model 的 variant 若出现必须是非空白字符串。
-  return value.variant === undefined || value.variant === null || nonBlank(value.variant)
+  return keys.length === 2 && keys.every((key) => key === 'driver' || key === 'settings')
 }
 
 function isGoalSetting(value: unknown): value is HarnessGoalSettingDTO {
@@ -96,12 +92,12 @@ function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
   const keys = Object.keys(value)
   if (
     keys.length !== 4
-    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'environmentName' || key === 'goal')
+    || !keys.every((key) => key === 'agentName' || key === 'execution' || key === 'environmentName' || key === 'goal')
   ) {
     return false
   }
   return nonBlank(value.agentName)
-    && isModelSelection(value.model)
+    && isExecutionSelection(value.execution)
     && isEnvironmentName(value.environmentName)
     && (value.goal === null || isGoalSetting(value.goal))
 }
@@ -192,9 +188,9 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
     case 'SET_AGENT':
       return hasExactKeys(value, ['type', 'idempotencyKey', 'agentName'])
         && nonBlank(value.agentName)
-    case 'SET_MODEL':
-      return hasExactKeys(value, ['type', 'idempotencyKey', 'model'])
-        && isModelSelection(value.model)
+    case 'SET_EXECUTION':
+      return hasExactKeys(value, ['type', 'idempotencyKey', 'execution'])
+        && isExecutionSelection(value.execution)
     case 'SET_ENVIRONMENT':
       return hasExactKeys(value, ['type', 'idempotencyKey', 'environmentName'])
         && isEnvironmentName(value.environmentName)
@@ -237,12 +233,12 @@ function isBranchDraft(value: unknown): value is BranchDraft {
   const keys = Object.keys(value)
   if (
     keys.length !== 4
-    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'environmentName' || key === 'yoloEnabled')
+    || !keys.every((key) => key === 'agentName' || key === 'execution' || key === 'environmentName' || key === 'yoloEnabled')
   ) {
     return false
   }
   return nonBlank(value.agentName)
-    && isModelSelection(value.model)
+    && isExecutionSelection(value.execution)
     && isEnvironmentName(value.environmentName)
     && typeof value.yoloEnabled === 'boolean'
 }

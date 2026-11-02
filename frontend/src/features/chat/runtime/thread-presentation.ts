@@ -3,6 +3,7 @@ import type { ThreadProjection } from './useThreadProjection'
 import type { useBoundThreadPanelViews } from './useBoundThreadPanelViews'
 import type { PaneTarget } from './agent-pane'
 import { formatModelLabel } from '@/features/catalog'
+import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 export function paneTargetViewKey(target: PaneTarget): string {
   return target.kind === 'BOUND_THREAD' ? `thread:${target.threadId}`
@@ -36,7 +37,7 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): st
   if (!settings) {
     return null
   }
-  const model = settings.model
+  const model = getBuiltinModelSelection(settings.execution)
   return [
     settings.agentName,
     model ? formatModelLabel(model.modelName, model.variant) : null,

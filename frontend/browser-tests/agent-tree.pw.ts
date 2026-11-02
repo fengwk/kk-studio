@@ -88,7 +88,7 @@ function threadDto(
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'minimax-m2.7', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
       environmentName: 'dev-node',
       goal: null,
     },

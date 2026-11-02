@@ -10,6 +10,7 @@ import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { createTextPart } from '@/features/chat/composer/composer-parts'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { saveThreadDraftParts } from '@/features/chat/runtime/thread-draft-store'
 import { setLocale } from '@/shared/i18n'
 import type {
@@ -84,10 +85,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: {
-        modelName: 'MiniMax',
-        variant: 'default',
-      },
+      execution: createBuiltinExecution('MiniMax', 'default'),
       environmentName: null,
       goal: null,
     },

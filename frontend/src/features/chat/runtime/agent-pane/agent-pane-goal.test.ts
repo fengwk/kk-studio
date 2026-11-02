@@ -11,12 +11,15 @@ import {
 } from '@/features/chat/runtime/thread-panel/thread-commands'
 import { createTextPart, createAttachmentPart } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type AgentRuntimeOwnerDTO,
+  createBuiltinExecution,
+} from '@/shared/api/contracts/ai-runtime'
 import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
-  model: { modelName: 'model', variant: 'default' },
+  execution: createBuiltinExecution('model', 'default'),
   environmentName: null,
   yoloEnabled: false,
 }
@@ -34,7 +37,7 @@ const mockThread: HarnessThreadDTO = {
   executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',
-    model: { modelName: 'model', variant: 'default' },
+    execution: createBuiltinExecution('model', 'default'),
     environmentName: null,
     goal: { id: 'existing-goal-id', text: 'Existing goal text' },
   },
@@ -118,7 +121,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
       if (frozen.request.target.type === 'NEW_SESSION') {
         expect(frozen.request.target.rootSettings).toEqual({
           agentName: 'assistant',
-          model: baseDraft.model,
+          execution: baseDraft.execution,
           environmentName: null,
           goal: null,
         })

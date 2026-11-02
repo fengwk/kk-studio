@@ -1045,6 +1045,12 @@ export interface HarnessBranchSettingsDTO {
   goal: HarnessGoalSettingDTO | null
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO */
+export interface HarnessExecutionSelectionDTO {
+  driver: string
+  settings: Record<string, unknown>
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO */
 export interface HarnessCancelledInputDTO {
   sequence: string

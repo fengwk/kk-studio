@@ -298,7 +298,7 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { modelName: 'MiniMax', variant: 'high' },
+          modelSelection: { modelName: 'MiniMax', variant: 'high' },
           models: [
             {
               kind: 'MODEL',
@@ -342,7 +342,7 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { modelName: 'MiniMax', variant: 'default' },
+          modelSelection: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
               kind: 'MODEL',
@@ -400,7 +400,7 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { modelName: 'MiniMax', variant: 'default' },
+          modelSelection: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
               kind: 'MODEL',

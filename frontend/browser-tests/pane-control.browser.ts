@@ -36,8 +36,9 @@ function rootThread(overrides: Record<string, unknown> = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'VeryLongModelName', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
       environmentName: null,
+      goal: null,
     },
     createTime: 1790812800,
     updateTime: 1790812800,
@@ -486,12 +487,12 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   // 安全点立即展示变更；后续相同回合快照不重复，底栏文字与提示同源。
   const rootSettings = {
     agentName: 'assistant',
-    model: { modelName: 'VeryLongModelName', variant: 'default' },
+    execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
     environmentName: null,
   }
   const changedSettings = {
     agentName: 'researcher',
-    model: { modelName: 'grok-4.7', variant: 'xhigh' },
+    execution: { driver: 'builtin', settings: { modelName: 'grok-4.7', variant: 'xhigh' } },
     environmentName: null,
     goal: null,
   }

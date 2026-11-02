@@ -12,7 +12,7 @@ import {
   listEnvironments,
   setAgentCommand,
   setEnvironmentCommand,
-  setModelCommand,
+  setExecutionCommand,
   stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
@@ -143,14 +143,15 @@ export async function runWorkspaceContractMatrix(ui) {
           await send.click()
           const queued = await waitForQueuedSettingsBatch(apiCtx, fixture.threadId, marker)
           assert(
-            queued.map((command) => command.type).join(',') === 'SET_MODEL,USER_MESSAGE',
+            queued.map((command) => command.type).join(',') === 'SET_EXECUTION,USER_MESSAGE',
             `settings and message were not queued in frozen order: ${JSON.stringify(queued)}`,
           )
-          const modelPayload = JSON.parse(queued[0].payloadJson)
+          const executionPayload = JSON.parse(queued[0].payloadJson)
           assert(
-            modelPayload.model?.modelName === fixture.model.name
-            && modelPayload.model?.variant === 'review',
-            `queued SET_MODEL does not match the UI selection: ${JSON.stringify(modelPayload)}`,
+            executionPayload.execution?.driver === 'builtin'
+            && executionPayload.execution?.settings?.modelName === fixture.model.name
+            && executionPayload.execution?.settings?.variant === 'review',
+            `queued SET_EXECUTION does not match the UI selection: ${JSON.stringify(executionPayload)}`,
           )
           // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot version 的 CAS），
           // 绝不进入 command batch；Thread 快照反映权威值。
@@ -745,8 +746,8 @@ async function waitForQueuedSettingsBatch(apiCtx, threadId, marker, timeoutMs = 
     const userIndex = commands.findIndex((command) =>
       command.type === 'USER_MESSAGE' && command.payloadJson.includes(marker),
     )
-    if (userIndex > 0 && commands[userIndex - 1]?.type === 'SET_MODEL') {
-      // 只返回本次 batch：marker USER 与其紧邻的 preceding SET_MODEL，
+    if (userIndex > 0 && commands[userIndex - 1]?.type === 'SET_EXECUTION') {
+      // 只返回本次 batch：marker USER 与其紧邻的 preceding SET_EXECUTION，
       // 不把更早已入队的 queued message 卷进来。
       return [commands[userIndex - 1], commands[userIndex]]
     }
@@ -883,7 +884,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       }),
       commands: [
         setAgentCommand(state.otherAgent.name, cid()),
-        setModelCommand(
+        setExecutionCommand(
           {
             modelName: state.model.name,
             variant: 'default',
@@ -896,7 +897,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     })
     assert(
       switched.acceptedCommands.map((command) => command.type).join(',')
-        === 'SET_AGENT,SET_MODEL,SET_ENVIRONMENT,USER_MESSAGE',
+        === 'SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(switched.acceptedCommands),
     )
     await waitForQuiescentThread(apiCtx, state.threadId, {
@@ -1108,7 +1109,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           }),
           commands: [
             setAgentCommand(state.parentAgent.name, cid()),
-            setModelCommand(
+            setExecutionCommand(
               {
                 modelName: state.model.name,
                 variant: 'default',
@@ -1265,7 +1266,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           }),
           commands: [
             setAgentCommand(state.agent.name, cid()),
-            setModelCommand(
+            setExecutionCommand(
               {
                 modelName: state.model.name,
                 variant: 'default',
