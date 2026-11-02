@@ -62,7 +62,7 @@ function ComposerHarness() {
       <div style={{ width: '100%' }}>
         <ThreadComposerControls
           settings={{
-            model,
+            modelSelection: model,
             models: FIXTURE_MODELS,
             yoloEnabled: false,
             environmentName: null,

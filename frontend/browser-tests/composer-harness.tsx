@@ -95,7 +95,7 @@ export function ComposerHarnessApp() {
   }, [pane1FocusIntent, activePane, pane1Disabled, modalOpen])
 
   const settings: ThreadComposerSettingsInput = {
-    model,
+    modelSelection: model,
     models: INITIAL_MODELS,
     yoloEnabled,
     environmentName,
