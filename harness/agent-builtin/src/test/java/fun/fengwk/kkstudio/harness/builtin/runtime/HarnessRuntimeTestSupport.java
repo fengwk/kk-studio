@@ -504,6 +504,20 @@ public final class HarnessRuntimeTestSupport {
   /** 无 Model 父行的完整多工具批次，调用顺序与 sibling 序号一致。 */
   static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
       InMemoryBuiltinHarnessStore store, int toolCount) {
+    return seedModelFreeToolBaseline(store, toolCount, settings());
+  }
+
+  static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
+      InMemoryBuiltinHarnessStore store, int toolCount, BranchSettings branchSettings) {
+    return seedModelFreeToolBaseline(
+        store, toolCount, branchSettings, (ToolInvocationStatus[]) null);
+  }
+
+  static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
+      InMemoryBuiltinHarnessStore store,
+      int toolCount,
+      BranchSettings branchSettings,
+      ToolInvocationStatus... statuses) {
     if (toolCount <= 0) {
       throw new IllegalArgumentException("toolCount must be positive");
     }
@@ -518,7 +532,8 @@ public final class HarnessRuntimeTestSupport {
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           tx.sessions().insert(session(sessionId));
-          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), T0));
           tx.entries()
               .insert(
                   turnStartEntry(
@@ -527,6 +542,7 @@ public final class HarnessRuntimeTestSupport {
                       rootEntryId,
                       T1,
                       threadId,
+                      branchSettings,
                       capabilities(hostBinding())));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.threads().insert(thread);
@@ -544,9 +560,18 @@ public final class HarnessRuntimeTestSupport {
           for (int i = 0; i < toolCount; i++) {
             UUID toolId = tx.nextId();
             toolIds.add(toolId);
+            ToolInvocationStatus status =
+                statuses != null && i < statuses.length ? statuses[i] : ToolInvocationStatus.READY;
             invocations.add(
                 toolInvocation(
-                    toolId, threadId, turnStartEntryId, assistantEntryId, i, callIds[i], T1));
+                    toolId,
+                    threadId,
+                    turnStartEntryId,
+                    assistantEntryId,
+                    i,
+                    callIds[i],
+                    status,
+                    T1));
           }
           tx.tools().insert(invocations);
           tx.threads().update(thread.advanceHead(assistantEntryId, T2));
@@ -1110,13 +1135,25 @@ public final class HarnessRuntimeTestSupport {
       Instant createdAt,
       UUID ownerThreadId,
       TurnCapabilities capabilities) {
+    return turnStartEntry(
+        id, sessionId, parentId, createdAt, ownerThreadId, settings(), capabilities);
+  }
+
+  static Entry turnStartEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      UUID ownerThreadId,
+      BranchSettings settings,
+      TurnCapabilities capabilities) {
     return new Entry(
         id,
         sessionId,
         parentId,
         new TurnStartPayload(
             TurnStartReason.INPUT,
-            settings(),
+            settings,
             ownerThreadId,
             100_000,
             16_384,
@@ -1353,6 +1390,26 @@ public final class HarnessRuntimeTestSupport {
       int callIndex,
       String toolCallId,
       Instant createdAt) {
+    return toolInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        assistantEntryId,
+        callIndex,
+        toolCallId,
+        ToolInvocationStatus.READY,
+        createdAt);
+  }
+
+  static ToolInvocation toolInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID assistantEntryId,
+      int callIndex,
+      String toolCallId,
+      ToolInvocationStatus status,
+      Instant createdAt) {
     return new ToolInvocation(
         id,
         threadId,
@@ -1361,7 +1418,7 @@ public final class HarnessRuntimeTestSupport {
         callIndex,
         new ToolCall(toolCallId, "bash", "{}"),
         hostBinding(),
-        ToolInvocationStatus.READY,
+        status,
         0,
         null,
         null,

@@ -13,10 +13,12 @@ import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.FakeRun;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
+import fun.fengwk.kkstudio.harness.runtime.ToolOutcomeQuery;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -1016,5 +1018,49 @@ class ToolProcessorExecutionTest {
     } catch (IllegalAccessException error) {
       throw new IllegalStateException(error);
     }
+  }
+
+  /** WAITING_REQUEST 工具认领时直接完成 Work，不调网关、不唤醒 Thread；激活为 READY 并重新请求 Work 后正常执行。 */
+  @Test
+  void waitingRequestToolCompletesWorkWithoutGatewayOrThreadWakeThenRunsOnActivate()
+      throws Exception {
+    Fixture fixture = ToolProcessorTestSupport.waitingRequestFixture();
+
+    int initialAdmitCalls = fixture.gateway.admitCalls;
+    Work initialThreadWork =
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
+
+    // 认领 TOOL Work 并处理
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(claim(fixture)));
+
+    // 网关未调用，TOOL Work 已完成，Thread 未唤醒
+    assertEquals(initialAdmitCalls, fixture.gateway.admitCalls);
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+    Work currentThreadWork =
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId());
+    assertEquals(initialThreadWork.wakeVersion(), currentThreadWork.wakeVersion());
+
+    // 2. activateRequest 并请求 TOOL Work
+    ToolProcessorTestSupport.transition(
+        fixture.store,
+        fixture.toolInvocationId,
+        tool -> tool.activateRequest(ToolProcessorTestSupport.NOW));
+    // 激活后状态转为 READY，预审放行（标记无需审批）并请求 TOOL Work
+    ToolProcessorTestSupport.toApproved(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+    ToolProcessorTestSupport.requestToolWork(fixture, ToolProcessorTestSupport.NOW);
+
+    // 经测试网关执行为 SUCCEEDED
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+    awaitStatus(fixture, ToolInvocationStatus.SUCCEEDED);
+    awaitIdle(fixture);
+
+    // ToolOutcomeQuery.find 读到该终态
+    var outcome =
+        new ToolOutcomeQuery(fixture.store)
+            .find(fixture.baseline.threadId(), fixture.toolInvocationId);
+    assertTrue(outcome.isPresent());
+    assertEquals(ToolResultStatus.SUCCEEDED, outcome.get().status());
   }
 }

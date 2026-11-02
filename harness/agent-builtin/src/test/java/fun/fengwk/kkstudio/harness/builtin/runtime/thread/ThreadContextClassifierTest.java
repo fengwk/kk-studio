@@ -398,6 +398,70 @@ class ThreadContextClassifierTest {
   }
 
   @Test
+  void basisWithToolSiblingsAllowedOnlyWhenResponsePendingAndCancelsToolBatch() {
+    // 1. RESPONSE_PENDING 且 cancelsToolBatch == true：允许存在 tool siblings，分类为 ModelTerminalPending
+    LockedDriverState pendingCancelling =
+        model(
+            THREAD_ID,
+            TURN_START_ID,
+            USER_ID,
+            ModelInvocationStatus.SUCCEEDED,
+            response(List.of()),
+            null,
+            true);
+    ThreadContext context =
+        classify(
+            thread(USER_ID),
+            openUserPath(),
+            pendingCancelling,
+            List.of(tool(id(0), "call-1", ToolInvocationStatus.READY)));
+    assertInstanceOf(ThreadContext.ModelTerminalPending.class, context);
+
+    // 2. RESPONSE_PENDING 但 cancelsToolBatch == false：抛出 IllegalStateException
+    LockedDriverState pendingNotCancelling =
+        model(
+            THREAD_ID,
+            TURN_START_ID,
+            USER_ID,
+            ModelInvocationStatus.SUCCEEDED,
+            response(List.of()),
+            null,
+            false);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            classify(
+                thread(USER_ID),
+                openUserPath(),
+                pendingNotCancelling,
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
+
+    // 3. ACTIVE 且 cancelsToolBatch == true：抛出 IllegalStateException
+    LockedDriverState activeCancelling =
+        model(THREAD_ID, TURN_START_ID, USER_ID, ModelInvocationStatus.RUNNING, null, null, true);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            classify(
+                thread(USER_ID),
+                openUserPath(),
+                activeCancelling,
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
+
+    // 4. ACTIVE 且 cancelsToolBatch == false：抛出 IllegalStateException
+    LockedDriverState activeNotCancelling =
+        model(THREAD_ID, TURN_START_ID, USER_ID, ModelInvocationStatus.RUNNING, null, null, false);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            classify(
+                thread(USER_ID),
+                openUserPath(),
+                activeNotCancelling,
+                List.of(tool(id(0), "call-1", ToolInvocationStatus.READY))));
+  }
+
+  @Test
   void attachedErrorHeadIsIdleOrHistorical() {
     // resultEntryId == head 但 head 不是 ASSISTANT Message（AssistantError）：历史，不校验 Tool。
     EntryPath path = errorPath();
@@ -864,6 +928,24 @@ class ThreadContextClassifierTest {
       ModelInvocationStatus status,
       ProviderResponse result,
       UUID resultEntryId) {
+    return model(
+        modelThreadId,
+        modelTurnStartEntryId,
+        requestHeadEntryId,
+        status,
+        result,
+        resultEntryId,
+        false);
+  }
+
+  private static LockedDriverState model(
+      UUID modelThreadId,
+      UUID modelTurnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelInvocationStatus status,
+      ProviderResponse result,
+      UUID resultEntryId,
+      boolean cancelsToolBatch) {
     int attempt = status == ModelInvocationStatus.READY ? 0 : 1;
     ModelInvocationError error =
         status == ModelInvocationStatus.FAILED
@@ -885,16 +967,27 @@ class ThreadContextClassifierTest {
             List.of(),
             NOW,
             NOW);
-    return new TestLockedState(model);
+    return new TestLockedState(model, cancelsToolBatch);
   }
 
   /** 旧 ModelInvocation 形状的 Driver 状态：只暴露中立的 activity 与身份。 */
   private static final class TestLockedState implements LockedDriverState {
 
     private final ModelInvocation model;
+    private final boolean cancelsToolBatch;
 
     private TestLockedState(ModelInvocation model) {
+      this(model, false);
+    }
+
+    private TestLockedState(ModelInvocation model, boolean cancelsToolBatch) {
       this.model = model;
+      this.cancelsToolBatch = cancelsToolBatch;
+    }
+
+    @Override
+    public boolean cancelsToolBatch() {
+      return cancelsToolBatch;
     }
 
     /**

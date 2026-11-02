@@ -306,7 +306,7 @@ public final class ThreadProcessor {
           planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
           return;
         }
-        if (userDemand) {
+        if (userDemand && driver.allowsQueuedInputHarvest(tx, thread, path)) {
           planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
           return;
         }

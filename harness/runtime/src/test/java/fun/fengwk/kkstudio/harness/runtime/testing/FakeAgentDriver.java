@@ -173,6 +173,7 @@ public final class FakeAgentDriver implements AgentDriver {
 
   private boolean allowsQueuedInputHarvest = true;
   private int completeStopInvocations = 0;
+  private ThreadState lastCompleteStopThread;
 
   public FakeAgentDriver withAllowsQueuedInputHarvest(boolean allowed) {
     this.allowsQueuedInputHarvest = allowed;
@@ -188,10 +189,15 @@ public final class FakeAgentDriver implements AgentDriver {
   @Override
   public void completeStop(HarnessStore.Transaction tx, ThreadState thread, DriverCommit commit) {
     this.completeStopInvocations++;
+    this.lastCompleteStopThread = thread;
   }
 
   public int completeStopInvocations() {
     return completeStopInvocations;
+  }
+
+  public ThreadState lastCompleteStopThread() {
+    return lastCompleteStopThread;
   }
 
   /** 可直接构造生成结果、工具调用、失败与本地执行身份的中立投影。 */

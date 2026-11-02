@@ -67,10 +67,18 @@ public interface AgentDriver {
       ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage);
 
   /**
-   * 是否允许在本安全边界先消费 queued settings / 输入再继续。
+   * 是否允许在本安全边界消费 queued settings 或输入。
    *
-   * <p>Builtin 默认保持既有优先队列语义；外部 Driver 在已冻结的输入周期仍 active 时返回 {@code false}，使该边界只启动 CONTINUATION，
-   * 不把新输入或设置混入同一周期。实现只在调用方事务内读取状态，不开启事务、不执行外部 I/O。
+   * <p>Runtime 在所有收割排队输入的调度边界统一询问 Driver：
+   *
+   * <ul>
+   *   <li>在安全边界提取并应用排队独立设置（{@code applyPendingSettings}）前；
+   *   <li>在 {@code ContinuationDue} 边界判定是否收割排队输入（转为 {@code INPUT} 原因）前；
+   *   <li>在 {@code IdleOrHistorical} 边界判定是否收割排队输入以开启新 {@code INPUT} 回前后。
+   * </ul>
+   *
+   * <p>Builtin 默认返回 {@code true} 保持既有优先队列语义；外部 Driver 在私有周期冻结或仍 active 时返回 {@code false}，
+   * 阻止新输入或设置在此时被收割。实现只在调用方事务内读取状态，不开启事务、不执行外部 I/O。
    */
   default boolean allowsQueuedInputHarvest(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {

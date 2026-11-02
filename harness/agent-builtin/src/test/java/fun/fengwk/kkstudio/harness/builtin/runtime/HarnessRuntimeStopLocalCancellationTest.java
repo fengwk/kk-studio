@@ -11,9 +11,11 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.succeedTool;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -23,11 +25,17 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.ToolOutcomeQuery;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -195,5 +203,55 @@ class HarnessRuntimeStopLocalCancellationTest {
     HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
     runtime.stop(new StopCommand(idle.threadId(), TestIds.id(2), 0));
     assertEquals(List.of(active.modelId()), calls);
+  }
+
+  @Test
+  void stopCancelsWaitingRequestToolSiblingAndNotifiesDriverCompleteStopAfterHeadAdvance() {
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    FakeAgentDriver fakeDriver = new FakeAgentDriver("fake-driver");
+    BranchSettings fakeSettings =
+        new BranchSettings("fake-agent", new ExecutionSelection(fakeDriver.id(), "{}"), null);
+    HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
+        HarnessRuntimeTestSupport.seedModelFreeToolBaseline(
+            store,
+            2,
+            fakeSettings,
+            ToolInvocationStatus.WAITING_REQUEST,
+            ToolInvocationStatus.READY);
+    List<UUID> ids = baseline.toolIds();
+    UUID waitingToolId = ids.get(0);
+    UUID readyToolId = ids.get(1);
+
+    seedThreadWork(store, baseline.threadId());
+    seedToolWork(store, waitingToolId);
+    seedToolWork(store, readyToolId);
+
+    List<UUID> cancelledTools = new ArrayList<>();
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            store,
+            new DriverRegistry(
+                List.of(
+                    fakeDriver,
+                    HarnessRuntimeTestSupport.driver(
+                        store, HarnessRuntimeTestSupport.UNUSED_RESOLVER))),
+            HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
+            invocationId -> {},
+            cancelledTools::add);
+
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
+    assertStopped(result);
+
+    // 兄弟工具通过 ToolOutcomeQuery 读取终态为 CANCELLED
+    var outcome = new ToolOutcomeQuery(store).find(baseline.threadId(), waitingToolId);
+    assertTrue(outcome.isPresent());
+    assertEquals(ToolResultStatus.CANCELLED, outcome.get().status());
+
+    // FakeAgentDriver 的 completeStop 恰好调用一次
+    assertEquals(1, fakeDriver.completeStopInvocations());
+    // 发生在 head 推进之后（断言传入 Thread 的 head 即停止后的 head）
+    assertNotNull(fakeDriver.lastCompleteStopThread());
+    assertEquals(result.thread().headEntryId(), fakeDriver.lastCompleteStopThread().headEntryId());
+    assertEquals(result.thread().headEntryId(), targetReceipt(result).stoppedTurnEndEntryId());
   }
 }

@@ -33,9 +33,12 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport;
+import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -47,6 +50,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
@@ -56,8 +60,10 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -752,5 +758,79 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                 builtin(fixture.store, tx)
                     .findModelInvocationByTurn(forkedThreadId, notificationEntryId)
                     .isEmpty()));
+  }
+
+  @Test
+  void driverAllowsQueuedInputHarvestControlsQueuedUserAndSettingsHarvest() {
+    Fixture fixture = fixture();
+    TurnResolution resolution =
+        new TurnResolution.Rejected(new AssistantError("FAILED", "fake turn ended"));
+    FakeAgentDriver fakeDriver =
+        new FakeAgentDriver(() -> resolution).withAllowsQueuedInputHarvest(false);
+    ThreadProcessor processor =
+        new ThreadProcessor(
+            fixture.store,
+            new DriverRegistry(
+                List.of(
+                    fakeDriver, HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
+            new ThreadProcessorConfig(
+                RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
+
+    BranchSettings fakeSettings =
+        new BranchSettings("fake-agent", new ExecutionSelection(fakeDriver.id(), "{}"), null);
+
+    var baseline =
+        fixture.store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootEntryId = tx.nextId();
+              UUID threadId = tx.nextId();
+              tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(rootEntryId, sessionId, null, new RootPayload(fakeSettings), NOW));
+              tx.threads().insert(threadState(threadId, sessionId, rootEntryId, NOW));
+              return new Baseline(sessionId, rootEntryId, threadId);
+            });
+
+    // 排队一个 USER 消息与一个设置命令
+    UUID userCommand =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new UserMessageCommandPayload(userMessage("hello fake driver")));
+    UUID settingsCommand =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new SetExecutionCommandPayload(new ExecutionSelection(fakeDriver.id(), "{\"opt\":1}")));
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    // 1. allowsQueuedInputHarvest 为 false：处理 work 后命令不被收割，head 不变
+    ClaimedWork claim1 = claimThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim1));
+
+    EntryPath pathAfterFirst = path(fixture.store, baseline.threadId());
+    assertEquals(1, pathAfterFirst.entries().size());
+    assertEquals(baseline.rootEntryId(), pathAfterFirst.head().id());
+    assertEquals(
+        ThreadCommandState.QUEUED,
+        command(fixture.store, baseline.threadId(), userCommand).state());
+    assertEquals(
+        ThreadCommandState.QUEUED,
+        command(fixture.store, baseline.threadId(), settingsCommand).state());
+
+    // 2. 将 allowsQueuedInputHarvest 改为 true，再次请求并处理
+    fakeDriver.withAllowsQueuedInputHarvest(true);
+    requestThreadWork(fixture.store, baseline.threadId());
+    ClaimedWork claim2 = claimThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim2));
+
+    // 命令被收割，head 推进
+    EntryPath pathAfterSecond = path(fixture.store, baseline.threadId());
+    assertTrue(pathAfterSecond.entries().size() > 1);
+    assertFalse(
+        command(fixture.store, baseline.threadId(), settingsCommand).state()
+            == ThreadCommandState.QUEUED);
   }
 }
