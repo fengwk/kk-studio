@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
 import { aggregateEntryUsage } from '@/features/chat/runtime/thread-timeline/turn-usage'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
@@ -48,7 +49,7 @@ function assistant(
 function turnStart(id = 'turn-1', reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
   return entry(id, 'TURN_START', { reason, settings: {
     agentName: 'coding',
-    model: { modelName: 'm', variant: 'default' },
+    execution: createBuiltinExecution('m', 'default'),
     environmentName: null,
   } })
 }
