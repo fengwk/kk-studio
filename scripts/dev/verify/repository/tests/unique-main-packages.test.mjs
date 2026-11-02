@@ -30,13 +30,13 @@ function diagnostics(modules) {
     assert.equal(result.error, undefined)
     return result.stderr
       .split('\n')
-      .filter((line) => /Java (?:main|test) package shared across Maven modules/u.test(line))
+      .filter((line) => /Java package shared across Maven modules/u.test(line))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 }
 
-test('main and test package ownership are checked independently', () => {
+test('package ownership across Maven modules rejects shared packages', () => {
   assert.deepEqual(diagnostics({
     first: {
       'src/main/java/one/A.java': 'package example.shared;\nclass A {}',
@@ -48,8 +48,8 @@ test('main and test package ownership are checked independently', () => {
       'src/test/java/other/CTest.java': 'package example.test.shared;\nclass CTest {}',
     },
   }), [
-    '- Java main package shared across Maven modules: example.shared (first, second)',
-    '- Java test package shared across Maven modules: example.test.shared (first, second)',
+    '- Java package shared across Maven modules: example.shared (first, second)',
+    '- Java package shared across Maven modules: example.test.shared (first, second)',
   ])
 })
 
@@ -66,11 +66,13 @@ test('one module may reuse a package between main and test', () => {
   }), [])
 })
 
-test('main and test packages in different modules do not conflict', () => {
+test('main in one module and test in another module sharing a package is rejected', () => {
   assert.deepEqual(diagnostics({
     first: { 'src/main/java/A.java': 'package example.shared;\nclass A {}' },
     second: { 'src/test/java/B.java': 'package example.shared;\nclass B {}' },
-  }), [])
+  }), [
+    '- Java package shared across Maven modules: example.shared (first, second)',
+  ])
 })
 
 test('package ownership counts each module once', () => {
@@ -86,8 +88,8 @@ test('package ownership counts each module once', () => {
       'src/test/java/other/CTest.java': 'package example.test.shared;\nclass CTest {}',
     },
   }), [
-    '- Java main package shared across Maven modules: example.shared (first, second)',
-    '- Java test package shared across Maven modules: example.test.shared (first, second)',
+    '- Java package shared across Maven modules: example.shared (first, second)',
+    '- Java package shared across Maven modules: example.test.shared (first, second)',
   ])
 })
 
@@ -100,14 +102,14 @@ test('shared platform plugin packages are rejected without a P1 exception', () =
     'platform/plugin-api': files,
     'platform/runtime': files,
   }), [
-    '- Java main package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin (platform/plugin-api, platform/runtime)',
-    '- Java main package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.credential (platform/plugin-api, platform/runtime)',
-    '- Java main package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.resource (platform/plugin-api, platform/runtime)',
+    '- Java package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin (platform/plugin-api, platform/runtime)',
+    '- Java package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.credential (platform/plugin-api, platform/runtime)',
+    '- Java package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.resource (platform/plugin-api, platform/runtime)',
   ])
   assert.deepEqual(diagnostics({
     first: { 'src/main/java/A.java': 'package fun.fengwk.kkstudio.platform.plugin.other;' },
     second: { 'src/main/java/B.java': 'package fun.fengwk.kkstudio.platform.plugin.other;' },
   }), [
-    '- Java main package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.other (first, second)',
+    '- Java package shared across Maven modules: fun.fengwk.kkstudio.platform.plugin.other (first, second)',
   ])
 })

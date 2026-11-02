@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 

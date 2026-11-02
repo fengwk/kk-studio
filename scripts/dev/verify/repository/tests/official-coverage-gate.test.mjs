@@ -59,8 +59,8 @@ const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec',
   'fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec',
   'fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog',
-  'fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor',
-  'fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec',
+  'fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor',
+  'fun.fengwk.kkstudio.harness.contributor.builtin.goal.GoalProgressCodec',
   'fun.fengwk.kkstudio.harness.prompt.PromptTemplate',
   'fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader',
 ]

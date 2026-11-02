@@ -494,7 +494,7 @@ const pluginImportPrefixes = [
 ]
 
 /** 内核里的 SPI 与内置工具包只依赖契约，绝不触碰 runtime 内部实现。 */
-const kernelContractPackages = ['tool', 'contributor', 'builtin', 'prompt']
+const kernelContractPackages = ['tool', 'contributor', 'prompt']
 
 function pomDependencies(pomRelativePath) {
   const source = read(pomRelativePath).replace(/<!--[\s\S]*?-->/gu, '')
@@ -620,11 +620,11 @@ function checkModuleBoundaries() {
     }
   }
 
-  // runtime 只经 HarnessCatalog 使用内置工具，不直接依赖 builtin 实现。
+  // runtime 只经 HarnessCatalog 使用内置工具，不直接依赖 contributor.builtin 实现。
   for (const { file, imported } of javaImports(
     path.join(repositoryRoot, 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime'),
   )) {
-    if (imported.startsWith('fun.fengwk.kkstudio.harness.builtin.')) {
+    if (imported.startsWith('fun.fengwk.kkstudio.harness.contributor.builtin.')) {
       addError(`${file}: runtime must reach builtin tools only through the catalog (${imported})`)
     }
   }
@@ -725,27 +725,29 @@ function productionPackages(modulePath) {
 }
 
 /**
- * 同名包按源集分别归属：生产包和测试包各自在 Maven 模块之间唯一。
- * 同一模块的 main 与 test 可以同名，因为它们位于不同 classpath，不构成运行时冲突。
+ * Java 包在 Maven 模块之间全局唯一（无论出现在 main 还是 test）。
+ * 同一模块内部的 main 与 test 可以同名。
  */
-function packageOwners(sourceSet) {
+function packageOwners() {
   const owners = new Map()
   function visitModule(modulePath) {
     const pomPath = path.join(modulePath, 'pom.xml')
     if (!existsSync(path.join(repositoryRoot, pomPath))) {
       return
     }
-    const sourceRoot = path.join(repositoryRoot, modulePath, 'src', sourceSet, 'java')
-    for (const file of walkFiles(sourceRoot).filter((file) => file.endsWith('.java'))) {
-      const match = readFileSync(file, 'utf8').match(/^\s*package\s+([\w.]+)\s*;/mu)
-      if (!match) {
-        continue
+    for (const sourceSet of ['main', 'test']) {
+      const sourceRoot = path.join(repositoryRoot, modulePath, 'src', sourceSet, 'java')
+      for (const file of walkFiles(sourceRoot).filter((file) => file.endsWith('.java'))) {
+        const match = readFileSync(file, 'utf8').match(/^\s*package\s+([\w.]+)\s*;/mu)
+        if (!match) {
+          continue
+        }
+        const name = match[1]
+        if (!owners.has(name)) {
+          owners.set(name, new Set())
+        }
+        owners.get(name).add(modulePath || '.')
       }
-      const name = match[1]
-      if (!owners.has(name)) {
-        owners.set(name, new Set())
-      }
-      owners.get(name).add(modulePath || '.')
     }
     for (const match of read(pomPath).matchAll(/<module>\s*([^<]+?)\s*<\/module>/gu)) {
       visitModule(path.join(modulePath, match[1]))
@@ -756,15 +758,13 @@ function packageOwners(sourceSet) {
 }
 
 function checkUniquePackages() {
-  for (const sourceSet of ['main', 'test']) {
-    for (const [name, modules] of packageOwners(sourceSet)) {
-      if (modules.size < 2) {
-        continue
-      }
-      addError(
-        `Java ${sourceSet} package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`,
-      )
+  for (const [name, modules] of packageOwners()) {
+    if (modules.size < 2) {
+      continue
     }
+    addError(
+      `Java package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`,
+    )
   }
 }
 

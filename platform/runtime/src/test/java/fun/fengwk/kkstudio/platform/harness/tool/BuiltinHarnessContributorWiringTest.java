@@ -9,11 +9,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
