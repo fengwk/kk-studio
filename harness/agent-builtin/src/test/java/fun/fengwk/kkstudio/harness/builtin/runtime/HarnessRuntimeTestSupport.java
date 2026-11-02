@@ -1037,6 +1037,16 @@ public final class HarnessRuntimeTestSupport {
         });
   }
 
+  /** 请求一条无 lease 的 AGENT Work 行。 */
+  static void seedAgentWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.AGENT, threadId));
+          return null;
+        });
+  }
+
   /** 请求一条无 lease 的 MODEL Work 行（在 Model 活跃期间被围栏）。 */
   static void seedModelWork(InMemoryBuiltinHarnessStore store, UUID modelId) {
     store.transaction(

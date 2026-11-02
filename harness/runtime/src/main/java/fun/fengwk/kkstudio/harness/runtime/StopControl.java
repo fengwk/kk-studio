@@ -297,7 +297,7 @@ final class StopControl {
               context));
     }
 
-    // Stage 7: Work 锁与立即删除（覆盖 TerminalPending 节点仍持有的 MODEL/AGENT/TOOL Work，先于任何物化删除）。
+    // Stage 7: Work 锁与立即删除（覆盖 TerminalPending 节点仍持有的 MODEL/TOOL Work，先于任何物化删除）。
     List<WorkTarget> allWorkTargets = new ArrayList<>();
     for (ThreadStopContext ctx : contexts) {
       allWorkTargets.add(new WorkTarget(WorkTargetType.THREAD, ctx.thread().id()));

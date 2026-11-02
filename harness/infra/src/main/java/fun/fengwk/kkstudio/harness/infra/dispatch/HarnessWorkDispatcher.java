@@ -55,6 +55,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   private static final String NAME = "harness work dispatcher";
 
+  /** 当前 Dispatcher 实例在节点集群中的唯一标识，传递给底层用于 Environment route 亲和性路由围栏校验。 */
   private final UUID nodeInstanceId;
 
   private final HarnessStore store;
@@ -65,8 +66,8 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   private int roundRobinCursor;
 
   /**
-   * 生产 wiring 构造：按已注册的 {@link WorkTargetType} 将 claim 路由给对应处理器。 必须包含 {@link WorkTargetType#THREAD}
-   * 处理器。自动分配随机 nodeInstanceId。
+   * 生产 wiring 构造：按 {@link WorkTargetType} 把 claim 路由给注册的 Processor 处理器；返回值 被有意忽略（dispatcher 绝不解释
+   * typed 结果）。自动分配随机 nodeInstanceId。
    */
   public HarnessWorkDispatcher(
       HarnessStore store,
@@ -78,10 +79,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this(UUID.randomUUID(), store, config, drainExecutor, workerExecutor, pollScheduler, handlers);
   }
 
-  /**
-   * 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 必须包含 {@link
-   * WorkTargetType#THREAD} 处理器。
-   */
+  /** 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 */
   public HarnessWorkDispatcher(
       UUID nodeInstanceId,
       HarnessStore store,
@@ -95,18 +93,18 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.config = Objects.requireNonNull(config, "config");
     Objects.requireNonNull(handlers, "handlers");
     if (handlers.isEmpty() || !handlers.containsKey(WorkTargetType.THREAD)) {
-      throw new IllegalArgumentException("handlers must be non-empty and contain THREAD handler");
+      throw new IllegalArgumentException("handlers must be non-empty and contain THREAD processor");
     }
-    Map<WorkTargetType, Consumer<ClaimedWork>> copy = new EnumMap<>(WorkTargetType.class);
+    Map<WorkTargetType, Consumer<ClaimedWork>> defensive = new EnumMap<>(WorkTargetType.class);
     for (Map.Entry<WorkTargetType, Consumer<ClaimedWork>> entry : handlers.entrySet()) {
       Objects.requireNonNull(entry.getKey(), "targetType");
       Objects.requireNonNull(entry.getValue(), "handler for " + entry.getKey());
-      copy.put(entry.getKey(), entry.getValue());
+      defensive.put(entry.getKey(), entry.getValue());
     }
-    this.handlers = Collections.unmodifiableMap(copy);
+    this.handlers = Collections.unmodifiableMap(defensive);
     List<WorkTargetType> types = new ArrayList<>();
     for (WorkTargetType type : WorkTargetType.values()) {
-      if (this.handlers.containsKey(type)) {
+      if (defensive.containsKey(type)) {
         types.add(type);
       }
     }
