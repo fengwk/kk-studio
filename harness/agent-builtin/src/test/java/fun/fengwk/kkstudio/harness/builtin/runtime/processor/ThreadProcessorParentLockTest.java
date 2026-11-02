@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -98,7 +99,8 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
     ThreadProcessor processor =
         new ThreadProcessor(
             recording,
-            HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver),
+            new DriverRegistry(
+                List.of(HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
             new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, () -> COMPACTION_CONFIG));
 
     assertEquals(

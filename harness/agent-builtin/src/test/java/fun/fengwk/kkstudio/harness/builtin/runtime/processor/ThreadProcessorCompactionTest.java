@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
@@ -162,7 +163,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // joinInvocationId）
     CompactionStart compaction = start.compaction();
     assertNotNull(compaction);
-    assertNotNull(compaction.executionModel());
+    assertNotNull(compaction.execution());
     assertNotNull(compaction.outputBudget());
     assertTrue(compaction.outputBudget() > 0);
     assertNotNull(compaction.childThreadId());
@@ -587,13 +588,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     fixture.resolver.autoConsistent = true;
     TurnResolver.CompactionResolved compResolved =
         new TurnResolver.CompactionResolved(
-            ThreadProcessorTestSupport.builtinExecutionModel(),
+            BuiltinExecution.of(ThreadProcessorTestSupport.builtinExecutionModel()),
             4096L,
             CONTEXT_WINDOW,
             MAX_OUTPUT_TOKENS,
             new BranchSettings(
                 "compaction",
-                ThreadProcessorTestSupport.builtinExecutionModel(),
+                BuiltinExecution.of(ThreadProcessorTestSupport.builtinExecutionModel()),
                 branchSettings().environmentName(),
                 null));
     CompactionPreparation historyPrep = historyPreparation();
@@ -607,7 +608,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       tx,
                       parent,
                       new CompactionResolution(
-                          compResolved.executionModel(),
+                          compResolved.execution(),
                           compResolved.outputBudget(),
                           compResolved.contextWindow(),
                           compResolved.maxOutputTokens(),
@@ -1390,7 +1391,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         new CompactionStart(
             CompactionPhase.HISTORY,
             CompactionTrigger.THRESHOLD,
-            ThreadProcessorTestSupport.builtinExecutionModel(),
+            BuiltinExecution.of(ThreadProcessorTestSupport.builtinExecutionModel()),
             4096L,
             id(5L),
             id(4L),
@@ -2077,7 +2078,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(expectedMax, start.maxOutputTokens());
     assertEquals(base.toolBindings(), start.capabilities().toolBindings());
     assertEquals(subagents, start.capabilities().subagentBindings());
-    assertEquals("test-group", start.fallbackModel().modelName());
+    assertEquals("test-group", BuiltinExecution.model(start.executedSelection()).modelName());
     assertEquals("test-group", invocation.groupProgress().groupName());
   }
 

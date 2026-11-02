@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -44,7 +45,7 @@ import java.util.UUID;
 /** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   private static final EnvironmentId ENV_BINDING =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId OTHER_ENVIRONMENT_ID =
@@ -149,7 +150,7 @@ class ResolvedRequestValidatorTest {
       List<ToolBinding> tools,
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
-    return normalSpec(settings.model(), tools, subagents, cacheControl);
+    return normalSpec(BuiltinExecution.model(settings.execution()), tools, subagents, cacheControl);
   }
 
   private static ModelRequestSpec normalSpec(

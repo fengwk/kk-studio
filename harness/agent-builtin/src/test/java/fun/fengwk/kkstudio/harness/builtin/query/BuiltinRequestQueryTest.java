@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
@@ -72,7 +73,8 @@ class BuiltinRequestQueryTest {
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           BranchSettings settings =
-              new BranchSettings("agent", new ModelSelection("model", "v1"), null);
+              new BranchSettings(
+                  "agent", BuiltinExecution.of(new ModelSelection("model", "v1")), null);
           tx.sessions().insert(new Session(sessionId, "session", NOW));
           tx.entries()
               .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(settings), NOW));

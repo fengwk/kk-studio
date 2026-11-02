@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -81,13 +82,14 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   @Test
   void modelMismatchBecomesDurableFailure() {
     assertMismatchBecomesDurableFailure(
-        branchSettings().withModel(ModelSelection.model("other-model", "v1")));
+        branchSettings()
+            .withExecution(BuiltinExecution.of(ModelSelection.model("other-model", "v1"))));
   }
 
   @Test
   void variantMismatchBecomesDurableFailure() {
     assertMismatchBecomesDurableFailure(
-        branchSettings().withModel(ModelSelection.model("model", "v9")));
+        branchSettings().withExecution(BuiltinExecution.of(ModelSelection.model("model", "v9"))));
   }
 
   /** candidate 默认 branch 事实下（settings = branchSettings()）请求与事实不一致。 */

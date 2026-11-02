@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -401,7 +402,9 @@ class ToolOutcomeQueryTest {
   private static HarnessRuntime runtime(InMemoryBuiltinHarnessStore store) {
     return new HarnessRuntime(
         store,
-        HarnessRuntimeTestSupport.driver(store, (threadId, path, preparation) -> null),
+        new DriverRegistry(
+            List.of(
+                HarnessRuntimeTestSupport.driver(store, (threadId, path, preparation) -> null))),
         () -> CompactionConfig.DEFAULT);
   }
 }

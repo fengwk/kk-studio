@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -243,8 +244,10 @@ class ExecutionExitSettlementTest {
         HarnessRuntime runtime =
             new HarnessRuntime(
                 fixture.store,
-                HarnessRuntimeTestSupport.driver(
-                    fixture.store, (threadId, candidatePath, preparation) -> null),
+                new DriverRegistry(
+                    List.of(
+                        HarnessRuntimeTestSupport.driver(
+                            fixture.store, (threadId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 processor::cancel);
@@ -375,7 +378,10 @@ class ExecutionExitSettlementTest {
   private static HarnessRuntime runtime(Fixture fixture) {
     return new HarnessRuntime(
         fixture.store,
-        HarnessRuntimeTestSupport.driver(fixture.store, (threadId, path, preparation) -> null),
+        new DriverRegistry(
+            List.of(
+                HarnessRuntimeTestSupport.driver(
+                    fixture.store, (threadId, path, preparation) -> null))),
         () -> CompactionConfig.DEFAULT,
         ignored -> {},
         fixture.processor::cancel);
@@ -432,7 +438,10 @@ class ExecutionExitSettlementTest {
     ThreadProcessor processor =
         new ThreadProcessor(
             fixture.store,
-            HarnessRuntimeTestSupport.driver(fixture.store, (threadId1, path, preparation) -> null),
+            new DriverRegistry(
+                List.of(
+                    HarnessRuntimeTestSupport.driver(
+                        fixture.store, (threadId1, path, preparation) -> null))),
             new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
     ClaimedWork claim = ThreadProcessorTestSupport.claimThreadWork(fixture.store, threadId, NOW);
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));

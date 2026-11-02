@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -1591,7 +1592,8 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings(
+        "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}

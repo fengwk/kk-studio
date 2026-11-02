@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -52,7 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Clock;
@@ -86,7 +88,7 @@ class HarnessRuntimeForkTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
 
     UUID acceptedThreadId = TestIds.id(983);
-    ModelSelection switched = ModelSelection.model("model-2", "v2");
+    ExecutionSelection switched = BuiltinExecution.of(ModelSelection.model("model-2", "v2"));
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
@@ -97,15 +99,15 @@ class HarnessRuntimeForkTest {
                     "branch",
                     false),
                 List.of(
-                    new NewThreadCommand(new SetModelCommandPayload(switched), TestIds.id(984)),
+                    new NewThreadCommand(new SetExecutionCommandPayload(switched), TestIds.id(984)),
                     userMessageCommand(TestIds.id(985), "hello"))),
             AcceptancePreflight.IDENTITY);
     assertEquals(acceptedThreadId, accepted.thread().id());
     List<ThreadCommand> commands =
         store.transaction(tx -> loadCommandsByThread(tx, acceptedThreadId));
-    SetModelCommandPayload queued =
-        assertInstanceOf(SetModelCommandPayload.class, commands.getFirst().payload());
-    assertEquals(switched, queued.model());
+    SetExecutionCommandPayload queued =
+        assertInstanceOf(SetExecutionCommandPayload.class, commands.getFirst().payload());
+    assertEquals(switched, queued.execution());
   }
 
   /** 无压缩时复制 ROOT 之后的完整历史：新身份、链条连续、tool pair 保留，且不携带来源的 Builtin 模型状态。 */

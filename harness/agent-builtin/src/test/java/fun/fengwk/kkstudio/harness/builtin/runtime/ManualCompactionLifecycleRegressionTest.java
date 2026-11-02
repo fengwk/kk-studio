@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -78,7 +79,7 @@ class ManualCompactionLifecycleRegressionTest {
     HarnessRuntime runtime =
         new HarnessRuntime(
             store,
-            HarnessRuntimeTestSupport.driver(store, resolver),
+            new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, resolver))),
             () -> CompactionConfig.DEFAULT);
 
     TwoLevelBaseline baseline = seedTwoLevelTree(store);
@@ -121,7 +122,7 @@ class ManualCompactionLifecycleRegressionTest {
     HarnessRuntime runtime =
         new HarnessRuntime(
             store,
-            HarnessRuntimeTestSupport.driver(store, resolver),
+            new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, resolver))),
             () -> CompactionConfig.DEFAULT);
 
     ThreeLevelBaseline baseline = seedThreeLevelTree(store);
@@ -426,13 +427,13 @@ class ManualCompactionLifecycleRegressionTest {
     @Override
     public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
       return new CompactionResolved(
-          HarnessRuntimeTestSupport.builtinExecutionModel(),
+          HarnessRuntimeTestSupport.executionSelection(),
           4096L,
           CONTEXT_WINDOW,
           MAX_OUTPUT_TOKENS,
           new BranchSettings(
               "compaction",
-              HarnessRuntimeTestSupport.builtinExecutionModel(),
+              HarnessRuntimeTestSupport.executionSelection(),
               HarnessRuntimeTestSupport.settings().environmentName(),
               null));
     }

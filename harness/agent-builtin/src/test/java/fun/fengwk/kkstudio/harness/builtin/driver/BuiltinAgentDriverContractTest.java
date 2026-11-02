@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -139,7 +140,9 @@ class BuiltinAgentDriverContractTest {
     // 测试意图：公共快照只发布属于本 Thread 本 turn 的中立投影；另一个 Thread 的快照绝不携带外来 generation。
     Seed owner = seedOwnerThread();
     Seed other = seedOtherThread(owner.sessionId(), owner.rootEntryId());
-    HarnessRuntime runtime = new HarnessRuntime(store, driver, () -> CompactionConfig.DEFAULT);
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
 
     ThreadSnapshot ownerSnapshot = runtime.getThreadSnapshot(owner.threadId());
     assertNotNull(ownerSnapshot.generation());
@@ -158,7 +161,9 @@ class BuiltinAgentDriverContractTest {
     GenerationProjection foreign =
         lockState(owner.threadId(), owner.requestHeadEntryId()).projection();
     assertNotNull(foreign);
-    HarnessRuntime runtime = new HarnessRuntime(store, driver, () -> CompactionConfig.DEFAULT);
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
     ThreadSnapshot otherSnapshot = runtime.getThreadSnapshot(other.threadId());
 
     assertThrows(
@@ -408,6 +413,7 @@ class BuiltinAgentDriverContractTest {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings(
+        "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
 }

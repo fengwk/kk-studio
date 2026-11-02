@@ -28,11 +28,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -61,7 +63,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -85,7 +87,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     ThreadProcessor processor =
         new ThreadProcessor(
             wrapped,
-            HarnessRuntimeTestSupport.driver(store, fixture.resolver),
+            new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, fixture.resolver))),
             new ThreadProcessorConfig(
                 RESOLVE_FAILURE_DELAY, () -> ThreadProcessorTestSupport.COMPACTION_CONFIG));
     var baseline = seedBaseline(store);
@@ -202,7 +204,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     UUID userCommand =
         seedCommand(
             fixture.store,
@@ -291,11 +294,11 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store,
         baseline.threadId(),
-        new SetModelCommandPayload(ModelSelection.model("model-a", "v1")));
+        new SetExecutionCommandPayload(BuiltinExecution.of(ModelSelection.model("model-a", "v1"))));
     seedCommand(
         fixture.store,
         baseline.threadId(),
-        new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+        new SetExecutionCommandPayload(BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
 
@@ -337,7 +340,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
@@ -375,7 +379,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     requestThreadWork(fixture.store, baseline.threadId());
 
     // claim1：应用 SET_MODEL 为 SETTINGS 快照；claim2：无 continuation / 无 message，quiesce。
@@ -400,7 +405,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
 
@@ -433,7 +439,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+            new SetExecutionCommandPayload(
+                BuiltinExecution.of(ModelSelection.model("model-b", "v2"))));
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

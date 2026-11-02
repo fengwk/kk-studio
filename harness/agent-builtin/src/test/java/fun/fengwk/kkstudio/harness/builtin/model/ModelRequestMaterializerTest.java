@@ -10,6 +10,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -79,7 +80,7 @@ class ModelRequestMaterializerTest {
   private static final UUID OWNER = id(1L);
   private static final Instant T0 = Instant.parse("2026-08-01T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   private static final ModelRequestMaterializer MATERIALIZER = new ModelRequestMaterializer();
   private static final ModelRequestSpecJsonCodec CODEC = new ModelRequestSpecJsonCodec();
 

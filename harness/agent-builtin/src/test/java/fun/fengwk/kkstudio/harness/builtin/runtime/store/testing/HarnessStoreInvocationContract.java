@@ -21,7 +21,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.builtinExecutionModel;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.executionSelection;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.hostBinding;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
@@ -2653,7 +2653,7 @@ public abstract class HarnessStoreInvocationContract {
               new CompactionStart(
                   CompactionPhase.FULL,
                   CompactionTrigger.THRESHOLD,
-                  builtinExecutionModel(),
+                  executionSelection(),
                   4096L,
                   cutEntryId,
                   null,

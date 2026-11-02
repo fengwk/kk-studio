@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
@@ -104,8 +105,10 @@ class HarnessRuntimeStopExitContractTest {
         runtime =
             new HarnessRuntime(
                 fixture.store,
-                HarnessRuntimeTestSupport.driver(
-                    fixture.store, (threadId, candidatePath, preparation) -> null),
+                new DriverRegistry(
+                    List.of(
+                        HarnessRuntimeTestSupport.driver(
+                            fixture.store, (threadId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 fixture.processor::cancel);
@@ -280,8 +283,10 @@ class HarnessRuntimeStopExitContractTest {
         HarnessRuntime runtime =
             new HarnessRuntime(
                 fixture.store,
-                HarnessRuntimeTestSupport.driver(
-                    fixture.store, (threadId, candidatePath, preparation) -> null),
+                new DriverRegistry(
+                    List.of(
+                        HarnessRuntimeTestSupport.driver(
+                            fixture.store, (threadId, candidatePath, preparation) -> null))),
                 () -> CompactionConfig.DEFAULT,
                 ignored -> {},
                 fixture.processor::cancel);

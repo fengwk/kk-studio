@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -345,7 +346,8 @@ class HarnessRuntimeTreeLockTest {
     HarnessRuntime recordingRuntime =
         new HarnessRuntime(
             recording,
-            HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver),
+            new DriverRegistry(
+                List.of(HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
             fixture.compactionConfigProvider);
 
     CompactThreadResult result =
@@ -398,7 +400,8 @@ class HarnessRuntimeTreeLockTest {
     HarnessRuntime sabotagedRuntime =
         new HarnessRuntime(
             sabotagedStore,
-            HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver),
+            new DriverRegistry(
+                List.of(HarnessRuntimeTestSupport.driver(fixture.store, fixture.resolver))),
             fixture.compactionConfigProvider);
 
     assertThrows(
@@ -590,13 +593,13 @@ class HarnessRuntimeTreeLockTest {
         (threadId, candidatePath, preparation) -> {
           if (preparation != null) {
             return new TurnResolver.CompactionResolved(
-                HarnessRuntimeTestSupport.builtinExecutionModel(),
+                HarnessRuntimeTestSupport.executionSelection(),
                 4096L,
                 100_000,
                 16_384,
                 new BranchSettings(
                     "compaction",
-                    HarnessRuntimeTestSupport.builtinExecutionModel(),
+                    HarnessRuntimeTestSupport.executionSelection(),
                     HarnessRuntimeTestSupport.settings().environmentName(),
                     null));
           }

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -87,7 +88,7 @@ class ModelAttemptMaterializationTest {
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {

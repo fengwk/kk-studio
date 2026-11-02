@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupMemberExecution;
@@ -68,6 +69,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -316,8 +318,10 @@ class ModelProcessorTest {
       ThreadProcessor threadProcessor =
           new ThreadProcessor(
               fixture.store,
-              HarnessRuntimeTestSupport.driver(
-                  fixture.store, (threadId, path, preparation) -> null),
+              new DriverRegistry(
+                  List.of(
+                      HarnessRuntimeTestSupport.driver(
+                          fixture.store, (threadId, path, preparation) -> null))),
               new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
       assertEquals(
           ThreadProcessResult.COMPLETED,
@@ -421,8 +425,10 @@ class ModelProcessorTest {
     HarnessRuntime runtime =
         new HarnessRuntime(
             fixture.store,
-            HarnessRuntimeTestSupport.driver(
-                fixture.store, (threadId, candidatePath, preparation) -> null),
+            new DriverRegistry(
+                List.of(
+                    HarnessRuntimeTestSupport.driver(
+                        fixture.store, (threadId, candidatePath, preparation) -> null))),
             () -> CompactionConfig.DEFAULT,
             processor::cancel,
             mock(ToolProcessor.class)::cancel);
@@ -5019,7 +5025,8 @@ class ModelProcessorTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings(
+        "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null);
   }
 
   private static ProviderReplayState sampleReplayState() {

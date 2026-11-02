@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -161,7 +162,8 @@ class HarnessRuntimeStopModelTest {
                   }
                 });
     HarnessRuntime missingBarrier =
-        new HarnessRuntime(store, driver, () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
     ThreadState before =
         store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
 

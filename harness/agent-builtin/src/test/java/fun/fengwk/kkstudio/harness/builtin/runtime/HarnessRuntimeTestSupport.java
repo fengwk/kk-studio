@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -39,7 +40,9 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -128,7 +131,10 @@ public final class HarnessRuntimeTestSupport {
   /** 创建仅带默认/未使用依赖的测试 Runtime 控制面。 */
   static HarnessRuntime runtime(HarnessStore store, Clock clock) {
     useClock(store, clock);
-    return new HarnessRuntime(store, driver(store, UNUSED_RESOLVER), DEFAULT_COMPACTION_PROVIDER);
+    return new HarnessRuntime(
+        store,
+        new DriverRegistry(List.of(driver(store, UNUSED_RESOLVER))),
+        DEFAULT_COMPACTION_PROVIDER);
   }
 
   /** 创建带指定 resolver 与 compaction provider 的测试 Runtime。 */
@@ -138,7 +144,8 @@ public final class HarnessRuntimeTestSupport {
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider) {
     useClock(store, clock);
-    return new HarnessRuntime(store, driver(store, resolver), compactionConfigProvider);
+    return new HarnessRuntime(
+        store, new DriverRegistry(List.of(driver(store, resolver))), compactionConfigProvider);
   }
 
   /** 创建带 local execution canceller 的测试 Runtime。 */
@@ -150,7 +157,7 @@ public final class HarnessRuntimeTestSupport {
     useClock(store, clock);
     return new HarnessRuntime(
         store,
-        driver(store, UNUSED_RESOLVER),
+        new DriverRegistry(List.of(driver(store, UNUSED_RESOLVER))),
         DEFAULT_COMPACTION_PROVIDER,
         modelCanceller,
         toolCanceller);
@@ -1353,12 +1360,12 @@ public final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static ModelSelection builtinExecutionModel() {
-    return ModelSelection.model("model", "v1");
+  static ExecutionSelection executionSelection() {
+    return BuiltinExecution.of(ModelSelection.model("model", "v1"));
   }
 
   static BranchSettings settings() {
-    return new BranchSettings("agent", builtinExecutionModel(), null);
+    return new BranchSettings("agent", executionSelection(), null);
   }
 
   static ModelRequestSpec modelRequest() {

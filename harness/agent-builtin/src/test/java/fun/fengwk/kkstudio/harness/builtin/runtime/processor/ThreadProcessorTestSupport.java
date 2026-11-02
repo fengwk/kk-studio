@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
@@ -36,7 +37,9 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -863,11 +866,11 @@ public final class ThreadProcessorTestSupport {
   }
 
   static ModelSelection builtinExecution(BranchSettings settings) {
-    return settings.model();
+    return BuiltinExecution.model(settings.execution());
   }
 
   static BranchSettings branchSettings() {
-    return new BranchSettings("agent", builtinExecutionModel(), null);
+    return new BranchSettings("agent", BuiltinExecution.of(builtinExecutionModel()), null);
   }
 
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
@@ -1289,14 +1292,15 @@ public final class ThreadProcessorTestSupport {
       if (autoConsistent) {
         // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造 CompactionResolved。
         if (preparation != null) {
-          ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
+          ExecutionSelection compactorExecution =
+              BuiltinExecution.of(ModelSelection.model("compactor-model", "v1"));
           return new TurnResolver.CompactionResolved(
-              compactorModel,
+              compactorExecution,
               4096L,
               CONTEXT_WINDOW,
               MAX_OUTPUT_TOKENS,
               new BranchSettings(
-                  "compaction", compactorModel, path.baseSettings().environmentName(), null));
+                  "compaction", compactorExecution, path.baseSettings().environmentName(), null));
         }
         return new TurnResolver.Resolved(
             requestFor(path.baseSettings()), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);
@@ -1366,11 +1370,12 @@ public final class ThreadProcessorTestSupport {
       HarnessStore targetStore = processorStore == null ? store : processorStore;
       CompactionConfigProvider configProvider = () -> compactionConfig;
       BuiltinAgentDriver driver = HarnessRuntimeTestSupport.driver(store, resolver);
-      this.runtime = new HarnessRuntime(targetStore, driver, configProvider);
+      DriverRegistry registry = new DriverRegistry(List.of(driver));
+      this.runtime = new HarnessRuntime(targetStore, registry, configProvider);
       this.processor =
           new ThreadProcessor(
               targetStore,
-              driver,
+              registry,
               new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, configProvider));
     }
 
