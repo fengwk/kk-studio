@@ -75,11 +75,8 @@ export function isSameExecution(a: unknown, b: unknown): boolean {
     if (modelA == null || modelB == null) return false
     return modelA.modelName === modelB.modelName && (modelA.variant ?? null) === (modelB.variant ?? null)
   }
-  try {
-    return JSON.stringify(execA.settings) === JSON.stringify(execB.settings)
-  } catch {
-    return false
-  }
+  // 服务端按键序规范化 settings，同一选择的 JSON 文本相同。
+  return JSON.stringify(execA.settings) === JSON.stringify(execB.settings)
 }
 
 export type EntryType =

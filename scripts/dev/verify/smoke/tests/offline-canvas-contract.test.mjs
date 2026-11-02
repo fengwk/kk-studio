@@ -183,11 +183,11 @@ test('test intent: the NEW_SESSION batch carries no workspace field and the owne
     type: 'NEW_SESSION',
     sessionId: SESSION_ID,
     threadId: THREAD_ID,
-    // canonical root settings 精确为 agentName + model + environmentName 三字段：
+    // canonical root settings 精确为 agentName + execution + environmentName 三字段：
     // environmentName 是 nullable 快照字段，null 表示未选择 Environment。
     rootSettings: {
       agentName: 'default-assistant',
-      model: { modelName: 'acceptance-stub', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
       environmentName: null,
     },
     yoloEnabled: false,

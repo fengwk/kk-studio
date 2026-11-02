@@ -654,7 +654,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 保存 agentName/yoloEnabled 与 required-nullable 默认 environmentName（无默认环境时显式 null）；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值（YOLO 或默认环境）不改变既有 Thread',
+  docs: 'Chat 保存 agentName/yoloEnabled 与 required-nullable 默认 environmentName（无默认环境时显式 null）；NEW_SESSION rootSettings 携带 agentName/execution/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值（YOLO 或默认环境）不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)

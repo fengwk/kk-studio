@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { SubagentTreePanel } from './SubagentTreePanel'
 import { ThreadNavigationContext } from './thread-navigation-context'
 import { projectThreadTree, type ActiveThreadTreeNode } from './thread-panel/active-thread-tree'
@@ -11,7 +12,7 @@ const node = (threadId: string, parentThreadId: string | null, overrides: Partia
   threadId, parentThreadId, agentName: 'Explorer', name: 'main',
   status: 'IDLE', executionControl: 'RUNNABLE', outcome: null, updateTime: 1774958400,
   turnCount: 7, toolCallCount: 12,
-  model: { modelName: 'model', variant: 'default' },
+  execution: createBuiltinExecution('model', 'default'),
   ...overrides,
 })
 

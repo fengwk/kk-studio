@@ -3,6 +3,7 @@ export {
   extractDefaultVariantFromModel,
 } from '@/features/catalog/ai-resource-draft-codecs'
 export {
+  formatExecutionModelLabel,
   formatModelLabel,
   isGroupModel,
   toAgentModelViews,

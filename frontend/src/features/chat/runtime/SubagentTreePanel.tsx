@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
-import { formatModelLabel } from '@/features/catalog'
+import { formatExecutionModelLabel } from '@/features/catalog'
 import { ThreadInteractionPanel } from './thread-panel/ThreadInteractionPanel'
 import { ThreadLink } from './ThreadLink'
 import { formatThreadStatusLabel } from './thread-panel/thread-status-format'
@@ -103,7 +103,7 @@ export function SubagentTreePanel({ tree, currentThreadId, onClose }: {
                 </span>
               ) : null}
               <span>{t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}</span>
-              <span>{formatModelLabel(node.model.modelName, node.model.variant)}</span>
+              <span>{formatExecutionModelLabel(node.execution)}</span>
             </ThreadLink>
           </li>
         })}

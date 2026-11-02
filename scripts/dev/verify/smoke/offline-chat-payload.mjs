@@ -30,7 +30,7 @@ export function buildOfflineChatBatchRequest({
       threadId,
       rootSettings: {
         agentName,
-        model: { modelName, variant },
+        execution: { driver: 'builtin', settings: { modelName, variant } },
         environmentName: null,
       },
       yoloEnabled: false,

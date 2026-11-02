@@ -1,4 +1,5 @@
-import type { AgentModelDTO } from '@/shared/api/generated/contracts'
+import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
+import type { AgentModelDTO, HarnessExecutionSelectionDTO } from '@/shared/api/generated/contracts'
 
 /**
  * {@link AgentModelDTO} 的客户端投影。逻辑名全局唯一，不包含 provider 前缀；
@@ -17,6 +18,12 @@ export function formatModelLabel(
     return resolved || 'unknown-model'
   }
   return resolved ? `${name} (${resolved})` : name
+}
+
+/** 执行选择的模型标签：只有 Builtin 执行选择携带模型，其它 Driver 显示为未知模型。 */
+export function formatExecutionModelLabel(execution: HarnessExecutionSelectionDTO): string {
+  const model = getBuiltinModelSelection(execution)
+  return formatModelLabel(model?.modelName, model?.variant)
 }
 
 export function isGroupModel(model?: AgentModelView | null): boolean {

@@ -953,7 +953,7 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
       executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         environmentName: null,
       },
       createTime: '2026-07-28T10:00:00Z',

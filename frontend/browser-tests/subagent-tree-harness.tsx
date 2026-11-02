@@ -25,7 +25,7 @@ const node = (
   outcome,
   updateTime: 1774958400,
   status,
-  model: { modelName: 'Known-model', variant: 'default' },
+  execution: { driver: 'builtin', settings: { modelName: 'Known-model', variant: 'default' } },
   turnCount: 7,
   toolCallCount: 12,
 })

@@ -16,7 +16,7 @@ function node(
     parentThreadId,
     name: threadId,
     agentName: 'assistant',
-    model: { modelName: 'm', variant: 'default' },
+    execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'default' } },
     status: 'IDLE',
     executionControl: 'RUNNABLE',
     turnCount: 1,
