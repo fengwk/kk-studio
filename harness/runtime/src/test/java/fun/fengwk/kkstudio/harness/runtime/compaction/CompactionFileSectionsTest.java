@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -45,7 +45,7 @@ class CompactionFileSectionsTest {
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
 
   @Test
   void extractsReadWriteAndEditWithModifiedWinningOverRead() {

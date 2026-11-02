@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -22,7 +22,9 @@ import java.util.UUID;
 /** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
-  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
+  private static final ExecutionSelection EXECUTION =
+      new ExecutionSelection(
+          "builtin", "{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test
@@ -32,7 +34,7 @@ class ThreadCommandPayloadJsonCodecTest {
             new UserMessageCommandPayload(user("hello")),
             new CustomMessageCommandPayload(user("custom")),
             new SetAgentCommandPayload("coding"),
-            new SetModelCommandPayload(MODEL),
+            new SetExecutionCommandPayload(EXECUTION),
             new SetEnvironmentCommandPayload("local"),
             new SetEnvironmentCommandPayload(null));
 
@@ -50,8 +52,8 @@ class ThreadCommandPayloadJsonCodecTest {
     assertFalse(userJson.contains("USER_MESSAGE"));
 
     assertEquals(
-        "{\"model\":{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}}",
-        codec.encode(new SetModelCommandPayload(MODEL)));
+        "{\"execution\":{\"driver\":\"builtin\",\"settings\":{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}}}",
+        codec.encode(new SetExecutionCommandPayload(EXECUTION)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
     // SET_ENVIRONMENT 的 environmentName 必须显式存在：null 表示解除环境选择，不能省略。
     assertEquals(
@@ -148,8 +150,8 @@ class ThreadCommandPayloadJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"workspacePath\":null}}"));
+                ThreadCommandType.SET_EXECUTION,
+                "{\"execution\":{\"driver\":\"builtin\",\"settings\":{},\"workspacePath\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -160,29 +162,24 @@ class ThreadCommandPayloadJsonCodecTest {
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_MODEL, "{\"model\":{\"modelName\":\"m\"}}"));
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_EXECUTION, "{\"execution\":{\"driver\":\"builtin\"}}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_MODEL, "{\"model\":[\"p\"]}"));
+        () -> codec.decode(ThreadCommandType.SET_EXECUTION, "{\"execution\":[\"p\"]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"modelName\":\" m\",\"variant\":\"v\"}}"));
+                ThreadCommandType.SET_EXECUTION,
+                "{\"execution\":{\"driver\":\" builtin\",\"settings\":{}}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"extra\":1}}"));
-    // Logical model selection rejects provider identity even on an otherwise valid shape.
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"providerName\":\"p\"}}"));
+                ThreadCommandType.SET_EXECUTION,
+                "{\"execution\":{\"driver\":\"builtin\",\"settings\":{},\"extra\":1}}"));
   }
 
   @Test

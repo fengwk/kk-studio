@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
@@ -37,6 +38,8 @@ public final class FakeAgentDriver implements AgentDriver {
 
   private final Supplier<TurnResolution> turnResolution;
   private final Supplier<CompactionPreparation> automaticCompaction;
+  private String id = "fake";
+  private DriverCapabilities capabilities = new DriverCapabilities(true, true);
   private LockedDriverState state = NONE_STATE;
   private DriverApplied applied;
   private DriverStopResult stopResult = new DriverStopResult(null, List.of());
@@ -79,6 +82,29 @@ public final class FakeAgentDriver implements AgentDriver {
     this.stopResult = Objects.requireNonNull(stopResult, "stopResult");
     return this;
   }
+
+  public FakeAgentDriver withId(String id) {
+    this.id = Objects.requireNonNull(id, "id");
+    return this;
+  }
+
+  public FakeAgentDriver withCapabilities(DriverCapabilities capabilities) {
+    this.capabilities = Objects.requireNonNull(capabilities, "capabilities");
+    return this;
+  }
+
+  @Override
+  public String id() {
+    return id;
+  }
+
+  @Override
+  public DriverCapabilities capabilities() {
+    return capabilities;
+  }
+
+  @Override
+  public void validateSettings(String settingsJson) {}
 
   @Override
   public TurnResolution resolveTurn(

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -421,18 +422,18 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void encodesCanonicalFieldOrder() {
     assertEquals(
-        "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+        "{\"settings\":{\"agentName\":\"coding\",\"execution\":{"
+            + "\"driver\":\"fake\",\"settings\":{}}"
             + ",\"environmentName\":null,\"goal\":null}}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
-        "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+        "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"execution\":{"
+            + "\"driver\":\"fake\",\"settings\":{}}"
             + ",\"environmentName\":null,\"goal\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null"
-            + ",\"fallbackModel\":null,\"capabilities\":null}",
+            + ",\"executedSelection\":null,\"capabilities\":null}",
         CODEC.encode(
             new TurnStartPayload(
                 TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null, null)));
@@ -486,7 +487,7 @@ class HistoryEntryPayloadJsonCodecTest {
   /** 模型回退的 turn 记录实际调用的型号；settings 保持 Thread 自己的设置。 */
   @Test
   void roundTripsTurnStartFallbackModelAndRejectsInvalidShapes() {
-    ModelSelection fallback = ModelSelection.model("gpt-5", "default");
+    ExecutionSelection fallback = new ExecutionSelection("fake", "{\"model\":\"gpt-5\"}");
     TurnStartPayload resolved =
         new TurnStartPayload(
             TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null, fallback);
@@ -1279,7 +1280,7 @@ class HistoryEntryPayloadJsonCodecTest {
     return new AssistantMessageMetadata(base.stopReason(), base.usage(), decodeDurationMillis);
   }
 
-  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
+  private static final ExecutionSelection MODEL = new ExecutionSelection("fake", "{}");
 
   private static BranchSettings settings() {
     return new BranchSettings("coding", MODEL, null);

@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -658,7 +658,7 @@ class HistoryEntryPayloadTest {
   }
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
+      new BranchSettings("coding", new ExecutionSelection("fake", "{}"), null);
   private static final Instant TIME = Instant.ofEpochSecond(1000L);
 
   private static AgentMessage user(String text) {

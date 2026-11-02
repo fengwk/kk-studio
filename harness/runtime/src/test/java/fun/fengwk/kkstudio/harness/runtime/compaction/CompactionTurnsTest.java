@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -26,7 +26,7 @@ import java.util.List;
 class CompactionTurnsTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("m", "v"), null);
+      new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
   private static final Instant NOW = Instant.EPOCH;
 
   @Test

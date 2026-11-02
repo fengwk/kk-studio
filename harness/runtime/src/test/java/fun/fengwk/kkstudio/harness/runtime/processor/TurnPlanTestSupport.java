@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -88,7 +88,7 @@ final class TurnPlanTestSupport {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
   }
 
   private static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId) {

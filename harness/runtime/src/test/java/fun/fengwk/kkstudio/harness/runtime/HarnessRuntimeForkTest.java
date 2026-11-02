@@ -773,7 +773,7 @@ class HarnessRuntimeForkTest {
                       new CompactionStart(
                           CompactionPhase.FULL,
                           CompactionTrigger.MANUAL,
-                          HarnessRuntimeTestSupport.builtinExecutionModel(),
+                          HarnessRuntimeTestSupport.executionSelection(),
                           4_096L,
                           u2,
                           null,
@@ -826,7 +826,7 @@ class HarnessRuntimeForkTest {
                   new CompactionStart(
                       CompactionPhase.HISTORY,
                       CompactionTrigger.THRESHOLD,
-                      HarnessRuntimeTestSupport.builtinExecutionModel(),
+                      HarnessRuntimeTestSupport.executionSelection(),
                       4_096L,
                       a1,
                       u1,
@@ -848,7 +848,7 @@ class HarnessRuntimeForkTest {
                   new CompactionStart(
                       CompactionPhase.TURN_PREFIX,
                       CompactionTrigger.MANUAL,
-                      HarnessRuntimeTestSupport.builtinExecutionModel(),
+                      HarnessRuntimeTestSupport.executionSelection(),
                       4_096L,
                       a2,
                       u2,

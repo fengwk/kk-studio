@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.time.Instant;
@@ -41,20 +41,23 @@ class TurnPlanPreviewTest {
   private static final UUID IDEMPOTENCY_KEY = TestIds.id(77_001L);
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
 
-  /** 测试意图：SET_MODEL/SET_AGENT 前缀只更新快照，末尾 USER_MESSAGE 生成唯一模型可见消息，且候选 path 直接从 source head 续接。 */
+  /**
+   * 测试意图：SET_EXECUTION/SET_AGENT 前缀只更新快照，末尾 USER_MESSAGE 生成唯一模型可见消息，且候选 path 直接从 source head 续接。
+   */
   @Test
   void inputCandidatePathMergesSettingsSnapshotAndUserMessage() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
-    NewThreadCommand setModel =
-        command(new SetModelCommandPayload(ModelSelection.model("model-2", "v2")));
+    ExecutionSelection execution2 =
+        new ExecutionSelection("builtin", "{\"modelName\":\"model-2\",\"variant\":\"v2\"}");
+    NewThreadCommand setExecution = command(new SetExecutionCommandPayload(execution2));
     NewThreadCommand setAgent = command(new SetAgentCommandPayload("agent-2"));
     NewThreadCommand userMessage = command(userMessage("hello preview"));
 
     EntryPath candidate =
         TurnPlanPreview.inputCandidatePath(
-            baseline.threadId(), source, 1L, List.of(setModel, setAgent, userMessage), NOW);
+            baseline.threadId(), source, 1L, List.of(setExecution, setAgent, userMessage), NOW);
 
     // source 只有一个 ROOT；候选 = ROOT + TURN_START(INPUT) + 一条 USER 消息（SET_* 不产生消息）。
     assertEquals(3, candidate.entries().size());
@@ -62,9 +65,7 @@ class TurnPlanPreviewTest {
     TurnStartPayload start = (TurnStartPayload) candidate.entries().get(1).payload();
     assertEquals(TurnStartReason.INPUT, start.reason());
     assertEquals(baseline.threadId(), start.ownerThreadId());
-    assertEquals(
-        new BranchSettings("agent-2", ModelSelection.model("model-2", "v2"), null),
-        start.settings());
+    assertEquals(new BranchSettings("agent-2", execution2, null), start.settings());
     MessagePayload message = (MessagePayload) candidate.entries().get(2).payload();
     assertEquals(AgentMessageRole.USER, message.message().role());
     assertEquals(userMessage("hello preview").message(), message.message());
@@ -145,7 +146,7 @@ class TurnPlanPreviewTest {
     return store.transaction(tx -> tx.entries().find(entryId)).orElseThrow();
   }
 
-  private static NewThreadCommand command(SetModelCommandPayload payload) {
+  private static NewThreadCommand command(SetExecutionCommandPayload payload) {
     return new NewThreadCommand(payload, IDEMPOTENCY_KEY);
   }
 

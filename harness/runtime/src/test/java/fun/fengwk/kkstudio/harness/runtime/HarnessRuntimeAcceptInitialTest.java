@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -47,7 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -426,9 +426,11 @@ class HarnessRuntimeAcceptInitialTest {
                 AcceptancePreflight.IDENTITY));
   }
 
-  /** SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。 */
+  /**
+   * SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。
+   */
   @Test
-  void setPrefixOrderRequiresAgentBeforeModelBeforeEnvironment() {
+  void setPrefixOrderRequiresAgentBeforeExecutionBeforeEnvironment() {
     // 合法：全前缀 + 单条 user message。
     AcceptedCommands result =
         runtime.acceptCommands(
@@ -438,13 +440,13 @@ class HarnessRuntimeAcceptInitialTest {
                 List.of(
                     setAgent(TestIds.id(2)),
                     new NewThreadCommand(
-                        new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
+                        new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
                         TestIds.id(3)),
                     new NewThreadCommand(new SetEnvironmentCommandPayload("local"), TestIds.id(5)),
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
-    // 非法：SET_AGENT 出现在 SET_MODEL 之后（顺序不变量拒绝）。
+    // 非法：SET_AGENT 出现在 SET_EXECUTION 之后（顺序不变量拒绝）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -454,12 +456,12 @@ class HarnessRuntimeAcceptInitialTest {
                     TestIds.id(123),
                     List.of(
                         new NewThreadCommand(
-                            new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
+                            new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
                             TestIds.id(2)),
                         setAgent(TestIds.id(1)),
                         userMessageCommand(TestIds.id(3), "hi"))),
                 AcceptancePreflight.IDENTITY));
-    // 非法：SET_ENVIRONMENT 出现在 SET_MODEL 之前（顺序不变量拒绝）。
+    // 非法：SET_ENVIRONMENT 出现在 SET_EXECUTION 之前（顺序不变量拒绝）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -471,7 +473,7 @@ class HarnessRuntimeAcceptInitialTest {
                         new NewThreadCommand(
                             new SetEnvironmentCommandPayload("local"), TestIds.id(2)),
                         new NewThreadCommand(
-                            new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
+                            new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
                             TestIds.id(3)),
                         userMessageCommand(TestIds.id(1), "hi"))),
                 AcceptancePreflight.IDENTITY));

@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -102,7 +102,7 @@ public final class SpawnTestSupport {
   }
 
   private static BranchSettings defaultSettings() {
-    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+    return new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
   }
 
   public static AcceptedCommands acceptAndJoin(
@@ -163,7 +163,7 @@ public final class SpawnTestSupport {
     boolean notify = ticket.delivery() == JoinDelivery.NOTIFY_PARENT;
     BranchSettings agentSettings =
         new BranchSettings(
-            ticket.agent(), settings.model(), settings.environmentName(), settings.goal());
+            ticket.agent(), settings.execution(), settings.environmentName(), settings.goal());
     return new SpawnRequest(
         threadId,
         sessionId,

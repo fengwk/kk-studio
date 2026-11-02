@@ -14,7 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -141,19 +141,19 @@ class StopRecordsTest {
         Arrays.stream(HarnessRuntime.class.getDeclaredConstructors())
             .filter(constructor -> Modifier.isPublic(constructor.getModifiers()))
             .count());
-    AgentDriver driver = new FakeAgentDriver();
+    DriverRegistry registry = new DriverRegistry(List.of(new FakeAgentDriver()));
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
                 .getDeclaredConstructor(
-                    HarnessStore.class, AgentDriver.class, CompactionConfigProvider.class)
+                    HarnessStore.class, DriverRegistry.class, CompactionConfigProvider.class)
                 .getModifiers()));
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
                 .getDeclaredConstructor(
                     HarnessStore.class,
-                    AgentDriver.class,
+                    DriverRegistry.class,
                     CompactionConfigProvider.class,
                     Consumer.class,
                     Consumer.class)
@@ -164,14 +164,17 @@ class StopRecordsTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new HarnessRuntime(store, null, HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER));
-    assertThrows(NullPointerException.class, () -> new HarnessRuntime(store, driver, null));
+            new HarnessRuntime(
+                store,
+                (DriverRegistry) null,
+                HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER));
+    assertThrows(NullPointerException.class, () -> new HarnessRuntime(store, registry, null));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessRuntime(
                 store,
-                driver,
+                registry,
                 HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
                 (Consumer<UUID>) null,
                 ignored -> {}));
@@ -180,7 +183,7 @@ class StopRecordsTest {
         () ->
             new HarnessRuntime(
                 store,
-                driver,
+                registry,
                 HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
                 ignored -> {},
                 (Consumer<UUID>) null));

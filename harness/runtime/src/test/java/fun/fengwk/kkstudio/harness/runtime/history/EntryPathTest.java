@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -113,7 +114,8 @@ class EntryPathTest {
     // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
     BranchSettings rootSettings = settings("root-agent");
     BranchSettings firstTurn =
-        settings("first-agent").withModel(ModelSelection.model("claude-sonnet", "custom"));
+        settings("first-agent")
+            .withExecution(new ExecutionSelection("fake", "{\"model\":\"custom\"}"));
     BranchSettings latestTurn = settings("latest-agent");
     Entry root = root(rootSettings);
     Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
@@ -130,7 +132,7 @@ class EntryPathTest {
     BranchSettings base = path.baseSettings();
     assertEquals(latestTurn, base);
     assertEquals("latest-agent", base.agentName());
-    assertEquals(ModelSelection.model("claude-sonnet", "default"), base.model());
+    assertEquals(new ExecutionSelection("fake", "{}"), base.execution());
     assertNotEquals(firstTurn, base);
     assertNotEquals(rootSettings, base);
   }
@@ -139,7 +141,7 @@ class EntryPathTest {
   void compactionTurnSettingsNeverChangeBranchProjection() {
     BranchSettings live = settings("live");
     BranchSettings compactionOnly =
-        settings("poison").withModel(ModelSelection.model("summary", "v2"));
+        settings("poison").withExecution(new ExecutionSelection("summary", "{}"));
     Entry root = root(settings("root"));
     Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, live);
     Entry user = userMessage(id(3L), id(2L));
@@ -1550,6 +1552,6 @@ class EntryPathTest {
   }
 
   private static BranchSettings settings(String agentName) {
-    return new BranchSettings(agentName, ModelSelection.model("claude-sonnet", "default"), null);
+    return new BranchSettings(agentName, new ExecutionSelection("fake", "{}"), null);
   }
 }

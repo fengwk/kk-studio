@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -934,13 +934,13 @@ class HarnessRuntimeJoinAcceptanceTest {
     NewThreadCommand second = userMessageCommand(TestIds.id(5002), "second");
     NewThreadCommand setAgent =
         new NewThreadCommand(new SetAgentCommandPayload("worker"), TestIds.id(5003));
-    NewThreadCommand setModel =
+    NewThreadCommand setExecution =
         new NewThreadCommand(
-            new SetModelCommandPayload(ModelSelection.model("model", "v1")), TestIds.id(5004));
+            new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")), TestIds.id(5004));
 
     assertSpawnRejected(List.of(first, second));
     assertSpawnRejected(List.of(setAgent));
-    assertSpawnRejected(List.of(setModel, setAgent, first));
+    assertSpawnRejected(List.of(setExecution, setAgent, first));
     assertSpawnRejected(List.of(first, setAgent));
   }
 

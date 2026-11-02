@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -622,12 +622,12 @@ public final class StoreTestSupport {
         invocation.updatedAt());
   }
 
-  public static ModelSelection builtinExecutionModel() {
-    return ModelSelection.model("model", "v1");
+  public static ExecutionSelection executionSelection() {
+    return new ExecutionSelection("fake", "{}");
   }
 
   public static BranchSettings branchSettings() {
-    return new BranchSettings("agent", builtinExecutionModel(), null);
+    return new BranchSettings("agent", executionSelection(), null);
   }
 
   public static ToolCall toolCall(String toolCallId) {

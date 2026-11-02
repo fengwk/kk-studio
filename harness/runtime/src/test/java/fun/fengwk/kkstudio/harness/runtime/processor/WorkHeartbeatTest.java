@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -557,7 +557,7 @@ class WorkHeartbeatTest {
                             null,
                             new RootPayload(
                                 new BranchSettings(
-                                    "agent", ModelSelection.model("model", "v1"), null)),
+                                    "agent", new ExecutionSelection("fake", "{}"), null)),
                             NOW));
                 tx.threads()
                     .insert(

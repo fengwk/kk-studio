@@ -16,9 +16,10 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -45,7 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -119,8 +120,7 @@ class HarnessRuntimeManualCompactionTest {
     TurnStartPayload start = (TurnStartPayload) path.head().payload();
     assertEquals(result.turnStartEntryId(), path.head().id());
     assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
-    assertEquals(
-        HarnessRuntimeTestSupport.builtinExecutionModel(), start.compaction().executionModel());
+    assertEquals(HarnessRuntimeTestSupport.executionSelection(), start.compaction().execution());
     assertNotNull(start.contextWindow());
     assertNotNull(start.maxOutputTokens());
     assertNotNull(
@@ -369,7 +369,7 @@ class HarnessRuntimeManualCompactionTest {
     seedCommand(
         configFixture.store,
         configBaseline.threadId(),
-        new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
+        new SetExecutionCommandPayload(new ExecutionSelection("fake", "{\"m\":\"b\"}")));
     configFixture.resolver.results.add(rejection());
     long configVersion = thread(configFixture.store, configBaseline.threadId()).version();
     configFixture.runtime.compactThread(
@@ -388,7 +388,9 @@ class HarnessRuntimeManualCompactionTest {
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
         new HarnessRuntime(
-            runtimeStore, new FakeAgentDriver(resolver::resolve), () -> CompactionConfig.DEFAULT);
+            runtimeStore,
+            new DriverRegistry(List.of(new FakeAgentDriver(resolver::resolve))),
+            () -> CompactionConfig.DEFAULT);
     return new Fixture(store, resolver, runtime);
   }
 
@@ -729,13 +731,13 @@ class HarnessRuntimeManualCompactionTest {
       if (autoConsistent) {
         return new TurnResolution.Compaction(
             new CompactionResolution(
-                HarnessRuntimeTestSupport.builtinExecutionModel(),
+                HarnessRuntimeTestSupport.executionSelection(),
                 4096L,
                 CONTEXT_WINDOW,
                 MAX_OUTPUT_TOKENS,
                 new BranchSettings(
                     "compaction",
-                    HarnessRuntimeTestSupport.builtinExecutionModel(),
+                    HarnessRuntimeTestSupport.executionSelection(),
                     HarnessRuntimeTestSupport.settings().environmentName(),
                     null)));
       }

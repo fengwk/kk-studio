@@ -6,8 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** {@link ThreadContextProbe} Store 组合读取测试。 */
@@ -65,8 +67,7 @@ class ThreadContextProbeTest {
                       SESSION_ID,
                       null,
                       new RootPayload(
-                          new BranchSettings(
-                              "agent", ModelSelection.model("model", "variant"), null)),
+                          new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null)),
                       NOW));
           tx.threads().insert(thread);
           return null;
@@ -75,7 +76,7 @@ class ThreadContextProbeTest {
     ThreadContext context =
         store.transaction(
             tx ->
-                new ThreadContextProbe(new FakeAgentDriver())
+                new ThreadContextProbe(new DriverRegistry(List.of(new FakeAgentDriver())))
                     .probe(tx, tx.threads().lock(THREAD_ID).orElseThrow()));
 
     assertInstanceOf(ThreadContext.IdleOrHistorical.class, context);
@@ -90,7 +91,7 @@ class ThreadContextProbeTest {
     ThreadContext context =
         store.transaction(
             tx ->
-                new ThreadContextProbe(new FakeAgentDriver())
+                new ThreadContextProbe(new DriverRegistry(List.of(new FakeAgentDriver())))
                     .probe(tx, tx.threads().lock(baseline.threadId()).orElseThrow()));
 
     assertInstanceOf(ThreadContext.ToolActive.class, context);

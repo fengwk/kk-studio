@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -31,7 +31,7 @@ class SpawnRequestTest {
   private static final UUID HEAD = id(4);
   private static final UUID TICKET = id(5);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
+      new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
 
   @Test
   void acceptsNewRootChildSettleAndContinuationTickets() {

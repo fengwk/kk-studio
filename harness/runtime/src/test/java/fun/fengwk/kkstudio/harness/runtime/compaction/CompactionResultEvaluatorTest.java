@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -27,8 +27,8 @@ import java.util.Map;
 /** Compaction terminal 到 durable result/error 的纯语义映射。 */
 class CompactionResultEvaluatorTest {
 
-  private static final ModelSelection MODEL = ModelSelection.model("model", "v1");
-  private static final BranchSettings SETTINGS = new BranchSettings("agent", MODEL, null);
+  private static final ExecutionSelection EXECUTION = new ExecutionSelection("fake", "{}");
+  private static final BranchSettings SETTINGS = new BranchSettings("agent", EXECUTION, null);
   private static final Instant NOW = Instant.EPOCH;
   private static final long BUDGET = 4096L;
 
@@ -88,7 +88,7 @@ class CompactionResultEvaluatorTest {
         new CompactionStart(
             CompactionPhase.HISTORY,
             CompactionTrigger.THRESHOLD,
-            MODEL,
+            EXECUTION,
             BUDGET,
             id(1L),
             id(1L),

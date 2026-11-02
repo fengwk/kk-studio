@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -68,7 +68,7 @@ class ThreadJoinProjectorTest {
   private static final String VALID_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", ModelSelection.model("model", "default"), null);
+      new BranchSettings("assistant", new ExecutionSelection("fake", "{}"), null);
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
   private static final Instant T1 = Instant.parse("2026-01-01T00:00:01Z");
   private static final Instant T2 = Instant.parse("2026-01-01T00:00:02Z");

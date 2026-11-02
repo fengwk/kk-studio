@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -470,9 +470,9 @@ class HarnessRuntimeAcceptThreadTest {
             }));
   }
 
-  private static NewThreadCommand setModelCommand(UUID idempotencyKey) {
+  private static NewThreadCommand setExecutionCommand(UUID idempotencyKey) {
     return new NewThreadCommand(
-        new SetModelCommandPayload(ModelSelection.model("model", "v1")), idempotencyKey);
+        new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")), idempotencyKey);
   }
 
   private static Ticket rootTicket(UUID invocationId) {
@@ -494,7 +494,7 @@ class HarnessRuntimeAcceptThreadTest {
                 baseline.threadId(),
                 stopped.headEntryId(),
                 stopped.nextCommandSequence(),
-                List.of(setAgentCommand(TestIds.id(1)), setModelCommand(TestIds.id(2)))),
+                List.of(setAgentCommand(TestIds.id(1)), setExecutionCommand(TestIds.id(2)))),
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
@@ -523,7 +523,7 @@ class HarnessRuntimeAcceptThreadTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(setModelCommand(TestIds.id(1)))),
+                List.of(setExecutionCommand(TestIds.id(1)))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
     ThreadState after =
@@ -549,7 +549,7 @@ class HarnessRuntimeAcceptThreadTest {
                         baseline.threadId(),
                         baseline.rootEntryId(),
                         1,
-                        List.of(setModelCommand(TestIds.id(1)))),
+                        List.of(setExecutionCommand(TestIds.id(1)))),
                     join,
                     AcceptancePreflight.IDENTITY));
     assertTrue(error.getMessage().contains("batches must end with exactly one user-like input"));

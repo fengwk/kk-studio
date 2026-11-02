@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -56,7 +56,7 @@ import java.util.UUID;
 class CompactionPlannerTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final ModelSelection SETTINGS_MODEL = ModelSelection.model("model", "v1");
+  private static final ExecutionSelection SETTINGS_EXECUTION = new ExecutionSelection("fake", "{}");
   private static final CompactionConfig CONFIG = new CompactionConfig(20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
@@ -857,7 +857,7 @@ class CompactionPlannerTest {
   /** 自包含合法路径构造器：id 顺序、parent 链、TURN 语法。 */
   private static final class PathBuilder {
     private final List<Entry> entries = new ArrayList<>();
-    private final BranchSettings SETTINGS = new BranchSettings("agent", SETTINGS_MODEL, null);
+    private final BranchSettings SETTINGS = new BranchSettings("agent", SETTINGS_EXECUTION, null);
     private long nextId = 1L;
 
     PathBuilder root() {

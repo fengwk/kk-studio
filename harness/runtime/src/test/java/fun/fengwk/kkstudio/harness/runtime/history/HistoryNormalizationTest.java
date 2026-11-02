@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization.StopClose;
@@ -180,7 +180,7 @@ class HistoryNormalizationTest {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings("assistant", ModelSelection.model("claude-sonnet", "default"), null);
+    return new BranchSettings("assistant", new ExecutionSelection("fake", "{}"), null);
   }
 
   /** 逐条追加 Entry 的 builder：保证 Session / 父链 / id 唯一性与 EntryPath 不变式一致。 */

@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 
 import java.util.UUID;
 
 /** CompactionStart 的 phase/anchor 最小形状与 run group 不变量。 */
 class CompactionStartTest {
 
-  private static final ModelSelection MODEL = ModelSelection.model("m", "v");
+  private static final ExecutionSelection MODEL = new ExecutionSelection("fake", "{}");
   private static final Long BUDGET = 4096L;
   private static final UUID CHILD_ID = id(100L);
   private static final UUID JOIN_ID = id(101L);
@@ -79,7 +79,7 @@ class CompactionStartTest {
   void acceptsPendingFactory() {
     CompactionStart pending =
         CompactionStart.pending(CompactionPhase.FULL, CompactionTrigger.MANUAL, id(4L), null, null);
-    assertNull(pending.executionModel());
+    assertNull(pending.execution());
     assertNull(pending.outputBudget());
     assertNull(pending.childThreadId());
     assertNull(pending.joinInvocationId());

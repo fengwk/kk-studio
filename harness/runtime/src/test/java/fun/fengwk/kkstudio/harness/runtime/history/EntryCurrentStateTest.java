@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -82,7 +82,8 @@ class EntryCurrentStateTest {
     Entry assistant = message(id(4L), user.id(), AgentMessageRole.ASSISTANT, true);
     Entry end = turnEnd(id(5L), assistant.id(), start.id());
     Entry compaction =
-        compaction(id(6L), end.id(), settings("poison").withModel(ModelSelection.model("s", "v2")));
+        compaction(
+            id(6L), end.id(), settings("poison").withExecution(new ExecutionSelection("s", "{}")));
     Entry summary = compactionResult(id(7L), compaction.id());
     Entry compactionEnd = turnEnd(id(8L), summary.id(), compaction.id());
     Entry control = notification(id(9L), compactionEnd.id());
@@ -272,6 +273,6 @@ class EntryCurrentStateTest {
   }
 
   private static BranchSettings settings(String agent) {
-    return new BranchSettings(agent, ModelSelection.model("claude", "default"), null);
+    return new BranchSettings(agent, new ExecutionSelection("fake", "{}"), null);
   }
 }

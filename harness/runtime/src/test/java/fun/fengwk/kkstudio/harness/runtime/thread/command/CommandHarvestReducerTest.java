@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -25,7 +25,11 @@ class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
   private static final BranchSettings BASE =
-      new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
+      new BranchSettings(
+          "coding",
+          new ExecutionSelection(
+              "builtin", "{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"),
+          null);
 
   /** 测试用确定性 goal id 分配器：每次调用产生新 id，因此断言到的 id 序列同时证明「每条 typed GOAL 设置恰分配一个新 id」。 */
   private static Supplier<UUID> goalIds() {
@@ -40,6 +44,9 @@ class CommandHarvestReducerTest {
 
   @Test
   void appliesCommandsInSequenceWithLastWriteWins() {
+    ExecutionSelection opus =
+        new ExecutionSelection(
+            "builtin", "{\"modelName\":\"claude-opus\",\"variant\":\"thinking\"}");
     BranchSettings result =
         reduce(
             id(7L),
@@ -51,17 +58,14 @@ class CommandHarvestReducerTest {
                 queued(
                     id(4L),
                     4L,
-                    new SetModelCommandPayload(ModelSelection.model("gpt-4.1", "default"))),
-                queued(
-                    id(5L),
-                    5L,
-                    new SetModelCommandPayload(ModelSelection.model("claude-opus", "thinking"))),
+                    new SetExecutionCommandPayload(
+                        new ExecutionSelection(
+                            "builtin", "{\"modelName\":\"gpt-4.1\",\"variant\":\"default\"}"))),
+                queued(id(5L), 5L, new SetExecutionCommandPayload(opus)),
                 queued(id(6L), 6L, new SetEnvironmentCommandPayload("local")),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(user("instruction")))));
 
-    assertEquals(
-        new BranchSettings("agent-b", ModelSelection.model("claude-opus", "thinking"), "local"),
-        result);
+    assertEquals(new BranchSettings("agent-b", opus, "local"), result);
   }
 
   /** 测试意图：设置命令按顺序生效；重复设置、消息命令不影响最终快照。 */
@@ -75,7 +79,7 @@ class CommandHarvestReducerTest {
                 // no-op：与 BASE 相同。
                 queued(id(1L), 1L, new SetAgentCommandPayload("coding")),
                 queued(id(2L), 2L, new SetAgentCommandPayload("reviewer")),
-                queued(id(3L), 3L, new SetModelCommandPayload(BASE.model())),
+                queued(id(3L), 3L, new SetExecutionCommandPayload(BASE.execution())),
                 queued(id(4L), 4L, new SetEnvironmentCommandPayload("local")),
                 // 消息不改变设置。
                 queued(id(5L), 5L, new CustomMessageCommandPayload(user("custom")))));
@@ -98,25 +102,26 @@ class CommandHarvestReducerTest {
             List.of(queued(id(1L), 1L, new SetEnvironmentCommandPayload(null))));
     assertNull(cleared.environmentName());
 
-    // 环境变更不得隐式影响 agent 与 model。
+    // 环境变更不得隐式影响 agent 与 execution。
     assertEquals(BASE.agentName(), cleared.agentName());
-    assertEquals(BASE.model(), cleared.model());
+    assertEquals(BASE.execution(), cleared.execution());
   }
 
   @Test
-  void modelSelectionIsAtomicAndMessagesDoNotChangeSettings() {
-    ModelSelection replacement = ModelSelection.model("gpt-4.1", "default");
+  void executionSelectionIsAtomicAndMessagesDoNotChangeSettings() {
+    ExecutionSelection replacement =
+        new ExecutionSelection("builtin", "{\"modelName\":\"gpt-4.1\",\"variant\":\"default\"}");
     BranchSettings result =
         reduce(
             id(7L),
             BASE,
             List.of(
                 queued(id(1L), 1L, new UserMessageCommandPayload(user("hello"))),
-                queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
+                queued(id(2L), 2L, new SetExecutionCommandPayload(replacement)),
                 queued(id(3L), 3L, new CustomMessageCommandPayload(user("custom")))));
 
     assertEquals("coding", result.agentName());
-    assertEquals(replacement, result.model());
+    assertEquals(replacement, result.execution());
   }
 
   @Test
@@ -222,7 +227,7 @@ class CommandHarvestReducerTest {
 
     assertEquals(new GoalSetting(id(1_001L), "ship it"), result.goal());
     assertEquals("agent-a", result.agentName());
-    assertEquals(BASE.model(), result.model());
+    assertEquals(BASE.execution(), result.execution());
     assertNull(result.environmentName());
   }
 
@@ -241,9 +246,9 @@ class CommandHarvestReducerTest {
 
     assertEquals(new GoalSetting(id(1_001L), "same"), first.goal());
     assertNull(second.goal());
-    // Goal 的创改不得影响 agent / model / environment。
+    // Goal 的创改不得影响 agent / execution / environment。
     assertEquals(first.agentName(), second.agentName());
-    assertEquals(first.model(), second.model());
+    assertEquals(first.execution(), second.execution());
     assertEquals(first.environmentName(), second.environmentName());
   }
 

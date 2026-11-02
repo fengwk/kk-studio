@@ -19,8 +19,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -109,7 +110,8 @@ public final class HarnessRuntimeTestSupport {
   /** 创建仅带默认/未使用依赖的测试 Runtime 控制面。 */
   static HarnessRuntime runtime(HarnessStore store, Clock clock) {
     useClock(store, clock);
-    return new HarnessRuntime(store, new FakeAgentDriver(), DEFAULT_COMPACTION_PROVIDER);
+    return new HarnessRuntime(
+        store, new DriverRegistry(List.of(new FakeAgentDriver())), DEFAULT_COMPACTION_PROVIDER);
   }
 
   /** 创建带指定 Driver 与 compaction provider 的测试 Runtime。 */
@@ -119,7 +121,7 @@ public final class HarnessRuntimeTestSupport {
       AgentDriver driver,
       CompactionConfigProvider compactionConfigProvider) {
     useClock(store, clock);
-    return new HarnessRuntime(store, driver, compactionConfigProvider);
+    return new HarnessRuntime(store, new DriverRegistry(List.of(driver)), compactionConfigProvider);
   }
 
   /** 创建带 local execution canceller 的测试 Runtime。 */
@@ -130,7 +132,11 @@ public final class HarnessRuntimeTestSupport {
       Consumer<UUID> toolCanceller) {
     useClock(store, clock);
     return new HarnessRuntime(
-        store, new FakeAgentDriver(), DEFAULT_COMPACTION_PROVIDER, modelCanceller, toolCanceller);
+        store,
+        new DriverRegistry(List.of(new FakeAgentDriver())),
+        DEFAULT_COMPACTION_PROVIDER,
+        modelCanceller,
+        toolCanceller);
   }
 
   /** 测试时钟驱动内存 store 的事务时间（生产实现取数据库时钟）。 */
@@ -851,12 +857,12 @@ public final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static ModelSelection builtinExecutionModel() {
-    return ModelSelection.model("model", "v1");
+  static ExecutionSelection executionSelection() {
+    return new ExecutionSelection("fake", "{}");
   }
 
   static BranchSettings settings() {
-    return new BranchSettings("agent", builtinExecutionModel(), null);
+    return new BranchSettings("agent", executionSelection(), null);
   }
 
   static ToolInvocationError toolError() {

@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 
 import java.time.Instant;
@@ -22,7 +22,7 @@ class EntrySliceTest {
   private static final UUID SESSION_ID = id(1L);
   private static final Instant BASE = Instant.parse("2026-10-31T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", ModelSelection.model("claude", "default"), null);
+      new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
 
   @Test
   void nullBaseRequiresCompleteEntryPathAndEmptyBaseIsHead() {
