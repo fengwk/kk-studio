@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.RecordingScheduler;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ThreadSeed;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -200,9 +202,10 @@ class HarnessAgentWorkIntegrationTest {
                     .orElseThrow());
     assertEquals(new WorkTarget(WorkTargetType.AGENT, threadId), claim.target());
 
-    // 使用 FakeAgentDriver 组装 Runtime 并执行 Stop
-    FakeAgentDriver driver = new FakeAgentDriver();
-    HarnessRuntime runtime = new HarnessRuntime(store, driver, () -> CompactionConfig.DEFAULT);
+    // 种子 Thread 的执行选择是 builtin：以同一 id 注册 FakeAgentDriver，使 Stop 路由到它。
+    DriverRegistry drivers =
+        new DriverRegistry(List.of(new FakeAgentDriver(BuiltinExecution.DRIVER)));
+    HarnessRuntime runtime = new HarnessRuntime(store, drivers, () -> CompactionConfig.DEFAULT);
 
     ThreadState initialThread = store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
     StopResult result =
