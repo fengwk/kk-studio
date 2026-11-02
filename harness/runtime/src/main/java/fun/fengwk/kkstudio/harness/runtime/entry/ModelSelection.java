@@ -2,7 +2,12 @@ package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import java.util.Objects;
 
-/** 冻结到 branch settings snapshot 中的统一逻辑模型选择：全局名称 + 可选单模型 Variant。 */
+/**
+ * 统一逻辑模型身份：全局名称 + 可选单模型 Variant。
+ *
+ * <p>用于 AssistantMessageMetadata、MODEL_ATTEMPT_FAILURE 与 Builtin 执行设置； 不再直接作为 BranchSettings 或
+ * Command 的字段出现。
+ */
 public record ModelSelection(String modelName, String variant) {
 
   public ModelSelection {

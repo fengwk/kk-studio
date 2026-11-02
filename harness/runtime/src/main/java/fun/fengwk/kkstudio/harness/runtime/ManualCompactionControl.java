@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -45,17 +46,19 @@ import java.util.UUID;
 final class ManualCompactionControl {
 
   private final HarnessStore store;
-  private final AgentDriver driver;
+  private final DriverRegistry driverRegistry;
   private final CompactionConfigProvider compactionConfigProvider;
   private final ThreadContextProbe threadContextProbe;
 
   ManualCompactionControl(
-      HarnessStore store, AgentDriver driver, CompactionConfigProvider compactionConfigProvider) {
+      HarnessStore store,
+      DriverRegistry driverRegistry,
+      CompactionConfigProvider compactionConfigProvider) {
     this.store = Objects.requireNonNull(store, "store");
-    this.driver = Objects.requireNonNull(driver, "driver");
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
-    this.threadContextProbe = new ThreadContextProbe(driver);
+    this.threadContextProbe = new ThreadContextProbe(driverRegistry);
   }
 
   ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
@@ -74,6 +77,7 @@ final class ManualCompactionControl {
     return store.transaction(
         tx -> {
           ManualPlan manualPlan = planManual(tx, command);
+          AgentDriver driver = driverRegistry.of(manualPlan.candidatePath().baseSettings());
           TurnResolution result =
               driver.resolveTurn(
                   tx, manualPlan.thread(), manualPlan.candidatePath(), manualPlan.preparation());
@@ -133,6 +137,11 @@ final class ManualCompactionControl {
     if (thread.executionControl().isStopped()) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_STOPPED);
     }
+    AgentDriver driver = driverRegistry.of(path.baseSettings());
+    if (!driver.capabilities().manualCompaction()) {
+      return ManualDecision.disabled(
+          ManualCompactionAvailability.DisabledReason.EXECUTION_UNSUPPORTED);
+    }
     CompactionConfig compactionConfig = compactionConfigProvider.compactionConfig();
     ThreadContext context = threadContextProbe.probe(tx, thread, EntryCurrentState.from(path));
     if (!(context instanceof ThreadContext.IdleOrHistorical)
@@ -145,7 +154,7 @@ final class ManualCompactionControl {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
     CompactionHistory.ClosedTurn candidate = CompactionHistory.latestClosedTurn(path);
-    boolean mismatchedModelSeen = false;
+    boolean mismatchedExecutionSeen = false;
     while (candidate != null) {
       TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
       if (!thread.id().equals(start.ownerThreadId())) {
@@ -153,11 +162,11 @@ final class ManualCompactionControl {
             ManualCompactionAvailability.DisabledReason.OWNERSHIP_BARRIER);
       }
       if (start.contextWindow() != null && start.maxOutputTokens() != null) {
-        var executionModel =
+        var execution =
             start.compaction() == null
-                ? start.settings().model()
-                : start.compaction().executionModel();
-        if (executionModel.equals(path.baseSettings().model())) {
+                ? start.settings().execution()
+                : start.compaction().execution();
+        if (execution.equals(path.baseSettings().execution())) {
           long projectedTokens = CompactionPlanner.estimateProjectionTokens(path);
           long minimum = compactionConfig.manualMinimum(start.contextWindow());
           if (projectedTokens < minimum) {
@@ -174,14 +183,14 @@ final class ManualCompactionControl {
               : ManualDecision.enabled(preparation);
         }
         if (start.compaction() == null) {
-          mismatchedModelSeen = true;
+          mismatchedExecutionSeen = true;
         }
       }
       candidate = CompactionHistory.previousClosedTurn(path, candidate);
     }
     return ManualDecision.disabled(
-        mismatchedModelSeen
-            ? ManualCompactionAvailability.DisabledReason.MODEL_CHANGED
+        mismatchedExecutionSeen
+            ? ManualCompactionAvailability.DisabledReason.EXECUTION_CHANGED
             : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 

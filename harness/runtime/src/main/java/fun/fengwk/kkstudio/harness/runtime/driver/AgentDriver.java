@@ -21,6 +21,15 @@ import java.util.UUID;
  */
 public interface AgentDriver {
 
+  /** Driver 唯一标识符，匹配 ^[a-z][a-z0-9-]{0,31}$。 */
+  String id();
+
+  /** Driver 声明的能力集。 */
+  DriverCapabilities capabilities();
+
+  /** 校验 Driver settings JSON object 文本的合法性；不合法时抛出 IllegalArgumentException。 */
+  void validateSettings(String settingsJson);
+
   /** 在调用方事务内解析 candidate Turn；成功时只返回语义计划，具体私有状态由 {@code install} 提交。 */
   TurnResolution resolveTurn(
       HarnessStore.Transaction tx,

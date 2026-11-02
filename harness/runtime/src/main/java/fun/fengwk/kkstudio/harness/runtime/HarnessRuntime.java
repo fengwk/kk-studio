@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
@@ -77,7 +78,7 @@ public final class HarnessRuntime {
   private static final ToolApprovalJsonCodec APPROVAL_JSON = new ToolApprovalJsonCodec();
 
   private final HarnessStore store;
-  private final AgentDriver driver;
+  private final DriverRegistry driverRegistry;
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
   private final ToolInputControl toolInputControl;
@@ -88,27 +89,29 @@ public final class HarnessRuntime {
 
   /** 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。 */
   public HarnessRuntime(
-      HarnessStore store, AgentDriver driver, CompactionConfigProvider compactionConfigProvider) {
-    this(store, driver, compactionConfigProvider, NO_OP_CANCELLER, NO_OP_CANCELLER);
+      HarnessStore store,
+      DriverRegistry driverRegistry,
+      CompactionConfigProvider compactionConfigProvider) {
+    this(store, driverRegistry, compactionConfigProvider, NO_OP_CANCELLER, NO_OP_CANCELLER);
   }
 
   /** 由具体 Driver/Processor wiring 与 local execution adapter 共用的构造方法。 */
   public HarnessRuntime(
       HarnessStore store,
-      AgentDriver driver,
+      DriverRegistry driverRegistry,
       CompactionConfigProvider compactionConfigProvider,
       Consumer<UUID> modelExecutionCanceller,
       Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
-    this.driver = Objects.requireNonNull(driver, "driver");
-    this.acceptCommandsControl = new AcceptCommandsControl(store);
-    this.stopControl = new StopControl(store, driver);
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
+    this.acceptCommandsControl = new AcceptCommandsControl(store, driverRegistry);
+    this.stopControl = new StopControl(store, driverRegistry);
     this.toolInputControl = new ToolInputControl(this.store);
     this.toolOutcomeQuery = new ToolOutcomeQuery(this.store);
     this.manualCompactionControl =
         new ManualCompactionControl(
             this.store,
-            Objects.requireNonNull(driver, "driver"),
+            driverRegistry,
             Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider"));
     this.modelExecutionCanceller =
         Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
@@ -225,7 +228,7 @@ public final class HarnessRuntime {
           for (UUID id : lockOrder) {
             locked.add(tx.threads().lock(id).orElseThrow());
           }
-          ThreadContextProbe probe = new ThreadContextProbe(driver);
+          ThreadContextProbe probe = new ThreadContextProbe(driverRegistry);
           List<ThreadTreeNode> nodes = new ArrayList<>(locked.size());
           for (ThreadState thread : locked) {
             List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
@@ -389,6 +392,7 @@ public final class HarnessRuntime {
   /** 以当前 Driver 自己的策略判断是否需要自动压缩；Runtime 不自行选择阈值或 fallback。返回 null 表示无需压缩。 */
   public CompactionPreparation prepareAutomaticCompaction(
       ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
+    AgentDriver driver = driverRegistry.of(path.baseSettings());
     return driver.prepareAutomaticCompaction(
         Objects.requireNonNull(thread, "thread"),
         Objects.requireNonNull(path, "path"),
@@ -708,7 +712,7 @@ public final class HarnessRuntime {
       HarnessStore.Transaction tx, ThreadState thread, UUID afterEntryId) {
     EntrySlice slice = tx.entries().loadSlice(thread.headEntryId(), afterEntryId);
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread, driver);
+    LockedThreadContext locked = ThreadContextLock.load(tx, thread, driverRegistry);
     GenerationProjection generation = generationOf(locked.context());
     if (generation != null) {
       if (!tx.entries().isAncestor(thread.headEntryId(), generation.requestHeadEntryId())) {

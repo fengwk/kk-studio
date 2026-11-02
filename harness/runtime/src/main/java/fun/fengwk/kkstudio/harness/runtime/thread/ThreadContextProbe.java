@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -19,11 +20,11 @@ import java.util.Objects;
  */
 public final class ThreadContextProbe {
 
-  private final AgentDriver driver;
+  private final DriverRegistry driverRegistry;
   private final ThreadContextClassifier classifier = new ThreadContextClassifier();
 
-  public ThreadContextProbe(AgentDriver driver) {
-    this.driver = Objects.requireNonNull(driver, "driver");
+  public ThreadContextProbe(DriverRegistry driverRegistry) {
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
   }
 
   public ThreadContext probe(
@@ -31,6 +32,7 @@ public final class ThreadContextProbe {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(state, "state");
+    AgentDriver driver = driverRegistry.of(state.baseSettings());
     LockedDriverState driverState = driver.readState(tx, thread, state);
     List<ToolInvocation> siblings = List.of();
     if (state.openTurnStart().isPresent() && assistantHead(state)) {

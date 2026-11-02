@@ -17,11 +17,12 @@ import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -128,7 +129,7 @@ public final class ThreadProcessor {
           "Turn planning failed before the model was invoked. Send a new message to retry.");
 
   private final HarnessStore store;
-  private final AgentDriver driver;
+  private final DriverRegistry driverRegistry;
   private final ThreadProcessorConfig config;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
@@ -136,11 +137,12 @@ public final class ThreadProcessor {
   private final ThreadContextProbe threadContextProbe;
   private final ThreadLifecycleCoordinator coordinator;
 
-  public ThreadProcessor(HarnessStore store, AgentDriver driver, ThreadProcessorConfig config) {
+  public ThreadProcessor(
+      HarnessStore store, DriverRegistry driverRegistry, ThreadProcessorConfig config) {
     this.store = Objects.requireNonNull(store, "store");
-    this.driver = Objects.requireNonNull(driver, "driver");
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
     this.config = Objects.requireNonNull(config, "config");
-    this.threadContextProbe = new ThreadContextProbe(driver);
+    this.threadContextProbe = new ThreadContextProbe(driverRegistry);
     this.coordinator = new ThreadLifecycleCoordinator();
   }
 
@@ -229,6 +231,7 @@ public final class ThreadProcessor {
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
     EntryCurrentState currentState = EntryCurrentState.from(path);
     ThreadContext context = threadContextProbe.probe(tx, thread, currentState);
+    AgentDriver driver = driverRegistry.of(path.baseSettings());
     switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Driver：判断 pre-existing queued message 必须在 lock Driver 前加载。
@@ -247,7 +250,7 @@ public final class ThreadProcessor {
             || !Objects.equals(pending.driverState().generationId(), driverState.generationId())) {
           throw new IllegalStateException("locked driver state no longer matches the pending turn");
         }
-        applyModel(tx, claim, thread, path, driverState, now, hasQueuedMessage);
+        applyModel(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
       }
       case ThreadContext.ModelActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
@@ -264,7 +267,8 @@ public final class ThreadProcessor {
             pending.assistant(),
             pending.calls(),
             lockedSiblings,
-            now);
+            now,
+            driver);
       }
       case ThreadContext.ToolActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ContinuationDue ignored -> {
@@ -397,7 +401,8 @@ public final class ThreadProcessor {
       EntryPath path,
       LockedDriverState driverState,
       Instant now,
-      boolean hasQueuedMessage) {
+      boolean hasQueuedMessage,
+      AgentDriver driver) {
     DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
     UUID head = applied.headEntryId();
     UUID finalAnswerEntryId = applied.finalAnswerEntryId();
@@ -603,20 +608,21 @@ public final class ThreadProcessor {
     boolean stopped = thread.executionControl().isStopped();
     boolean hasQueuedDemand =
         ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
+    EntryPath endPath = tx.entries().loadPath(turnEndId);
+    AgentDriver driver = driverRegistry.of(endPath.baseSettings());
     boolean compactionDue =
         !stopped
             && thread.constraints().allowAutoCompaction()
             && driver.prepareAutomaticCompaction(
                     advanced,
-                    tx.entries().loadPath(turnEndId),
+                    endPath,
                     config.compactionProvider().compactionConfig(),
                     hasQueuedDemand)
                 != null;
     boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
     boolean requestThread = hasQueuedDemand && !stopped || compactionDue || mechanicalWake;
     if (mechanicalWake) {
-      EntryPath updatedPath = tx.entries().loadPath(turnEndId);
-      coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
+      coordinator.remindSoftBudgetIfDue(tx, advanced, endPath, now);
     }
     if (outcome == TurnEndOutcome.FAILED && !requestThread) {
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
@@ -644,7 +650,8 @@ public final class ThreadProcessor {
       Entry assistant,
       List<ToolCallMessageContent> calls,
       List<ToolInvocation> siblings,
-      Instant now) {
+      Instant now,
+      AgentDriver driver) {
     if (calls.size() != siblings.size()) {
       throw new IllegalStateException(
           "tool sibling count must match the assistant tool calls of entry " + assistant.id());
@@ -752,6 +759,7 @@ public final class ThreadProcessor {
   private void resolveAndCommitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, TurnPlan plan) {
     TurnResolution resolution;
+    AgentDriver driver = driverRegistry.of(plan.candidatePath().baseSettings());
     try {
       resolution = driver.resolveTurn(tx, thread, plan.candidatePath(), plan.preparation());
     } catch (TurnResolveTransientException transientFailure) {
@@ -897,8 +905,8 @@ public final class ThreadProcessor {
         || !(entry.payload() instanceof TurnStartPayload start)) {
       return entry;
     }
-    ModelSelection executed = accepted == null ? null : accepted.executedSelection();
-    ModelSelection selectedModel = start.settings().model();
+    ExecutionSelection executed = accepted == null ? null : accepted.executedSelection();
+    ExecutionSelection selectedExecution = start.settings().execution();
     return new Entry(
         entry.id(),
         entry.sessionId(),
@@ -910,7 +918,7 @@ public final class ThreadProcessor {
             contextWindow,
             maxOutputTokens,
             compactionStart != null ? compactionStart : start.compaction(),
-            executed == null || selectedModel == null || executed.equals(selectedModel)
+            executed == null || selectedExecution == null || executed.equals(selectedExecution)
                 ? null
                 : executed,
             accepted == null ? null : accepted.capabilities()),

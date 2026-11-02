@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPay
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -187,7 +187,7 @@ final class TurnPlanBuilder {
             parentId = entryId;
           }
           case SetAgentCommandPayload ignored -> {}
-          case SetModelCommandPayload ignored -> {}
+          case SetExecutionCommandPayload ignored -> {}
           case SetEnvironmentCommandPayload ignored -> {}
         }
       }

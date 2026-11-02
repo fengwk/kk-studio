@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 
 import java.util.Objects;
@@ -28,7 +28,7 @@ public record TurnStartPayload(
     Integer contextWindow,
     Integer maxOutputTokens,
     CompactionStart compaction,
-    ModelSelection fallbackModel,
+    ExecutionSelection executedSelection,
     TurnCapabilities capabilities)
     implements EntryPayload {
 
@@ -45,7 +45,7 @@ public record TurnStartPayload(
       Integer contextWindow,
       Integer maxOutputTokens,
       CompactionStart compaction,
-      ModelSelection fallbackModel) {
+      ExecutionSelection executedSelection) {
     this(
         reason,
         settings,
@@ -53,7 +53,7 @@ public record TurnStartPayload(
         contextWindow,
         maxOutputTokens,
         compaction,
-        fallbackModel,
+        executedSelection,
         null);
   }
 
@@ -75,13 +75,13 @@ public record TurnStartPayload(
       throw new IllegalArgumentException(
           "compaction metadata is required iff reason is COMPACTION");
     }
-    if (fallbackModel != null
+    if (executedSelection != null
         && (contextWindow == null
             || compaction != null
-            || fallbackModel.equals(settings.model()))) {
+            || executedSelection.equals(settings.execution()))) {
       throw new IllegalArgumentException(
-          "fallbackModel is only recorded for a resolved non-compaction turn that left the thread"
-              + " model");
+          "executedSelection is only recorded for a resolved non-compaction turn that left the"
+              + " thread execution");
     }
   }
 

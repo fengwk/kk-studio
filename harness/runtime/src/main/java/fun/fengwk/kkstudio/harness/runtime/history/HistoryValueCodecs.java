@@ -32,7 +32,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("agentName", "model", "environmentName", "goal");
+      orderedSet("agentName", "execution", "environmentName", "goal");
   private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
   private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
@@ -69,7 +69,7 @@ final class HistoryValueCodecs {
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
     node.put("agentName", settings.agentName());
-    node.set("model", encodeModelSelection(settings.model()));
+    node.set("execution", ExecutionSelectionJsonCodec.encode(settings.execution()));
     // environmentName 是完整快照的一部分：null 必须显式输出，解码端据此区分「未选择」与旧的两字段 shape。
     if (settings.environmentName() == null) {
       node.putNull("environmentName");
@@ -93,7 +93,7 @@ final class HistoryValueCodecs {
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
         requiredText(node, "agentName", context),
-        decodeModelSelection(node.get("model"), context + ".model"),
+        ExecutionSelectionJsonCodec.decode(node.get("execution"), context + ".execution"),
         nullableEnvironmentName(node, "environmentName", context),
         nullableGoal(node, "goal", context));
   }

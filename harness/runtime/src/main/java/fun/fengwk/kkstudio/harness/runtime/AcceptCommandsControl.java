@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -20,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -49,20 +52,22 @@ import java.util.UUID;
 final class AcceptCommandsControl {
 
   /**
-   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt;
+   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT -&gt;
    * SET_CONTRIBUTOR_STATE，每类至多一次、全部在消息之前。
    */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
           ThreadCommandType.SET_AGENT,
-          ThreadCommandType.SET_MODEL,
+          ThreadCommandType.SET_EXECUTION,
           ThreadCommandType.SET_ENVIRONMENT,
           ThreadCommandType.SET_CONTRIBUTOR_STATE);
 
   private final HarnessStore store;
+  private final DriverRegistry driverRegistry;
 
-  AcceptCommandsControl(HarnessStore store) {
+  AcceptCommandsControl(HarnessStore store, DriverRegistry driverRegistry) {
     this.store = Objects.requireNonNull(store, "store");
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
   }
 
   AcceptedCommands acceptCommands(AcceptCommandsCommand command, AcceptancePreflight preflight) {
@@ -98,6 +103,7 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> commands,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
+    validateExecutionCommandsOnNewRoot(target.rootSettings(), commands);
     return store.transaction(
         tx -> {
           LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
@@ -229,6 +235,8 @@ final class AcceptCommandsControl {
                     + target.sessionId());
           }
           requireLegalForkBoundary(startEntry);
+          BranchSettings sourceSettings = tx.entries().loadBranchSettings(target.startEntryId());
+          validateForkExecutionCommands(sourceSettings, commands, "NEW_THREAD");
           String creationRequestHash =
               ThreadCreationRequestHash.forNewThread(
                   target.sessionId(),
@@ -363,6 +371,7 @@ final class AcceptCommandsControl {
                 "start entry " + target.startEntryId() + " is not on the source thread path");
           }
           BranchSettings rootSettings = tx.entries().loadBranchSettings(target.startEntryId());
+          validateForkExecutionCommands(rootSettings, commands, "NEW_FORKED_SESSION");
           Instant now = tx.now();
           Session session =
               new Session(
@@ -421,7 +430,8 @@ final class AcceptCommandsControl {
             throw new HarnessRuntimeNotFoundException(
                 "thread " + target.threadId() + " does not exist");
           }
-          return acceptOnLockedThread(tx, thread, target, commands, preflight, null);
+          return acceptOnLockedThread(
+              tx, thread, target, commands, preflight, null, driverRegistry);
         });
   }
 
@@ -436,6 +446,17 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> commands,
       AcceptancePreflight preflight,
       SpawnRequest ticket) {
+    return acceptOnLockedThread(tx, thread, target, commands, preflight, ticket, null);
+  }
+
+  static AcceptedCommands acceptOnLockedThread(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      AcceptCommandsTarget.Thread target,
+      List<NewThreadCommand> commands,
+      AcceptancePreflight preflight,
+      SpawnRequest ticket,
+      DriverRegistry driverRegistry) {
     boolean genuineUserInput = isGenuineUserInput(commands);
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
@@ -473,6 +494,9 @@ final class AcceptCommandsControl {
     }
     validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     validateBatchShape(target, commands, false);
+    if (driverRegistry != null) {
+      validateExecutionCommandsOnThread(tx, thread, commands, driverRegistry);
+    }
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
@@ -928,6 +952,60 @@ final class AcceptCommandsControl {
 
   private static IllegalArgumentException invalidBatch(String targetLabel, String message) {
     return new IllegalArgumentException(targetLabel + " batch: " + message);
+  }
+
+  private void validateExecutionCommandsOnNewRoot(
+      BranchSettings rootSettings, List<NewThreadCommand> commands) {
+    if (rootSettings.execution() != null) {
+      driverRegistry.validate(rootSettings.execution());
+    }
+    for (NewThreadCommand command : commands) {
+      if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
+        driverRegistry.validate(setExecution.execution());
+      }
+    }
+  }
+
+  private void validateForkExecutionCommands(
+      BranchSettings sourceSettings, List<NewThreadCommand> commands, String context) {
+    AgentDriver sourceDriver = driverRegistry.of(sourceSettings);
+    if (!sourceDriver.capabilities().fork()) {
+      throw new IllegalArgumentException(
+          "fork is unsupported by driver " + sourceDriver.id() + " in " + context);
+    }
+    for (NewThreadCommand command : commands) {
+      if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
+        driverRegistry.validate(setExecution.execution());
+        if (!sourceDriver.id().equals(setExecution.execution().driver())) {
+          throw new IllegalArgumentException(
+              "driver cannot be changed in fork: source="
+                  + sourceDriver.id()
+                  + ", requested="
+                  + setExecution.execution().driver());
+        }
+      }
+    }
+  }
+
+  private static void validateExecutionCommandsOnThread(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      List<NewThreadCommand> commands,
+      DriverRegistry driverRegistry) {
+    BranchSettings currentSettings = tx.entries().loadBranchSettings(thread.headEntryId());
+    for (NewThreadCommand command : commands) {
+      if (command.payload() instanceof SetExecutionCommandPayload setExecution) {
+        driverRegistry.validate(setExecution.execution());
+        if (currentSettings.execution() != null
+            && !currentSettings.execution().driver().equals(setExecution.execution().driver())) {
+          throw new IllegalArgumentException(
+              "driver cannot be changed on an existing thread: current="
+                  + currentSettings.execution().driver()
+                  + ", requested="
+                  + setExecution.execution().driver());
+        }
+      }
+    }
   }
 
   private static HarnessRuntimeConflictException conflict(

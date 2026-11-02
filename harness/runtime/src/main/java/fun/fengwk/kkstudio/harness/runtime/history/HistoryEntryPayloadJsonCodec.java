@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -70,7 +71,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "contextWindow",
           "maxOutputTokens",
           "compaction",
-          "fallbackModel",
+          "executedSelection",
           "capabilities");
   private static final Set<String> TURN_CAPABILITIES_FIELDS =
       orderedSet("toolBindings", "subagentBindings", "mediaCapabilities");
@@ -212,10 +213,10 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.set("compaction", encodeCompactionStart(value.compaction()));
     }
-    if (value.fallbackModel() == null) {
-      node.putNull("fallbackModel");
+    if (value.executedSelection() == null) {
+      node.putNull("executedSelection");
     } else {
-      node.set("fallbackModel", HistoryValueCodecs.encodeModelSelection(value.fallbackModel()));
+      node.set("executedSelection", ExecutionSelectionJsonCodec.encode(value.executedSelection()));
     }
     if (value.capabilities() == null) {
       node.putNull("capabilities");
@@ -457,10 +458,10 @@ public final class HistoryEntryPayloadJsonCodec {
         HistoryValueCodecs.nullablePositiveInt(node, "contextWindow", "TURN_START"),
         HistoryValueCodecs.nullablePositiveInt(node, "maxOutputTokens", "TURN_START"),
         decodeNullableCompactionStart(node.get("compaction")),
-        node.get("fallbackModel").isNull()
+        node.get("executedSelection").isNull()
             ? null
-            : HistoryValueCodecs.decodeModelSelection(
-                node.get("fallbackModel"), "TURN_START.fallbackModel"),
+            : ExecutionSelectionJsonCodec.decode(
+                node.get("executedSelection"), "TURN_START.executedSelection"),
         node.get("capabilities").isNull()
             ? null
             : decodeTurnCapabilities(node.get("capabilities")));
@@ -651,7 +652,7 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet(
           "phase",
           "trigger",
-          "executionModel",
+          "execution",
           "outputBudget",
           "cutEntryId",
           "turnPrefixStartEntryId",
@@ -663,10 +664,10 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("phase", start.phase().name());
     node.put("trigger", start.trigger().name());
-    if (start.executionModel() == null) {
-      node.putNull("executionModel");
+    if (start.execution() == null) {
+      node.putNull("execution");
     } else {
-      node.set("executionModel", HistoryValueCodecs.encodeModelSelection(start.executionModel()));
+      node.set("execution", ExecutionSelectionJsonCodec.encode(start.execution()));
     }
     if (start.outputBudget() == null) {
       node.putNull("outputBudget");
@@ -703,12 +704,11 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
     HistoryValueCodecs.requireExactFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
-    JsonNode modelNode = node.get("executionModel");
-    ModelSelection executionModel =
-        modelNode == null || modelNode.isNull()
+    JsonNode executionNode = node.get("execution");
+    ExecutionSelection execution =
+        executionNode == null || executionNode.isNull()
             ? null
-            : HistoryValueCodecs.decodeModelSelection(
-                modelNode, "TURN_START.compaction.executionModel");
+            : ExecutionSelectionJsonCodec.decode(executionNode, "TURN_START.compaction.execution");
     return new CompactionStart(
         HistoryValueCodecs.readEnum(
             CompactionPhase.class,
@@ -718,7 +718,7 @@ public final class HistoryEntryPayloadJsonCodec {
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
             "TURN_START.compaction.trigger"),
-        executionModel,
+        execution,
         HistoryValueCodecs.nullablePositiveLong(node, "outputBudget", "TURN_START.compaction"),
         HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(

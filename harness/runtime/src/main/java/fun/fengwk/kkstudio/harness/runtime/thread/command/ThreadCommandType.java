@@ -6,7 +6,7 @@ public enum ThreadCommandType {
   CUSTOM_MESSAGE,
   GOAL,
   SET_AGENT,
-  SET_MODEL,
+  SET_EXECUTION,
   SET_ENVIRONMENT,
   /** 系统通知：只由 Runtime 内部接受，普通 HTTP 客户端不允许提交。 */
   NOTIFICATION,
@@ -21,7 +21,7 @@ public enum ThreadCommandType {
   /** 该 command 是否只变更 branch 配置（不产生 message Entry，不单独唤醒模型）。 */
   public boolean isSetting() {
     return this == SET_AGENT
-        || this == SET_MODEL
+        || this == SET_EXECUTION
         || this == SET_ENVIRONMENT
         || this == SET_CONTRIBUTOR_STATE;
   }

@@ -140,7 +140,7 @@ final class SessionForkCopy {
           new CompactionStart(
               compaction.phase(),
               compaction.trigger(),
-              compaction.executionModel(),
+              compaction.execution(),
               compaction.outputBudget(),
               requireMapped(compaction.cutEntryId(), newIds),
               mappedOrNull(compaction.turnPrefixStartEntryId(), newIds),

@@ -64,7 +64,8 @@ public final class CommandHarvestReducer {
           settings = settings.withGoal(goal);
         }
         case SetAgentCommandPayload value -> settings = settings.withAgentName(value.agentName());
-        case SetModelCommandPayload value -> settings = settings.withModel(value.model());
+        case SetExecutionCommandPayload value -> settings =
+            settings.withExecution(value.execution());
         case SetEnvironmentCommandPayload value -> settings =
             settings.withEnvironmentName(value.environmentName());
       }

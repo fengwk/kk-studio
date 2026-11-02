@@ -82,7 +82,7 @@ public final class CompactionChildSpawn {
     return new CompactionStart(
         preparation.phase(),
         preparation.trigger(),
-        resolved.executionModel(),
+        resolved.execution(),
         resolved.outputBudget(),
         preparation.cutEntryId(),
         preparation.turnPrefixStartEntryId(),

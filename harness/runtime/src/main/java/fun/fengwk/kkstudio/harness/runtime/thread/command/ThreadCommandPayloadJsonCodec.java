@@ -11,8 +11,8 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
@@ -51,14 +51,13 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> GOAL_FIELDS = orderedSet("text");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
-  private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
+  private static final Set<String> SET_EXECUTION_FIELDS = orderedSet("execution");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
   private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
   private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
       orderedSet("contributorId", "customType", "data");
-  private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -128,7 +127,7 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case GOAL -> decodeGoal(root);
       case SET_AGENT -> decodeSetAgent(root);
-      case SET_MODEL -> decodeSetModel(root);
+      case SET_EXECUTION -> decodeSetExecution(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
       case NOTIFICATION -> decodeNotification(root);
       case SET_CONTRIBUTOR_STATE -> decodeSetContributorState(root);
@@ -171,9 +170,9 @@ public final class ThreadCommandPayloadJsonCodec {
         yield node;
       }
       case SetAgentCommandPayload value -> NODES.objectNode().put("agentName", value.agentName());
-      case SetModelCommandPayload value -> NODES
+      case SetExecutionCommandPayload value -> NODES
           .objectNode()
-          .set("model", encodeModelSelection(value.model()));
+          .set("execution", ExecutionSelectionJsonCodec.encode(value.execution()));
       case SetEnvironmentCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
         // environmentName 必须显式存在：null 表示解除环境选择，与「字段缺失」严格区分。
@@ -205,13 +204,6 @@ public final class ThreadCommandPayloadJsonCodec {
     node.put("contributorId", state.contributorId());
     node.put("customType", state.customType());
     node.set("data", parseCanonicalObject(state.dataJson(), "state.data"));
-    return node;
-  }
-
-  private static ObjectNode encodeModelSelection(ModelSelection selection) {
-    ObjectNode node = NODES.objectNode();
-    node.put("modelName", selection.modelName());
-    node.put("variant", selection.variant());
     return node;
   }
 
@@ -254,10 +246,11 @@ public final class ThreadCommandPayloadJsonCodec {
     return new SetAgentCommandPayload(canonicalText(node, "agentName", "SET_AGENT"));
   }
 
-  private static SetModelCommandPayload decodeSetModel(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_MODEL");
-    requireExactFields(node, SET_MODEL_FIELDS, "SET_MODEL");
-    return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
+  private static SetExecutionCommandPayload decodeSetExecution(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_EXECUTION");
+    requireExactFields(node, SET_EXECUTION_FIELDS, "SET_EXECUTION");
+    return new SetExecutionCommandPayload(
+        ExecutionSelectionJsonCodec.decode(node.get("execution"), "SET_EXECUTION.execution"));
   }
 
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
@@ -278,18 +271,6 @@ public final class ThreadCommandPayloadJsonCodec {
     }
     return CommandValueValidation.requireCanonicalEnvironmentName(
         value.stringValue(), context + "." + field);
-  }
-
-  private static ModelSelection decodeModelSelection(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_MODEL.model");
-    requireExactFields(node, MODEL_SELECTION_FIELDS, "SET_MODEL.model");
-    JsonNode variant = node.get("variant");
-    if (!variant.isNull() && !variant.isString()) {
-      throw new IllegalArgumentException("SET_MODEL.model.variant must be text or null");
-    }
-    return new ModelSelection(
-        canonicalText(node, "modelName", "SET_MODEL.model"),
-        variant.isNull() ? null : canonicalText(node, "variant", "SET_MODEL.model"));
   }
 
   private static NotificationCommandPayload decodeNotification(JsonNode value) {

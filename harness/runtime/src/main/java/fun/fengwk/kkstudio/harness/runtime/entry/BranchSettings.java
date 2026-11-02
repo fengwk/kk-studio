@@ -12,7 +12,7 @@ import java.util.Objects;
  * Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
-    String agentName, ModelSelection model, String environmentName, GoalSetting goal) {
+    String agentName, ExecutionSelection execution, String environmentName, GoalSetting goal) {
 
   /** Environment name 上限（与 Environment 资源名约束一致）。 */
   public static final int MAX_ENVIRONMENT_NAME_CHARS = 64;
@@ -21,33 +21,33 @@ public record BranchSettings(
 
   public BranchSettings {
     agentName = requireCanonicalAgentName(agentName, "agentName");
-    model = Objects.requireNonNull(model, "model");
+    execution = Objects.requireNonNull(execution, "execution");
     environmentName = requireCanonicalEnvironmentName(environmentName, "environmentName");
   }
 
   /** 无 Goal 的快捷构造：新建 branch 的 ROOT settings 从不携带 Goal。 */
-  public BranchSettings(String agentName, ModelSelection model, String environmentName) {
-    this(agentName, model, environmentName, null);
+  public BranchSettings(String agentName, ExecutionSelection execution, String environmentName) {
+    this(agentName, execution, environmentName, null);
   }
 
   /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
-    return new BranchSettings(value, model, environmentName, goal);
+    return new BranchSettings(value, execution, environmentName, goal);
   }
 
-  /** 返回整体原子替换 model selection 后的快照。 */
-  public BranchSettings withModel(ModelSelection value) {
+  /** 返回整体原子替换 execution selection 后的快照。 */
+  public BranchSettings withExecution(ExecutionSelection value) {
     return new BranchSettings(agentName, value, environmentName, goal);
   }
 
   /** 返回整体替换 Environment 选择后的快照；null 表示解除环境选择。 */
   public BranchSettings withEnvironmentName(String value) {
-    return new BranchSettings(agentName, model, value, goal);
+    return new BranchSettings(agentName, execution, value, goal);
   }
 
   /** 返回整体替换用户 Goal 后的快照；null 表示用户清除 Goal。 */
   public BranchSettings withGoal(GoalSetting value) {
-    return new BranchSettings(agentName, model, environmentName, value);
+    return new BranchSettings(agentName, execution, environmentName, value);
   }
 
   private static String requireCanonicalAgentName(String value, String field) {

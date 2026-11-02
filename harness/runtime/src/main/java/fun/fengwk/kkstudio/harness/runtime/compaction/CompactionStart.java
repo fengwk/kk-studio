@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -20,7 +20,7 @@ import java.util.UUID;
 public record CompactionStart(
     CompactionPhase phase,
     CompactionTrigger trigger,
-    ModelSelection executionModel,
+    ExecutionSelection execution,
     Long outputBudget,
     UUID cutEntryId,
     UUID turnPrefixStartEntryId,
@@ -51,18 +51,18 @@ public record CompactionStart(
     trigger = Objects.requireNonNull(trigger, "trigger");
     Objects.requireNonNull(cutEntryId, "cutEntryId");
     boolean allRunGroupNull =
-        executionModel == null
+        execution == null
             && outputBudget == null
             && childThreadId == null
             && joinInvocationId == null;
     boolean allRunGroupNonNull =
-        executionModel != null
+        execution != null
             && outputBudget != null
             && childThreadId != null
             && joinInvocationId != null;
     if (!allRunGroupNull && !allRunGroupNonNull) {
       throw new IllegalArgumentException(
-          "executionModel, outputBudget, childThreadId, and joinInvocationId must either all be null or all be non-null");
+          "execution, outputBudget, childThreadId, and joinInvocationId must either all be null or all be non-null");
     }
     if (allRunGroupNonNull && outputBudget <= 0L) {
       throw new IllegalArgumentException("outputBudget must be positive");

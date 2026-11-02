@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
@@ -32,16 +33,17 @@ final class ThreadContextLock {
   private ThreadContextLock() {}
 
   static LockedThreadContext load(
-      HarnessStore.Transaction tx, ThreadState thread, AgentDriver driver) {
-    return load(tx, thread, tx.entries().loadCurrent(thread.headEntryId()), driver);
+      HarnessStore.Transaction tx, ThreadState thread, DriverRegistry registry) {
+    return load(tx, thread, tx.entries().loadCurrent(thread.headEntryId()), registry);
   }
 
   static LockedThreadContext load(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryCurrentState state,
-      AgentDriver driver) {
-    Objects.requireNonNull(driver, "driver");
+      DriverRegistry registry) {
+    Objects.requireNonNull(registry, "registry");
+    AgentDriver driver = registry.of(state.baseSettings());
     LockedDriverState driverState = driver.lockState(tx, thread, state);
     List<ToolInvocation> siblings = List.of();
     if (state.openTurnStart().isPresent() && assistantHead(state)) {

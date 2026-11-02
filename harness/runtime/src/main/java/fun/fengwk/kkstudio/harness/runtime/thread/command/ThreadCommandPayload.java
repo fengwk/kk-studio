@@ -10,7 +10,7 @@ public sealed interface ThreadCommandPayload
         CustomMessageCommandPayload,
         GoalCommandPayload,
         SetAgentCommandPayload,
-        SetModelCommandPayload,
+        SetExecutionCommandPayload,
         SetEnvironmentCommandPayload,
         NotificationCommandPayload,
         SetContributorStateCommandPayload {

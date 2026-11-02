@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.driver;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -40,8 +40,8 @@ public sealed interface TurnResolution
 
     TurnCapabilities capabilities();
 
-    /** 实际执行的模型选择；与设置一致时 Runtime 不写 fallback。 */
-    ModelSelection executedSelection();
+    /** 实际执行的执行选择；与设置一致时 Runtime 不写 executedSelection。 */
+    ExecutionSelection executedSelection();
 
     /**
      * 在 Runtime 已插入 TURN_START / 输入 Entry 并推进 Thread 后，由 Driver 创建私有 generation 状态与 MODEL Work。

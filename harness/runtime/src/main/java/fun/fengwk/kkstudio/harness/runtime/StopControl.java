@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -79,11 +80,11 @@ final class StopControl {
   private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
   private final HarnessStore store;
-  private final AgentDriver driver;
+  private final DriverRegistry driverRegistry;
 
-  StopControl(HarnessStore store, AgentDriver driver) {
+  StopControl(HarnessStore store, DriverRegistry driverRegistry) {
     this.store = Objects.requireNonNull(store, "store");
-    this.driver = Objects.requireNonNull(driver, "driver");
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
   }
 
   Commit stop(StopCommand command, Consumer<Commit> afterCommit) {
@@ -269,7 +270,9 @@ final class StopControl {
     // Stage 5: Driver 状态锁
     Map<UUID, LockedDriverState> driverStatesByThread = new HashMap<>();
     for (ThreadStopCandidate candidate : toStop) {
+      EntryPath path = pathsByThread.get(candidate.thread().id());
       EntryCurrentState state = statesByThread.get(candidate.thread().id());
+      AgentDriver driver = driverRegistry.of(path.baseSettings());
       driverStatesByThread.put(
           candidate.thread().id(), driver.lockState(tx, candidate.thread(), state));
     }
@@ -337,10 +340,11 @@ final class StopControl {
       LockedDriverState driverState = original.driverState();
       List<ToolInvocation> siblings = original.toolSiblings();
       ThreadContext context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
+      AgentDriver driver = driverRegistry.of(path.baseSettings());
       if (context instanceof ThreadContext.ModelTerminalPending pending) {
         // 提交先于 Stop：用 Driver 的公共物化把已提交的 terminal 结果写入历史（绝不 409），再正常 Stop。
         Materialized materialized =
-            materializeTerminalModel(tx, thread, path, pending.driverState());
+            materializeTerminalModel(tx, thread, path, pending.driverState(), driver);
         if (materialized.terminalEntryId() != null) {
           committedTerminals.add(materialized);
         }
@@ -351,7 +355,8 @@ final class StopControl {
         siblings = loadAssistantSiblings(tx, thread, path, driverState);
         context = CLASSIFIER.classify(thread, currentState, driverState, siblings);
       } else if (context instanceof ThreadContext.ToolTerminalPending pending) {
-        thread = materializeTerminalToolBatch(tx, thread, path, driverState, pending.siblings());
+        thread =
+            materializeTerminalToolBatch(tx, thread, path, driverState, pending.siblings(), driver);
         path = tx.entries().loadPath(thread.headEntryId());
         currentState = EntryCurrentState.from(path);
         driverState = driver.lockState(tx, thread, currentState);
@@ -898,7 +903,8 @@ final class StopControl {
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
-      LockedDriverState driverState) {
+      LockedDriverState driverState,
+      AgentDriver driver) {
     Instant mutationNow = tx.now();
     DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
     ThreadState current = tx.threads().find(thread.id()).orElseThrow();
@@ -923,7 +929,8 @@ final class StopControl {
       ThreadState thread,
       EntryPath path,
       LockedDriverState driverState,
-      List<ToolInvocation> siblings) {
+      List<ToolInvocation> siblings,
+      AgentDriver driver) {
     Instant mutationNow = tx.now();
     UUID turnStartEntryId =
         path.openTurnStart()
