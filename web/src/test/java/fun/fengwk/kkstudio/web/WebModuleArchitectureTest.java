@@ -12,6 +12,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -35,6 +37,7 @@ class WebModuleArchitectureTest {
   private static final String HARNESS_MODEL_PREFIX = "fun.fengwk.kkstudio.harness.model.";
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
+  private static final String PROJECT_REPO_PREFIX = "fun.fengwk.kkstudio.project.repo.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
       List.of(
           HARNESS_RUNTIME_PREFIX,
@@ -71,6 +74,7 @@ class WebModuleArchitectureTest {
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
+          PROJECT_REPO_PREFIX,
           PLATFORM_ENVIRONMENT_PREFIX + "gateway." + "EnvironmentDaemonGateway",
           PLATFORM_ENVIRONMENT_PREFIX + "registry." + "EnvironmentConnection",
           PLATFORM_ENVIRONMENT_PREFIX + "registry." + "EnvironmentRegistry");
@@ -271,6 +275,42 @@ class WebModuleArchitectureTest {
                 + String.join("\n", violations));
   }
 
+  private static final Pattern BUSINESS_SQL_PATTERN =
+      Pattern.compile(
+          "(?i)\"(?:select\\s+.+?\\s+from|insert\\s+into|update\\s+.+?\\s+set|delete\\s+from)\\s+");
+
+  @Test
+  void webMainSourcesDoNotExecuteDirectBusinessTableSqlQueries() throws IOException {
+    Path main = locateWebMainJava();
+    assertTrue(Files.isDirectory(main), "web main sources must exist: " + main);
+    List<String> violations = new ArrayList<>();
+
+    try (Stream<Path> stream = Files.walk(main)) {
+      stream
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> !isGeneratedOrTarget(path))
+          .forEach(
+              path -> {
+                try {
+                  String source = Files.readString(path, StandardCharsets.UTF_8);
+                  Matcher matcher = BUSINESS_SQL_PATTERN.matcher(source);
+                  while (matcher.find()) {
+                    violations.add(
+                        relative(main, path) + ": contains business SQL query: " + matcher.group());
+                  }
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              });
+    }
+
+    assertTrue(
+        violations.isEmpty(),
+        () ->
+            "web main sources must not execute direct business table SQL queries:\n"
+                + String.join("\n", violations));
+  }
+
   private static List<String> scanViolations(Path main) throws IOException {
     List<String> violations = new ArrayList<>();
     try (Stream<Path> stream = Files.walk(main)) {
@@ -296,6 +336,12 @@ class WebModuleArchitectureTest {
                     } else if (isForbiddenHarnessReference(trimmed)) {
                       violations.add(
                           relative(main, path) + ": forbidden Harness reference " + trimmed);
+                    } else {
+                      for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
+                        if (trimmed.contains(prefix)) {
+                          violations.add(relative(main, path) + ": forbidden reference " + trimmed);
+                        }
+                      }
                     }
                   }
                 } catch (IOException error) {
