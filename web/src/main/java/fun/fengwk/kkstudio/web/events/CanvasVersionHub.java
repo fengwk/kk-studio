@@ -3,12 +3,11 @@ package fun.fengwk.kkstudio.web.events;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import javax.sql.DataSource;
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -30,11 +29,11 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
 
   static final String CHANNEL = "canvas_revision";
 
-  private final DataSource dataSource;
+  private final CanvasStore canvasStore;
   private final SubscriptionFanOut<Event> subscribers = new SubscriptionFanOut<>();
 
-  CanvasVersionHub(DataSource dataSource) {
-    this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+  CanvasVersionHub(CanvasStore canvasStore) {
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
   }
 
   @Override
@@ -62,19 +61,10 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
   }
 
   private long currentRevision(UUID canvasId) {
-    try (Connection connection = dataSource.getConnection();
-        PreparedStatement statement =
-            connection.prepareStatement("select revision from canvas_document where id = ?")) {
-      statement.setObject(1, canvasId);
-      try (ResultSet result = statement.executeQuery()) {
-        if (!result.next()) {
-          throw new IllegalArgumentException("unknown canvas: " + canvasId);
-        }
-        return result.getLong(1);
-      }
-    } catch (SQLException error) {
-      throw new IllegalStateException("cannot read current canvas revision", error);
-    }
+    return canvasStore
+        .findDocument(canvasId)
+        .map(CanvasDocument::revision)
+        .orElseThrow(() -> new IllegalArgumentException("unknown canvas: " + canvasId));
   }
 
   void broadcastResync() {
@@ -91,15 +81,9 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
     }
     String rawCanvasId = payload.substring(0, colon);
     String rawRevision = payload.substring(colon + 1);
-    if (!rawRevision.matches("0|[1-9]\\d*")) {
-      return null;
-    }
     try {
-      UUID canvasId = UUID.fromString(rawCanvasId);
-      if (!canvasId.toString().equals(rawCanvasId)) {
-        return null;
-      }
-      long revision = Long.parseLong(rawRevision);
+      UUID canvasId = Uuids.parseCanonical(rawCanvasId, "canvasId");
+      long revision = DecimalLongs.parseNonNegative(rawRevision, "revision");
       return new CanvasRevision(canvasId, revision);
     } catch (IllegalArgumentException ignored) {
       return null;

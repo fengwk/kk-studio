@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.project;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.id.Uuids;
+
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -63,8 +65,7 @@ public class ProjectInvalidationHub {
       return null;
     }
     try {
-      UUID parsed = UUID.fromString(value);
-      return parsed.toString().equals(value) ? parsed : null;
+      return Uuids.parseCanonical(value, "payload");
     } catch (IllegalArgumentException error) {
       return null;
     }

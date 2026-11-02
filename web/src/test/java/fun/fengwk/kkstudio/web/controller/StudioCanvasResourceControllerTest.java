@@ -15,18 +15,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
-import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
-import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -60,7 +55,13 @@ class StudioCanvasResourceControllerTest {
             .setMessageConverters(
                 new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
             .build();
-    when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
+    CanvasResource media =
+        new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);
+    CanvasResource text =
+        new CanvasResource(TEXT_RESOURCE, CANVAS, TEXT_NODE, 0, null, "note", "hello", NOW);
+    when(queryService.findResource(CANVAS, MEDIA_RESOURCE)).thenReturn(Optional.of(media));
+    when(queryService.findResource(CANVAS, TEXT_RESOURCE)).thenReturn(Optional.of(text));
+    when(queryService.findResource(CANVAS, MISSING_RESOURCE)).thenReturn(Optional.empty());
   }
 
   /** 原图与 preview URL 都只返回方法、URL、headers 和 expiry，不暴露 bucket/key。 */
@@ -114,34 +115,5 @@ class StudioCanvasResourceControllerTest {
         .perform(post("/api/canvases/not-a-uuid/resources/" + MEDIA_RESOURCE + "/download-url"))
         .andExpect(status().isBadRequest());
     verify(blobManager, never()).presignOriginalUrl(any());
-  }
-
-  private static CanvasSnapshot snapshot() {
-    CanvasDocument document = new CanvasDocument(CANVAS, "demo", 3, NOW, NOW);
-    CanvasResource media =
-        new CanvasResource(MEDIA_RESOURCE, CANVAS, NODE, 0, BLOB, "a.png", null, NOW);
-    CanvasResource text =
-        new CanvasResource(TEXT_RESOURCE, CANVAS, TEXT_NODE, 0, null, "note", "hello", NOW);
-    CanvasResourceNode mediaNode =
-        new CanvasResourceNode(
-            NODE,
-            CANVAS,
-            "image",
-            new CanvasTransform(1, 2, 100, 80),
-            null,
-            List.of(media),
-            null,
-            null);
-    CanvasResourceNode textNode =
-        new CanvasResourceNode(
-            TEXT_NODE,
-            CANVAS,
-            "note",
-            new CanvasTransform(1, 2, 100, 80),
-            null,
-            List.of(text),
-            null,
-            null);
-    return new CanvasSnapshot(document, List.of(mediaNode, textNode), List.of(), List.of());
   }
 }

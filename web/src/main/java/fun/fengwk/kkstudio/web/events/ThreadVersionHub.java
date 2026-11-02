@@ -3,12 +3,11 @@ package fun.fengwk.kkstudio.web.events;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import javax.sql.DataSource;
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.number.DecimalLongs;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -27,11 +26,11 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
 
   static final String CHANNEL = "harness_thread_version";
 
-  private final DataSource dataSource;
+  private final HarnessStore harnessStore;
   private final SubscriptionFanOut<Event> subscribers = new SubscriptionFanOut<>();
 
-  ThreadVersionHub(DataSource dataSource) {
-    this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+  ThreadVersionHub(HarnessStore harnessStore) {
+    this.harnessStore = Objects.requireNonNull(harnessStore, "harnessStore");
   }
 
   @Override
@@ -59,19 +58,12 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
   }
 
   private long currentVersion(UUID threadId) {
-    try (Connection connection = dataSource.getConnection();
-        PreparedStatement statement =
-            connection.prepareStatement("select version from harness_thread where id = ?")) {
-      statement.setObject(1, threadId);
-      try (ResultSet result = statement.executeQuery()) {
-        if (!result.next()) {
-          throw new IllegalArgumentException("unknown thread: " + threadId);
-        }
-        return result.getLong(1);
-      }
-    } catch (SQLException error) {
-      throw new IllegalStateException("cannot read current thread version", error);
-    }
+    return harnessStore.transaction(
+        tx ->
+            tx.threads()
+                .find(threadId)
+                .map(ThreadState::version)
+                .orElseThrow(() -> new IllegalArgumentException("unknown thread: " + threadId)));
   }
 
   void broadcastResync() {
@@ -87,17 +79,11 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
       return null;
     }
     String rawThreadId = payload.substring(0, colon);
-    String version = payload.substring(colon + 1);
-    if (!version.matches("0|[1-9]\\d*")) {
-      return null;
-    }
+    String rawVersion = payload.substring(colon + 1);
     try {
-      UUID threadId = UUID.fromString(rawThreadId);
-      if (!threadId.toString().equals(rawThreadId)) {
-        return null;
-      }
-      Long.parseLong(version);
-      return new ThreadVersion(threadId, version);
+      UUID threadId = Uuids.parseCanonical(rawThreadId, "threadId");
+      long version = DecimalLongs.parseNonNegative(rawVersion, "version");
+      return new ThreadVersion(threadId, Long.toString(version));
     } catch (IllegalArgumentException ignored) {
       return null;
     }
