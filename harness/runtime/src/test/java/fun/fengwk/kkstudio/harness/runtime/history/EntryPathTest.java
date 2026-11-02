@@ -1533,6 +1533,102 @@ class EntryPathTest {
         time(id));
   }
 
+  @Test
+  void executionFailedRequiresAssistantCompleteToolsAndNonCompactionTurn() {
+    Entry root = root(settings("root"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L), "call-1:read");
+    Entry result = toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read");
+    Entry end =
+        turnEnd(
+            id(6L), id(5L), id(2L), TurnEndOutcome.FAILED, TurnEndReason.EXECUTION_FAILED, null);
+    new EntryPath(List.of(root, start, user, assistant, result, end));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    start,
+                    user,
+                    turnEnd(
+                        id(4L),
+                        id(3L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.EXECUTION_FAILED,
+                        null))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    start,
+                    user,
+                    assistant,
+                    turnEnd(
+                        id(6L),
+                        id(4L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.EXECUTION_FAILED,
+                        null))));
+    Entry compaction =
+        compactionStart(
+            id(2L),
+            id(1L),
+            settings("turn"),
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            null,
+            null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    compaction,
+                    compactionResult(id(3L), id(2L)),
+                    turnEnd(
+                        id(4L),
+                        id(3L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.EXECUTION_FAILED,
+                        null))));
+  }
+
+  @Test
+  void nativeCompactionIsTransparentToTurnGrammarAndIgnoredInTrailingControl() {
+    Entry root = root(settings("root"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry nativeAuditInTurn = nativeCompaction(id(4L), id(3L));
+    Entry assistant = assistantMessage(id(5L), id(4L));
+    Entry end = turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+    Entry nativeAuditOutside = nativeCompaction(id(7L), id(6L));
+
+    EntryPath path =
+        new EntryPath(
+            List.of(root, start, user, nativeAuditInTurn, assistant, end, nativeAuditOutside));
+    assertEquals(end, path.headIgnoringTrailingControlEntries());
+    assertEquals(settings("turn"), path.baseSettings());
+    assertFalse(path.openTurnStart().isPresent());
+  }
+
+  private static Entry nativeCompaction(UUID id, UUID parentId) {
+    return new Entry(
+        id,
+        OWNER_THREAD_ID,
+        parentId,
+        new NativeCompactionPayload("auto", 100L, 50L, 50L, 10L, "h", "a", "t"),
+        time(id));
+  }
+
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     ModelCost cost =

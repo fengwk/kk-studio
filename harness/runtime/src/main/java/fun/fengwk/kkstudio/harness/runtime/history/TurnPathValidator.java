@@ -55,7 +55,7 @@ final class TurnPathValidator {
   /** 按 root-to-head 顺序访问一个非 ROOT Entry。 */
   void visit(Entry entry) {
     EntryPayload payload = entry.payload();
-    if (payload instanceof CustomEntryPayload) {
+    if (payload instanceof CustomEntryPayload || payload instanceof NativeCompactionPayload) {
       // CUSTOM 是透明 branch state：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/callIndex
       // 判定，也不打开/关闭 turn。
       return;
@@ -164,7 +164,14 @@ final class TurnPathValidator {
         }
         case FAILED -> {
           requireInput("a failed turn");
-          if (end.reason() == TurnEndReason.OUTPUT_TRUNCATED
+          if (end.reason() == TurnEndReason.EXECUTION_FAILED) {
+            if (openReason != TurnStartReason.INPUT && openReason != TurnStartReason.CONTINUATION) {
+              throw new IllegalArgumentException(
+                  "execution failure is only allowed for INPUT or CONTINUATION turns");
+            }
+            requireAssistantMessage("execution failed");
+            requireCompleteToolResults("execution failed");
+          } else if (end.reason() == TurnEndReason.OUTPUT_TRUNCATED
               || end.reason() == TurnEndReason.CONTENT_FILTERED) {
             // 截断/过滤的 failed turn 以 ASSISTANT MESSAGE 结果结束：保留 partial 内容与 generation metadata，
             // 且必须与 reason 匹配（LENGTH->OUTPUT_TRUNCATED、FILTERED->CONTENT_FILTERED）并零 tool call。

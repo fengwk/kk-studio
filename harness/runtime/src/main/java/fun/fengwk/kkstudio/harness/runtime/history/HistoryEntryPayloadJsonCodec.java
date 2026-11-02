@@ -84,6 +84,16 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("contributorId", "customType", "data");
   private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
       orderedSet("attempt", "model", "requestedAt", "error", "retryAt");
+  private static final Set<String> NATIVE_COMPACTION_FIELDS =
+      orderedSet(
+          "trigger",
+          "preTokens",
+          "postTokens",
+          "cumulativeDroppedTokens",
+          "durationMs",
+          "nativeHeadId",
+          "nativeAnchorId",
+          "nativeTailId");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS =
       orderedSet("contributorId", "customType", "rendererKey", "message", "details");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error", "attempt");
@@ -133,6 +143,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case MessagePayload value -> encodeMessage(value);
       case CustomEntryPayload value -> encodeCustomEntry(value);
       case ModelAttemptFailurePayload value -> encodeModelAttemptFailure(value);
+      case NativeCompactionPayload value -> encodeNativeCompaction(value);
       case CustomMessagePayload value -> encodeCustomMessage(value);
       case AssistantErrorPayload value -> encodeAssistantError(value);
       case AssistantAbortedPayload value -> encodeAssistantAborted(value);
@@ -174,6 +185,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case MESSAGE -> decodeMessage(value);
       case CUSTOM -> decodeCustomEntry(value);
       case MODEL_ATTEMPT_FAILURE -> decodeModelAttemptFailure(value);
+      case NATIVE_COMPACTION -> decodeNativeCompaction(value);
       case CUSTOM_MESSAGE -> decodeCustomMessage(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
       case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
@@ -306,6 +318,19 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     node.set("error", encodeError(value.error()));
     node.put("retryAt", value.retryAt().toString());
+    return node;
+  }
+
+  private static ObjectNode encodeNativeCompaction(NativeCompactionPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("trigger", value.trigger());
+    node.put("preTokens", value.preTokens());
+    node.put("postTokens", value.postTokens());
+    node.put("cumulativeDroppedTokens", value.cumulativeDroppedTokens());
+    node.put("durationMs", value.durationMs());
+    node.put("nativeHeadId", value.nativeHeadId());
+    node.put("nativeAnchorId", value.nativeAnchorId());
+    node.put("nativeTailId", value.nativeTailId());
     return node;
   }
 
@@ -599,6 +624,42 @@ public final class HistoryEntryPayloadJsonCodec {
     Instant retryAt = parseInstant(node, "retryAt", "MODEL_ATTEMPT_FAILURE.retryAt");
     return new ModelAttemptFailurePayload(
         attempt, model, requestedAt, decodeError(node.get("error")), retryAt);
+  }
+
+  private static NativeCompactionPayload decodeNativeCompaction(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "NATIVE_COMPACTION");
+    HistoryValueCodecs.requireExactFields(node, NATIVE_COMPACTION_FIELDS, "NATIVE_COMPACTION");
+    return new NativeCompactionPayload(
+        nativeText(node, "trigger"),
+        nativeCount(node, "preTokens"),
+        nativeCount(node, "postTokens"),
+        nativeCount(node, "cumulativeDroppedTokens"),
+        nativeCount(node, "durationMs"),
+        nativeText(node, "nativeHeadId"),
+        nativeText(node, "nativeAnchorId"),
+        nativeText(node, "nativeTailId"));
+  }
+
+  private static String nativeText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException("invalid native compaction text: " + field);
+    }
+    return value.asText();
+  }
+
+  private static Long nativeCount(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new IllegalArgumentException("invalid native compaction count: " + field);
+    }
+    return value.longValue();
   }
 
   private static Instant parseInstant(ObjectNode node, String field, String context) {

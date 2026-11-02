@@ -12,6 +12,8 @@ public enum EntryType {
   CUSTOM,
   /** Model retry failure audit node：透明、不属于对话语义，也不关闭 Turn。 */
   MODEL_ATTEMPT_FAILURE,
+  /** Immutable Driver-reported native compaction audit; not a Builtin summary. */
+  NATIVE_COMPACTION,
   /** 由业务扩展注入的对话消息。 */
   CUSTOM_MESSAGE,
   /** Provider/Assistant-side 错误审计。 */

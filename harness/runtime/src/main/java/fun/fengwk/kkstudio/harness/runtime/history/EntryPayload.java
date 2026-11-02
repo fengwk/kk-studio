@@ -11,6 +11,7 @@ public sealed interface EntryPayload
         MessagePayload,
         CustomEntryPayload,
         ModelAttemptFailurePayload,
+        NativeCompactionPayload,
         CustomMessagePayload,
         AssistantErrorPayload,
         AssistantAbortedPayload,

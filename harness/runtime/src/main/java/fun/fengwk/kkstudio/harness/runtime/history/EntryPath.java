@@ -80,6 +80,7 @@ public record EntryPath(List<Entry> entries) {
       Entry entry = entries.get(i);
       if (!(entry.payload() instanceof NotificationPayload)
           && !(entry.payload() instanceof SettingsPayload)
+          && !(entry.payload() instanceof NativeCompactionPayload)
           && !(entry.payload() instanceof ForkPayload)) {
         return entry;
       }

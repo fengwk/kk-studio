@@ -37,9 +37,10 @@ public record TurnEndPayload(
       case FAILED -> {
         if (reason != TurnEndReason.TURN_FAILED
             && reason != TurnEndReason.OUTPUT_TRUNCATED
-            && reason != TurnEndReason.CONTENT_FILTERED) {
+            && reason != TurnEndReason.CONTENT_FILTERED
+            && reason != TurnEndReason.EXECUTION_FAILED) {
           throw new IllegalArgumentException(
-              "failed turns require reason TURN_FAILED, OUTPUT_TRUNCATED or CONTENT_FILTERED");
+              "failed turns require an execution-failure or model-failure reason");
         }
         if (continueModel) {
           throw new IllegalArgumentException("continueModel must be false for failed turns");
