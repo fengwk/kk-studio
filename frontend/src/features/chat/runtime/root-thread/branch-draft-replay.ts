@@ -35,16 +35,16 @@ export function branchDraftFromEntry(
   if (execution != null) {
     const driver = typeof execution.driver === 'string' ? execution.driver : fallback.execution.driver
     if (driver === 'builtin') {
-      const fallbackModel = getBuiltinModelSelection(fallback.execution)
+      const fallbackBuiltinModel = getBuiltinModelSelection(fallback.execution)
       const executionSettings = isRecord(execution.settings) ? execution.settings : null
       const modelName = typeof executionSettings?.modelName === 'string'
         ? executionSettings.modelName
-        : (fallbackModel?.modelName ?? '')
+        : (fallbackBuiltinModel?.modelName ?? '')
       const variant = typeof executionSettings?.variant === 'string'
         ? executionSettings.variant
         : executionSettings?.variant === null
           ? null
-          : (fallbackModel?.variant ?? null)
+          : (fallbackBuiltinModel?.variant ?? null)
       nextExecution = createBuiltinExecution(modelName, variant)
     } else {
       nextExecution = {

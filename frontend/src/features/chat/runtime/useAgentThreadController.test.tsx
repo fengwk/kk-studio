@@ -45,7 +45,6 @@ import type {
   AgentDefinitionDTO,
   HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
-  HarnessModelSelectionDTO,
   HarnessSessionEntryDTO,
   HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
@@ -74,16 +73,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     decideApproval: vi.fn(),
   },
 }))
-
-function modelSelection(
-  overrides: Partial<HarnessModelSelectionDTO> = {},
-): HarnessModelSelectionDTO {
-  return {
-        modelName: 'MiniMax',
-    variant: 'default',
-    ...overrides,
-  }
-}
 
 function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},

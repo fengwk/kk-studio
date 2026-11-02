@@ -191,7 +191,7 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
-配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
+配置差异按 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
 根面板与草稿 pane 不渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
 其真实身份（agent 名称与 `modelName (variant)`；默认 main

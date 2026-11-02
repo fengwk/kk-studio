@@ -600,7 +600,7 @@ export function useRootThreadControl({
     focusOnEscape: focused,
     composerRef,
     settings: activeDraft == null ? undefined : {
-      model: getBuiltinModelSelection(activeDraft.execution),
+      modelSelection: getBuiltinModelSelection(activeDraft.execution),
       models,
       yoloEnabled: activeDraft.yoloEnabled,
       environmentName: activeDraft.environmentName,

@@ -107,7 +107,7 @@ registerCase({
         yoloEnabled: false,
       })
       // 先用不存在的 Agent 确定性创建空闲 Thread（不触发 Provider），随后在已订阅事件通道后
-      // 通过 THREAD batch 一次性 SET_AGENT/SET_MODEL + USER_MESSAGE 启动 mock turn。
+      // 通过 THREAD batch 一次性 SET_AGENT/SET_EXECUTION + USER_MESSAGE 启动 mock turn。
       const sessionId = cid()
       const createdThreadId = cid()
       await createNewSession(ctx, {
