@@ -12,11 +12,11 @@
 | --- | --- |
 | `resolveTurn` | 调用 [`TurnResolver`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/TurnResolver.java)，把 Resolved 结果校验为冻结 `ModelRequestSpec`、上下文窗口、输出预算与能力；Accepted 由 Runtime 调用 `install` |
 | `install` | 在同一事务创建 `READY` 的 [`ModelInvocation`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelInvocation.java) 并请求 MODEL Work |
-| `lockState` | 按 open `TURN_START` 锁定当前 generation；terminal 但尚未物化时为 `RESPONSE_PENDING`，否则为 `ACTIVE` 或 `NONE`；通过 `workTarget()` 显式声明以 `ModelInvocation` id 为键的 MODEL Work（供 Stop 在 Stage 7 锁定并清理） |
+| `lockState` | 按 open `TURN_START` 锁定当前 generation；terminal 但尚未物化时为 `RESPONSE_PENDING`，否则为 `ACTIVE` 或 `NONE`；`workTarget()` 声明以 `ModelInvocation` id 为键的 MODEL Work，Stop 据此锁定并删除 |
 | `applyResponse` | 经 [`ModelOutcomeAppender`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelOutcomeAppender.java) 把终态物化为 Assistant / Error / Compaction / ToolBatch 历史 |
 | `completeToolBatch` | 校验 generation 已附着到当前 Assistant head，并删除临时 ModelInvocation |
 | `prepareAutomaticCompaction` | 委托 [`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) |
-| `stop` | 把在途生成收敛为 `ASSISTANT_ERROR(CANCELLED)` 或携带已冻结流式内容的 `ASSISTANT_ABORTED` barrier，并取消 generation；返回 barrierEntryId 与用于物理提交后本地取消的 `executionIds` |
+| `stop` | 把在途生成收敛为 `ASSISTANT_ERROR(CANCELLED)` 或携带已冻结流式内容的 `ASSISTANT_ABORTED` barrier，并取消 generation；返回的 `executionIds` 是该 generation 的 ModelInvocation id，Stop 事务提交后用于取消本地执行 |
 
 Builtin 的私有持久化端口是 [`BuiltinStore`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/store/BuiltinStore.java)。它只把调用方已有的 Runtime 事务投影为窄 typed 视图，模型状态 CRUD 只存在于该接口；生产实现与 Runtime transaction 共享同一连接、数据库时间与锁序跟踪，视图本身绝不开启事务。
 
