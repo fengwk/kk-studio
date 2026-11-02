@@ -60,8 +60,8 @@ public final class ThreadContextClassifier {
         requireEmptySiblings(toolSiblings, "at the driver basis");
       }
       return driverState.activity() == DriverActivity.ACTIVE
-          ? new ThreadContext.ModelActive(driverState)
-          : new ThreadContext.ModelTerminalPending(driverState);
+          ? new ThreadContext.GenerationActive(driverState)
+          : new ThreadContext.GenerationTerminalPending(driverState);
     }
     if (driverState.resultEntryId() != null && !driverState.resultAt(head.id())) {
       requireEmptySiblings(toolSiblings, "without the driver result at the head");

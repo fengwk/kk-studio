@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-/** 一次 {@link ModelProcessor#process} 或 {@link ToolProcessor#process} 调用的最小 typed 结果。 */
+/** 一次 Work 处理调用的最小 typed 结果（如 Driver Work 或 {@link ToolProcessor#process}）。 */
 public enum ProcessResult {
   /** 本地 execution 已在 Gateway 成功启动并开始运行。 */
   STARTED,

@@ -195,7 +195,8 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
 
-    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> ClaimLostSignal -> LOST
+    // fence 调用序列：claimOwned（1）-> GenerationActive blocker 的 Work fence（2）丢失 -> ClaimLostSignal ->
+    // LOST
     // no-op。
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     assertEquals(3, path(real, baseline.threadId()).entries().size());

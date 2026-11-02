@@ -59,9 +59,9 @@ import java.util.function.Consumer;
 /**
  * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
  *
- * <p>同步控制操作通过短事务与规范锁序 Session -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
- * ToolInvocation siblings -&gt; Work 保证 durable 状态一致；手动压缩在同一短事务内完成 version 校验、candidate 构造、同库
- * resolve 与提交。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
+ * <p>同步控制操作通过短事务与规范锁序 Session -&gt; Thread -&gt; Commands -&gt; Driver 私有行 -&gt; ToolInvocation
+ * siblings -&gt; Work 保证 durable 状态一致；手动压缩在同一短事务内完成 version 校验、candidate 构造、同库 resolve
+ * 与提交。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
  * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、callIndex 不连续）仍为 {@link
  * IllegalStateException}。所有持久化时间取自事务的 {@link HarnessStore.Transaction#now()}。
  *
@@ -84,10 +84,10 @@ public final class HarnessRuntime {
   private final ToolInputControl toolInputControl;
   private final ToolOutcomeQuery toolOutcomeQuery;
   private final ManualCompactionControl manualCompactionControl;
-  private final Consumer<UUID> modelExecutionCanceller;
+  private final Consumer<UUID> driverExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
 
-  /** 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。 */
+  /** 创建仅含 control 面的 Runtime，不承载本地 Driver/Tool execution。 */
   public HarnessRuntime(
       HarnessStore store,
       DriverRegistry driverRegistry,
@@ -100,7 +100,7 @@ public final class HarnessRuntime {
       HarnessStore store,
       DriverRegistry driverRegistry,
       CompactionConfigProvider compactionConfigProvider,
-      Consumer<UUID> modelExecutionCanceller,
+      Consumer<UUID> driverExecutionCanceller,
       Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
     this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
@@ -113,8 +113,8 @@ public final class HarnessRuntime {
             this.store,
             driverRegistry,
             Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider"));
-    this.modelExecutionCanceller =
-        Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
+    this.driverExecutionCanceller =
+        Objects.requireNonNull(driverExecutionCanceller, "driverExecutionCanceller");
     this.toolExecutionCanceller =
         Objects.requireNonNull(toolExecutionCanceller, "toolExecutionCanceller");
   }
@@ -177,8 +177,8 @@ public final class HarnessRuntime {
    * 统一读取一次工具调用的 terminal outcome：优先读取本 Thread 尚存的 terminal Invocation，行已删除时按 Session 反查已物化的
    * ToolResult Entry。
    *
-   * <p>严格归属校验：Invocation 经其 ModelInvocation 归属该 Thread；历史 Entry 必须位于该 Thread 发起的 Turn 父链上。不属于该
-   * Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 {@link
+   * <p>严格归属校验：Invocation 经公共 threadId 与 turnStartEntryId 归属该 Thread；历史 Entry 必须位于该 Thread 当前 head
+   * 路径上且最近 TurnStart 由该 Thread 发起。不属于该 Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 {@link
    * HarnessRuntimeNotFoundException}。非成功结果同时返回 durable error kind/message，人工输入返回 durable receipt。
    */
   public Optional<ToolOutcomeView> findToolOutcome(UUID threadId, UUID invocationId) {
@@ -411,7 +411,7 @@ public final class HarnessRuntime {
   /**
    * 原子停止当前 live Turn、取消已入队 Commands，或重放一次先前 thread-owned Stop。
    *
-   * <p>durable transaction 由 {@link StopControl} 持有。本地 Model/Tool execution 的取消登记在该事务的物理 commit 之后
+   * <p>durable transaction 由 {@link StopControl} 持有。本地 Driver/Tool execution 的取消登记在该事务的物理 commit 之后
    * （{@code store.afterCommit}）：无外层事务时即 Stop 事务提交后，加入调用方外层事务时只在外层真正提交后触发，外层回滚则不取消。
    * 本地取消失败仅记录日志，无法改变已 commit 的结果。
    */
@@ -421,7 +421,8 @@ public final class HarnessRuntime {
         stopControl.stop(
             command,
             stopped -> {
-              cancelLocalExecutions(modelExecutionCanceller, "Model", stopped.modelExecutionIds());
+              cancelLocalExecutions(
+                  driverExecutionCanceller, "Driver", stopped.driverExecutionIds());
               cancelLocalExecutions(toolExecutionCanceller, "Tool", stopped.toolExecutionIds());
             });
     return commit.result();
@@ -670,12 +671,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在单个短 transaction 内读取一次完整的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Model
-   * -&gt; Tool siblings），跨 transaction 永不混合状态。
+   * 在单个短 transaction 内读取一次完整的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Driver
+   * 状态 -&gt; Tool siblings），跨 transaction 永不混合状态。
    *
-   * <p>只锁目标 Thread 与该 Thread 当前适用的 Commands/Model/Tool 行，不取执行树锁；Thread 行锁串行化该 Thread 的全部写入，Entry
-   * 不可变，因此同事务行锁已足以保证快照一致性，无需阻塞祖先或兄弟。当前状态与完整历史在同一事务读取。ModelInvocation checkpoint 可能在 Thread version
-   * 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把 version 当作完整快照 ETag。
+   * <p>只锁目标 Thread 与该 Thread 当前适用的 Commands/Driver 私有行/Tool 行，不取执行树锁；Thread 行锁串行化该 Thread
+   * 的全部写入，Entry 不可变，因此同事务行锁已足以保证快照一致性，无需阻塞祖先或兄弟。当前状态与完整历史在同一事务读取。Driver generation checkpoint 可能在
+   * Thread version 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把 version 当作完整快照 ETag。
    */
   public ThreadSnapshot getThreadSnapshot(UUID threadId) {
     return getThreadSnapshot(threadId, null);
@@ -753,8 +754,8 @@ public final class HarnessRuntime {
 
   private static GenerationProjection generationOf(ThreadContext context) {
     return switch (context) {
-      case ThreadContext.ModelActive active -> active.driverState().projection();
-      case ThreadContext.ModelTerminalPending pending -> pending.driverState().projection();
+      case ThreadContext.GenerationActive active -> active.driverState().projection();
+      case ThreadContext.GenerationTerminalPending pending -> pending.driverState().projection();
       default -> null;
     };
   }

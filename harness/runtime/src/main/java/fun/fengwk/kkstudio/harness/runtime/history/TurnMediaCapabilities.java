@@ -7,7 +7,7 @@ import java.util.Set;
 /**
  * Turn 内消费者可接受的内联媒体能力快照。
  *
- * <p>工具结果返回媒体时只能依据发起 Turn 已冻结的消费者能力判断，不得再反查 Provider 或 ModelInvocation。{@code inputModalities}
+ * <p>工具结果返回媒体时只能依据发起 Turn 已冻结的消费者能力判断，不得反查底层 Provider 或 Driver 私有状态。{@code inputModalities}
  * 是消费者自身声明的输入模态；{@code userModalities} / {@code toolResultModalities} 是实际协议允许的
  * 内容位置。二者同时满足才允许作为工具结果读取。
  */

@@ -130,14 +130,14 @@ public final class HarnessRuntimeTestSupport {
   static HarnessRuntime runtime(
       HarnessStore store,
       Clock clock,
-      Consumer<UUID> modelCanceller,
+      Consumer<UUID> driverCanceller,
       Consumer<UUID> toolCanceller) {
     useClock(store, clock);
     return new HarnessRuntime(
         store,
         new DriverRegistry(List.of(new FakeAgentDriver("fake"), new FakeAgentDriver("builtin"))),
         DEFAULT_COMPACTION_PROVIDER,
-        modelCanceller,
+        driverCanceller,
         toolCanceller);
   }
 

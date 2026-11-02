@@ -112,9 +112,9 @@ class StopRecordsTest {
             false,
             THREAD,
             List.of(new StoppedThreadReceipt(THREAD.id(), id(4L), id(3L), 0, List.of())));
-    // Commit 同时承载任意数量的 Model / Tool 本地取消（父与多子混合执行），不做单类型截断。
+    // Commit 同时承载任意数量的 Driver / Tool 本地取消（父与多子混合执行），不做单类型截断。
     StopControl.Commit commit = new StopControl.Commit(result, List.of(id(1L)), List.of(id(2L)));
-    assertEquals(List.of(id(1L)), commit.modelExecutionIds());
+    assertEquals(List.of(id(1L)), commit.driverExecutionIds());
     assertEquals(List.of(id(2L)), commit.toolExecutionIds());
     assertThrows(NullPointerException.class, () -> new StopControl.Commit(null, null, List.of()));
     assertThrows(NullPointerException.class, () -> new StopControl.Commit(result, null, null));

@@ -12,14 +12,14 @@ import java.util.Objects;
 /**
  * 纯分类的 Thread live/historical applicability 结果（非持久化，不接触 Store）。
  *
- * <p>Driver 只暴露 {@link LockedDriverState} 语义视图；Runtime 不读取 ModelInvocation 或任何 Driver 私有类型。 Tool
- * siblings 的归属始终按公共 Thread/TurnStart/Assistant 字段校验。
+ * <p>Driver 只暴露 {@link LockedDriverState} 语义视图；Runtime 不读取任何 Driver 私有类型。 Tool siblings 的归属始终按公共
+ * Thread/TurnStart/Assistant 字段校验。
  */
 public sealed interface ThreadContext
     permits ThreadContext.IdleOrHistorical,
         ThreadContext.ContinuationDue,
-        ThreadContext.ModelActive,
-        ThreadContext.ModelTerminalPending,
+        ThreadContext.GenerationActive,
+        ThreadContext.GenerationTerminalPending,
         ThreadContext.ToolActive,
         ThreadContext.ToolTerminalPending {
 
@@ -40,17 +40,17 @@ public sealed interface ThreadContext
   }
 
   /** 本 Thread 当前 open Turn 的 Driver generation 非 terminal 且 head == basis：等待执行完成。 */
-  record ModelActive(LockedDriverState driverState) implements ThreadContext {
+  record GenerationActive(LockedDriverState driverState) implements ThreadContext {
 
-    public ModelActive {
+    public GenerationActive {
       driverState = Objects.requireNonNull(driverState, "driverState");
     }
   }
 
   /** Driver generation terminal、未挂结果且 head == basis：需由 Driver 原子物化结果。 */
-  record ModelTerminalPending(LockedDriverState driverState) implements ThreadContext {
+  record GenerationTerminalPending(LockedDriverState driverState) implements ThreadContext {
 
-    public ModelTerminalPending {
+    public GenerationTerminalPending {
       driverState = Objects.requireNonNull(driverState, "driverState");
     }
   }

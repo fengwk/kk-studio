@@ -41,8 +41,8 @@ public interface ThreadStore {
   void lockTree(UUID rootThreadId);
 
   /**
-   * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work / Join / Stop 回执；要求所有 Thread
-   * 已按 UUID 升序锁定。
+   * 批量删除 Thread 及其全部 Command / Driver 私有行 / ToolInvocation / Work / Join / Stop 回执；要求所有 Thread 已按
+   * UUID 升序锁定。
    */
   int delete(List<UUID> threadIds);
 }

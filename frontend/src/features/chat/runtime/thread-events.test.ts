@@ -673,7 +673,7 @@ describe('buildThreadEventTimeline', () => {
   })
 
   it('skips active failure overlays already materialized in the same turn', () => {
-    // ModelTerminalPending 窗口内 durable Entry 与活跃 overlay 同时存在；
+    // GenerationTerminalPending 窗口内 durable Entry 与活跃 overlay 同时存在；
     // 相同 Turn 的 (attempt, sequence) identity 只保留 durable 权威记录。
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),

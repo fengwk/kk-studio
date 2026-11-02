@@ -11,11 +11,15 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 
 import java.util.List;
 import java.util.Objects;
@@ -168,6 +172,24 @@ public final class FakeAgentDriver implements AgentDriver {
       LockedDriverState state,
       DriverCommit commit,
       UUID stopRequestId) {
+    if (stopResult.barrierEntryId() != null) {
+      return stopResult;
+    }
+    if (state != null
+        && state.activity() == DriverActivity.ACTIVE
+        && commit != null
+        && path != null) {
+      UUID barrierId = commit.nextId();
+      commit.insertEntry(
+          new Entry(
+              barrierId,
+              path.root().sessionId(),
+              path.head().id(),
+              new AssistantErrorPayload(
+                  new AssistantError(AssistantError.CANCELLED_CODE, "cancelled"), null),
+              commit.now()));
+      return new DriverStopResult(barrierId, stopResult.executionIds());
+    }
     return stopResult;
   }
 
@@ -206,7 +228,7 @@ public final class FakeAgentDriver implements AgentDriver {
       UUID requestHeadEntryId,
       UUID resultEntryId,
       GenerationProjection projection,
-      UUID executionId,
+      WorkTarget workTarget,
       boolean cancelsToolBatch)
       implements LockedDriverState {
 
@@ -219,8 +241,8 @@ public final class FakeAgentDriver implements AgentDriver {
         UUID requestHeadEntryId,
         UUID resultEntryId,
         GenerationProjection projection,
-        UUID executionId) {
-      this(activity, requestHeadEntryId, resultEntryId, projection, executionId, false);
+        WorkTarget workTarget) {
+      this(activity, requestHeadEntryId, resultEntryId, projection, workTarget, false);
     }
 
     @Override

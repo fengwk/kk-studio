@@ -278,11 +278,11 @@ class ThreadContextClassifierTest {
   // -----------------------------------------------------------------------------------------------
 
   @Test
-  void nonterminalModelAtBasisIsModelActive() {
+  void nonterminalModelAtBasisIsGenerationActive() {
     EntryPath path = openUserPath();
-    ThreadContext.ModelActive context =
+    ThreadContext.GenerationActive context =
         assertInstanceOf(
-            ThreadContext.ModelActive.class,
+            ThreadContext.GenerationActive.class,
             classify(
                 thread(USER_ID),
                 path,
@@ -292,11 +292,11 @@ class ThreadContextClassifierTest {
   }
 
   @Test
-  void terminalModelAtBasisIsModelTerminalPending() {
+  void terminalModelAtBasisIsGenerationTerminalPending() {
     EntryPath path = openUserPath();
-    ThreadContext.ModelTerminalPending context =
+    ThreadContext.GenerationTerminalPending context =
         assertInstanceOf(
-            ThreadContext.ModelTerminalPending.class,
+            ThreadContext.GenerationTerminalPending.class,
             classify(
                 thread(USER_ID),
                 path,
@@ -399,7 +399,8 @@ class ThreadContextClassifierTest {
 
   @Test
   void basisWithToolSiblingsAllowedOnlyWhenResponsePendingAndCancelsToolBatch() {
-    // 1. RESPONSE_PENDING 且 cancelsToolBatch == true：允许存在 tool siblings，分类为 ModelTerminalPending
+    // 1. RESPONSE_PENDING 且 cancelsToolBatch == true：允许存在 tool siblings，分类为
+    // GenerationTerminalPending
     LockedDriverState pendingCancelling =
         model(
             THREAD_ID,
@@ -415,7 +416,7 @@ class ThreadContextClassifierTest {
             openUserPath(),
             pendingCancelling,
             List.of(tool(id(0), "call-1", ToolInvocationStatus.READY)));
-    assertInstanceOf(ThreadContext.ModelTerminalPending.class, context);
+    assertInstanceOf(ThreadContext.GenerationTerminalPending.class, context);
 
     // 2. RESPONSE_PENDING 但 cancelsToolBatch == false：抛出 IllegalStateException
     LockedDriverState pendingNotCancelling =

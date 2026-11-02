@@ -40,10 +40,7 @@ public sealed interface RealtimeEvent
     TOOL_INVOCATION
   }
 
-  /**
-   * 一条 Model Provider delta；sequence 在 attempt 内从 1 严格递增。最终完整 response 仍只进入 durable
-   * ModelInvocation。
-   */
+  /** 一条 Model Provider delta；sequence 在 attempt 内从 1 严格递增。最终完整 response 仍只进入 durable 存储。 */
   record ModelDelta(
       UUID threadId,
       UUID modelInvocationId,

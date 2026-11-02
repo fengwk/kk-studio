@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.util.List;
 
@@ -39,7 +41,8 @@ class FakeAgentDriverTest {
         new DriverApplied(id(2), null, false, true, true, TurnEndOutcome.COMPLETED, List.of());
     DriverStopResult stop = new DriverStopResult(id(3), List.of(id(4)));
     FakeAgentDriver.FakeLockedDriverState state =
-        new FakeAgentDriver.FakeLockedDriverState(DriverActivity.ACTIVE, id(5), null, null, id(4));
+        new FakeAgentDriver.FakeLockedDriverState(
+            DriverActivity.ACTIVE, id(5), null, null, new WorkTarget(WorkTargetType.MODEL, id(4)));
 
     FakeAgentDriver driver =
         new FakeAgentDriver(() -> resolution)
@@ -52,7 +55,7 @@ class FakeAgentDriverTest {
     assertSame(applied, driver.applyResponse(null, null, null, state, null));
     assertSame(stop, driver.stop(null, null, null, state, null, id(6)));
     assertEquals(DriverActivity.ACTIVE, state.activity());
-    assertEquals(id(4), state.executionId());
+    assertEquals(new WorkTarget(WorkTargetType.MODEL, id(4)), state.workTarget());
     assertFalse(state.cancelsToolBatch());
     assertTrue(driver.allowsQueuedInputHarvest(null, null, null));
 
@@ -64,7 +67,12 @@ class FakeAgentDriverTest {
 
     FakeAgentDriver.FakeLockedDriverState cancellingState =
         new FakeAgentDriver.FakeLockedDriverState(
-            DriverActivity.RESPONSE_PENDING, id(5), null, null, id(4), true);
+            DriverActivity.RESPONSE_PENDING,
+            id(5),
+            null,
+            null,
+            new WorkTarget(WorkTargetType.MODEL, id(4)),
+            true);
     assertTrue(cancellingState.cancelsToolBatch());
   }
 }

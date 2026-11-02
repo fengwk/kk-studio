@@ -166,8 +166,9 @@ public record ThreadSnapshot(
     return switch (context) {
       case ThreadContext.IdleOrHistorical ignored -> ThreadLiveState.IDLE_OR_HISTORICAL;
       case ThreadContext.ContinuationDue ignored -> ThreadLiveState.CONTINUATION_DUE;
-      case ThreadContext.ModelActive ignored -> ThreadLiveState.DRIVER_ACTIVE;
-      case ThreadContext.ModelTerminalPending ignored -> ThreadLiveState.DRIVER_RESPONSE_PENDING;
+      case ThreadContext.GenerationActive ignored -> ThreadLiveState.DRIVER_ACTIVE;
+      case ThreadContext.GenerationTerminalPending ignored -> ThreadLiveState
+          .DRIVER_RESPONSE_PENDING;
       case ThreadContext.ToolActive ignored -> ThreadLiveState.TOOL_ACTIVE;
       case ThreadContext.ToolTerminalPending ignored -> ThreadLiveState.TOOL_TERMINAL_PENDING;
     };
