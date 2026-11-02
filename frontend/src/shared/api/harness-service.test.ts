@@ -23,7 +23,7 @@ describe('harnessService', () => {
         threadId: 't1',
         rootSettings: {
           agentName: 'assistant',
-          model: { modelName: 'm', variant: 'v' },
+          execution: { driver: 'builtin', settings: { modelName: 'm', variant: 'v' } },
           environmentName: null,
           goal: null,
         },

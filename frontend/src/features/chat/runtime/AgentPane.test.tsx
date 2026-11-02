@@ -576,7 +576,7 @@ function treeNode(
     parentThreadId,
     name,
     agentName: parentThreadId == null ? 'assistant' : 'coder',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
     status: active ? 'RUNNING' : 'IDLE',
     executionControl: 'RUNNABLE',
     turnCount: 1,
@@ -711,7 +711,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
       createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
-      model: getBuiltinModelSelection(thread().branchSettings.execution)!, headMessagePreview: null,
+      execution: thread().branchSettings.execution, headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -1193,7 +1193,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: 0,
       status: 'IDLE',
       executionControl: 'RUNNABLE',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: 'thread preview',
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1376,7 +1376,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: 0,
       status: 'RUNNING' as const,
       executionControl: 'RUNNABLE',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
@@ -1686,7 +1686,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: 0,
       status: 'IDLE',
       executionControl: 'RUNNABLE',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     })).toMatchObject({
       id: THREAD_ID,
@@ -1791,7 +1791,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         status: 'IDLE',
         executionControl: 'RUNNABLE',
         turnCount: 1,
@@ -1804,7 +1804,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: THREAD_ID,
         name: 'worker',
         agentName: 'coder',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         status: 'RUNNING',
         executionControl: 'RUNNABLE',
         turnCount: 1,
@@ -1827,7 +1827,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
-        model: { modelName: 'MiniMax', variant: 'default' },
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
         status: 'IDLE',
         executionControl: 'RUNNABLE',
         turnCount: 1,
@@ -1862,7 +1862,7 @@ describe('AgentPane orchestration', () => {
       parentThreadId: null,
       name: threadId === THREAD_ID ? 'tree A' : 'tree B',
       agentName: 'assistant',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       status: 'IDLE',
       executionControl: 'RUNNABLE',
       turnCount: 1,
@@ -1874,7 +1874,7 @@ describe('AgentPane orchestration', () => {
       parentThreadId: threadId,
       name: threadId === THREAD_ID ? 'active A' : 'active B',
       agentName: 'coder',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       status: 'RUNNING',
       executionControl: 'RUNNABLE',
       turnCount: 1,
@@ -1901,7 +1901,7 @@ describe('AgentPane orchestration', () => {
       executionControl: 'RUNNABLE',
       createdAt: 0,
       updatedAt: 0,
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -2173,7 +2173,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: 0,
       status: 'IDLE',
       executionControl: 'RUNNABLE',
-      model: { modelName: 'MiniMax', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -3646,7 +3646,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           name: 'Thread 2',
           status: 'IDLE',
           executionControl: 'RUNNABLE',
-          model: { modelName: 'MiniMax', variant: 'default' },
+          execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
           createdAt: 0,
           updatedAt: 0,
           headMessagePreview: null,

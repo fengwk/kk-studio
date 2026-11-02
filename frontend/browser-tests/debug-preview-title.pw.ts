@@ -34,7 +34,7 @@ interface PreviewRequest {
     commands: Array<{
       type: string
       contents?: Array<{ type: string; text?: string }>
-      model?: { modelName: string; variant?: string | null }
+      execution?: { driver?: string; settings?: { modelName?: string; variant?: string | null } }
     }>
   }
 }

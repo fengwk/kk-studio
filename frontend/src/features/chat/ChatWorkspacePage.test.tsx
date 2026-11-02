@@ -24,7 +24,6 @@ import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import {
   createBuiltinExecution,
-  getBuiltinModelSelection,
 } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
 import type {
@@ -784,7 +783,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const summary = {
       threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
       createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
-      model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } }, headMessagePreview: null,
     }
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
@@ -963,7 +962,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
         threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
         createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
-        model: getBuiltinModelSelection(thread().branchSettings.execution)!, headMessagePreview: null,
+        execution: thread().branchSettings.execution, headMessagePreview: null,
       }])
     }
     if (scenario === 'offline') {

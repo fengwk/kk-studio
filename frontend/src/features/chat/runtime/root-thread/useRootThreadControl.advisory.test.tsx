@@ -23,7 +23,7 @@ function makeThread(threadId: string): HarnessThreadDTO {
     executionControl: 'AUTONOMOUS',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'test-model', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'test-model', variant: 'default' } },
       environmentName: null,
       goal: null,
     },
@@ -75,7 +75,6 @@ const mockDefaults = {
   agentName: 'assistant',
   environmentName: null,
   yoloEnabled: false,
-  model: { modelName: 'test-model', variant: 'default' },
 }
 
 describe('useRootThreadControl advisory query lifecycle', () => {

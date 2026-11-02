@@ -28,7 +28,7 @@ function makeThread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO
     executionControl: 'AUTONOMOUS',
     branchSettings: {
       agentName: 'assistant',
-      model: { modelName: 'test-model', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'test-model', variant: 'default' } },
       environmentName: null,
       goal: null,
     },

@@ -35,7 +35,7 @@ function treeNode(
     parentThreadId,
     name,
     agentName: 'assistant',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
     status,
     executionControl,
     turnCount: 1,
