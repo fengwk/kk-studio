@@ -7,9 +7,9 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationJsonSupport;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 
 import java.util.ArrayList;

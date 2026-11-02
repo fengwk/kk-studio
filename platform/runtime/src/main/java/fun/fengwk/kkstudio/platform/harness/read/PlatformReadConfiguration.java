@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;

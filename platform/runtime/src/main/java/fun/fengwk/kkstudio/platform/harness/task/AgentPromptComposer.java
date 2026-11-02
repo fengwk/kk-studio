@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentPrompts;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentPrompts;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;

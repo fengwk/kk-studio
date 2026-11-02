@@ -273,7 +273,7 @@ stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 
 ## 内置工具
 
-[`BuiltinHarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java)（id `builtin`）注册第一方工具与 `goal.progress` 自定义条目类型：
+[`BuiltinHarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/BuiltinHarnessContributor.java)（id `builtin`）注册第一方工具与 `goal.progress` 自定义条目类型：
 
 | 模型可见 name | 依赖 | 可见性 | 说明 |
 | --- | --- | --- | --- |
@@ -286,9 +286,9 @@ stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
 | `get_goal` / `update_goal` | READ / WRITE `goal.progress` | SELECTABLE | 读取用户 Goal 与进度；声明当前 Goal 的终态进度 |
 
-每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时过滤宿主工具，`read` 仍保留平台资源读取。宿主工具由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个能力，schema 与默认超时取自能力描述符，说明文本在 [`environment/prompts`](../../harness/runtime/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/)。`read` 对 `kkstudio:/skills/...` 读取平台当前发布的 Skill，对 `kkstudio:/resources/<blobId>` 按本次调用的 Thread 校验 Session 引用，对绝对本地路径委托 `BoundEnvironment`。
+每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时过滤宿主工具，`read` 仍保留平台资源读取。宿主工具由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个能力，schema 与默认超时取自能力描述符，说明文本在 [`environment/prompts`](../../harness/runtime/src/main/resources/fun/fengwk/kkstudio/harness/contributor/builtin/environment/prompts/)。`read` 对 `kkstudio:/skills/...` 读取平台当前发布的 Skill，对 `kkstudio:/resources/<blobId>` 按本次调用的 Thread 校验 Session 引用，对绝对本地路径委托 `BoundEnvironment`。
 
-Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能读取它并声明终态进度：[`GoalProgress`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgress.java)（`goalId`、`complete | blocked`、非空 `reason`）由 [`GoalProgressCodec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgressCodec.java) 严格编解码；`update_goal` 绑定执行时生效的 `goalId`，没有 Goal 或已有终态声明时拒绝。[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 把参数交给只接受、不等待的 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期与异步委派的行为契约见 [内置工具与异步委派](builtin-tools-design.md)。
+Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能读取它并声明终态进度：[`GoalProgress`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgress.java)（`goalId`、`complete | blocked`、非空 `reason`）由 [`GoalProgressCodec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgressCodec.java) 严格编解码；`update_goal` 绑定执行时生效的 `goalId`，没有 Goal 或已有终态声明时拒绝。[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给只接受、不等待的 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期与异步委派的行为契约见 [内置工具与异步委派](builtin-tools-design.md)。
 
 ## Prompt 模板
 
@@ -310,11 +310,10 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.driver` | 内部 Agent Driver 契约与中立投影：Turn 解析/提交、锁定状态、活动投影与 Stop 结果；不读取具体 Driver 私有状态 |
 | `runtime.entry` | 分支配置与回合生命周期值：`BranchSettings`、`GoalSetting`、启动原因与结局 |
 | `runtime.execution` | 具体执行代次的窄退出账本：身份登记、单向真实 ACK、显式放弃、journal write-ahead 重放与确认后的 Join 结算推进；不复制 Invocation 状态机 |
-| `runtime.history` | Entry、`EntryPath`、`EntrySlice`、回合文法校验与历史 JSON 编解码 |
+| `runtime.history` | Entry、`EntryPath`、`EntrySlice`、`SubagentBinding`、回合文法校验与历史 JSON 编解码 |
 | `runtime.input` | `ask_user` 问卷与答案的纯值校验和规范化 |
 | `runtime.interaction` | 等待输入/审批的只读投影与稳定分页，不持有产品归属 |
-| `runtime.invocation.codec` | Tool 持久化列的严格确定性 JSON 编解码；Builtin 的 `ModelRequestSpec` codec 在 driver 模块 |
-| `runtime.invocation.model` | 公共子代理绑定值 `SubagentBinding`；Builtin 的 `ModelInvocation` 与 `ModelRequestSpec` 在 driver 模块 |
+| `runtime.invocation.codec` | Tool 持久化列的严格确定性 JSON 编解码；Builtin 的 `ModelRequestSpec` codec 在 harness/agent-builtin |
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与副作用批次；不执行工具 |
 | `runtime.join` | Join 票据、一次终态冻结、回执投影与完成通知渲染的纯函数 |
 | `runtime.permission` | 权限规则模型与求值、Bash 命令面分析；只产出策略候选 |
@@ -331,14 +330,14 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `tool` | Tool 身份、定义、调用、结果与错误文案的值契约 |
 | `tool.codec` | Tool 定义与结果的严格 codec |
 | `contributor.api` | Contributor SPI、`Tool` 执行契约、分支视图与冻结目录 |
-| `builtin` | 第一方 Contributor 与内置工具的历史渲染 |
-| `builtin.environment` | 绑定环境能力的宿主工具与统一 `read` |
-| `builtin.goal` | `get_goal` / `update_goal` 与 `goal.progress` 条目 |
-| `builtin.input` | `ask_user` 工具定义 |
-| `builtin.subagent` | `task` 工具、委派请求与子代理配置 |
+| `contributor.builtin` | 第一方 Contributor 与内置工具的历史渲染 |
+| `contributor.builtin.environment` | 绑定环境能力的宿主工具与统一 `read` |
+| `contributor.builtin.goal` | `get_goal` / `update_goal` 与 `goal.progress` 条目 |
+| `contributor.builtin.input` | `ask_user` 工具定义 |
+| `contributor.builtin.subagent` | `task` 工具、委派请求与子代理配置 |
 | `prompt` | 严格 prompt 模板与 classpath 加载 |
 
-`tool`、`contributor`、`builtin` 与 `prompt` 是契约包，绝不 import `harness.runtime.*` 的实现；`runtime` 也不 import `builtin`。这些方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
+`tool`、`contributor`（含第一方 `contributor.builtin`）与 `prompt` 是契约包，绝不 import `harness.runtime.*` 的实现；`runtime` 也不 import `contributor.builtin`。这些方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
 
 ## 源码与测试
 

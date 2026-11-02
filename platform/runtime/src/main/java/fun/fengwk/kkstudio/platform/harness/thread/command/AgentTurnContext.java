@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.thread.command;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;

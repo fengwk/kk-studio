@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 
 import java.util.HashSet;
 import java.util.List;

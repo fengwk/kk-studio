@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -14,8 +14,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;

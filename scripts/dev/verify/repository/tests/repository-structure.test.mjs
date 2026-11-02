@@ -570,7 +570,7 @@ const CORE_STATE_ENUMS = [
     constants: ['HISTORY_CUT'],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStatus.java',
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalStatus.java',
     enumName: 'GoalStatus',
     constants: ['ACTIVE', 'COMPLETE', 'BLOCKED'],
   },
