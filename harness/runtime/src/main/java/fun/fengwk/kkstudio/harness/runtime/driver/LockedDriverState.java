@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * 事务内 Driver 状态的中立视图。
  *
- * <p>实现可以持有 Driver 私有状态，但 Runtime 只能通过本接口读取活动类别与中立投影， 不得强转或读取实现字段。实例只在产生它的 store transaction 内有效；只有
+ * <p>实现可以持有 Driver 私有状态，但 Runtime 只能通过本接口读取活动类别与中立投影，不得强转或读取实现字段。实例只在产生它的 store transaction 内有效；只有
  * {@link AgentDriver#lockState} 返回的状态可用于执行和变更，{@link AgentDriver#readState} 返回的状态仅供读取。
  */
 public interface LockedDriverState {

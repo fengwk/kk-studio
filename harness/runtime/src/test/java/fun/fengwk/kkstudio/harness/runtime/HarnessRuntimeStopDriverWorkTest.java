@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 验证 Stop 控制面遵循 LockedDriverState.workTarget 契约： 显式声明的 Work 目标在 Stop 期间被原子锁定并删除； 未声明时无关的 MODEL Work
+ * 验证 Stop 控制面遵循 LockedDriverState.workTarget 契约：显式声明的 Work 目标在 Stop 期间被原子锁定并删除；未声明时无关的 MODEL Work
  * 行不受影响。
  */
 class HarnessRuntimeStopDriverWorkTest {
@@ -80,8 +80,7 @@ class HarnessRuntimeStopDriverWorkTest {
 
     // 配置 FakeAgentDriver 显式声明该 workTarget
     driver.withState(
-        new FakeLockedDriverState(
-            DriverActivity.ACTIVE, baseline.turnStartEntryId(), null, null, target));
+        new FakeLockedDriverState(DriverActivity.ACTIVE, userEntryId, null, null, target));
 
     // 执行 Stop
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), id(1L), 1));
@@ -124,7 +123,7 @@ class HarnessRuntimeStopDriverWorkTest {
     // 配置 FakeAgentDriver 不声明 workTarget（为 null）
     driver.withState(
         new FakeLockedDriverState(
-            DriverActivity.ACTIVE, baseline.turnStartEntryId(), null, null, (WorkTarget) null));
+            DriverActivity.ACTIVE, userEntryId, null, null, (WorkTarget) null));
 
     // 执行 Stop
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), id(1L), 1));

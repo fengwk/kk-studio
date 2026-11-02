@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * 统一逻辑模型身份：全局名称 + 可选单模型 Variant。
  *
- * <p>用于 AssistantMessageMetadata、MODEL_ATTEMPT_FAILURE 与 Builtin 执行设置； BranchSettings 经
+ * <p>用于 AssistantMessageMetadata、MODEL_ATTEMPT_FAILURE 与 Builtin 执行设置；BranchSettings 经
  * ExecutionSelection 携带 Driver 私有设置。
  */
 public record ModelSelection(String modelName, String variant) {

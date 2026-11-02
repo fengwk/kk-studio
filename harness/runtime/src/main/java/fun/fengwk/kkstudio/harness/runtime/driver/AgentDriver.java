@@ -14,8 +14,8 @@ import java.util.UUID;
 /**
  * Runtime 内部的窄 Agent Driver 契约。
  *
- * <p>Driver 是 Runtime 端口的实现者：只按锁定 Thread 视图准备 Turn、推进已完成响应、投影中立活动/诊断与停止私有执行。 组合根向 {@link
- * DriverRegistry} 注册所有可用 Driver，Runtime 按 {@code ExecutionSelection.driver} 路由； 未安装 Driver 由 {@link
+ * <p>Driver 是 Runtime 端口的实现者：只按锁定 Thread 视图准备 Turn、推进已完成响应、投影中立活动/诊断与停止私有执行。组合根向 {@link
+ * DriverRegistry} 注册所有可用 Driver，Runtime 按 {@code ExecutionSelection.driver} 路由；未安装 Driver 由 {@link
  * UninstalledAgentDriver} 承接。Runtime 不动态加载 Driver，不传递 ServiceLocator，也不读取 Driver 私有状态类型。
  *
  * <p>所有方法都在调用方已有事务内执行：不得开启新事务、不得执行外部 I/O、不得执行工具或绕过历史校验。

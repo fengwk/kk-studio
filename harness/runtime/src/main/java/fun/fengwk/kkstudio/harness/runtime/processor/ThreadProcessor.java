@@ -104,7 +104,7 @@ import java.util.UUID;
  * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
  * complete，依赖 wakeVersion 保留新 wake。Driver generation terminal apply 按 planner 决策落地：active Tool
  * phase 仅为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经
- * ToolTerminalPending 应用）； closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED /
+ * ToolTerminalPending 应用）；closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED /
  * terminal failure / cancel / unknown / compaction 关闭结果）在同一事务追加 TURN_END
  * 与严格物化校验（attach-then-delete）并由 Driver complete/物化清理私有状态，且仅在已有 queued user demand、HISTORY /
  * OVERFLOW obligation、hard overflow 或 continuation obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft
@@ -250,11 +250,11 @@ public final class ThreadProcessor {
             || !Objects.equals(pending.driverState().generationId(), driverState.generationId())) {
           throw new IllegalStateException("locked driver state no longer matches the pending turn");
         }
-        applyModel(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
+        applyGeneration(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
       }
       case ThreadContext.GenerationActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
-        // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Model；Driver 只在存在时参与附加校验。
+        // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Driver generation；Driver 只在存在时参与附加校验。
         LockedDriverState driverState = driver.lockState(tx, thread, currentState);
         List<ToolInvocation> lockedSiblings =
             tx.tools().lockByAssistantEntry(pending.assistant().id());
@@ -398,7 +398,7 @@ public final class ThreadProcessor {
    * 恰好执行一次并完成 claim。结果物化、attempt 审计与私有 terminal 行清理全部由 Driver 在同一事务内完成；Runtime 只推进公共 Thread、结算 Join
    * 与规划 Work。
    */
-  private void applyModel(
+  private void applyGeneration(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,

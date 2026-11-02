@@ -12,7 +12,7 @@ import java.util.Objects;
 /**
  * 纯分类的 Thread live/historical applicability 结果（非持久化，不接触 Store）。
  *
- * <p>Driver 只暴露 {@link LockedDriverState} 语义视图；Runtime 不读取任何 Driver 私有类型。 Tool siblings 的归属始终按公共
+ * <p>Driver 只暴露 {@link LockedDriverState} 语义视图；Runtime 不读取任何 Driver 私有类型。Tool siblings 的归属始终按公共
  * Thread/TurnStart/Assistant 字段校验。
  */
 public sealed interface ThreadContext

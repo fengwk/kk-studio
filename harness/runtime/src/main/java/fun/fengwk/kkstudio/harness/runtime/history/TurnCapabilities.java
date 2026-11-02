@@ -12,7 +12,7 @@ import java.util.Set;
 /**
  * 一次 Turn 解析完成后冻结的执行能力：工具 bindings、子代理 allowlist 与消费者媒体能力。
  *
- * <p>这是工具声明、审批、执行、{@code task} 父权限与媒体读取的公共权限来源。Driver 私有请求中的工具列表不得作为公共工具授权事实。 尚未解析（pending /
+ * <p>这是工具声明、审批、执行、{@code task} 父权限与媒体读取的公共权限来源。Driver 私有请求中的工具列表不得作为公共工具授权事实。尚未解析（pending /
  * rejected）的 TurnStart 允许没有 capabilities；任何可执行 ToolInvocation 都必须能引用其 TurnStart 中冻结的 binding。
  *
  * <p>工具 bindings 必须名称唯一并共享最多一个 Environment；子代理名称唯一。媒体能力只含中立枚举，不携带 Provider 实现类型。

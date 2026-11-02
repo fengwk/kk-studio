@@ -456,8 +456,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
 
     @Override
     public WorkTarget workTarget() {
-      // Runtime 也以该身份定位 Stop 时必须清掉的 MODEL Work；tool phase 中 generation 已 attached，
-      // activity 不再是 ACTIVE，但 Work 仍归属该 generation。
+      // Stop 据此锁定并删除本 generation 的 MODEL Work；tool 阶段 generation 已 attached、
+      // activity 不是 ACTIVE，但 Work 仍归属该 generation。
       return new WorkTarget(WorkTargetType.MODEL, model.id());
     }
   }
