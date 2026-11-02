@@ -1558,7 +1558,7 @@ public abstract class HarnessStoreJoinContract {
                       return tx.exits().register(wrongKindRemote);
                     }));
     assertEquals(
-        "remote execution parent must be the same generation's TOOL execution",
+        "remote execution parent must be the same generation's TOOL or AGENT execution",
         wrongKindParentFailure.getMessage());
     IllegalArgumentException wrongLeaseParentFailure =
         assertThrows(
@@ -1570,11 +1570,48 @@ public abstract class HarnessStoreJoinContract {
                       return tx.exits().register(wrongIdentityRemote);
                     }));
     assertEquals(
-        "remote execution parent must be the same generation's TOOL execution",
+        "remote execution parent must be the same generation's TOOL or AGENT execution",
         wrongLeaseParentFailure.getMessage());
     assertTrue(store.transaction(tx -> tx.exits().find(wrongKindRemote.executionId())).isEmpty());
     assertTrue(
         store.transaction(tx -> tx.exits().find(wrongIdentityRemote.executionId())).isEmpty());
+
+    // 验证 AGENT execution 作为 parent 注册 REMOTE execution 成功
+    ExecutionExitFact agentParent =
+        fact(
+            TestIds.id(841),
+            threadId,
+            TestIds.id(842),
+            1,
+            "lease-agent",
+            ExecutionExitKind.AGENT,
+            null);
+    ExecutionExitFact agentRemote =
+        fact(
+            TestIds.id(843),
+            threadId,
+            TestIds.id(842),
+            1,
+            "lease-agent",
+            ExecutionExitKind.REMOTE,
+            agentParent.executionId());
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId);
+          tx.exits().register(agentParent);
+          tx.exits().register(agentRemote);
+          return null;
+        });
+    assertEquals(
+        ExecutionExitState.UNCONFIRMED,
+        store
+            .transaction(
+                tx -> {
+                  tx.threads().lock(threadId);
+                  return tx.exits().find(agentRemote.executionId());
+                })
+            .orElseThrow()
+            .state());
   }
 
   @Test
