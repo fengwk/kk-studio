@@ -37,7 +37,7 @@ export interface ThreadComposerEnvironmentOption {
 export type ThreadComposerSettingsStatus = 'draft' | 'pending' | null
 
 export interface ThreadComposerSettingsInput {
-  model: ThreadComposerModelSelection
+  model: ThreadComposerModelSelection | null
   models: readonly ThreadComposerModelOption[]
   yoloEnabled: boolean
   environmentName: string | null
@@ -93,7 +93,7 @@ export function ThreadComposerControls({
     () => models.filter((model) => model.kind === 'GROUP' || variantIds(model).length > 0),
     [models],
   )
-  const currentModel = models.find((model) => model.name === settings.model.modelName)
+  const currentModel = models.find((model) => model.name === settings.model?.modelName)
   const variantTarget = variantModel ?? currentModel ?? null
   const items = useMemo<SelectableItem[]>(() => {
     if (menu === 'permission') {
@@ -142,9 +142,9 @@ export function ThreadComposerControls({
     } else {
       const variants = variantTarget == null ? [] : variantIds(variantTarget)
       const selected =
-        variantTarget?.name === settings.model.modelName
-          && variants.includes(settings.model.variant ?? '')
-          ? settings.model.variant ?? ''
+        variantTarget?.name === settings.model?.modelName
+          && variants.includes(settings.model?.variant ?? '')
+          ? settings.model?.variant ?? ''
           : variantTarget?.config?.defaultVariant
       setActiveId(selected && variants.includes(selected) ? selected : (variants[0] ?? ''))
     }
@@ -160,8 +160,8 @@ export function ThreadComposerControls({
     menu,
     models,
     settings.environmentName,
-    settings.model.modelName,
-    settings.model.variant,
+    settings.model?.modelName,
+    settings.model?.variant,
     settings.yoloEnabled,
     variantTarget,
   ])
@@ -291,7 +291,7 @@ export function ThreadComposerControls({
     ? t('ai.runtime.composer.permissionYolo')
     : t('ai.runtime.composer.permissionDefault')
   const environmentLabel = settings.environmentName ?? t('ai.runtime.composer.environmentNone')
-  const modelLabel = settings.model.modelName
+  const modelLabel = settings.model?.modelName
     ? formatModelLabel(settings.model.modelName, settings.model.variant)
     : t('ai.runtime.composer.model')
   const settingsStatus = settings.status ?? null
@@ -342,7 +342,7 @@ export function ThreadComposerControls({
           aria-label={t('ai.runtime.composer.modelVariant')}
           aria-haspopup="listbox"
           aria-expanded={menu === 'model' || menu === 'variant'}
-          disabled={disabled || usableModels.length === 0}
+          disabled={disabled || usableModels.length === 0 || settings.model == null}
           onClick={() => onMenuChange(menu === 'model' || menu === 'variant' ? null : 'model')}
         >
           <span>{modelLabel}</span>
@@ -415,10 +415,10 @@ export function ThreadComposerControls({
                         && item.id === environmentItemId(settings.environmentName)
                       )
                     : menu === 'model'
-                      ? item.id === settings.model.modelName
+                      ? item.id === settings.model?.modelName
                       : (
-                          variantTarget?.name === settings.model.modelName
-                          && item.id === settings.model.variant
+                          variantTarget?.name === settings.model?.modelName
+                          && item.id === settings.model?.variant
                         )
               return (
                 <li key={item.id}>

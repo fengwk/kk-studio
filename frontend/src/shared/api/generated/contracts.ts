@@ -1040,9 +1040,15 @@ export interface HarnessAssistantErrorDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO */
 export interface HarnessBranchSettingsDTO {
   agentName: string
-  model: HarnessModelSelectionDTO
+  execution: HarnessExecutionSelectionDTO
   environmentName: string | null
   goal: HarnessGoalSettingDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO */
+export interface HarnessExecutionSelectionDTO {
+  driver: string
+  settings: Record<string, unknown>
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO */
@@ -1066,7 +1072,7 @@ export interface HarnessCommandCreateDTO {
   idempotencyKey: string
   contents?: HarnessUserMessageContentDTO[] | null
   agentName?: string | null
-  model?: HarnessModelSelectionDTO | null
+  execution?: HarnessExecutionSelectionDTO | null
   environmentName?: string | null
   text?: string | null
 }

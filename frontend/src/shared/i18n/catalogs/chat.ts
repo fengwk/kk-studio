@@ -586,9 +586,13 @@ export const chatCatalog = {
     'en-US': 'No compactable context was found',
     'zh-CN': '没有可用于压缩的上下文',
   },
-  'ai.runtime.command.disabled.compaction.modelChanged': {
-    'en-US': 'The model changed; start a new turn before compacting',
-    'zh-CN': '模型已变更，请先开始新一轮',
+  'ai.runtime.command.disabled.compaction.executionChanged': {
+    'en-US': 'Execution settings (model) changed; start a new turn before compacting',
+    'zh-CN': '执行设置（模型）已更改，请先开始新一轮',
+  },
+  'ai.runtime.command.disabled.compaction.executionUnsupported': {
+    'en-US': 'Compaction is not supported by the current driver',
+    'zh-CN': '当前 Driver 不支持压缩',
   },
   'ai.runtime.command.disabled.compaction.belowMinimum': {
     'en-US': 'The context is below the minimum size for manual compaction',

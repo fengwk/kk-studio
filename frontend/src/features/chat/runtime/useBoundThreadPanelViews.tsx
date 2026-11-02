@@ -10,6 +10,7 @@ import type { DebugInspectorSelection } from '@/features/chat/runtime/thread-pan
 import type { ThreadPaneLabels } from '@/features/chat/runtime/ThreadPane'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
+import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import type {
   EnvironmentCardDTO,
   HarnessModelRequestDebugRequestDTO,
@@ -60,12 +61,14 @@ export function useBoundThreadPanelViews(
     initialEventsScrollTop,
   } = useThreadPanelViewState(viewKey, controller.bodyRef, controller.events)
 
-  const rawDebugSettings = previewOptions?.debugSettings !== undefined
-    ? previewOptions.debugSettings
-    : controller.thread?.branchSettings
-  const debugModelName = rawDebugSettings?.model?.modelName ?? null
-  const debugModelVariant = rawDebugSettings?.model?.variant ?? null
-  const debugEnvironmentName = rawDebugSettings?.environmentName ?? null
+  const rawDebugModel = previewOptions?.debugSettings !== undefined
+    ? previewOptions.debugSettings?.model
+    : getBuiltinModelSelection(controller.thread?.branchSettings?.execution)
+  const debugModelName = rawDebugModel?.modelName ?? null
+  const debugModelVariant = rawDebugModel?.variant ?? null
+  const debugEnvironmentName = previewOptions?.debugSettings !== undefined
+    ? (previewOptions.debugSettings?.environmentName ?? null)
+    : (controller.thread?.branchSettings?.environmentName ?? null)
 
   const debugRequest = useMemo<HarnessModelRequestDebugRequestDTO | null>(() => {
     if (!debugModelName) {
@@ -85,7 +88,7 @@ export function useBoundThreadPanelViews(
   // 因此 revision 必须由这些事实构成，而不是 working 的一次 true/false。
   const debugRevision = useMemo(() => {
     const settings = controller.thread?.branchSettings
-    const model = debugRequest?.model ?? settings?.model
+    const model = debugRequest?.model ?? getBuiltinModelSelection(settings?.execution)
     const environmentName = debugRequest !== null
       ? debugRequest.environmentName
       : (settings?.environmentName ?? null)

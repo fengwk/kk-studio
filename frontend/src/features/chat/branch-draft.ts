@@ -1,10 +1,15 @@
-import type { HarnessCommandCreateDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type HarnessCommandCreateDTO,
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+  isSameExecution,
+} from '@/shared/api/contracts/ai-runtime'
 import type { AgentModelView } from '@/features/catalog'
 import { parsePayload } from '@/features/chat/runtime/payload-json'
 import type {
   AgentDefinitionDTO,
   HarnessBranchSettingsDTO,
-  HarnessModelSelectionDTO,
+  HarnessExecutionSelectionDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
 } from '@/shared/api/generated/contracts'
@@ -14,7 +19,7 @@ import type {
  */
 export interface BranchDraft {
   agentName: string
-  model: HarnessModelSelectionDTO
+  execution: HarnessExecutionSelectionDTO
   environmentName: string | null
   yoloEnabled: boolean
 }
@@ -41,7 +46,7 @@ export function materializeBlankBranchDraft(
     // 组没有组级 Variant；成员的 Variant 已固化在组配置中。
     return {
       agentName: agent.name,
-      model: { modelName: model.name, variant: null },
+      execution: createBuiltinExecution(model.name, null),
       environmentName: environmentName ?? null,
       yoloEnabled,
     }
@@ -53,7 +58,7 @@ export function materializeBlankBranchDraft(
   }
   return {
     agentName: agent.name,
-    model: { modelName: model.name, variant: variantId },
+    execution: createBuiltinExecution(model.name, variantId),
     environmentName: environmentName ?? null,
     yoloEnabled,
   }
@@ -100,10 +105,7 @@ export function branchDraftFromBranchSettings(
 ): BranchDraft {
   return {
     agentName: settings.agentName,
-    model: {
-      modelName: settings.model.modelName,
-      variant: settings.model.variant ?? null,
-    },
+    execution: settings.execution,
     environmentName: settings.environmentName,
     yoloEnabled,
   }
@@ -111,14 +113,13 @@ export function branchDraftFromBranchSettings(
 
 export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolean {
   return left.agentName === right.agentName
-    && left.model.modelName === right.model.modelName
-    && (left.model.variant ?? null) === (right.model.variant ?? null)
+    && isSameExecution(left.execution, right.execution)
     && left.environmentName === right.environmentName
     && left.yoloEnabled === right.yoloEnabled
 }
 
 /**
- * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_AGENT/SET_MODEL/SET_ENVIRONMENT。
+ * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_AGENT/SET_EXECUTION/SET_ENVIRONMENT。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -133,11 +134,14 @@ export function buildBranchDiffCommands(
       agentName: draft.agentName,
     })
   }
-  if (!sameModelSelection(base.model, draft.model)) {
+  if (!isSameExecution(base.execution, draft.execution)) {
     commands.push({
-      type: 'SET_MODEL',
+      type: 'SET_EXECUTION',
       idempotencyKey: createCommandId(),
-      model: { ...draft.model },
+      execution: {
+        driver: draft.execution.driver,
+        settings: { ...draft.execution.settings },
+      },
     })
   }
   if (base.environmentName !== draft.environmentName) {
@@ -148,11 +152,6 @@ export function buildBranchDiffCommands(
     })
   }
   return commands
-}
-
-function sameModelSelection(left: HarnessModelSelectionDTO, right: HarnessModelSelectionDTO): boolean {
-  return left.modelName === right.modelName
-    && (left.variant ?? null) === (right.variant ?? null)
 }
 
 /**
@@ -181,20 +180,39 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
       const agentName = typeof payload.agentName === 'string' ? payload.agentName : base.agentName
       return { ...base, agentName }
     }
-    case 'SET_MODEL': {
-      const model = payload.model
-      if (model && typeof model === 'object' && !Array.isArray(model)) {
-        const record = model as Record<string, unknown>
-        return {
-          ...base,
-          model: {
-            modelName: typeof record.modelName === 'string' ? record.modelName : base.model.modelName,
-            variant: typeof record.variant === 'string'
-              ? record.variant
-              : record.variant === null
+    case 'SET_EXECUTION': {
+      const execution = payload.execution
+      if (execution && typeof execution === 'object' && !Array.isArray(execution)) {
+        const record = execution as Record<string, unknown>
+        const driver = typeof record.driver === 'string' ? record.driver : base.execution.driver
+        if (driver === 'builtin') {
+          const baseModel = getBuiltinModelSelection(base.execution)
+          const baseModelName = baseModel?.modelName ?? ''
+          const baseVariant = baseModel?.variant ?? null
+          const settings = record.settings
+          if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+            const s = settings as Record<string, unknown>
+            const modelName = typeof s.modelName === 'string' ? s.modelName : baseModelName
+            const variant = typeof s.variant === 'string'
+              ? s.variant
+              : s.variant === null
                 ? null
-                : (base.model.variant ?? null),
-          },
+                : baseVariant
+            return {
+              ...base,
+              execution: createBuiltinExecution(modelName, variant),
+            }
+          }
+        } else {
+          return {
+            ...base,
+            execution: {
+              driver,
+              settings: (record.settings && typeof record.settings === 'object' && !Array.isArray(record.settings))
+                ? (record.settings as Record<string, unknown>)
+                : base.execution.settings,
+            },
+          }
         }
       }
       return base

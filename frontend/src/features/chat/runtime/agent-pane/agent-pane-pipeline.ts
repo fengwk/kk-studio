@@ -73,7 +73,10 @@ export function createThreadId(): string {
 export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsDTO {
   return {
     agentName: draft.agentName,
-    model: { ...draft.model },
+    execution: {
+      driver: draft.execution.driver,
+      settings: { ...draft.execution.settings },
+    },
     environmentName: draft.environmentName,
     goal: null,
   }
@@ -254,7 +257,10 @@ function buildCreationTarget(target: PaneTarget, draft: BranchDraft) {
 export function copyBranchDraft(draft: BranchDraft): BranchDraft {
   return {
     ...draft,
-    model: { ...draft.model },
+    execution: {
+      driver: draft.execution.driver,
+      settings: { ...draft.execution.settings },
+    },
   }
 }
 

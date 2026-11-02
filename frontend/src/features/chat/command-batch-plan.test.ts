@@ -9,12 +9,13 @@ import {
   type ComposerPart,
 } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
     agentName: 'assistant',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     goal: null,
     ...overrides,
@@ -44,7 +45,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
     agentName: 'assistant',
-    model: { modelName: 'MiniMax', variant: 'default' },
+    execution: createBuiltinExecution('MiniMax', 'default'),
     environmentName: null,
     yoloEnabled: false,
     ...overrides,
@@ -95,12 +96,12 @@ describe('command batch replay identity', () => {
       effectiveBase: draftOf(),
       draft: draftOf({
         agentName: 'coder',
-        model: { modelName: 'GPT-5', variant: 'v2' },
+        execution: createBuiltinExecution('GPT-5', 'v2'),
       }),
     })
     expect(batch.request.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
-      'SET_MODEL',
+      'SET_EXECUTION',
       'USER_MESSAGE',
     ])
   })

@@ -23,7 +23,11 @@ import {
 } from '@/features/chat/composer/composer-draft'
 import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
 import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
+import {
+  type AgentRuntimeOwnerDTO,
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import {
   parseGoalProgress,
   type BranchGoalProgressResult,
@@ -475,10 +479,12 @@ export function useRootThreadControl({
   } : controller, {
     // 本地草稿没有 threadId：视图状态按目标身份隔离，API 规划仍按真实 threadId/会话。
     viewKey: targetViewKey,
-    debugSettings: activeDraft == null ? undefined : {
-      model: activeDraft.model,
-      environmentName: activeDraft.environmentName,
-    },
+    debugSettings: activeDraft == null
+      ? undefined
+      : (() => {
+          const builtin = getBuiltinModelSelection(activeDraft.execution)
+          return builtin ? { model: builtin, environmentName: activeDraft.environmentName } : null
+        })(),
     historyLoading: isDraftHistoryTarget(target) ? treeEntriesQuery.isLoading : controller.messagesLoading,
     historyError: (isDraftHistoryTarget(target) ? treeEntriesQuery.error ?? draftHistory.error : controller.messagesError)
       ? t('ai.chat.history.loadFailed') : null,
@@ -594,7 +600,7 @@ export function useRootThreadControl({
     focusOnEscape: focused,
     composerRef,
     settings: activeDraft == null ? undefined : {
-      model: activeDraft.model,
+      model: getBuiltinModelSelection(activeDraft.execution),
       models,
       yoloEnabled: activeDraft.yoloEnabled,
       environmentName: activeDraft.environmentName,
@@ -607,7 +613,7 @@ export function useRootThreadControl({
           branchPanel.selectModel(model)
         } else {
           setLocalDraftEdited(true)
-          setLocalDraft((current) => (current ? { ...current, model } : current))
+          setLocalDraft((current) => (current ? { ...current, execution: createBuiltinExecution(model) } : current))
         }
       },
       onYoloChange: (enabled) => {

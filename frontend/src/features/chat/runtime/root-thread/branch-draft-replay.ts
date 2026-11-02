@@ -1,13 +1,20 @@
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import { parsePayload } from '@/features/chat/runtime/payload-json'
 import { threadDraftPath } from '@/features/chat/thread-draft-path'
+import {
+  createBuiltinExecution,
+  getBuiltinModelSelection,
+} from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 
 export function cloneDraft(draft: BranchDraft): BranchDraft {
   return {
     ...draft,
-    model: { ...draft.model },
+    execution: {
+      driver: draft.execution.driver,
+      settings: { ...draft.execution.settings },
+    },
   }
 }
 
@@ -23,7 +30,29 @@ export function branchDraftFromEntry(
   if (settings == null) {
     return cloneDraft(fallback)
   }
-  const model = isRecord(settings.model) ? settings.model : null
+  const execution = isRecord(settings.execution) ? settings.execution : null
+  let nextExecution = fallback.execution
+  if (execution != null) {
+    const driver = typeof execution.driver === 'string' ? execution.driver : fallback.execution.driver
+    if (driver === 'builtin') {
+      const fallbackModel = getBuiltinModelSelection(fallback.execution)
+      const executionSettings = isRecord(execution.settings) ? execution.settings : null
+      const modelName = typeof executionSettings?.modelName === 'string'
+        ? executionSettings.modelName
+        : (fallbackModel?.modelName ?? '')
+      const variant = typeof executionSettings?.variant === 'string'
+        ? executionSettings.variant
+        : executionSettings?.variant === null
+          ? null
+          : (fallbackModel?.variant ?? null)
+      nextExecution = createBuiltinExecution(modelName, variant)
+    } else {
+      nextExecution = {
+        driver,
+        settings: isRecord(execution.settings) ? { ...execution.settings } : { ...fallback.execution.settings },
+      }
+    }
+  }
   let environmentName = fallback.environmentName
   if (Object.hasOwn(settings, 'environmentName')) {
     if (typeof settings.environmentName === 'string') {
@@ -35,16 +64,7 @@ export function branchDraftFromEntry(
   return {
     ...cloneDraft(fallback),
     agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
-    model: {
-      modelName: typeof model?.modelName === 'string'
-        ? model.modelName
-        : fallback.model.modelName,
-      variant: typeof model?.variant === 'string'
-        ? model.variant
-        : model?.variant === null
-          ? null
-          : (fallback.model.variant ?? null),
-    },
+    execution: nextExecution,
     environmentName,
   }
 }
