@@ -113,7 +113,9 @@ final class PostgresqlWorkStore implements WorkStore {
   public void request(WorkTarget target, EnvironmentId requiredEnvironmentId) {
     tx.checkOpen();
     Objects.requireNonNull(target, "target");
-    if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
+    if (requiredEnvironmentId != null
+        && target.type() != WorkTargetType.TOOL
+        && target.type() != WorkTargetType.AGENT) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
@@ -238,7 +240,7 @@ final class PostgresqlWorkStore implements WorkStore {
   private void requireWorkOwnerLocked(WorkTarget target) {
     UUID threadId =
         switch (target.type()) {
-          case THREAD -> tx.threads()
+          case THREAD, AGENT -> tx.threads()
               .find(target.id())
               .orElseThrow(
                   () -> new IllegalArgumentException("work target does not exist: " + target))
@@ -264,7 +266,7 @@ final class PostgresqlWorkStore implements WorkStore {
   private void requireTargetExists(WorkTarget target) {
     boolean exists =
         switch (target.type()) {
-          case THREAD -> tx.queryExists(
+          case THREAD, AGENT -> tx.queryExists(
               "select exists (select 1 from harness_thread where id = ?)", target.id());
           case MODEL -> tx.queryExists(
               "select exists (select 1 from harness_model_invocation where id = ?)", target.id());

@@ -196,6 +196,91 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(beforeRegistration.getMessage().contains("ck_harness_execution_exit_time"));
   }
 
+  @Test
+  void executionExitAndDurableWorkAcceptAgentTargetAndKind() {
+    UUID threadId = seedExecutionExitThread();
+    UUID agentExecutionId = UUID.randomUUID();
+    UUID invocationId = UUID.randomUUID();
+
+    // 1. harness_execution_exit 接受 kind = 'AGENT'
+    jdbc.update(
+        "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
+            + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
+            + " abandoned_at) values (?, ?, ?, 1, 'lease-agent', 'AGENT', null, 'UNCONFIRMED',"
+            + " timestamp with time zone '2026-01-01 00:00:00.000+00', null, null)",
+        agentExecutionId,
+        threadId,
+        invocationId);
+
+    // AGENT 支持 STUDIO_EXITED
+    jdbc.update(
+        "update harness_execution_exit set state = 'STUDIO_EXITED', confirmed_at = registered_at"
+            + " where execution_id = ?",
+        agentExecutionId);
+
+    // AGENT 不支持 REMOTE_ACKNOWLEDGED
+    DataIntegrityViolationException agentAck =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "update harness_execution_exit set state = 'REMOTE_ACKNOWLEDGED'"
+                        + " where execution_id = ?",
+                    agentExecutionId));
+    assertTrue(agentAck.getMessage().contains("ck_harness_execution_exit_kind_state"));
+
+    // AGENT 不能有 parent_execution_id
+    DataIntegrityViolationException agentWithParent =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "update harness_execution_exit set parent_execution_id = ?"
+                        + " where execution_id = ?",
+                    agentExecutionId,
+                    agentExecutionId));
+    assertTrue(agentWithParent.getMessage().contains("ck_harness_execution_exit_kind"));
+
+    // 2. REMOTE 可以以 AGENT 执行代次为 parent_execution
+    UUID envId = UUID.randomUUID();
+    jdbc.update(
+        "insert into environment (id, name, registration_token_hash, created_at, updated_at)"
+            + " values (?, 'env-1',"
+            + " '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', now(), now())",
+        envId);
+    UUID remoteExecutionId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
+            + " owner_lease_token, kind, parent_execution_id, environment_id, state, registered_at,"
+            + " confirmed_at, abandoned_at) values (?, ?, ?, 1, 'lease-remote', 'REMOTE', ?, ?,"
+            + " 'REMOTE_ACKNOWLEDGED', timestamp with time zone '2026-01-01 00:00:00.000+00',"
+            + " timestamp with time zone '2026-01-01 00:00:00.100+00', null)",
+        remoteExecutionId,
+        threadId,
+        invocationId,
+        agentExecutionId,
+        envId);
+
+    // 3. durable_work 接受 AGENT target 且支持 required_environment_id
+    jdbc.update(
+        "insert into durable_work (target_type, target_id, available_at, wake_version,"
+            + " required_environment_id) values ('AGENT', ?, now(), 1, ?)",
+        threadId,
+        envId);
+
+    // durable_work 拒绝 THREAD 带有 required_environment_id
+    DataIntegrityViolationException threadAffinity =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into durable_work (target_type, target_id, available_at, wake_version,"
+                        + " required_environment_id) values ('THREAD', ?, now(), 1, ?)",
+                    UUID.randomUUID(),
+                    envId));
+    assertTrue(threadAffinity.getMessage().contains("ck_durable_work_required_environment"));
+  }
+
   private UUID seedExecutionExitThread() {
     UUID sessionId = UUID.randomUUID();
     UUID rootEntryId = UUID.randomUUID();
@@ -392,6 +477,15 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
     assertTrue(workLease.contains("WHERE (lease_until IS NOT NULL)"));
+    String agentWorkAvailable = indexDefinition("idx_durable_work_agent_available");
+    String agentWorkLease = indexDefinition("idx_durable_work_agent_lease_until");
+    assertTrue(agentWorkAvailable.contains("(available_at, target_id)"));
+    assertTrue(agentWorkAvailable.contains("target_type"));
+    assertTrue(agentWorkAvailable.contains("'AGENT'"));
+    assertTrue(agentWorkLease.contains("(lease_until, target_id)"));
+    assertTrue(agentWorkLease.contains("target_type"));
+    assertTrue(agentWorkLease.contains("'AGENT'"));
+    assertTrue(agentWorkLease.contains("lease_until IS NOT NULL"));
     assertTrue(threadParent.contains("(parent_thread_id)"));
     assertTrue(threadSession.contains("(session_id, created_at, id)"));
     String rootName = indexDefinition("uk_harness_thread_root_name");
