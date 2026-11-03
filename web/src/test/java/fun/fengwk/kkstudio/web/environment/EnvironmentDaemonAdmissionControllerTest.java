@@ -212,8 +212,8 @@ class EnvironmentDaemonAdmissionControllerTest {
   void protocolMismatchWithReleaseReturns426WithArtifactMetadata() throws Exception {
     testReleaseProvider.target =
         new DaemonReleaseTarget(
-            "6.0.0",
-            "https://github.com/fengwk/kk-studio/releases/download/v6.0.0/kk-daemon-linux-amd64.tar.gz",
+            "1.0.0",
+            "https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-daemon-linux-amd64.tar.gz",
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 
     MockHttpServletRequest request = newRequest();

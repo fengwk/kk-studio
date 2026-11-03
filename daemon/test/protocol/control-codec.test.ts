@@ -382,7 +382,7 @@ describe('control binary codec', () => {
           environmentId: ENVIRONMENT_ID,
           payload: {
             case: 'ready',
-            value: create(ReadySchema, { daemonVersion: '6.0.0' }),
+            value: create(ReadySchema, { daemonVersion: '1.0.0' }),
           },
         }),
       ),
@@ -396,7 +396,7 @@ describe('control binary codec', () => {
           payload: {
             case: 'ready',
             value: create(ReadySchema, {
-              daemonVersion: '6.0.0',
+              daemonVersion: '1.0.0',
               environment: create(EnvironmentInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
@@ -407,7 +407,7 @@ describe('control binary codec', () => {
               }),
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 1n,
-                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+                status: create(RuntimeBodySchema, { daemonVersion: '1.0.0' }),
               }),
             }),
           },
@@ -423,7 +423,7 @@ describe('control binary codec', () => {
           payload: {
             case: 'ready',
             value: create(ReadySchema, {
-              daemonVersion: '6.0.0',
+              daemonVersion: '1.0.0',
               environment: create(EnvironmentInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
@@ -465,7 +465,7 @@ describe('control binary codec', () => {
             value: create(HeartbeatSchema, {
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 0n,
-                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+                status: create(RuntimeBodySchema, { daemonVersion: '1.0.0' }),
               }),
             }),
           },
@@ -484,9 +484,9 @@ describe('control binary codec', () => {
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 1n,
                 status: create(RuntimeBodySchema, {
-                  daemonVersion: '6.0.0',
+                  daemonVersion: '1.0.0',
                   update: create(UpdateProgressSchema, {
-                    targetVersion: '6.1.0',
+                    targetVersion: '1.1.0',
                     downloadedBytes: 100n,
                     totalBytes: 50n,
                   }),
@@ -723,7 +723,7 @@ describe('control binary codec', () => {
             case: 'update',
             value: create(UpdateSchema, {
               operationId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              targetVersion: '6.0.0',
+              targetVersion: '1.0.0',
               artifactUrl: 'https://attacker.com/evil.tar.gz',
               artifactSha256: 'a'.repeat(64),
             }),
@@ -1065,7 +1065,7 @@ describe('control binary codec', () => {
           payload: {
             case: 'ready',
             value: create(ReadySchema, {
-              daemonVersion: '6.0.0',
+              daemonVersion: '1.0.0',
               environment: create(EnvironmentInfoSchema, {
                 operatingSystem: OperatingSystem.LINUX,
                 architecture: Architecture.AMD64,
@@ -1077,7 +1077,7 @@ describe('control binary codec', () => {
               }),
               runtimeStatus: create(RuntimeSnapshotSchema, {
                 revision: 1n,
-                status: create(RuntimeBodySchema, { daemonVersion: '6.0.0' }),
+                status: create(RuntimeBodySchema, { daemonVersion: '1.0.0' }),
               }),
             }),
           },

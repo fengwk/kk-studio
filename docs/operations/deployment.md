@@ -30,8 +30,8 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
-test -f web/target/kk-studio-web-6.0.0.jar
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-6.0.0.jar
+test -f web/target/kk-studio-web-1.0.0.jar
+"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.0.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -54,7 +54,7 @@ test -f web/target/kk-studio-web-6.0.0.jar
 验证静态资源已进入产物：
 
 ```bash
-"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-6.0.0.jar \
+"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.0.jar \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -183,7 +183,7 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 
 ### 从数据面不兼容的版本升级
 
-Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据库（包括此前发行版本创建的库）
+Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据库
 在校验阶段被拒绝，且表数据、迁移历史与结构保持不变。仓库不提供自动迁移、隐式 DDL 修补或
 `repair` 路径；不得让新版本的 Flyway 在旧库上重放 V1，也不得在现有部署或共享数据库上直接改表。
 
@@ -192,7 +192,7 @@ Flyway 只接受 V1 与当前基线一致的数据库；V1 不同的已有数据
 1. 在旧部署“设置 → 同步”导出配置 YAML，另存旧 App/Daemon 镜像、运行配置与密钥文件、
    全库 dump 与 S3 业务对象；确认备份可恢复后保留旧库，不把旧库作为新库目标。
 2. 新建全新的空 PostgreSQL 17/UTF8 数据库，由唯一 Flyway owner 用新版本产物初始化当前 Schema。同时清空各 App 实例的 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` journal 卷，新版本 journal 记录包含固定的 `environmentId` 等字段，不兼容旧版本未确认文件。
-3. 部署新版本 App 与同版本 Daemon 并指向新库。v6 Daemon 为全新安装，没有从旧版本原地升级的路径；部署 v6 后需要在每台主机重新执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标制品 URL 与 SHA256），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。旧 YAML 只作重建参考，不能原样导入：按当前契约整理
+3. 部署新版本 App 与同版本 Daemon 并指向新库。在每台主机通过 Environment 安装弹窗重新执行安装命令。运行中协议版本不一致时，准入端点返回 HTTP 426 + protobuf `UpgradeRequired`（含目标制品 URL 与 SHA256），Daemon 据此执行本机受管更新；无法受管更新时需重新覆盖安装。旧 YAML 只作重建参考，不能原样导入：按当前契约整理
    全局模型名、Agent 引用与价格后，经界面或配置导入校验写入；Provider 凭据、Environment 注册令牌与
    安装设置逐项核对。会话、项目、画布、运行历史与 Blob 引用只保留在旧库和备份中。
 4. 验收健康、关键业务操作、Environment `READY` 与 Daemon 重连后再切换入口；旧库、备份与旧镜像
