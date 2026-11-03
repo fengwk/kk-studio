@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -876,106 +875,38 @@ function checkEnvironmentRouteDocs() {
   }
 }
 
-const forbiddenSessionArtifactTerms = [
-  [['本', '切片'].join(''), new RegExp(['本', '切片'].join(''))],
-  [['Branch', 'B'].join(' '), new RegExp(['Branch', 'B'].join(' '))],
-]
-
-const BINARY_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
-  '.jar', '.class', '.war', '.ear',
-  '.woff', '.woff2', '.ttf', '.eot',
-  '.bin', '.exe', '.dll', '.so', '.dylib',
-  '.tar', '.gz', '.tgz', '.zip', '.7z',
-  '.pdf', '.mp3', '.mp4',
+/** 源码与配置中不得出现会话过程用语；Markdown 由文档禁用词覆盖，AGENTS.md 是 Agent 工作规则，不在此列。 */
+const sessionArtifactTerms = [['本', '切片'].join(''), ['Branch', 'B'].join(' ')]
+const sessionArtifactExtensions = new Set([
+  '.java', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.properties', '.sql', '.sh', '.ps1', '.txt',
 ])
+const generatedDirectories = new Set(['.git', '.workspace', 'node_modules', 'target', 'dist', 'coverage', 'reports'])
 
-function isBinaryBuffer(buffer) {
-  const checkLength = Math.min(buffer.length, 8192)
-  for (let i = 0; i < checkLength; i++) {
-    if (buffer[i] === 0) {
-      return true
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (generatedDirectories.has(entry.name)) {
+      return []
     }
-  }
-  return false
-}
-
-function collectTextFilesRecursively(dir, rootDir = dir) {
-  const files = []
-  const ignored = new Set([
-    '.git',
-    'node_modules',
-    'target',
-    'dist',
-    'coverage',
-    'reports',
-    '.workspace',
-    '.kkstudio',
-    'logs',
-    'pids',
-  ])
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (ignored.has(entry.name)) {
-      continue
+    const absolutePath = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      return sourceFiles(absolutePath)
     }
-    const full = path.join(dir, entry.name)
-    let stat
-    try {
-      stat = statSync(full)
-    } catch {
-      continue
-    }
-    if (stat.isDirectory()) {
-      files.push(...collectTextFilesRecursively(full, rootDir))
-    } else if (stat.isFile()) {
-      const rel = path.relative(rootDir, full).replace(/\\/g, '/')
-      files.push(rel)
-    }
-  }
-  return files
-}
-
-function getTrackedTextFiles(root) {
-  try {
-    const stdout = execFileSync('git', ['ls-files', '-z'], {
-      cwd: root,
-      encoding: 'utf8',
-      maxBuffer: 1 << 28,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-    return stdout.split('\0').filter(Boolean)
-  } catch {
-    return collectTextFilesRecursively(root)
-  }
+    return sessionArtifactExtensions.has(path.extname(entry.name)) ? [absolutePath] : []
+  })
 }
 
 function checkNoSessionArtifacts() {
-  const trackedFiles = getTrackedTextFiles(repositoryRoot)
-  for (const relativePath of trackedFiles) {
-    const ext = path.extname(relativePath).toLowerCase()
-    if (BINARY_EXTENSIONS.has(ext)) {
-      continue
-    }
-    const fullPath = path.join(repositoryRoot, relativePath)
-    let buffer
-    try {
-      buffer = readFileSync(fullPath)
-    } catch {
-      continue
-    }
-    if (isBinaryBuffer(buffer)) {
-      continue
-    }
-    const content = buffer.toString('utf8')
-    const lines = content.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      for (const [label, pattern] of forbiddenSessionArtifactTerms) {
-        if (pattern.test(line)) {
-          addError(`${relativePath}:${i + 1}: contains prohibited session artifact '${label}'`)
+  for (const file of sourceFiles(repositoryRoot)) {
+    const relativePath = relativeFromRoot(file)
+    read(relativePath)
+      .split('\n')
+      .forEach((line, index) => {
+        for (const term of sessionArtifactTerms) {
+          if (line.includes(term)) {
+            addError(`${relativePath}:${index + 1}: contains prohibited session artifact '${term}'`)
+          }
         }
-      }
-    }
+      })
   }
 }
 

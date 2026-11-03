@@ -171,7 +171,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
-`INVALID_RESPONSE` 失败，不再按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
+`INVALID_RESPONSE` 失败，不会按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[Harness Model：用量与计价](../modules/harness-model.md#协议来源)。
 
@@ -217,7 +217,7 @@ reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能�
 
 验收完成且确认备份可恢复后，可用 `reset-database.sh --cleanup-snapshots --dry-run`
 预览，再用 `--cleanup-snapshots` 确认删除目标库的全部冻结快照。默认重建不自动清理；
-清理包括最新快照，删除后无法直接切回旧库。连接与范围见[清理冻结快照](development-and-testing.md#清理冻结快照)。
+清理包括最新快照，删除后无法直接切回重建前的数据库。连接与范围见[清理冻结快照](development-and-testing.md#清理冻结快照)。
 
 ## 生产部署与反向代理
 

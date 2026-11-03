@@ -83,7 +83,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
-| 当前空库启动与旧库拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 空库启动与基线不一致数据库的拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 当前启动验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.startup.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
 | Studio 与 Environment Daemon 跨语言集成测试（Java 生产核心与 Node 24 Daemon 产物，真实 WebSocket + HTTP/2，需先构建 Daemon） | 先 `npm --prefix daemon ci && npm --prefix daemon run build`，再 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=DaemonCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 受管 code-server 真实视图验收（需冻结发行目录，默认跳过） | `KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> npm --prefix daemon run test -- test/ide/acceptance.test.ts`（Node 24；未设置该变量时用例整组跳过） |
@@ -125,7 +125,7 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
 V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变。Java 门禁以
 `mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
-React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动/旧库拒绝与 Node decoder。
+React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动、基线不一致数据库的拒绝与 Node decoder。
 通过后上传仅含 `app.jar` 及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。
 `main` publish 只下载同 run、同 SHA 的该 artifact，
 校验版本、提交与文件摘要后选择 `deploy/local/Dockerfile` 的 `verified-artifact` 阶段构建镜像，
@@ -139,7 +139,7 @@ Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安
 `daemon/package-lock.json` 安装，在 linux-amd64、linux-arm64、macos-arm64、macos-amd64、windows-amd64
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
 安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。该工作流作为 PR 门禁，
-并分别由 `docker-publish`（main）与 `daemon-release`（tag）调用，不再独立监听 push，避免同一提交
+并分别由 `docker-publish`（main）与 `daemon-release`（tag）调用，不单独监听 push，避免同一提交
 重复执行矩阵。Docker 发布与 Daemon Release 都要求该门禁成功；release 的 stage 还运行完整仓库脚本
 测试（含 Unix 安装器 fixture）与 tag/main ancestry、文档、敏感数据和版本门禁，随后在对应宿主上逐一
 烟测五个平台归档才上传 GitHub Release。
@@ -868,7 +868,7 @@ Environment 保留注册令牌摘要，同名更新保持其身份；新库生�
 需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
 
 数据库脚本只有 [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：
-默认备份旧库、重命名冻结，并以原元数据创建同名空库；验收后可显式清理冻结快照。
+默认备份当前库、重命名冻结，并以原元数据创建同名空库；验收后可显式清理冻结快照。
 它只连接 PostgreSQL，不管理应用或容器，也不执行 Flyway；重建目标库或删除快照时，
 发现该库仍有其他会话就拒绝，不终止会话。
 
@@ -937,7 +937,7 @@ reset 在任何改库操作前检查权限、目标库状态和其他会话；�
 `--yes` 可以跳过输入闸门，但只用于已有明确授权的非交互自动化，不能代替数据所有者批准。
 
 确认后写入并验证 custom-format `pg_dump`。这份备份是 dump 开始时的一致时间点，不保证包含
-dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` 才是 reset 完成前的最新旧库。
+dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` 才保留 reset 完成前的最新数据。
 备份经 `pg_restore --list` 检查并生成 SHA-256；它验证备份格式，不代替隔离恢复演练。
 空库保持原 owner/encoding/locale/tablespace/connection limit。
 目标空库就位前失败时，脚本尝试清理不完整空库、解冻并恢复原库名；恢复失败会报告人工处理步骤。
@@ -973,7 +973,7 @@ Docker 不可用时跳过的结果不能当作数据库流程通过。
 #### 清理冻结快照
 
 重建默认保留所有冻结库，不自动过期或删除。配置导入、关键功能与备份恢复能力验证通过，
-确认不再需要快速切回旧库后，使用独立清理模式：
+确认不需要快速切回重建前的数据库后，使用独立清理模式：
 
 ```bash
 ./scripts/ops/reset-database.sh --database kk_studio --cleanup-snapshots --dry-run
