@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /** 插件配置、凭据与认证 attempt 三个仓储在真实 PostgreSQL 上的 SQL 契约。 */
 class PluginPersistencePostgresIntegrationTest {
@@ -79,7 +80,13 @@ class PluginPersistencePostgresIntegrationTest {
     assertEquals(
         new PluginConfigurationRow(PLUGIN, 2L, "{\"enabled\":false}"),
         configurations.find(PLUGIN).orElseThrow());
-    assertEquals(2, configurations.findAll().size());
+    List<PluginConfigurationRow> allConfigurations = configurations.findAll();
+    assertEquals(2, allConfigurations.size());
+    assertEquals(
+        Set.of(
+            new PluginConfigurationRow(PLUGIN, 2L, "{\"enabled\":false}"),
+            new PluginConfigurationRow(OTHER, 1L, "{}")),
+        Set.copyOf(allConfigurations));
     assertEquals(Optional.empty(), configurations.find("ghost"));
     configurations.notifyChanged(PLUGIN);
   }

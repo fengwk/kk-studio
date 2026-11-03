@@ -120,6 +120,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
             status ->
                 uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "first-token"));
     assertEquals(uploadId, first.getId());
+    // RETURNING 与普通读取投影相同的所有字段。
+    assertEquals(uploadRepository.getById(uploadId), first);
 
     assertNull(
         tx.execute(

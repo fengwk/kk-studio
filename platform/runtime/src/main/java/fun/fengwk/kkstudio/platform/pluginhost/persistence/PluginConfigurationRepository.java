@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.pluginhost.persistence;
 
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -18,6 +19,12 @@ public class PluginConfigurationRepository {
   /** 普通配置或凭据变化的 PostgreSQL 通知通道。 */
   public static final String CHANNEL = "plugin_changed";
 
+  private static final String COLUMNS = "plugin_id, revision, values_json";
+  private static final RowMapper<PluginConfigurationRow> ROW_MAPPER =
+      (rs, row) ->
+          new PluginConfigurationRow(
+              rs.getString("plugin_id"), rs.getLong("revision"), rs.getString("values_json"));
+
   private final JdbcClient jdbc;
 
   public PluginConfigurationRepository(JdbcClient jdbc) {
@@ -25,31 +32,22 @@ public class PluginConfigurationRepository {
   }
 
   public List<PluginConfigurationRow> findAll() {
-    return jdbc.sql("select plugin_id, revision, values_json from plugin_configuration")
-        .query(
-            (rs, row) ->
-                new PluginConfigurationRow(
-                    rs.getString("plugin_id"), rs.getLong("revision"), rs.getString("values_json")))
-        .list();
+    return jdbc.sql("select " + COLUMNS + " from plugin_configuration").query(ROW_MAPPER).list();
   }
 
   public Optional<PluginConfigurationRow> find(String pluginId) {
-    return jdbc.sql(
-            "select plugin_id, revision, values_json from plugin_configuration"
-                + " where plugin_id = :pluginId")
+    return jdbc.sql("select " + COLUMNS + " from plugin_configuration where plugin_id = :pluginId")
         .param("pluginId", pluginId)
-        .query(
-            (rs, row) ->
-                new PluginConfigurationRow(
-                    rs.getString("plugin_id"), rs.getLong("revision"), rs.getString("values_json")))
+        .query(ROW_MAPPER)
         .optional();
   }
 
   /** 首次启动时为新安装的 Plugin 写入默认值；已有行保持不变。 */
   public void insertIfMissing(String pluginId, String valuesJson) {
     jdbc.sql(
-            "insert into plugin_configuration (plugin_id, revision, values_json)"
-                + " values (:pluginId, 1, :valuesJson) on conflict (plugin_id) do nothing")
+            "insert into plugin_configuration ("
+                + COLUMNS
+                + ") values (:pluginId, 1, :valuesJson) on conflict (plugin_id) do nothing")
         .param("pluginId", pluginId)
         .param("valuesJson", valuesJson)
         .update();
