@@ -12,11 +12,13 @@ export function ConfirmActionModal({
   pending,
   error,
   onClose,
+  className,
 }: {
   modal: ConfirmModalState | null
   pending: boolean
   error?: string | null
   onClose: () => void
+  className?: string
 }) {
   const { t } = useI18n()
   if (!modal) {
@@ -27,7 +29,7 @@ export function ConfirmActionModal({
   return (
     <Dialog
       role="alertdialog"
-      className="confirm-modal-card"
+      className={['confirm-modal-card', className].filter(Boolean).join(' ')}
       ariaLabel={modal.title}
       title={modal.title}
       pending={pending}

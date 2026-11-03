@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, PanelRight } from 'lucide-react'
+import { useOptionalIdePanel } from '@/features/environment/ide/ide-panel-context'
 import { ChatWorkspacePane } from '@/features/chat/ChatWorkspacePane'
 import { NewBranchDialog } from '@/features/chat/NewBranchDialog'
 import { samePaneTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
@@ -29,6 +30,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Button } from '@/shared/ui/controls/Button'
@@ -99,6 +101,15 @@ function ChatWorkspaceContent({
   const targetThreadId = searchParams.get('thread')
   const { t } = useI18n()
   const location = useLocation()
+  const idePanel = useOptionalIdePanel()
+  const ideHintId = useId()
+  const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
+  const ideEnvironment = chatEnvironment && isCanonicalUuid(chatEnvironment.id)
+    ? { id: chatEnvironment.id, name: chatEnvironment.name, ready: chatEnvironment.ready }
+    : null
+  const ideHint = ideEnvironment != null
+    ? t('ai.ide.toggle')
+    : t(chat.environmentName ? 'ai.ide.chatEnvironmentUnavailable' : 'ai.ide.selectChatEnvironment')
   const [initialPaneLoad] = useState(() => loadChatPaneState(chat.id))
   const [paneState, setPaneState] = useState<ChatPaneState>(initialPaneLoad.state)
   const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})
@@ -419,6 +430,26 @@ function ChatWorkspaceContent({
               commitPaneState((current) => applyChatLayout(current, nextLayout))
             }}
           /> : null}
+          {debugSource == null ? (
+            <span title={ideHint}>
+              <Button
+                variant="ghost"
+                size="compact"
+                className="chat-ide-toggle"
+                aria-label={t('ai.ide.toggle')}
+                aria-describedby={ideEnvironment == null ? ideHintId : undefined}
+                aria-pressed={idePanel?.panelVisible ?? false}
+                disabled={ideEnvironment == null || idePanel == null}
+                onClick={() => {
+                  if (ideEnvironment != null) idePanel?.togglePanel(ideEnvironment)
+                }}
+                data-testid="chat-ide-toggle"
+              >
+                <PanelRight size={16} aria-hidden="true" />
+              </Button>
+              {ideEnvironment == null ? <span id={ideHintId} className="sr-only">{ideHint}</span> : null}
+            </span>
+          ) : null}
         </div>
       </header>
       {storageUnavailable ? (

@@ -229,6 +229,7 @@ function renderWorkspaceRouter(
   initialEntries: string[],
   element: React.ReactNode = <ChatWorkspacePage />,
   openEnvironment: (request: IdeOpenEnvironmentRequest) => void = vi.fn(),
+  togglePanel: (environment: { id: string; name: string; ready: boolean }) => void = vi.fn(),
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -248,7 +249,7 @@ function renderWorkspaceRouter(
   )
   return render(
     <QueryClientProvider client={queryClient}>
-      <IdePanelContext.Provider value={{ openEnvironment }}>
+      <IdePanelContext.Provider value={{ openEnvironment, togglePanel, panelVisible: false }}>
         <RouterProvider router={router} />
       </IdePanelContext.Provider>
     </QueryClientProvider>,
@@ -304,6 +305,36 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('option', { name: '5' }))
     expect(document.querySelector('.chat-pane-grid.layout-grid-5')).not.toBeNull()
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(5)
+  })
+
+  it('disables the IDE layout action without a conversation environment', async () => {
+    // 没有环境时提示先选择，不能发起 IDE 打开。
+    renderWorkspace()
+    const button = await screen.findByTestId('chat-ide-toggle')
+    expect(button).toBeDisabled()
+    expect(button.parentElement).toHaveAttribute('title', '请先为当前对话选择环境')
+  })
+
+  it('passes the conversation environment to the IDE layout action', async () => {
+    // 布局栏必须使用当前对话的环境，而非其他已知环境。
+    const user = userEvent.setup()
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: CHAT_ID, title: 'Workspace', agentName: 'assistant', environmentName: 'local-node',
+      yoloEnabled: false, version: '1', createTime: 0, updateTime: 0,
+    })
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([{
+      id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
+      status: 'READY', version: '1', createTime: 0, updateTime: 0,
+      capabilities: [], statusExpiresAt: null, lastSeen: null,
+    }])
+    const togglePanel = vi.fn()
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, vi.fn(), togglePanel)
+    const button = await screen.findByTestId('chat-ide-toggle')
+    await waitFor(() => expect(button).toBeEnabled())
+    await user.click(button)
+    expect(togglePanel).toHaveBeenCalledWith({
+      id: 'a1000000-0000-4000-8000-000000000001', name: 'local-node', ready: true,
+    })
   })
 
   it('restores layout and pane targets from one bounded tab snapshot', async () => {

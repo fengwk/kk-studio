@@ -6,11 +6,11 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
-import { FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
+import { ArrowLeft, Copy, FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
 import { OpenDirectoryModal } from '@/features/environment/ide/OpenDirectoryModal'
 import { Button } from '@/shared/ui/controls/Button'
 import { Select } from '@/shared/ui/controls/Select'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -88,6 +88,7 @@ export function IdeOverlayPanel({
   const [directoryOpen, setDirectoryOpen] = useState(false)
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'copied' | 'failed' | null>(null)
   const [dirtyCloseEnvironmentId, setDirtyCloseEnvironmentId] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
   const lastSelectedRef = useRef(selectedEnvironmentId)
@@ -99,6 +100,7 @@ export function IdeOverlayPanel({
     lastSelectedRef.current = selectedEnvironmentId
     setDirectoryOpen(false)
     setDirectoryError(null)
+    setCopyStatus(null)
     setDirectoryPending(false)
     setDirtyCloseEnvironmentId(null)
   }, [selectedEnvironmentId])
@@ -192,6 +194,7 @@ export function IdeOverlayPanel({
         return
       }
       setDirectoryOpen(false)
+      setCopyStatus(null)
     } finally {
       setDirectoryPending(false)
     }
@@ -229,9 +232,15 @@ export function IdeOverlayPanel({
     && !environmentsLoading
     && !environmentsError
     && selectedEnvironment == null
+  const directory = selectedView?.directory
+  const directorySplit = directory == null ? 0 : Math.max(
+    directory.lastIndexOf('/') + 1,
+    directory.lastIndexOf('\\') + 1,
+  )
 
   return (
     <aside
+      id="ide-panel"
       className="ide-overlay-panel ide-global-panel"
       data-testid="ide-overlay-panel"
       tabIndex={-1}
@@ -262,17 +271,44 @@ export function IdeOverlayPanel({
               }}
               disabled={actionsDisabled}
               aria-label={t('ai.ide.openDirectory')}
-              title={`${environmentName(selectedView.environmentId)} · ${selectedView.directory}`}
+              title={selectedView.directory}
               data-testid="ide-open-directory-btn"
             >
               <FolderOpen size={14} aria-hidden="true" />
               <span className="ide-toolbar-dir" data-testid="ide-directory-badge">
-                {selectedView.directory}
+                <span className="ide-toolbar-dir-prefix">
+                  {selectedView.directory.slice(0, directorySplit)}
+                </span>
+                <span className="ide-toolbar-dir-suffix">
+                  {selectedView.directory.slice(directorySplit)}
+                </span>
               </span>
             </Button>
           ) : null}
         </div>
         <div className="ide-toolbar-actions">
+          {directory ? (
+            <Button
+              variant="ghost"
+              size="compact"
+              className="ide-toolbar-icon"
+              aria-label={t('ai.ide.copyDirectory')}
+              title={t('ai.ide.copyDirectory')}
+              data-testid="ide-copy-directory-btn"
+              onClick={() => {
+                if (!navigator.clipboard) {
+                  setCopyStatus('failed')
+                  return
+                }
+                void navigator.clipboard.writeText(directory).then(
+                  () => setCopyStatus('copied'),
+                  () => setCopyStatus('failed'),
+                )
+              }}
+            >
+              <Copy size={14} aria-hidden="true" />
+            </Button>
+          ) : null}
           {selectedView != null ? (
             <Button
               variant="ghost"
@@ -289,6 +325,7 @@ export function IdeOverlayPanel({
               data-testid="ide-terminal-btn"
             >
               <Terminal size={14} aria-hidden="true" />
+              <span className="ide-toolbar-action-label">{t('ai.ide.openTerminal')}</span>
             </Button>
           ) : null}
           <Button
@@ -300,7 +337,9 @@ export function IdeOverlayPanel({
             title={t('ai.ide.collapse')}
             data-testid="ide-collapse-btn"
           >
-            <PanelRightClose size={14} aria-hidden="true" />
+            <PanelRightClose className="ide-collapse-desktop" size={14} aria-hidden="true" />
+            <ArrowLeft className="ide-collapse-mobile" size={14} aria-hidden="true" />
+            <span className="ide-toolbar-action-label">{t('ai.ide.collapse')}</span>
           </Button>
           {selectedView != null ? (
             <Button
@@ -315,11 +354,17 @@ export function IdeOverlayPanel({
               data-testid="ide-close-btn"
             >
               <X size={14} aria-hidden="true" />
+              <span className="ide-toolbar-action-label">{t('ai.ide.close')}</span>
             </Button>
           ) : null}
         </div>
       </header>
 
+      {copyStatus ? (
+        <div className="ide-panel-warning-banner" role="status">
+          {t(copyStatus === 'copied' ? 'ai.ide.directoryCopied' : 'ai.ide.directoryCopyFailed')}
+        </div>
+      ) : null}
       {storageUnavailable ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-storage-unavailable">
           {t('ai.ide.storageUnavailable')}
@@ -562,41 +607,22 @@ export function IdeOverlayPanel({
       ) : null}
 
       {dirtyCloseEnvironmentId != null ? (
-        <Dialog
-          title={t('ai.ide.dirtyDiscardTitle')}
+        <ConfirmActionModal
+          className="ide-confirm-modal"
+          modal={{
+            title: t('ai.ide.dirtyDiscardTitle'),
+            description: t('ai.ide.dirtyDiscardMessage'),
+            confirmLabel: t('ai.ide.discardAndClose'),
+            tone: 'danger',
+            onConfirm: () => { void handleDiscardClose() },
+          }}
           pending={discarding}
           onClose={() => {
             if (!discarding) {
               setDirtyCloseEnvironmentId(null)
             }
           }}
-          role="alertdialog"
-        >
-          <div className="ide-confirm-dialog-content" data-testid="ide-dirty-close-dialog">
-            <p>{t('ai.ide.dirtyDiscardMessage')}</p>
-            <div className="ide-confirm-dialog-actions">
-              <Button
-                variant="ghost"
-                size="compact"
-                onClick={() => setDirtyCloseEnvironmentId(null)}
-                disabled={discarding}
-              >
-                {t('ai.ide.cancel')}
-              </Button>
-              <Button
-                danger
-                size="compact"
-                loading={discarding}
-                onClick={() => {
-                  void handleDiscardClose()
-                }}
-                data-testid="ide-discard-close-btn"
-              >
-                {t('ai.ide.discardAndClose')}
-              </Button>
-            </div>
-          </div>
-        </Dialog>
+        />
       ) : null}
     </aside>
   )

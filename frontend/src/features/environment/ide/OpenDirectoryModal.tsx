@@ -37,32 +37,35 @@ export function OpenDirectoryModal({
 
   return (
     <Dialog
+      className="ide-directory-modal"
       title={t('ai.ide.openDirectoryTitle')}
       pending={pending}
       onClose={onClose}
       initialFocusSelector="input[data-testid='ide-directory-input']"
     >
-      <form onSubmit={handleSubmit} className="ide-directory-form">
-        <div className="ide-directory-form-field">
-          <label htmlFor="ide-directory-input">
-            <FieldLabel>{t('ai.ide.directoryPathLabel')}</FieldLabel>
-          </label>
-          <TextInput
-            id="ide-directory-input"
-            data-testid="ide-directory-input"
-            value={directory}
-            disabled={pending}
-            placeholder={t('ai.ide.directoryPathPlaceholder')}
-            onChange={(e) => setDirectory(e.target.value)}
-            autoFocus
-          />
-        </div>
-        {error ? (
-          <div className="ide-directory-error" role="alert" data-testid="ide-directory-error">
-            {error}
+      <form onSubmit={handleSubmit} className="modal-card-form">
+        <div className="modal-body">
+          <div className="ide-directory-form-field">
+            <label htmlFor="ide-directory-input">
+              <FieldLabel>{t('ai.ide.directoryPathLabel')}</FieldLabel>
+            </label>
+            <TextInput
+              id="ide-directory-input"
+              data-testid="ide-directory-input"
+              value={directory}
+              disabled={pending}
+              placeholder={t('ai.ide.directoryPathPlaceholder')}
+              onChange={(e) => setDirectory(e.target.value)}
+              autoFocus
+            />
           </div>
-        ) : null}
-        <div className="ide-directory-actions">
+          {error ? (
+            <div className="ide-directory-error" role="alert" data-testid="ide-directory-error">
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="modal-footer">
           <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>
             {t('ai.ide.cancel')}
           </Button>

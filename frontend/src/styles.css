@@ -4309,6 +4309,7 @@ select.settings-input option {
 .chat-workspace {
   display: flex;
   flex-direction: column;
+  container: chat-workspace / inline-size;
   min-height: 0;
   height: 100%;
   background: var(--bg);
@@ -5142,7 +5143,7 @@ select.settings-input option {
   color: var(--danger);
 }
 
-@media (max-width: 960px) {
+@container chat-workspace (max-width: 960px) {
   /*
    * 小屏多 pane：纵向堆叠滚动；
    * 每个 pane 占满当前可见区（grid 容器高度），避免上一屏底部露出下一 pane 顶部。
@@ -5199,7 +5200,9 @@ select.settings-input option {
     height: 100%;
     max-height: 100%;
   }
+}
 
+@media (max-width: 960px) {
   .form-grid-2 {
     grid-template-columns: 1fr;
   }

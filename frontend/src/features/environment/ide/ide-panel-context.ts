@@ -17,6 +17,8 @@ export interface IdeOpenEnvironmentRequest {
 
 export interface IdePanelContextValue {
   openEnvironment: (request: IdeOpenEnvironmentRequest) => void
+  panelVisible: boolean
+  togglePanel: (environment: IdeEnvironmentInfo) => void
 }
 
 export const IdePanelContext = createContext<IdePanelContextValue | null>(null)
