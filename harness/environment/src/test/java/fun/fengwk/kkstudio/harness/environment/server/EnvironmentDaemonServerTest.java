@@ -3308,6 +3308,48 @@ class EnvironmentDaemonServerTest {
     assertTrue(fixture.server.runtimeStatus(ENVIRONMENT_ID).isEmpty());
   }
 
+  /** 意图：仅被接受的实质运行态变化发布；重复、旧快照和只有 revision 变化均静默。 */
+  @Test
+  void runtimeStatusNotificationsFollowActualChangesFromBothMessages() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-runtime-notifications");
+    DaemonRuntimeStatus running = DaemonRuntimeStatus.running(DAEMON_VERSION);
+    DaemonRuntimeStatus updating =
+        new DaemonRuntimeStatus(DAEMON_VERSION, new DaemonUpdateProgress("1.0.10", 10L, null));
+
+    fixture.receive(channel, heartbeatEnvelope(1L, running));
+    fixture.receive(channel, heartbeatEnvelope(2L, running));
+    assertEquals(2L, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
+    assertTrue(fixture.leaseStore.runtimeStatusChanges.isEmpty());
+
+    fixture.receive(channel, heartbeatEnvelope(3L, updating));
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.leaseStore.runtimeStatusChanges);
+    fixture.receive(channel, runtimeStatusEnvelope(3L, updating));
+    fixture.receive(channel, runtimeStatusEnvelope(2L, running));
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.leaseStore.runtimeStatusChanges);
+
+    fixture.receive(channel, runtimeStatusEnvelope(4L, running));
+    assertEquals(List.of(ENVIRONMENT_ID, ENVIRONMENT_ID), fixture.leaseStore.runtimeStatusChanges);
+    assertEquals(running, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().status());
+  }
+
+  /** 意图：运行态发布时围栏失效或存储失败不能被吞掉，会话必须关闭。 */
+  @Test
+  void runtimeStatusNotificationFailureClosesTheSession() {
+    for (boolean fenceLost : List.of(true, false)) {
+      Fixture fixture = new Fixture();
+      FakeControlChannel channel = fixture.connectReady("channel-runtime-failure");
+      fixture.leaseStore.runtimeStatusFenceLost = fenceLost;
+      fixture.leaseStore.runtimeStatusNotificationFails = !fenceLost;
+
+      fixture.receive(channel, runtimeStatusEnvelope(2L, DAEMON_VERSION, "1.0.10", 10L));
+      assertTrue(channel.closed());
+      assertEquals(MessageType.ERROR, channel.lastEnvelope().getMessageType());
+      assertTrue(fixture.server.runtimeStatus(ENVIRONMENT_ID).isEmpty());
+      assertTrue(fixture.leaseStore.runtimeStatusChanges.isEmpty());
+    }
+  }
+
   private static String runtimeStatusPayload(
       long revision, String daemonVersion, String targetVersion, long downloadedBytes) {
     return "{\"revision\":\""

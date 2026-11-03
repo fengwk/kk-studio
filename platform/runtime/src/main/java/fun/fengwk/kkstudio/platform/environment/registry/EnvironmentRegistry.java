@@ -41,9 +41,8 @@ import java.util.function.Supplier;
  * <p>连接生命周期事件（CONNECTING/READY/DISCONNECTED）在推进状态的同一条围栏语句里原子追加到 {@code recent_events}， 数组始终是 200
  * 条以内的按时间正序窗口；READY 同时把 {@code skill_state} 清空，随后由 Skill 同步编排器全量重建。
  *
- * <p>六组连接写（tryAcquire/markReady/heartbeat/disconnect/recordEvent/replaceSkillState）各自在一个真实短事务内执行
- * 「围栏 SQL + environment_changed 发布」：只有实际写入成功才发布，0 行围栏与拒绝结果静默；发布失败连同围栏写一起回滚，
- * 绝不出现「租约已提交、通知未发出」的窗口。自然到期没有数据库写事件，仍由读取时判定与重连单次对账处理。
+ * <p>状态、宿主信息、Skill 投影或运维事件的围栏写与 {@code environment_changed} 在同一事务提交；0 行围栏与拒绝结果静默，
+ * 发布失败会回滚围栏写。HEARTBEAT 只续租，不发布通知。内存运行状态变化时先更新快照，再在 READY 租约围栏下发布失效提示。 自然到期没有数据库写事件，仍由读取时判定与截止点对账处理。
  */
 @Component
 public class EnvironmentRegistry implements DaemonLeaseStore {
@@ -191,6 +190,22 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
             and status = 'READY'
             and lease_until > statement_timestamp()
       )
+      """;
+
+  /** 先取得行锁，再按数据库当前时间复核围栏，避免等待锁期间租约过期后仍发布。 */
+  private static final String LOCK_READY_LEASE_SQL =
+      """
+      with locked as materialized (
+          select owner_node_id, lease_token, status, lease_until
+          from environment_connection
+          where environment_id = :environmentId
+          for update
+      )
+      select 1 from locked
+      where owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
+        and status = 'READY'
+        and lease_until > clock_timestamp()
       """;
 
   private static final String HAS_READY_LEASE_SQL =
@@ -421,7 +436,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 刷新路由租约的 last_seen 与 lease_until。
+   * 只刷新路由租约的 last_seen 与 lease_until，不发布环境变化通知。
    *
    * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
    */
@@ -430,16 +445,36 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(leaseDuration, "leaseDuration");
-    return fencedWrite(
-        environmentId,
-        () ->
-            jdbcClient
-                .sql(HEARTBEAT_SQL)
-                .param("leaseMillis", leaseDuration.toMillis())
-                .param("environmentId", environmentId.value())
-                .param("ownerNodeId", ownerNodeId)
-                .param("leaseToken", leaseToken)
-                .update());
+    return jdbcClient
+            .sql(HEARTBEAT_SQL)
+            .param("leaseMillis", leaseDuration.toMillis())
+            .param("environmentId", environmentId.value())
+            .param("ownerNodeId", ownerNodeId)
+            .param("leaseToken", leaseToken)
+            .update()
+        > 0;
+  }
+
+  @Override
+  public boolean runtimeStatusChanged(EnvironmentId environmentId, UUID leaseToken) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(leaseToken, "leaseToken");
+    return transactionTemplate.execute(
+        status -> {
+          boolean holdsLease =
+              jdbcClient
+                  .sql(LOCK_READY_LEASE_SQL)
+                  .param("environmentId", environmentId.value())
+                  .param("ownerNodeId", ownerNodeId)
+                  .param("leaseToken", leaseToken)
+                  .query(Integer.class)
+                  .optional()
+                  .isPresent();
+          if (holdsLease) {
+            notifier.environmentChanged(environmentId.value());
+          }
+          return holdsLease;
+        });
   }
 
   /**

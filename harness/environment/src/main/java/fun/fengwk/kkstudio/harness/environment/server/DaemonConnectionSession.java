@@ -539,6 +539,7 @@ final class DaemonConnectionSession implements DaemonSession {
   }
 
   private void applyRuntimeStatus(DaemonRuntimeSnapshot snapshot) {
+    boolean changed = false;
     synchronized (stateLock) {
       if (!ready || cleaned) {
         throw new ControlProtocolException("runtimeStatus arrived after connection left READY");
@@ -549,13 +550,16 @@ final class DaemonConnectionSession implements DaemonSession {
       }
       DaemonRuntimeSnapshot current = this.runtimeStatus;
       if (current == null || snapshot.revision() > current.revision()) {
+        changed = current == null || !snapshot.status().equals(current.status());
         this.runtimeStatus = snapshot;
-        return;
-      }
-      if (snapshot.revision() == current.revision() && !snapshot.equals(current)) {
+      } else if (snapshot.revision() == current.revision() && !snapshot.equals(current)) {
         throw new ControlProtocolException(
             "runtimeStatus revision " + snapshot.revision() + " changed without advancing");
       }
+    }
+    // 快照先可读，再发布；围栏失效或发布失败均交给会话的 fail-closed 路径处理。
+    if (changed && !leaseStore.runtimeStatusChanged(environmentId, leaseToken)) {
+      throw new ControlProtocolException("route fence lost for environment " + environmentId);
     }
   }
 

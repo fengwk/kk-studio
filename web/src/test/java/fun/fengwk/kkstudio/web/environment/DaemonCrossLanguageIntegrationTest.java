@@ -973,6 +973,11 @@ class DaemonCrossLanguageIntegrationTest {
     }
 
     @Override
+    public boolean runtimeStatusChanged(EnvironmentId environmentId, UUID leaseToken) {
+      return holdsReadyLease(environmentId, leaseToken);
+    }
+
+    @Override
     public boolean disconnect(
         EnvironmentId environmentId, UUID leaseToken, Duration graceDuration) {
       return true;

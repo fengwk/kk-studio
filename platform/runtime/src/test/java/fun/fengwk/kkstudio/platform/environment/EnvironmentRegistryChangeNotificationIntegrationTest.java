@@ -9,10 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -20,10 +22,28 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.protocol.Architecture;
+import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
+import fun.fengwk.kkstudio.harness.environment.protocol.EnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.protocol.Heartbeat;
+import fun.fengwk.kkstudio.harness.environment.protocol.MessageType;
+import fun.fengwk.kkstudio.harness.environment.protocol.OperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.protocol.Ready;
+import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeBody;
+import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.protocol.RuntimeStatus;
+import fun.fengwk.kkstudio.harness.environment.protocol.UpdateProgress;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonAdmission;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonControlChannel;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonHandshake;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonSession;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 
 import java.time.Clock;
@@ -33,10 +53,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * environment_connection 六组写的 Java 通知契约：真实短事务内「围栏 SQL + environment_changed 发布」要么一起提交、要么一起回滚。
+ * environment_connection 的 Java 通知契约：状态写与 {@code environment_changed} 在事务内一起提交或回滚。
  *
- * <p>测试基座直接使用独立 LISTEN 连接观测：真实写入（含 HEARTBEAT 与 Skill 投影）提交后各投递一次； 认证拒绝、活跃租约冲突、0
- * 行围栏与自然到期保持静默；发布失败必须回滚对应围栏写。
+ * <p>测试基座直接使用独立 LISTEN 连接观测：真实状态和 Skill 投影写入后投递通知；心跳续租、认证拒绝、活跃租约冲突、0 行围栏与自然到期保持静默；状态写的发布失败必须回滚。
  */
 class EnvironmentRegistryChangeNotificationIntegrationTest
     extends EnvironmentNotificationTestSupport {
@@ -65,6 +84,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
               "amd64"));
 
   @Autowired private EnvironmentRegistry environmentRegistry;
+  @Autowired private EnvironmentDaemonServer daemonServer;
 
   @BeforeEach
   void seedEnvironments() {
@@ -111,7 +131,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
     }
   }
 
-  /** 测试意图：markReady/heartbeat/recordEvent/replaceSkillState/disconnect 各自成功时通知，0 行围栏静默。 */
+  /** 测试意图：状态、事件与 Skill 投影成功时通知，心跳和 0 行围栏静默。 */
   @Test
   void fencedConnectionWritesNotifyOnlyWhenTheyWrite() throws Exception {
     try (EnvironmentChannelListener listener = listen()) {
@@ -136,8 +156,18 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
 
       assertFalse(environmentRegistry.heartbeat(DEV, UUID.randomUUID(), LEASE_DURATION));
       listener.assertSilent();
-      assertTrue(environmentRegistry.heartbeat(DEV, token, LEASE_DURATION));
-      listener.assertNotification(DEV.toString());
+      EnvironmentConnection beforeHeartbeat = environmentRegistry.find(DEV).orElseThrow();
+      for (int i = 0; i < 3; i++) {
+        assertTrue(environmentRegistry.heartbeat(DEV, token, Duration.ofSeconds(90 + i)));
+      }
+      EnvironmentConnection afterHeartbeat = environmentRegistry.find(DEV).orElseThrow();
+      assertTrue(afterHeartbeat.leaseUntil().isAfter(beforeHeartbeat.leaseUntil()));
+      assertTrue(afterHeartbeat.lastSeenAt().isAfter(beforeHeartbeat.lastSeenAt()));
+      assertEquals(beforeHeartbeat.status(), afterHeartbeat.status());
+      assertEquals(beforeHeartbeat.daemonCapabilities(), afterHeartbeat.daemonCapabilities());
+      assertEquals(beforeHeartbeat.skillState(), afterHeartbeat.skillState());
+      assertEquals(beforeHeartbeat.recentEvents(), afterHeartbeat.recentEvents());
+      listener.assertSilent();
 
       assertFalse(environmentRegistry.recordEvent(DEV, UUID.randomUUID(), skillEvent));
       listener.assertSilent();
@@ -147,23 +177,121 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertFalse(
           environmentRegistry.replaceSkillState(DEV, UUID.randomUUID(), List.of(), skillEvent));
       listener.assertSilent();
-      assertTrue(environmentRegistry.replaceSkillState(DEV, token, List.of(), skillEvent));
+      List<EnvironmentSkillState> installed =
+          List.of(
+              EnvironmentSkillState.installed(
+                  "dev", "0123456789abcdef0123456789abcdef01234567", "/home/dev/skills/dev"));
+      assertTrue(environmentRegistry.replaceSkillState(DEV, token, installed, skillEvent));
+      listener.assertNotification(DEV.toString());
+      assertEquals(installed, environmentRegistry.find(DEV).orElseThrow().skillState());
+
+      assertFalse(environmentRegistry.runtimeStatusChanged(DEV, UUID.randomUUID()));
+      listener.assertSilent();
+      assertTrue(environmentRegistry.runtimeStatusChanged(DEV, token));
       listener.assertNotification(DEV.toString());
 
       assertFalse(environmentRegistry.disconnect(DEV, UUID.randomUUID(), LEASE_DURATION));
       listener.assertSilent();
       assertTrue(environmentRegistry.disconnect(DEV, token, LEASE_DURATION));
       listener.assertNotification(DEV.toString());
+      assertFalse(environmentRegistry.runtimeStatusChanged(DEV, token));
+      listener.assertSilent();
+
+      // 同节点重连并上报新的宿主信息：CONNECTING 和 READY 都是可见变化。
+      UUID reconnected =
+          assertInstanceOf(
+                  LeaseBindResult.Acquired.class,
+                  environmentRegistry.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION))
+              .leaseToken();
+      listener.assertNotification(DEV.toString());
+      DaemonCapabilities changedHost =
+          new DaemonCapabilities(
+              "1.0.10",
+              new DaemonEnvironmentInfo(
+                  DaemonOperatingSystem.LINUX,
+                  "UTC",
+                  "test",
+                  "/home/test",
+                  "new host",
+                  "/tmp/kk-studio",
+                  "amd64"));
+      assertTrue(environmentRegistry.markReady(DEV, reconnected, changedHost, LEASE_DURATION));
+      listener.assertNotification(DEV.toString());
+      assertEquals(changedHost, environmentRegistry.find(DEV).orElseThrow().daemonCapabilities());
 
       // 过期持有者：全部围栏 0 行，连同直接改期一起保持静默。
       expireConnectionLease(DEV);
       listener.assertSilent();
-      assertFalse(environmentRegistry.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
-      assertFalse(environmentRegistry.heartbeat(DEV, token, LEASE_DURATION));
-      assertFalse(environmentRegistry.disconnect(DEV, token, LEASE_DURATION));
-      assertFalse(environmentRegistry.recordEvent(DEV, token, skillEvent));
-      assertFalse(environmentRegistry.replaceSkillState(DEV, token, List.of(), skillEvent));
+      assertFalse(environmentRegistry.markReady(DEV, reconnected, CAPABILITIES, LEASE_DURATION));
+      assertFalse(environmentRegistry.heartbeat(DEV, reconnected, LEASE_DURATION));
+      assertFalse(environmentRegistry.runtimeStatusChanged(DEV, reconnected));
+      assertFalse(environmentRegistry.disconnect(DEV, reconnected, LEASE_DURATION));
+      assertFalse(environmentRegistry.recordEvent(DEV, reconnected, skillEvent));
+      assertFalse(environmentRegistry.replaceSkillState(DEV, reconnected, List.of(), skillEvent));
       listener.assertSilent();
+    }
+  }
+
+  /** 测试意图：真实会话加 PostgreSQL 通知链路中，心跳续租静默，运行态变化在快照可读后通知。 */
+  @Test
+  void sessionPublishesOnlyRealRuntimeChanges() throws Exception {
+    try (EnvironmentChannelListener listener = listen()) {
+      DaemonAdmission.Admitted admission =
+          assertInstanceOf(
+              DaemonAdmission.Admitted.class,
+              daemonServer.admit(new DaemonHandshake(DEV_TOKEN, UUID.randomUUID().toString())));
+      listener.assertNotification(DEV.toString());
+      DaemonControlChannel channel = mock(DaemonControlChannel.class);
+      when(channel.isOpen()).thenReturn(true);
+      when(channel.offer(any())).thenReturn(DaemonOfferResult.ACCEPTED);
+      DaemonSession session = daemonServer.open(admission, channel, null);
+      RuntimeBody running = RuntimeBody.newBuilder().setDaemonVersion("1.0.9").build();
+      RuntimeBody updating =
+          running.toBuilder()
+              .setUpdate(
+                  UpdateProgress.newBuilder().setTargetVersion("1.0.10").setDownloadedBytes(10))
+              .build();
+      session.receive(
+          Envelope.newBuilder()
+              .setMessageType(MessageType.READY)
+              .setEnvironmentId(DEV.toString())
+              .setReady(
+                  Ready.newBuilder()
+                      .setDaemonVersion("1.0.9")
+                      .setEnvironment(
+                          EnvironmentInfo.newBuilder()
+                              .setOperatingSystem(OperatingSystem.LINUX)
+                              .setArchitecture(Architecture.AMD64)
+                              .setTimeZone("UTC")
+                              .setUserName("dev")
+                              .setHomeDirectory("/home/dev")
+                              .setTempDirectory("/tmp/kk-studio")
+                              .setNote("notify test daemon."))
+                      .setRuntimeStatus(snapshot(1, running)))
+              .build());
+      listener.assertNotification(DEV.toString());
+
+      session.receive(heartbeat(snapshot(1, running)));
+      session.receive(heartbeat(snapshot(2, running)));
+      listener.assertSilent();
+
+      session.receive(heartbeat(snapshot(3, updating)));
+      listener.assertNotification(DEV.toString());
+      assertEquals(
+          10L, daemonServer.runtimeStatus(DEV).orElseThrow().status().update().downloadedBytes());
+      session.receive(heartbeat(snapshot(3, updating)));
+      listener.assertSilent();
+
+      session.receive(
+          Envelope.newBuilder()
+              .setMessageType(MessageType.RUNTIME_STATUS)
+              .setEnvironmentId(DEV.toString())
+              .setRuntimeStatus(RuntimeStatus.newBuilder().setRuntimeStatus(snapshot(4, running)))
+              .build());
+      listener.assertNotification(DEV.toString());
+      assertNull(daemonServer.runtimeStatus(DEV).orElseThrow().status().update());
+      session.close();
+      listener.assertNotification(DEV.toString());
     }
   }
 
@@ -199,19 +327,32 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertNull(connecting.daemonCapabilities());
       listener.assertSilent();
 
-      // HEARTBEAT 同理：发布失败导致续租回滚，租约到期时间保持原值。
+      // HEARTBEAT 不依赖通知器，发布故障不阻断续租。
       Instant leaseBefore = connecting.leaseUntil();
+      assertTrue(failingRegistry.heartbeat(DEV, token, Duration.ofSeconds(120)));
+      Instant renewedLease = environmentRegistry.find(DEV).orElseThrow().leaseUntil();
+      assertTrue(renewedLease.isAfter(leaseBefore));
+      listener.assertSilent();
+
+      // 续租 SQL 自身失败时，异常必须透传且租约不变。
       assertThrows(
-          DataAccessResourceFailureException.class,
-          () -> failingRegistry.heartbeat(DEV, token, LEASE_DURATION));
-      assertEquals(leaseBefore, environmentRegistry.find(DEV).orElseThrow().leaseUntil());
+          DataAccessException.class, () -> failingRegistry.heartbeat(DEV, token, Duration.ZERO));
+      assertEquals(renewedLease, environmentRegistry.find(DEV).orElseThrow().leaseUntil());
       listener.assertSilent();
 
       // disconnect 在发布失败时返回 false；捕获在事务边界之外，围栏写已回滚而不是被吞掉后提交。
       assertFalse(failingRegistry.disconnect(DEV, token, LEASE_DURATION));
       EnvironmentConnection afterFailedDisconnect = environmentRegistry.find(DEV).orElseThrow();
       assertEquals(LiveEnvironmentStatus.CONNECTING, afterFailedDisconnect.status());
-      assertEquals(leaseBefore, afterFailedDisconnect.leaseUntil());
+      assertEquals(renewedLease, afterFailedDisconnect.leaseUntil());
+      listener.assertSilent();
+
+      // 运行态通知仅在 READY 租约下发布，发布异常向上抛出。
+      assertTrue(environmentRegistry.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
+      listener.assertNotification(DEV.toString());
+      assertThrows(
+          DataAccessResourceFailureException.class,
+          () -> failingRegistry.runtimeStatusChanged(DEV, token));
       listener.assertSilent();
 
       // tryAcquire 的成功 upsert 在发布失败时同样回滚，绝不留下没有通知的连接行。
@@ -229,6 +370,18 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
         id.value(),
         name,
         token);
+  }
+
+  private static RuntimeSnapshot snapshot(long revision, RuntimeBody status) {
+    return RuntimeSnapshot.newBuilder().setRevision(revision).setStatus(status).build();
+  }
+
+  private static Envelope heartbeat(RuntimeSnapshot snapshot) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.HEARTBEAT)
+        .setEnvironmentId(DEV.toString())
+        .setHeartbeat(Heartbeat.newBuilder().setRuntimeStatus(snapshot))
+        .build();
   }
 
   private void expireConnectionLease(EnvironmentId environmentId) {
