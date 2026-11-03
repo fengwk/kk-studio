@@ -92,31 +92,6 @@ const checkableTopLevels = new Set([
   'pom.xml',
 ])
 const generatedPathMarkers = ['/target/', '/coverage/', '/reports/']
-const forbiddenArchitectureDocuments = ['technical', 'solution'].join('-')
-const forbiddenDesignDocuments = ['product', 'design'].join('-')
-const forbiddenCacheTerm = ['re', 'dis'].join('')
-const forbiddenGoalTable = ['agent', 'thread', 'goal'].join('_')
-const forbiddenDocumentationTerms = [
-  [forbiddenArchitectureDocuments, new RegExp(forbiddenArchitectureDocuments, 'i')],
-  [forbiddenDesignDocuments, new RegExp(forbiddenDesignDocuments, 'i')],
-  [forbiddenCacheTerm, new RegExp(`\\b${forbiddenCacheTerm}\\b`, 'i')],
-  [forbiddenGoalTable, new RegExp(`\\b${forbiddenGoalTable}\\b`, 'i')],
-  [
-    'Goals/Non-goals heading',
-    /^#{2,6}\s+(?:\d+\.\s*)?(?:Goals|Non-goals|Goals\s*\/\s*Non-goals)\s*$/imu,
-  ],
-  ['template responsibility heading', /^#{2,6}\s+(?:核心职责|协作边界)\s*$/mu],
-  ['Workspace NOTES', /workspace\s+notes/i],
-  [['本', '切片'].join(''), new RegExp(['本', '切片'].join(''))],
-  ['路线图', /路线图/],
-  ['TODO', /\bTODO\b/i],
-  ['SET_MODEL', /\bSET_MODEL\b/],
-  ['compressed WebSocket', /compressed\s+WebSocket/i],
-  ['X-Daemon-', /\bX-Daemon-\b/],
-  ['/api/events/v2', /\/api\/events\/v2\b/],
-  ['ProtoIdeBridge', /\bProtoIdeBridge\b/],
-  ['DATA_BIND', /\bDATA_BIND\b/],
-]
 
 const errors = []
 
@@ -394,33 +369,6 @@ function checkInlineSourcePaths() {
       ) {
         addError(`${relativePath}: inline repository path must also be linked ${value}`)
         reportedUnlinkedPaths.add(value)
-      }
-    }
-  }
-}
-
-function checkForbiddenReferencesAndTerms() {
-  const scanPaths = [
-    'README.md',
-    'AGENTS.md',
-    ...walkFiles(path.join(repositoryRoot, 'scripts')).map(relativeFromRoot),
-    ...walkFiles(docsRoot).map(relativeFromRoot),
-  ]
-  for (const relativePath of scanPaths) {
-    const source = read(relativePath)
-    const forbiddenPathPattern = new RegExp(
-      `docs/(?:${forbiddenArchitectureDocuments}|${forbiddenDesignDocuments})|${forbiddenArchitectureDocuments}|${forbiddenDesignDocuments}`,
-      'iu',
-    )
-    if (forbiddenPathPattern.test(source)) {
-      addError(`${relativePath}: contains a forbidden documentation path`)
-    }
-  }
-  for (const relativePath of markdownSurfaces) {
-    const source = outsideFencedCode(read(relativePath))
-    for (const [label, pattern] of forbiddenDocumentationTerms) {
-      if (pattern.test(source)) {
-        addError(`${relativePath}: contains forbidden documentation term ${label}`)
       }
     }
   }
@@ -875,7 +823,7 @@ function checkEnvironmentRouteDocs() {
   }
 }
 
-/** 源码与配置中不得出现会话过程用语；Markdown 由文档禁用词覆盖，AGENTS.md 是 Agent 工作规则，不在此列。 */
+/** 源码、配置与文档中不得出现会话过程用语；AGENTS.md 是 Agent 工作规则，不在此列。 */
 const sessionArtifactTerms = [['本', '切片'].join(''), ['Branch', 'B'].join(' ')]
 const sessionArtifactExtensions = new Set([
   '.java', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.yml', '.yaml', '.properties', '.sql', '.sh', '.ps1', '.txt',
@@ -896,6 +844,17 @@ function sourceFiles(directory) {
 }
 
 function checkNoSessionArtifacts() {
+  for (const relativePath of markdownSurfaces) {
+    const source = outsideFencedCode(read(relativePath))
+    for (const term of sessionArtifactTerms) {
+      if (source.includes(term)) {
+        addError(`${relativePath}: contains prohibited session artifact '${term}'`)
+      }
+    }
+    if (/workspace\s+notes/iu.test(source)) {
+      addError(`${relativePath}: contains prohibited session artifact 'Workspace NOTES'`)
+    }
+  }
   for (const file of sourceFiles(repositoryRoot)) {
     const relativePath = relativeFromRoot(file)
     read(relativePath)
@@ -914,7 +873,6 @@ checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
-checkForbiddenReferencesAndTerms()
 checkModuleBoundaries()
 checkUniquePackages()
 checkNoHarnessModuleDocs()

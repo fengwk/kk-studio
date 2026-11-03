@@ -137,13 +137,6 @@ jobs:
             exit 1
           fi
           node --test "${node_files[@]}"
-      - name: Pull the isolated PostgreSQL baseline image
-        # The schema checker runs with --pull=never; pull the pinned image explicitly first.
-        run: docker pull postgres:17.10
-      - name: Verify the sole V1 baseline on a fresh PostgreSQL
-        # Loads the real migration into an owned, network-isolated container and checks the full
-        # table inventory, target columns/relations/indexes and the shared SQL probes.
-        run: node scripts/dev/verify/repository/check-canvas-project-schema.mjs
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。

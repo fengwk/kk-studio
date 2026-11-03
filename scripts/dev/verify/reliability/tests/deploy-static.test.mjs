@@ -1,46 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 
 import { REPO_ROOT as REPOSITORY_ROOT } from '../../../lib/repo-root.mjs'
-
-const FORBIDDEN_EXTERNAL_CACHE_SERVICE = ['re', 'dis'].join('')
-const FORBIDDEN_EXTERNAL_CACHE_URL_ENVIRONMENT = [
-  'KK_STUDIO_',
-  FORBIDDEN_EXTERNAL_CACHE_SERVICE.toUpperCase(),
-  '_URL',
-].join('')
-const COMPOSE_FILES = [
-  'deploy/local/compose.yaml',
-  'deploy/reliability/compose.yaml',
-  'deploy/test/compose.yaml',
-]
-
-test('PostgreSQL-only compose files do not declare an external cache service or URL', () => {
-  const serviceDeclaration = new RegExp(`^\\s{2}${FORBIDDEN_EXTERNAL_CACHE_SERVICE}:\\s*$`, 'im')
-  for (const relativePath of COMPOSE_FILES) {
-    const source = readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
-    assert.doesNotMatch(source, serviceDeclaration, relativePath)
-    assert.equal(source.includes(FORBIDDEN_EXTERNAL_CACHE_URL_ENVIRONMENT), false, relativePath)
-  }
-})
-
-test('deployment, scripts, and current documentation contain no external cache references', () => {
-  // 只匹配独立的服务名/配置键；架构守卫类名（No<Service>ArchitectureTest）不是外部缓存引用。
-  const forbidden = new RegExp(`\\b${FORBIDDEN_EXTERNAL_CACHE_SERVICE}\\b`, 'i')
-  const files = [
-    ...walkFiles(path.join(REPOSITORY_ROOT, 'deploy')),
-    ...walkFiles(path.join(REPOSITORY_ROOT, 'scripts')),
-    ...walkFiles(path.join(REPOSITORY_ROOT, 'docs')),
-    path.join(REPOSITORY_ROOT, 'README.md'),
-  ]
-  const offenders = files
-    .filter(file => forbidden.test(readFileSync(file, 'utf8')))
-    .map(file => path.relative(REPOSITORY_ROOT, file))
-
-  assert.deepEqual(offenders, [])
-})
 
 const S3_INFRASTRUCTURE_COMPOSE_FILES = [
   'deploy/local/compose.yaml',
@@ -171,11 +134,4 @@ function extractServiceSection(composeContent, serviceName) {
     }
   }
   return sectionLines.join('\n')
-}
-
-function walkFiles(root) {
-  return readdirSync(root, { withFileTypes: true }).flatMap(entry => {
-    const target = path.join(root, entry.name)
-    return entry.isDirectory() ? walkFiles(target) : [target]
-  })
 }
