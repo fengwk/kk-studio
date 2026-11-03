@@ -11,7 +11,6 @@ export function recoverEmptySrcModules(): Plugin {
     handleHotUpdate(ctx) {
       const file = ctx.file.replace(/\\/g, '/')
       const critical =
-        file.includes('/ai-extension') ||
         file.includes('/AppShell.tsx') ||
         file.includes('/AiResourceCardLayout.tsx') ||
         file.includes('/providers.tsx') ||

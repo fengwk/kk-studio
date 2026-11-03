@@ -6,12 +6,16 @@
 
 # Maven build outputs (rebuilt inside the container)
 **/target/
-**/.mvn/wrapper/maven-wrapper.jar
 
 # Frontend caches / outputs (rebuilt inside the container by frontend-maven-plugin)
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
+
+# Daemon caches / outputs
+daemon/node_modules/
+daemon/dist/
+daemon/release/
 
 # Local reports and artifacts (never required for build)
 reports/
