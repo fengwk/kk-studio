@@ -49,7 +49,7 @@ grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、�
 
 ## 命令执行
 
-bash 在显式 workdir 中执行一次命令，默认超时保持 300 秒不变，由唯一的 invoke 信号驱动，无独立起表；成功、非零退出、超时和取消都收尾并保留已捕获输出，并在 `details.process.outcome` 中收敛进程终态（`EXITED`、`TIMED_OUT`、`CANCELLED`）。大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 原生进程监管](daemon.md#原生进程监管)。
+bash 在显式 workdir 中执行一次命令，默认超时为 300 秒，由唯一的 invoke 信号驱动，无独立起表；成功、非零退出、超时和取消都收尾并保留已捕获输出，并在 `details.process.outcome` 中收敛进程终态（`EXITED`、`TIMED_OUT`、`CANCELLED`）。大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 原生进程监管](daemon.md#原生进程监管)。
 
 ## LSP 生命周期
 
@@ -65,7 +65,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 子 Thread 存在未完成的 `SETTLE_OWNER_TURN` 时拒绝新续接，须完成 owner 结算后才可继续；精确重放返回原票据。通过准入的忙时续接不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。
 
-同一父/子对至多有一个有效未完成 join：获准的新续接原子上位并 supersede 旧等待，旧 join 保留其 invocation identity 与排队源命令，但不再占额度、不再产生独立交付。因此忙时追加多次 prompt 只会为最新一次 prompt 汇总一份结果，而不是每次委派各交付一次。
+同一父/子对至多有一个有效未完成 join：获准的新续接原子上位并 supersede 旧等待，旧 join 保留其 invocation identity 与排队源命令，不占额度、不产生独立交付。因此忙时追加多次 prompt 只会为最新一次 prompt 汇总一份结果，而不是每次委派各交付一次。
 
 从历史边界 fork 的 Thread 是独立执行根：分支 fork 的 head 是一个只记录 `mode`/切点的新 `FORK` Entry，会话 fork 则把切点处的有效上下文复制到新 Session，两者都追加固定英文 FORK 通知（只陈述事实）。它不继承源 Thread 的待处理命令、子执行或 Join 订阅；原有子任务之后的回执仍交给原父 Thread，新分支不能通过旧 thread_id 接管原有子执行，已在分叉前进入共享历史的回执仍可见。
 

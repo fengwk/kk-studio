@@ -34,7 +34,7 @@ const repositoryRoot = resolveRepositoryRoot()
 const docsRoot = path.join(repositoryRoot, 'docs')
 
 const moduleDocuments = [
-  'builtin-tools-design.md',
+  'builtin-tools.md',
   'canvas.md',
   'common.md',
   'daemon.md',

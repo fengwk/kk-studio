@@ -167,7 +167,7 @@ kkstudio:/resources/<blobId>
 不接受 `workdir`；只有 `process.exec`（bash）要求显式绝对 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
 Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
 按自己的地址、响应预算与凭据约束承担。
-路径与读取契约见 [内置工具设计](modules/builtin-tools-design.md)。
+路径与读取契约见 [内置工具与异步委派](modules/builtin-tools.md)。
 
 Skill 身份为 `(packageName, name)`。Package 保存仓库、branch、人工确认的
 `currentCommit`、最近观察到的 `observedHeadCommit` 与当前 Skill manifest；检查 branch
@@ -185,7 +185,7 @@ Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join �
 后代审批和问卷归属人工控制根，但不会改变 Join 的直接父订阅。继续委派使用 `thread_id` 并复验父子归属；
 深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
 `inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见
-[异步委派](modules/builtin-tools-design.md)与 [Harness Runtime](modules/harness-runtime.md)。
+[内置工具与异步委派](modules/builtin-tools.md)与 [Harness Runtime](modules/harness-runtime.md)。
 
 ### 构建期扩展
 
