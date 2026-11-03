@@ -6,10 +6,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelHttpRequest;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 

@@ -91,7 +91,7 @@ test('repository structure guard verifies root, harness and apps POM module list
     'agent-builtin',
     'infra',
   ])
-  assert.deepEqual(modulesOf('platform/pom.xml'), ['plugin-api', 'runtime'])
+  assert.deepEqual(modulesOf('platform/pom.xml'), ['plugin-api', 'daemon-server', 'runtime'])
   assert.deepEqual(modulesOf('apps/pom.xml'), ['canvas', 'project', 'ide'])
 })
 
@@ -673,7 +673,7 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
   },
   {
-    path: 'harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java',
+    path: 'platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonOfferResult.java',
     enumName: 'DaemonOfferResult',
     constants: ['ACCEPTED', 'BUSY', 'CLOSED'],
   },

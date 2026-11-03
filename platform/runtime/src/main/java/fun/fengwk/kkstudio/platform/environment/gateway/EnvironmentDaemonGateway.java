@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.environment.gateway;
 
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 
 import java.util.Objects;

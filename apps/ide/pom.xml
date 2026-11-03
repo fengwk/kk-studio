@@ -20,6 +20,10 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-platform-daemon-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-runtime</artifactId>
         </dependency>
         <dependency>
@@ -57,7 +61,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-environment</artifactId>
+            <artifactId>kk-studio-platform-daemon-server</artifactId>
             <version>${kk-studio.version}</version>
             <type>test-jar</type>
             <scope>test</scope>

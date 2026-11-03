@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 /**
  * IDE 视图授权的窄出口：owner 侧 claim/close 元数据事件，供浏览器会话与数据面按 Daemon 代际 + viewId + epoch 维护授权。

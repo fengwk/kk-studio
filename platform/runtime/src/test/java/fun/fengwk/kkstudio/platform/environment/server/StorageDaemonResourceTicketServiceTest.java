@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService.Ticket;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService.TransferRequest;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.Ticket;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.TransferRequest;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;

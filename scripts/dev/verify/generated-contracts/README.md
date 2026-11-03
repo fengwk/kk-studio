@@ -20,7 +20,7 @@ Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传�
 细化；其余代码直接从生成物导入，不手改生成物。
 
 控制协议的单一事实源是
-[control.proto](../../../../harness/environment/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
+[control.proto](../../../../platform/daemon-server/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
 TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
 [control_pb.ts](../../../../daemon/src/generated/control_pb.ts)。`check.sh` / `write.sh` 会检查或重写这份生成物。
 

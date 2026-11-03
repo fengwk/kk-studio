@@ -13,13 +13,13 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
-import fun.fengwk.kkstudio.harness.environment.protocol.UpgradeRequired;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonAdmission;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonHandshake;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSessions;
+import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.platform.daemon.protocol.UpgradeRequired;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonHandshake;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSessions;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseProvider;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseTarget;
 

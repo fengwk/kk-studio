@@ -201,13 +201,13 @@ Java 制品生产方与 Node 协议入口共享
 因此本地按顺序验证两端对同一批 UPDATE 命令的接受与拒绝一致：
 
 ```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl harness/environment -am test \
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl platform/daemon-server -am test \
   -Dtest=OfficialUpdateArtifactFixtureTest -Dsurefire.failIfNoSpecifiedTests=false
 npm --prefix daemon ci && npm --prefix daemon run build
-node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
+node scripts/daemon/verify-java-update-commands.mjs platform/daemon-server/target/daemon-update-java-commands.json
 ```
 
-Java producer 把生产 codec 的结果（accepted 包含 protobuf 长度前缀编码帧，rejected 包含 artifactUrl）写入 `harness/environment/target/daemon-update-java-commands.json`，
+Java producer 把生产 codec 的结果（accepted 包含 protobuf 长度前缀编码帧，rejected 包含 artifactUrl）写入 `platform/daemon-server/target/daemon-update-java-commands.json`，
 CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十一条错配必须被拒。
 CI 在 `mvn -Pdistribution verify` 之后以同样的顺序运行这两步。
 

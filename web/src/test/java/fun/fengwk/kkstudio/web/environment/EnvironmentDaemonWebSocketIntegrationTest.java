@@ -31,17 +31,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonAdmission;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonControlChannel;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonHandshake;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSession;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSessions;
-import fun.fengwk.kkstudio.harness.environment.transport.WebSocketEndPoint;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelHttpRequest;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
+import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonControlChannel;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonHandshake;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSessions;
+import fun.fengwk.kkstudio.platform.daemon.transport.WebSocketEndPoint;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseProvider;
 
 import java.io.IOException;

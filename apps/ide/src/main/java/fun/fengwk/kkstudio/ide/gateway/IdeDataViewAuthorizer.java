@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.ide.gateway;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 import java.util.Objects;
 import java.util.Optional;

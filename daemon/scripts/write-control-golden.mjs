@@ -6,7 +6,7 @@ import { decodeBinary, encodeBinary } from '../dist/protocol/control/codec.js'
 import { GOLDEN_FIXTURES } from '../test/protocol/control-fixtures.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const GOLDEN = resolve(HERE, '../../harness/environment/src/main/protocol/golden')
+const GOLDEN = resolve(HERE, '../../platform/daemon-server/src/main/protocol/golden')
 
 const fixtures = GOLDEN_FIXTURES.map(([name, factory]) => [name, factory()])
 

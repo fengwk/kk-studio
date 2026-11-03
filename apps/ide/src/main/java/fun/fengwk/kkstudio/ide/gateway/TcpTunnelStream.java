@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.ide.gateway;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

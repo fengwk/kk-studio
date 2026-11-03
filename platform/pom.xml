@@ -15,6 +15,7 @@
 
     <modules>
         <module>plugin-api</module>
+        <module>daemon-server</module>
         <module>runtime</module>
     </modules>
 </project>

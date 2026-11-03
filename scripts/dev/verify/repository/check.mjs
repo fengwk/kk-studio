@@ -460,6 +460,7 @@ const moduleDependencies = {
     'harness-agent-builtin',
   ],
   'platform/plugin-api': ['common', 'harness-runtime'],
+  'platform/daemon-server': ['common', 'harness-environment'],
   'platform/runtime': [
     'common',
     'share',
@@ -468,6 +469,7 @@ const moduleDependencies = {
     'harness-runtime',
     'harness-agent-builtin',
     'platform-plugin-api',
+    'platform-daemon-server',
   ],
   'apps/canvas/core': ['common', 'platform-plugin-api'],
   'apps/canvas/infra': [
@@ -479,7 +481,7 @@ const moduleDependencies = {
     'platform-runtime',
   ],
   'apps/project': ['common', 'share', 'work', 'harness-runtime', 'platform-runtime'],
-  'apps/ide': ['common', 'share', 'harness-environment', 'platform-runtime'],
+  'apps/ide': ['common', 'share', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
   'plugins/comfyui': ['common', 'platform-plugin-api'],
   'plugins/media': ['common', 'platform-plugin-api'],
   'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],

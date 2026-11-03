@@ -9,8 +9,8 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "generate:control": "node ../harness/environment/src/main/protocol/ts/generate.mjs",
-    "check:control": "node ../harness/environment/src/main/protocol/ts/generate.mjs --check",
+    "generate:control": "node ../platform/daemon-server/src/main/protocol/ts/generate.mjs",
+    "check:control": "node ../platform/daemon-server/src/main/protocol/ts/generate.mjs --check",
     "golden:control": "node scripts/write-control-golden.mjs",
     "test": "npm run build && vitest run",
     "coverage": "npm run build && vitest run --coverage"
