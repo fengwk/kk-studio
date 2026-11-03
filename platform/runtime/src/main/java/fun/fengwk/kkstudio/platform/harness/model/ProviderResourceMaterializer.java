@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -23,6 +24,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -453,33 +455,26 @@ public final class ProviderResourceMaterializer {
    * 鉴权。
    */
   private static String formatExternalizedText(ProviderResourceBlock resource) {
-    StringBuilder sb = new StringBuilder();
-    sb.append(
-        "[Output externalized. The preview below is incomplete; do not treat it as the full"
-            + " result.\n\n");
-    sb.append("The complete output is available as a session resource:\n")
-        .append(SessionResourceUri.format(resource.blobId()))
-        .append("\n");
-    sb.append("Name: ").append(resource.name()).append("\n");
-    sb.append("Size: ")
-        .append(resource.totalBytes())
-        .append(" bytes, ")
-        .append(resource.totalLines())
-        .append(" lines\n");
-    sb.append(
-        "Use the read tool with this resource URI and offset/limit to page through the complete"
-            + " output.]");
-    sb.append("\n\n--- preview ---");
-    if (resource.preview() != null && !resource.preview().isEmpty()) {
-      sb.append("\n").append(resource.preview());
-    }
-    return sb.toString();
+    String preview = resource.preview() == null ? "" : resource.preview();
+    String text =
+        PromptRenderer.render(
+            "fun/fengwk/kkstudio/platform/prompts/messages/output-externalized.md",
+            Map.of(
+                "uri", SessionResourceUri.format(resource.blobId()),
+                "name", resource.name(),
+                "bytes", resource.totalBytes(),
+                "lines", resource.totalLines(),
+                "hasPreview", !preview.isEmpty(),
+                "preview", preview));
+    return text.substring(0, text.length() - 1);
   }
 
   /** 被移动到后续 USER 消息的工具结果媒体在 tool result 内保留的确定性文本事实。 */
   private static String deferredToolMediaText(ProviderResourceBlock resource, StorageBlob blob) {
-    return fallbackText(resource, blob)
-        + "\nThe media is delivered to you as a separate user message after this tool result.";
+    return PromptRenderer.render(
+            "fun/fengwk/kkstudio/platform/prompts/messages/media-deferred.md",
+            Map.of("fallback", fallbackText(resource, blob)))
+        .stripTrailing();
   }
 
   /**

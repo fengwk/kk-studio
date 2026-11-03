@@ -6,8 +6,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -29,14 +28,13 @@ import java.util.Map;
  * 压缩 prompt 的 classpath 资源入口与 Pi 风格对话序列化。
  *
  * <p>prompt 文本逐字复制自上游 Pi（见同目录 NOTICE），所有注入变量（conversation / previousSummary / summary）一律通过 严格
- * {@link PromptTemplate} 渲染。序列化格式对齐 Pi：{@code [User]} / {@code [Assistant thinking]} / {@code
+ * {@link PromptRenderer} 渲染。序列化格式对齐 Pi：{@code [User]} / {@code [Assistant thinking]} / {@code
  * [Assistant]} / {@code [Assistant tool calls]} / {@code [Tool result]}；每个 Tool result 截断到 2_000
  * 字符；非文本媒体 / 资源使用确定性占位符（如 {@code [Image: image/png]}）而不是丢失。
  */
 public final class CompactionPrompts {
 
-  private static final String ROOT = "fun/fengwk/kkstudio/harness/runtime/compaction/prompts/";
-  private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
+  private static final String ROOT = "fun/fengwk/kkstudio/harness/prompts/compaction/";
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
           // tool arguments 是自由 JSON：按 BigDecimal 读回，摘要里的数值不得退化为 Infinity / 0 或被重新格式化。
@@ -207,15 +205,11 @@ public final class CompactionPrompts {
         + " more characters truncated]";
   }
 
-  private static PromptTemplate template(String name) {
-    return LOADER.load(ROOT + name);
-  }
-
   private static String text(String name) {
-    return template(name).render(Map.of());
+    return render(name, Map.of());
   }
 
   private static String render(String name, Map<String, String> values) {
-    return template(name).render(values);
+    return PromptRenderer.render(ROOT + name, values);
   }
 }

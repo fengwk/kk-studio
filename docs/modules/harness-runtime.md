@@ -382,13 +382,13 @@ stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
 | `get_goal` / `update_goal` | READ / WRITE `goal.progress` | SELECTABLE | 读取用户 Goal 与进度；声明当前 Goal 的终态进度 |
 
-每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时过滤宿主工具，`read` 仍保留平台资源读取。宿主工具由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个能力，schema 与默认超时取自能力描述符，说明文本在 [`environment/prompts`](../../harness/runtime/src/main/resources/fun/fengwk/kkstudio/harness/contributor/builtin/environment/prompts/)。`read` 对 `kkstudio:/skills/...` 读取平台当前发布的 Skill，对 `kkstudio:/resources/<blobId>` 按本次调用的 Thread 校验 Session 引用，对绝对本地路径委托 `BoundEnvironment`。
+每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时过滤宿主工具，`read` 仍保留平台资源读取。宿主工具由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个能力，schema 与默认超时取自能力描述符，说明文本在 [`prompts/tools`](../../harness/runtime/src/main/resources/fun/fengwk/kkstudio/harness/prompts/tools/)。`read` 对 `kkstudio:/skills/...` 读取平台当前发布的 Skill，对 `kkstudio:/resources/<blobId>` 按本次调用的 Thread 校验 Session 引用，对绝对本地路径委托 `BoundEnvironment`。
 
 Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能读取它并声明终态进度：[`GoalProgress`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgress.java)（`goalId`、`complete | blocked`、非空 `reason`）由 [`GoalProgressCodec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgressCodec.java) 严格编解码；`update_goal` 绑定执行时生效的 `goalId`，没有 Goal 或已有终态声明时拒绝。[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给只接受、不等待的 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期与异步委派的行为契约见 [内置工具与异步委派](builtin-tools.md)。
 
 ## Prompt 模板
 
-[`PromptTemplate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptTemplate.java) 只识别 `${name}`，变量名匹配 `[A-Za-z_][A-Za-z0-9_]*`，构造时拒绝未闭合的 `${` 与非法变量名；`render` 要求传入的变量集合与模板声明的集合精确一致，值按字面量写入、不做二次解析。[`PromptTemplateLoader`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptTemplateLoader.java) 按 classpath 读取 UTF-8 文本并缓存解析结果，资源缺失立即失败，prompt 装配错误因此在首次使用时暴露，而不会退化成空模板。
+[`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 和 Project 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
 
 ## 严格 JSON 契约
 
@@ -441,7 +441,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 - Runtime test-jar 是唯一中立 kernel 测试基座：提供内存 Store、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `platform-runtime` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
 - 内存参考 Store 与 PostgreSQL 实现同构：`InMemoryHarnessStore` 只持有唯一已提交快照与全局 monitor，`InMemoryHarnessTransaction` 负责复制快照、commit/rollback、事务时钟、id 分配与锁阶梯，九个聚合原语各由一个 `InMemory*Store` 类实现，Driver 私有行经事务核心公开的测试 hook 在同一事务快照内挂载。锁阶梯为 `Session → Thread → Command → Driver → Tool → Work`，不存在第二份状态或按聚合拆分的快照。
 - `FakeAgentDriver` 是 `AgentDriver` 的最小确定性实现：默认没有私有状态，Stop 只为位于 request basis 的活跃 generation 追加 CANCELLED barrier；可配置 turn resolution、活动投影、响应物化与停止结果。其私有状态只存在内存、不参与 Store 事务回滚，因此只用于不验证 Driver 私有持久化的内核测试。
-- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 29 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Platform](platform.md#harness-持久化与调度) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
+- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 28 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Platform](platform.md#harness-持久化与调度) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 
 ---
 

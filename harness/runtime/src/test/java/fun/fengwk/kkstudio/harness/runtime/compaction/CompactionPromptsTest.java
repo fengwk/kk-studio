@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
@@ -28,8 +28,7 @@ import java.util.UUID;
  */
 class CompactionPromptsTest {
 
-  private static final String ROOT = "fun/fengwk/kkstudio/harness/runtime/compaction/prompts/";
-  private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
+  private static final String ROOT = "fun/fengwk/kkstudio/harness/prompts/compaction/";
 
   @Test
   void summaryUserPromptFramesInitialAndUpdateVariants() {
@@ -254,9 +253,8 @@ class CompactionPromptsTest {
   }
 
   private static String render(String resourceName, String variableValue) {
-    return LOADER
-        .load(ROOT + resourceName)
-        .render(Map.of(variableName(resourceName), variableValue));
+    return PromptRenderer.render(
+        ROOT + resourceName, Map.of(variableName(resourceName), variableValue));
   }
 
   private static String variableName(String resourceName) {
@@ -269,7 +267,7 @@ class CompactionPromptsTest {
   }
 
   private static String resource(String resourceName) {
-    return LOADER.load(ROOT + resourceName).raw();
+    return PromptRenderer.read(ROOT + resourceName);
   }
 
   /** Tool call arguments 是自由 JSON：数值按 BigDecimal 渲染，1e309 不得在摘要里变成 Infinity 文本。 */

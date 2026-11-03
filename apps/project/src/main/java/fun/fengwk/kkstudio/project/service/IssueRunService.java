@@ -8,6 +8,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -67,6 +68,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -776,13 +778,10 @@ public class IssueRunService {
   /** 自动任务输入：显式指向系统指令中冻结的 Issue 上下文，不复制可变业务事实。 */
   private static AgentMessage taskInput(ProjectRunScope scope) {
     String text =
-        "Start or continue the current Issue run for stage "
-            + scope.stage()
-            + " ("
-            + scope.stageName()
-            + "). Perform the work required by the current stage according to the authoritative"
-            + " Issue context in the system instructions, and request a handoff only when the"
-            + " stage work is complete.";
+        PromptRenderer.render(
+                "fun/fengwk/kkstudio/project/prompts/messages/issue-task.md",
+                Map.of("stage", scope.stage(), "stageName", scope.stageName()))
+            .stripTrailing();
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }
 

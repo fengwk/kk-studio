@@ -178,6 +178,9 @@ Run 区间为 `(start_entry_id,end_entry_id]`，沿 Entry 父链解释；最终�
 真实可见 Entry（取自 root Join 冻结的 `finalAnswerEntryId`），缺少报告时展示终态原因。
 Issue 的要求由需求和阶段定义，Agent 交接走 `issue_transition`；Issue Run 的任务输入是
 可信 `CUSTOM_MESSAGE`，其 owner 命令不出现在公共 batch 端点。
+Issue 工具说明、交接回执与当前 Run 上下文使用本模块的
+[`prompts`](../../apps/project/src/main/resources/fun/fengwk/kkstudio/project/prompts/) Markdown 资源，
+由 Harness 的严格模板渲染器填入冻结事实。
 
 执行记录落在 model 行：
 [`IssueAgentThread`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueAgentThread.java)

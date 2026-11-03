@@ -834,6 +834,50 @@ class ProviderResourceMaterializerTest {
     verify(blobManager, never()).presignOriginalUrl(any());
   }
 
+  @Test
+  void externalizedPreviewKeepsSpecialCharactersAndTrailingWhitespace() {
+    // 预览为真实工具输出：模板渲染不能转义或剥离结尾空白。
+    ProviderResourceBlock resource =
+        ProviderResourceBlock.externalizedText(BLOB_ID, "<&>.txt", 12, 2, "<&> {{literal}}\n ");
+    ProviderTextBlock text =
+        assertInstanceOf(
+            ProviderTextBlock.class,
+            materializer(mock(StorageBlobManager.class), mock(StorageBlobContentService.class))
+                .materialize(
+                    List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+                    Set.of(ModelInputModality.TEXT),
+                    ALL_MEDIA)
+                .get(0)
+                .contents()
+                .get(0));
+    assertEquals(
+        "[Output externalized. The preview below is incomplete; do not treat it as the full result.\n\n"
+            + "The complete output is available as a session resource:\n"
+            + SessionResourceUri.format(BLOB_ID)
+            + "\nName: <&>.txt\nSize: 12 bytes, 2 lines\n"
+            + "Use the read tool with this resource URI and offset/limit to page through the complete output.]\n\n"
+            + "--- preview ---\n<&> {{literal}}\n ",
+        text.text());
+  }
+
+  @Test
+  void externalizedTextWithoutPreviewEndsAtPreviewMarker() {
+    // 空预览不应凭模板尾部换行新增模型可见内容。
+    ProviderResourceBlock resource = ProviderResourceBlock.externalizedText(BLOB_ID, "x", 0, 0, "");
+    ProviderTextBlock text =
+        assertInstanceOf(
+            ProviderTextBlock.class,
+            materializer(mock(StorageBlobManager.class), mock(StorageBlobContentService.class))
+                .materialize(
+                    List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+                    Set.of(ModelInputModality.TEXT),
+                    ALL_MEDIA)
+                .get(0)
+                .contents()
+                .get(0));
+    assertTrue(text.text().endsWith("\n\n--- preview ---"), text.text());
+  }
+
   // ---------- 大小上限 ----------
 
   @Test

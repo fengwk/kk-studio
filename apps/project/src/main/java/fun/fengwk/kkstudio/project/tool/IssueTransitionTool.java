@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -46,28 +47,21 @@ public final class IssueTransitionTool implements Tool {
   public static final String LOCAL_NAME = "issue.transition";
 
   private static final String FIELD_TO_STATE = "to_state";
+  private static final String ROOT = "fun/fengwk/kkstudio/project/prompts/";
 
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           NAME,
-          """
-          Request a controlled handoff of the current Issue stage.
-
-          Use it only when the work of the current stage is done. The target must be one of the
-          stage's declared next stages; the request is validated against the current stage of the
-          live Issue and the currently running run. The platform stores the accepted target on the
-          current run and applies it only when the run is safely closed out, so the Issue stage does
-          not change while the run is still working. After a handoff has been accepted, do not start
-          new business writes; finish the run with a final report of what was done and how it was
-          verified.
-          """,
+          PromptRenderer.render(ROOT + "tools/issue-transition.md", Map.of()),
           NAME,
           new InputSchema(
-              "Handoff request for the current Issue stage.",
+              PromptRenderer.render(ROOT + "tools/issue-transition-request.md", Map.of())
+                  .stripTrailing(),
               Map.of(
                   FIELD_TO_STATE,
                   new StringSchema(
-                      "Target workflow state code of the current stage (for example REVIEW).")),
+                      PromptRenderer.render(ROOT + "tools/issue-transition-target.md", Map.of())
+                          .stripTrailing())),
               Set.of(FIELD_TO_STATE),
               false),
           ToolSideEffect.IDEMPOTENT,
@@ -129,17 +123,17 @@ public final class IssueTransitionTool implements Tool {
 
   private static ToolOutcome success(
       ToolExecutionRequest request, IssueTransitionService.IssueTransitionResult result) {
-    String prefix =
-        result.replayed()
-            ? "Handoff was already accepted for this run: "
-            : "Handoff accepted: this run will close out and the Issue stage will then move ";
     String text =
-        prefix
-            + result.fromState()
-            + " -> "
-            + result.toState()
-            + ". Do not start new business writes; finish the run with a final report of what was"
-            + " done and how it was verified.";
+        PromptRenderer.render(
+                ROOT + "messages/issue-transition-accepted.md",
+                Map.of(
+                    "replayed",
+                    result.replayed(),
+                    "from",
+                    result.fromState(),
+                    "to",
+                    result.toState()))
+            .stripTrailing();
     return ToolOutcome.withoutEffects(result(request, text, false));
   }
 

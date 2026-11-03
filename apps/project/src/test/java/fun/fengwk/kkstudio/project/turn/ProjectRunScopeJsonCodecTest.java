@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -142,6 +144,33 @@ class ProjectRunScopeJsonCodecTest {
     String json = codec.encode(closed);
     assertTrue(json.contains("\"active\":false"));
     assertEquals(closed, codec.decode(json));
+  }
+
+  @Test
+  void contextPreservesFrozenFactsAndOptionalSections() {
+    // 迁移前的上下文逐字输出：包含原样特殊字符、有/无可选描述和交接目标。
+    ProjectRunScope full = scope("<&> {{literal}}", "设计", List.of("REVIEW", "DONE"));
+    ProjectRunScope empty =
+        new ProjectRunScope(
+            RUN_ID,
+            ISSUE_ID,
+            PROJECT_ID,
+            THREAD_ID,
+            7L,
+            "修复登录",
+            null,
+            "DESIGN",
+            "设计",
+            null,
+            List.of(),
+            "worker",
+            true);
+    String root = "fun/fengwk/kkstudio/project/turn/";
+    assertEquals(
+        PromptRenderer.read(root + "issue-context.golden").stripTrailing(), full.contextSection());
+    assertEquals(
+        PromptRenderer.read(root + "issue-context-empty.golden").stripTrailing(),
+        empty.contextSection());
   }
 
   private static ProjectRunScope scope(
