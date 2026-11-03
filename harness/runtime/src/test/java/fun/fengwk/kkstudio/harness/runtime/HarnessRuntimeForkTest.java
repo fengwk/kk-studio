@@ -52,13 +52,13 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -87,6 +87,14 @@ class HarnessRuntimeForkTest {
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
   }
 
+  /** 窄查询区分已存在和不存在的 Session。 */
+  @Test
+  void sessionExistsQueriesCurrentStore() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    assertTrue(runtime.sessionExists(baseline.sessionId()));
+    assertFalse(runtime.sessionExists(TestIds.id(99999)));
+  }
+
   // ---------------------------------------------------------------- 分支 fork
 
   /** 分支 fork 的 head 事实是 FORK Entry，模型上下文投影固定通知，且不复制任何共享前缀。 */
@@ -100,7 +108,11 @@ class HarnessRuntimeForkTest {
                 new AcceptCommandsTarget.NewThread(
                     baseline.sessionId(), baseline.rootEntryId(), threadId, "branch", false),
                 List.of(userMessageCommand(TestIds.id(1), "hello"))),
-            AcceptancePreflight.IDENTITY);
+            (session, commands, copiedEntries) -> {
+              // 同一 Session 的分支共享历史，不向 preflight 暴露复制条目。
+              assertTrue(copiedEntries.isEmpty());
+              return commands;
+            });
 
     assertFalse(accepted.replayed());
     assertEquals(baseline.sessionId(), accepted.session().id());
@@ -483,6 +495,51 @@ class HarnessRuntimeForkTest {
   }
 
   // ---------------------------------------------------------------- 会话 fork：幂等
+
+  /** preflight 只收到复制后的历史；失败回滚，精确 replay 不再次调用。 */
+  @Test
+  void forkPreflightReceivesCopiedEntriesAndRollsBackOnFailure() {
+    HistorySeed source = seedHistory(store, false);
+    UUID sessionId = TestIds.id(970);
+    UUID threadId = TestIds.id(971);
+    AcceptCommandsCommand command =
+        sessionForkCommand(source.threadId(), source.lastEntryId(), sessionId, threadId, "fork");
+    List<Entry> observed = new ArrayList<>();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            runtime.acceptCommands(
+                command,
+                (session, commands, copiedEntries) -> {
+                  observed.addAll(copiedEntries);
+                  throw new IllegalStateException("reject");
+                }));
+    assertFalse(observed.isEmpty());
+    assertTrue(observed.stream().allMatch(entry -> entry.sessionId().equals(sessionId)));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isEmpty()));
+    assertTrue(store.transaction(tx -> tx.entries().find(observed.getFirst().id())).isEmpty());
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(threadId).isEmpty()));
+
+    observed.clear();
+    AcceptedCommands accepted =
+        runtime.acceptCommands(
+            command,
+            (session, commands, copiedEntries) -> {
+              observed.addAll(copiedEntries);
+              return commands;
+            });
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
+    assertEquals(path.entries().subList(1, path.entries().size() - 1), observed);
+    assertTrue(
+        runtime
+            .acceptCommands(
+                command,
+                (session, commands, copiedEntries) -> {
+                  throw new AssertionError("replay must not call preflight");
+                })
+            .replayed());
+  }
 
   /** 同 raw 请求精确 replay 不重复复制；内容变化映射为 ID reuse 冲突且零新增行。 */
   @Test

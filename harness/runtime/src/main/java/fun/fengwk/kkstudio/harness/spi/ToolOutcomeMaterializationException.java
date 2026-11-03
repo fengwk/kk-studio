@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.port;
+package fun.fengwk.kkstudio.harness.spi;
 
 /**
  * Tool outcome 的永久物化失败：输入引用已确定不可被稳定表达（未就绪、完整性不符或不是已授权资源）。

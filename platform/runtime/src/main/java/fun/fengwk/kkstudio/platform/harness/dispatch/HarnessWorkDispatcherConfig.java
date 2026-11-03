@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.dispatch;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.time.Duration;
 import java.util.Objects;

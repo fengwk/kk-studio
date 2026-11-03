@@ -23,7 +23,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的唯一同步入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
 
-每个控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交；手工压缩也只用一个短事务（锁内复验、同步 resolve、提交）。查询同样走 Store 事务，快照查询会加锁。Stop 的本地取消登记在 `afterCommit` 上，只在物理事务真正提交后执行，外层回滚即不取消，取消失败也不回滚已提交的事实。
+每个控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/HarnessStore.java) 内完成全部写入并原子提交；手工压缩也只用一个短事务（锁内复验、同步 resolve、提交）。查询同样走 Store 事务，快照查询会加锁。Stop 的本地取消登记在 `afterCommit` 上，只在物理事务真正提交后执行，外层回滚即不取消，取消失败也不回滚已提交的事实。
 
 业务拒绝使用类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java) 与 `HarnessRuntimeNotFoundException`（游标冲突、幂等身份复用、审批或输入不适用、压缩不可用等）；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）以 `IllegalStateException` 拒绝继续，绝不降级为业务错误。
 
@@ -312,14 +312,14 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 ## 端口与策略
 
-[`port`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/) 包定义内核对外部设施的反向依赖，不泄漏 Spring、JDBC 或 HTTP 类型：
+[`spi`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/) 包定义内核对外部设施的反向依赖，不泄漏 Spring、JDBC 或 HTTP 类型：
 
 | 端口 | 契约 |
 | --- | --- |
-| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`；`admit` 接收携带审批快照的执行请求，返回 `Admitted(run)` / `Busy` / `Rejected`；`Run.close` 释放本地资源 |
-| [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool 结果 Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容 |
-| [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java) | 按冻结 binding 找到 Tool 并渲染历史动作文本 |
-| [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) | best-effort 写入有损的 delta / checkpoint / partial 事件，失败不回滚任何事实 |
+| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`；`admit` 接收携带审批快照的执行请求，返回 `Admitted(run)` / `Busy` / `Rejected`；`Run.close` 释放本地资源 |
+| [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ToolResultHistoryMaterializer.java) | 在 Tool 结果 Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容 |
+| [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ToolHistoryActionResolver.java) | 按冻结 binding 找到 Tool 并渲染历史动作文本 |
+| [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/RealtimeEventSink.java) | best-effort 写入有损的 delta / checkpoint / partial 事件，失败不回滚任何事实 |
 
 三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查 owner、Issue 或阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
 
@@ -413,12 +413,12 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与副作用批次；不执行工具 |
 | `runtime.join` | Join 票据、一次终态冻结、回执投影与完成通知渲染的纯函数 |
 | `runtime.permission` | 权限规则模型与求值、Bash 命令面分析；只产出策略候选 |
-| `runtime.port` | 内核对外部设施的窄端口：Tool 网关、结果物化、历史动作与实时事件；Builtin 的 Model/Turn 端口在 harness/agent-builtin |
+| `spi` | 内核对外部设施的窄端口：Tool 网关、结果物化、历史动作与实时事件；Builtin 的 Model/Turn 端口在 harness/agent-builtin |
 | `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置；同时向 Driver 暴露公开的已认领执行骨架 `ClaimedExecutionSupport`（所有权校验、准入、租约 margin、取消 / 关闭、唯一的 `ClaimLostSignal`）；Builtin 的 MODEL Work 在 harness/agent-builtin |
 | `runtime.realtime` | 有损实时事件及其编解码；恢复以 durable 快照为准 |
 | `runtime.retry` | 调用重试与 HTTP 状态策略，只计算可行性与延迟 |
 | `runtime.session` | Session 实体、不可变消息内容块与 Assistant 元数据 |
-| `runtime.store` | `HarnessStore` 事务原语，领域模型与物理持久化的唯一边界 |
+| `spi.store` | `HarnessStore` 事务原语，领域模型与物理持久化的唯一边界 |
 | `runtime.thread` | Thread 状态、执行控制、上下文分类与状态投影 |
 | `runtime.thread.command` | 命令邮箱实体与 typed 字段归约 |
 | `runtime.tool` | 工具调用错误值及其编解码 |

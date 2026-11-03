@@ -19,8 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
@@ -66,7 +64,6 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final ChatSessionRepository chatSessionRepository;
   private final ChatRepository chatRepository;
   private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
-  private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
@@ -76,7 +73,6 @@ public class HarnessCommandAcceptanceOrchestrator {
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
       ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
-      ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
       StorageUploadService uploadService,
       SessionBlobRefManager refManager,
@@ -85,7 +81,6 @@ public class HarnessCommandAcceptanceOrchestrator {
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
-    this.stores = Objects.requireNonNull(stores, "stores");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
@@ -121,7 +116,7 @@ public class HarnessCommandAcceptanceOrchestrator {
       throw new IllegalArgumentException("thread command acceptance requires a THREAD target");
     }
     AcceptancePreflight preflight =
-        (tx, session, commands) -> prepareUserContents(session.id(), commands);
+        (session, commands, copiedEntries) -> prepareUserContents(session.id(), commands);
     return requireRuntime().acceptCommands(command, preflight);
   }
 
@@ -189,8 +184,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** 由来源执行根 Thread 解析其 Session；Thread 不可解析说明来源已不一致，失败而不是回退。 */
   private UUID sourceSessionId(UUID sourceThreadId) {
-    return requireStore()
-        .transaction(tx -> tx.threads().find(sourceThreadId).map(ThreadState::sessionId))
+    return requireRuntime()
+        .findThreadSessionId(sourceThreadId)
         .orElseThrow(() -> new IllegalArgumentException("fork source thread does not exist"));
   }
 
@@ -207,7 +202,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
   private boolean sessionExists(UUID sessionId) {
-    return requireStore().transaction(tx -> tx.sessions().find(sessionId).isPresent());
+    return requireRuntime().sessionExists(sessionId);
   }
 
   /** Chat owner 行以 KEY SHARE 锁定：阻止 Chat 删除但允许同 Chat 的并发接受；缺失即归属目标不存在。 */
@@ -241,8 +236,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** 由稳定绑定解析其 Thread 的 Session；Thread 不可解析说明归属事实已不一致，失败而不是回退。 */
   private UUID boundSessionId(UUID threadId) {
-    return requireStore()
-        .transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId))
+    return requireRuntime()
+        .findThreadSessionId(threadId)
         .orElseThrow(() -> new IllegalArgumentException("Issue agent thread does not exist"));
   }
 
@@ -254,14 +249,14 @@ public class HarnessCommandAcceptanceOrchestrator {
    * 与初始命令，再由调用方在同一 物理事务内写入绑定，本服务保持该顺序而不代写。
    */
   private AcceptancePreflight preflight(OwnerRef owner, AcceptCommandsTarget target) {
-    return (tx, session, commands) -> {
+    return (session, commands, copiedEntries) -> {
       if (owner instanceof OwnerRef.Chat chat
           && (target instanceof AcceptCommandsTarget.NewRootSession
               || target instanceof AcceptCommandsTarget.NewForkedSession)) {
         createChatSessionOwnership(session.id(), chat.chatId());
       }
       if (target instanceof AcceptCommandsTarget.NewForkedSession) {
-        retainCopiedResources(tx, session.id());
+        retainCopiedResources(copiedEntries, session.id());
       }
       return prepareUserContents(session.id(), commands);
     };
@@ -271,8 +266,8 @@ public class HarnessCommandAcceptanceOrchestrator {
    * 会话 fork 复制有效上下文时必须把被复制消息引用的 blob 重新 retain 到新 Session：新身份的 Entry 只携带 blobId，blob 生命周期由 {@code
    * session_blob_ref} 持有，源 Session 删除后新历史仍须可用。已存在的 ref 由幂等 retain 自然去重。
    */
-  private void retainCopiedResources(HarnessStore.Transaction tx, UUID sessionId) {
-    for (Entry entry : tx.entries().loadBySession(sessionId)) {
+  private void retainCopiedResources(List<Entry> copiedEntries, UUID sessionId) {
+    for (Entry entry : copiedEntries) {
       for (ResourceMessageContent resource : referencedResources(entry.payload())) {
         refManager.retainRef(sessionId, resource.blobId());
       }
@@ -352,14 +347,6 @@ public class HarnessCommandAcceptanceOrchestrator {
       throw new IllegalStateException("harness runtime is not available in this deployment");
     }
     return runtime;
-  }
-
-  private HarnessStore requireStore() {
-    HarnessStore store = stores.getIfAvailable();
-    if (store == null) {
-      throw new IllegalStateException("harness store is not available in this deployment");
-    }
-    return store;
   }
 
   private IssueAgentOwnership requireIssueAgentOwnership() {

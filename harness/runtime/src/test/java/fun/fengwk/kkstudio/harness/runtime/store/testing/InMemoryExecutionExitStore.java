@@ -4,8 +4,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.Comparator;

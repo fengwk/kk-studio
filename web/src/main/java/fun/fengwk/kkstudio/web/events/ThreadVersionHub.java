@@ -5,8 +5,8 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.Objects;
 import java.util.UUID;

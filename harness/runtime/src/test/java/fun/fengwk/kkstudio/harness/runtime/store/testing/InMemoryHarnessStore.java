@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -40,8 +40,8 @@ import java.util.function.Function;
  * Thread 的深删除一并移除。核心只保证 copy-on-write / rollback / owner 关联 / 行锁阶梯，不解释行内容，也不校验具体 driver 协议或状态机。
  *
  * <p>锁阶梯：SESSION -&gt; THREAD -&gt; COMMAND -&gt; DRIVER -&gt; TOOL -&gt; WORK；Thread 同层按 {@link
- * fun.fengwk.kkstudio.harness.runtime.store.UuidOrder} 升序，Tool siblings 按 callIndex 升序，Work 同层按
- * (type, id) 升序。实际加锁前的逆序防御见 {@link InMemoryHarnessLocks}。返回对象与 list 均为 immutable records / copies。
+ * fun.fengwk.kkstudio.harness.spi.store.UuidOrder} 升序，Tool siblings 按 callIndex 升序，Work 同层按 (type,
+ * id) 升序。实际加锁前的逆序防御见 {@link InMemoryHarnessLocks}。返回对象与 list 均为 immutable records / copies。
  */
 public class InMemoryHarnessStore implements HarnessStore {
 

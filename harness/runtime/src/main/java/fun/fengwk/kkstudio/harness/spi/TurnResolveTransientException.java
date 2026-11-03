@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.port;
+package fun.fengwk.kkstudio.harness.spi;
 
 /**
  * {@link TurnResolver} 的显式 typed transient infrastructure 失败：解析期间底层基础设施（数据库 / 网络）暂时不可用。

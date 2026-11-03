@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorExceptions;
+import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
 import java.util.ArrayList;

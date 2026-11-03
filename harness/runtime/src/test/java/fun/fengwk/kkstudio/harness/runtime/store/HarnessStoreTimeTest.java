@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;

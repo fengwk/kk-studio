@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -180,10 +179,7 @@ class PluginPromptTaskServiceTest {
         command
             .getValue()
             .preflight()
-            .prepare(
-                mock(HarnessStore.Transaction.class),
-                new Session(SESSION_ID, "h3", NOW),
-                List.of(raw));
+            .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
     AgentMessage durable = ((CustomMessageCommandPayload) prepared.getFirst().payload()).message();
     assertEquals(1, durable.contents().size());
     assertEquals("only", ((TextMessageContent) durable.contents().getFirst()).text());
@@ -216,10 +212,7 @@ class PluginPromptTaskServiceTest {
         command
             .getValue()
             .preflight()
-            .prepare(
-                mock(HarnessStore.Transaction.class),
-                new Session(SESSION_ID, "h3", NOW),
-                List.of(raw));
+            .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
 
     assertEquals(1, prepared.size());
     assertEquals(raw.idempotencyKey(), prepared.getFirst().idempotencyKey());
@@ -273,10 +266,7 @@ class PluginPromptTaskServiceTest {
             command
                 .getValue()
                 .preflight()
-                .prepare(
-                    mock(HarnessStore.Transaction.class),
-                    new Session(SESSION_ID, "h3", NOW),
-                    List.of(raw, raw)));
+                .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw, raw), List.of()));
   }
 
   /** 同一内容与同一暂存句柄永远得到同一 request hash；durable 形态不参与 hash。 */

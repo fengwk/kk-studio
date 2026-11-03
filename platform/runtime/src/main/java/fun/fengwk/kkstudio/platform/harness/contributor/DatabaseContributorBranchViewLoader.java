@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.contributor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.Objects;
 import java.util.UUID;

@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -29,6 +27,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -382,10 +382,10 @@ final class AcceptCommandsControl {
               .insert(
                   new Entry(
                       rootEntryId, target.sessionId(), null, new RootPayload(rootSettings), now));
-          Entry lastCopied =
+          List<Entry> copiedEntries =
               SessionForkCopy.copyEffectiveContext(
                   tx, target.sessionId(), rootEntryId, sourceCutPath, now);
-          UUID forkParentId = lastCopied == null ? rootEntryId : lastCopied.id();
+          UUID forkParentId = copiedEntries.isEmpty() ? rootEntryId : copiedEntries.getLast().id();
           UUID forkEntryId = tx.nextId();
           tx.entries()
               .insert(
@@ -414,7 +414,7 @@ final class AcceptCommandsControl {
                   now,
                   now);
           tx.threads().insert(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now, copiedEntries);
         });
   }
 
@@ -501,7 +501,7 @@ final class AcceptCommandsControl {
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
+    List<NewThreadCommand> prepared = preflight.prepare(session, commands, List.of());
     requirePreflightShape(commands, prepared);
     long nextSeq = thread.nextCommandSequence();
     List<ThreadCommand> allInserted = new ArrayList<>(prepared.size());
@@ -613,8 +613,18 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now) {
+    return acceptNewCommandsOnThread(tx, thread, requests, preflight, now, List.of());
+  }
+
+  private static AcceptedCommands acceptNewCommandsOnThread(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      List<NewThreadCommand> requests,
+      AcceptancePreflight preflight,
+      Instant now,
+      List<Entry> copiedEntries) {
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
-    List<NewThreadCommand> prepared = preflight.prepare(tx, session, requests);
+    List<NewThreadCommand> prepared = preflight.prepare(session, requests, copiedEntries);
     requirePreflightShape(requests, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
     long nextSequence = thread.nextCommandSequence();

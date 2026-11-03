@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.project.reconcile;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.time.Duration;
 

@@ -189,7 +189,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
 
   /** 接受事务内的 durable 形态：按捕获的内容位置把媒体物化为 RESOURCE，不解析任何插件文本。 */
   private AcceptancePreflight preflight(String systemText, List<PluginPromptContent> contents) {
-    return (tx, session, commands) -> {
+    return (session, commands, copiedEntries) -> {
       if (commands.size() != 1
           || !(commands.getFirst().payload() instanceof CustomMessageCommandPayload)) {
         throw new IllegalStateException(

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.port;
+package fun.fengwk.kkstudio.harness.spi;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;

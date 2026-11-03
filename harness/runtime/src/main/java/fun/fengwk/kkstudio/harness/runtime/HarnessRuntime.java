@@ -32,11 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
-import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
@@ -45,6 +40,11 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
+import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -201,6 +201,39 @@ public final class HarnessRuntime {
   public Optional<UUID> findRootThreadId(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::rootThreadId));
+  }
+
+  /** 查询 Thread 的不可变 Session 归属；Thread 不存在时为空。 */
+  public Optional<UUID> findThreadSessionId(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId));
+  }
+
+  /** 查询 Session 是否存在。 */
+  public boolean sessionExists(UUID sessionId) {
+    Objects.requireNonNull(sessionId, "sessionId");
+    return store.transaction(tx -> tx.sessions().find(sessionId).isPresent());
+  }
+
+  /**
+   * 深删 Session 闭包。调用方须持有产品 owner 锁，并确保回调和本操作加入同一物理事务。 两个回调分别在 Thread 删除前和每个 Entry/Session
+   * 删除前执行，接收不可变的现存 Session ID 列表。 任一失败均向调用方传播并回滚事务；空输入不打开事务或调用回调。
+   */
+  public void deleteSessions(
+      List<UUID> sessionIds,
+      Consumer<List<UUID>> deleteRelations,
+      Consumer<List<UUID>> releaseRefs) {
+    List<UUID> ids = List.copyOf(sessionIds);
+    Objects.requireNonNull(deleteRelations, "deleteRelations");
+    Objects.requireNonNull(releaseRefs, "releaseRefs");
+    if (ids.isEmpty()) {
+      return;
+    }
+    store.transaction(
+        tx -> {
+          SessionDeletion.delete(tx, ids, deleteRelations, releaseRefs);
+          return null;
+        });
   }
 
   /**

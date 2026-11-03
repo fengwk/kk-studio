@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.store;
+package fun.fengwk.kkstudio.harness.spi.store;
 
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 

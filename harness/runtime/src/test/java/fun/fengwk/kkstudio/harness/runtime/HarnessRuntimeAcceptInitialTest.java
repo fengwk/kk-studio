@@ -200,7 +200,8 @@ class HarnessRuntimeAcceptInitialTest {
         () ->
             runtime.acceptCommands(
                 newSession(List.of(userMessageCommand(TestIds.id(1), "hello"))),
-                (tx, session, commands) -> {
+                (session, commands, copiedEntries) -> {
+                  assertTrue(copiedEntries.isEmpty());
                   throw new IllegalStateException("preflight failed");
                 }));
     assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(TestIds.id(101)).isEmpty()));
@@ -215,17 +216,17 @@ class HarnessRuntimeAcceptInitialTest {
     assertPreflightContractViolation(
         TestIds.id(130),
         TestIds.id(131),
-        (tx, session, commands) -> null,
+        (session, commands, copiedEntries) -> null,
         "command preflight returned null");
     assertPreflightContractViolation(
         TestIds.id(132),
         TestIds.id(133),
-        (tx, session, commands) -> List.of(),
+        (session, commands, copiedEntries) -> List.of(),
         "command preflight must return exactly 1 commands, got 0");
     assertPreflightContractViolation(
         TestIds.id(134),
         TestIds.id(135),
-        (tx, session, commands) -> {
+        (session, commands, copiedEntries) -> {
           NewThreadCommand command = commands.getFirst();
           return List.of(
               new NewThreadCommand(command.payload(), TestIds.id(999), command.requestHash()));

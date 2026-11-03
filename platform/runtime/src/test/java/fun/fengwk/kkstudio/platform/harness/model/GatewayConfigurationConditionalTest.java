@@ -10,7 +10,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.HarnessToolGatewayConfiguration;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;

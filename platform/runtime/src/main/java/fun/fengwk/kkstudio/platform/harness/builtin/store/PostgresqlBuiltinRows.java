@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;

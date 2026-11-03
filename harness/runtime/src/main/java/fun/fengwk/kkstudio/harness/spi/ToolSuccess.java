@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.port;
+package fun.fengwk.kkstudio.harness.spi;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;

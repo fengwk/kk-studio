@@ -234,7 +234,11 @@ class HarnessRuntimeAcceptThreadTest {
                     List.of(
                         ResourceMessageContent.media(TestIds.id(88), "photo.png"),
                         new TextMessageContent("please summarize")))));
-    AcceptancePreflight materialize = (tx, session, commands) -> List.of(durable);
+    AcceptancePreflight materialize =
+        (session, commands, copiedEntries) -> {
+          assertTrue(copiedEntries.isEmpty());
+          return List.of(durable);
+        };
 
     AcceptedCommands first = runtime.acceptCommands(pure(baseline.threadId(), raw), materialize);
     assertFalse(first.replayed());

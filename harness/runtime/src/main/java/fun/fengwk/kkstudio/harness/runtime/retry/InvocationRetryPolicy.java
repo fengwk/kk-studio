@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.retry;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.time.Duration;
 import java.util.Objects;
