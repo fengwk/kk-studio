@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify that the repository version is aligned: the root POM `<version>`, its
- * `kk-studio.version` property, the daemon package version, the daemon IDE extension package version, the daemon runtime constant and,
+ * `kk-studio.version` property, the daemon package version, the daemon IDE extension package version, the frontend package version, the daemon runtime constant and,
  * when `RELEASE_TAG` is provided, the release tag (optionally `v`-prefixed) must be exactly equal.
  * No version is hard-coded here, so bumping the version never requires editing this script or the
  * workflow that runs it.
@@ -42,7 +42,7 @@ function requiredDaemonVersion(source) {
 }
 
 /** 返回 `{ expected, mismatches }`；未提供 tag 时只比较仓库内部版本。 */
-export function checkAlignment({ pomXml, packageJson, ideExtensionPackageJson, configTs, tag }) {
+export function checkAlignment({ pomXml, packageJson, ideExtensionPackageJson, frontendPackageJson, configTs, tag }) {
   // The project's own coordinates come before its dependencies; the parent block carries a different version.
   const withoutParent = pomXml.replace(/<!--[\s\S]*?-->/g, '').replace(/<parent>[\s\S]*?<\/parent>/, '')
   const expected = requiredText(withoutParent, 'version', 'the root <version>')
@@ -65,6 +65,13 @@ export function checkAlignment({ pomXml, packageJson, ideExtensionPackageJson, c
     }
     sources['daemon/ide-extension/package.json version'] = ideExtensionVersion.trim()
   }
+  if (frontendPackageJson !== undefined) {
+    const frontendVersion = JSON.parse(frontendPackageJson).version
+    if (typeof frontendVersion !== 'string' || frontendVersion.trim() === '') {
+      throw new Error('cannot read the frontend package version')
+    }
+    sources['frontend/package.json version'] = frontendVersion.trim()
+  }
   sources['daemon/src/config.ts DAEMON_VERSION'] = runtimeVersion
   if (tag !== undefined) {
     if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
@@ -82,16 +89,23 @@ export function checkAlignment({ pomXml, packageJson, ideExtensionPackageJson, c
 export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   let result
   let ideExtensionChecked = false
+  let frontendChecked = false
   try {
     const ideExtensionPath = path.join(root, 'daemon/ide-extension/package.json')
     const ideExtensionPackageJson = existsSync(ideExtensionPath)
       ? readFileSync(ideExtensionPath, 'utf8')
       : undefined
     ideExtensionChecked = ideExtensionPackageJson !== undefined
+    const frontendPath = path.join(root, 'frontend/package.json')
+    const frontendPackageJson = existsSync(frontendPath)
+      ? readFileSync(frontendPath, 'utf8')
+      : undefined
+    frontendChecked = frontendPackageJson !== undefined
     result = checkAlignment({
       pomXml: readFileSync(path.join(root, 'pom.xml'), 'utf8'),
       packageJson: readFileSync(path.join(root, 'daemon/package.json'), 'utf8'),
       ideExtensionPackageJson,
+      frontendPackageJson,
       configTs: readFileSync(path.join(root, 'daemon/src/config.ts'), 'utf8'),
       tag,
     })
@@ -103,9 +117,15 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
     process.stderr.write(`repository version alignment failed:\n${result.mismatches.map((line) => `- ${line}\n`).join('')}`)
     return 1
   }
-  const sources = ideExtensionChecked
-    ? 'pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json and daemon/src/config.ts'
-    : 'pom.xml, kk-studio.version, daemon/package.json and daemon/src/config.ts'
+  const sourceList = [
+    'pom.xml',
+    'kk-studio.version',
+    'daemon/package.json',
+    ...(ideExtensionChecked ? ['daemon/ide-extension/package.json'] : []),
+    ...(frontendChecked ? ['frontend/package.json'] : []),
+    'daemon/src/config.ts',
+  ]
+  const sources = `${sourceList.slice(0, -1).join(', ')} and ${sourceList[sourceList.length - 1]}`
   const tagSuffix = tag === undefined ? '' : ` and release tag ${tag}`
   process.stdout.write(`repository version ${result.expected} is aligned across ${sources}${tagSuffix}\n`)
   return 0

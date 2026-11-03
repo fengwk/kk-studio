@@ -24,8 +24,8 @@ import {
 function makeCommand(overrides: Partial<Update> = {}): Update {
   return create(UpdateSchema, {
     operationId: 'op-1',
-    targetVersion: '6.0.1',
-    artifactUrl: 'https://example.com/v6.0.1.tar.gz',
+    targetVersion: '1.0.1',
+    artifactUrl: 'https://example.com/v1.0.1.tar.gz',
     artifactSha256: 'a'.repeat(64),
     ...overrides,
   })
@@ -44,7 +44,7 @@ describe('runtime-update.ts pure unit tests', () => {
     const active: ActiveUpdate = {
       operationId: 'op-1',
       commandKey: updateCommandKey(cmd),
-      targetVersion: '6.0.1',
+      targetVersion: '1.0.1',
       controller: new AbortController(),
       receipt: accepted,
       prepared: false,
@@ -100,7 +100,7 @@ describe('runtime-update.ts pure unit tests', () => {
       const active: ActiveUpdate = {
         operationId: 'op-1',
         commandKey: updateCommandKey(cmd),
-        targetVersion: '6.0.1',
+        targetVersion: '1.0.1',
         controller: new AbortController(),
         receipt: acceptedReceipt(cmd),
         prepared: true,
@@ -111,20 +111,20 @@ describe('runtime-update.ts pure unit tests', () => {
         command: cmd,
         active,
         cached: undefined,
-        currentVersion: '6.0.0',
+        currentVersion: '1.0.0',
         busyReason: null,
         configured: true,
       })
       expect(replay.kind).toBe('replay-active')
 
       // 相同的 operationId 但参数变化 -> 抛出错误
-      const drifted = makeCommand({ targetVersion: '6.0.2' })
+      const drifted = makeCommand({ targetVersion: '1.0.2' })
       expect(() =>
         decideUpdate({
           command: drifted,
           active,
           cached: undefined,
-          currentVersion: '6.0.0',
+          currentVersion: '1.0.0',
           busyReason: null,
           configured: true,
         }),
@@ -136,19 +136,19 @@ describe('runtime-update.ts pure unit tests', () => {
         command: diffOpSameTarget,
         active,
         cached: undefined,
-        currentVersion: '6.0.0',
+        currentVersion: '1.0.0',
         busyReason: null,
         configured: true,
       })
       expect(statusRes.kind).toBe('status')
 
       // 不同的 operationId 且不同的 targetVersion -> reject (busy)
-      const diffTarget = makeCommand({ operationId: 'op-2', targetVersion: '6.0.2' })
+      const diffTarget = makeCommand({ operationId: 'op-2', targetVersion: '1.0.2' })
       const rejectBusy = decideUpdate({
         command: diffTarget,
         active,
         cached: undefined,
-        currentVersion: '6.0.0',
+        currentVersion: '1.0.0',
         busyReason: null,
         configured: true,
       })
@@ -164,20 +164,20 @@ describe('runtime-update.ts pure unit tests', () => {
         command: cmd,
         active: null,
         cached,
-        currentVersion: '6.0.0',
+        currentVersion: '1.0.0',
         busyReason: null,
         configured: true,
       })
       expect(replay.kind).toBe('replay-cached')
 
       // 缓存参数漂移
-      const drifted = makeCommand({ targetVersion: '6.0.2' })
+      const drifted = makeCommand({ targetVersion: '1.0.2' })
       expect(() =>
         decideUpdate({
           command: drifted,
           active: null,
           cached,
-          currentVersion: '6.0.0',
+          currentVersion: '1.0.0',
           busyReason: null,
           configured: true,
         }),
@@ -185,27 +185,27 @@ describe('runtime-update.ts pure unit tests', () => {
     })
 
     it('handles current version, busy reason, not configured and normal admit', () => {
-      const cmd = makeCommand({ targetVersion: '6.0.0' })
+      const cmd = makeCommand({ targetVersion: '1.0.0' })
       // 已经是当前版本
       expect(
         decideUpdate({
           command: cmd,
           active: null,
           cached: undefined,
-          currentVersion: '6.0.0',
+          currentVersion: '1.0.0',
           busyReason: null,
           configured: true,
         }).kind,
       ).toBe('status')
 
       // 忙碌
-      const cmdNew = makeCommand({ targetVersion: '6.0.1' })
+      const cmdNew = makeCommand({ targetVersion: '1.0.1' })
       expect(
         decideUpdate({
           command: cmdNew,
           active: null,
           cached: undefined,
-          currentVersion: '6.0.0',
+          currentVersion: '1.0.0',
           busyReason: 'running tests',
           configured: true,
         }).kind,
@@ -217,7 +217,7 @@ describe('runtime-update.ts pure unit tests', () => {
           command: cmdNew,
           active: null,
           cached: undefined,
-          currentVersion: '6.0.0',
+          currentVersion: '1.0.0',
           busyReason: null,
           configured: false,
         }).kind,
@@ -228,7 +228,7 @@ describe('runtime-update.ts pure unit tests', () => {
         command: cmdNew,
         active: null,
         cached: undefined,
-        currentVersion: '6.0.0',
+        currentVersion: '1.0.0',
         busyReason: null,
         configured: true,
       })
@@ -254,7 +254,7 @@ describe('runtime-update.ts pure unit tests', () => {
       const active: ActiveUpdate = {
         operationId: 'op-1',
         commandKey: updateCommandKey(cmd),
-        targetVersion: '6.0.1',
+        targetVersion: '1.0.1',
         controller: new AbortController(),
         receipt,
         prepared: true,

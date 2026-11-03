@@ -17,6 +17,7 @@ const POM = (version, property = version) => `<project>
 </project>`
 const PACKAGE = (version) => JSON.stringify({ name: 'daemon', version })
 const IDE_EXTENSION_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-ide-bridge', version })
+const FRONTEND_PACKAGE = (version) => JSON.stringify({ name: 'kk-studio-frontend', version })
 const CONFIG = (version) => `/** 构建版本。 */\nexport const DAEMON_VERSION = '${version}'\n`
 const inputs = (
   version,
@@ -24,12 +25,14 @@ const inputs = (
     property = version,
     packageVersion = version,
     ideExtensionPackageVersion = version,
+    frontendPackageVersion = version,
     runtimeVersion = version,
   } = {},
 ) => ({
   pomXml: POM(version, property),
   packageJson: PACKAGE(packageVersion),
   ideExtensionPackageJson: IDE_EXTENSION_PACKAGE(ideExtensionPackageVersion),
+  frontendPackageJson: FRONTEND_PACKAGE(frontendPackageVersion),
   configTs: CONFIG(runtimeVersion),
 })
 
@@ -54,20 +57,29 @@ test('test intent: a daemon ide extension package left at the previous version f
   ])
 })
 
+test('test intent: a frontend package left at the previous version fails the gate', () => {
+  const result = checkAlignment(inputs('1.2.3', { frontendPackageVersion: '1.2.2' }))
+  assert.deepEqual(result.mismatches, [
+    'frontend/package.json version is "1.2.2", expected "1.2.3"',
+  ])
+})
+
 test('test intent: every diverging source is reported against the root version', () => {
   const result = checkAlignment({
     ...inputs('1.2.3', {
       property: '1.2.4',
       packageVersion: '1.2.2',
       ideExtensionPackageVersion: '1.2.0',
+      frontendPackageVersion: '1.2.6',
       runtimeVersion: '1.2.1',
     }),
     tag: 'v1.2.5',
   })
-  assert.equal(result.mismatches.length, 5)
+  assert.equal(result.mismatches.length, 6)
   assert.ok(result.mismatches.some((line) => line.startsWith('pom.xml kk-studio.version is "1.2.4"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('daemon/package.json version is "1.2.2"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('daemon/ide-extension/package.json version is "1.2.0"')))
+  assert.ok(result.mismatches.some((line) => line.startsWith('frontend/package.json version is "1.2.6"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('daemon/src/config.ts DAEMON_VERSION is "1.2.1"')))
   assert.ok(result.mismatches.some((line) => line.startsWith('release tag "v1.2.5" is "1.2.5"')))
 })
@@ -76,6 +88,7 @@ test('test intent: unreadable or ambiguous versions and invalid tags fail instea
   assert.throws(() => checkAlignment({ ...inputs('1'), pomXml: '<project></project>' }), /root <version>/)
   assert.throws(() => checkAlignment({ ...inputs('1'), packageJson: '{}' }), /daemon package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), ideExtensionPackageJson: '{}' }), /daemon IDE extension package version/)
+  assert.throws(() => checkAlignment({ ...inputs('1'), frontendPackageJson: '{}' }), /frontend package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), configTs: 'const DAEMON_VERSION = "1"\n' }), /exactly one literal/)
   assert.throws(
     () => checkAlignment({ ...inputs('1'), configTs: `${CONFIG('1')}${CONFIG('1')}` }),
@@ -103,7 +116,7 @@ test('test intent: the CLI checks only internal versions when RELEASE_TAG is abs
   assert.equal(result.status, 0, result.stderr)
   assert.equal(
     result.stdout,
-    `repository version ${version} is aligned across pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json and daemon/src/config.ts\n`,
+    `repository version ${version} is aligned across pom.xml, kk-studio.version, daemon/package.json, daemon/ide-extension/package.json, frontend/package.json and daemon/src/config.ts\n`,
   )
 })
 

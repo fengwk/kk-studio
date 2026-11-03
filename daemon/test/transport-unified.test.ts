@@ -152,7 +152,7 @@ describe('Unified Transport & Control Protocol (X-DESIGN §1, §2, §3)', () => 
     const upgradeWithArtifact = create(UpgradeRequiredSchema, {
       targetProtocolVersion: 1,
       artifactUrl:
-        'https://github.com/fengwk/kk-studio/releases/download/v6.0.0/kk-studio-daemon-v6.0.0-linux-amd64.tar.gz',
+        'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-v1.0.0-linux-amd64.tar.gz',
       artifactSha256: 'a'.repeat(64),
     })
 
