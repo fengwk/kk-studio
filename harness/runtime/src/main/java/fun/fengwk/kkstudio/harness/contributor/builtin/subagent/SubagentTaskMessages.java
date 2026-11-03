@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
+
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -27,23 +30,9 @@ public final class SubagentTaskMessages {
    */
   public static String accepted(UUID childThreadId, boolean replaced) {
     Objects.requireNonNull(childThreadId, "childThreadId");
-    StringBuilder message =
-        new StringBuilder("Task accepted. thread_id: ")
-            .append(childThreadId)
-            .append(".\n")
-            .append(
-                "The subagent runs asynchronously in an isolated session and reports back later as a"
-                    + " separate message; it can complete, fail, or be cancelled, so do not wait or"
-                    + " poll for it.\n")
-            .append("Continue other independent work now, or yield if none remains.\n")
-            .append("To continue this subagent later, call task with thread_id ")
-            .append(childThreadId)
-            .append(", subagent_type, and prompt.");
-    if (replaced) {
-      message.append(
-          "\nThis continuation replaces the previous pending wait on this subagent thread; only one"
-              + " consolidated result will be reported for the latest prompt.");
-    }
-    return message.toString();
+    return PromptRenderer.render(
+            "fun/fengwk/kkstudio/harness/prompts/messages/task-accepted.md",
+            Map.of("threadId", childThreadId, "replaced", replaced))
+        .stripTrailing();
   }
 }

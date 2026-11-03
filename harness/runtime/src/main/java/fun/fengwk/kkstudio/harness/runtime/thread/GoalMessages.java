@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+
+import java.util.Map;
 
 /**
  * 用户 Goal 的两个模型可见投影：设置/清除当次的冻结输入消息，以及压缩后仍生效的用户级历史背景。
@@ -10,37 +13,31 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
  */
 public final class GoalMessages {
 
+  private static final String ROOT = "fun/fengwk/kkstudio/harness/prompts/messages/";
+
   private GoalMessages() {}
 
   /** 设置 Goal 的冻结输入 USER 消息：用户原文 + 本 turn 立即开始的行动要求。 */
   public static AgentMessage inputSet(String goalText) {
-    return AgentMessage.user(
-        "I am setting a long-term goal for this branch. Keep working towards it from this turn on"
-            + " until I change or clear it. The goal text below is mine and is authoritative:\n\n---"
-            + " goal begin ---\n"
-            + goalText
-            + "\n--- goal end ---\n\nStart advancing this goal now, and report progress against"
-            + " it as you go.");
+    return message("goal-input-set.md", Map.of("goal", String.valueOf(goalText)));
   }
 
   /** 清除 Goal 的冻结输入 USER 消息：正文严格表达当前没有用户设定 Goal。 */
   public static AgentMessage inputCleared() {
-    return AgentMessage.user("No active user-set goal.");
+    return message("goal-input-cleared.md", Map.of());
   }
 
   /** 压缩后的生效 Goal 背景：正文严格来自执行本次压缩的 COMPACTION TURN_START 冻结 settings，标明是压缩边界的历史背景而非新指令。 */
   public static AgentMessage backgroundSet(String goalText) {
-    return AgentMessage.user(
-        "Goal at the frozen compaction boundary (historical context, not a new instruction):\n\n---"
-            + " goal begin ---\n"
-            + goalText
-            + "\n--- goal end ---\n\nThe user's actual messages follow.");
+    return message("goal-background-set.md", Map.of("goal", String.valueOf(goalText)));
   }
 
   /** 压缩后的无 Goal 背景：冻结的压缩边界快照没有生效 Goal，只陈述该事实（不声称曾被清除）。 */
   public static AgentMessage backgroundCleared() {
-    return AgentMessage.user(
-        "Goal at the frozen compaction boundary (historical context, not a new instruction): No"
-            + " active user-set goal.\n\nThe user's actual messages follow.");
+    return message("goal-background-cleared.md", Map.of());
+  }
+
+  private static AgentMessage message(String name, Map<String, ?> values) {
+    return AgentMessage.user(PromptRenderer.render(ROOT + name, values).stripTrailing());
   }
 }

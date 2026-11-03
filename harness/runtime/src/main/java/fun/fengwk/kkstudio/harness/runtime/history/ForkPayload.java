@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
+
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -19,8 +22,8 @@ public record ForkPayload(ForkMode mode, UUID sourceEntryId, UUID sourceThreadId
 
   /** 固定的英文 fork 通知：只陈述事实，不包含行为引导，也不把继承的历史任务提升为指令。 */
   public static final String NOTICE =
-      "This thread was forked. Earlier tool calls and background tasks will not resume or report"
-          + " here. Subagent thread IDs inherited from history are no longer valid.";
+      PromptRenderer.render("fun/fengwk/kkstudio/harness/prompts/messages/fork.md", Map.of())
+          .stripTrailing();
 
   public ForkPayload {
     mode = Objects.requireNonNull(mode, "mode");

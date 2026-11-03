@@ -1,0 +1,1 @@
+Start or continue the current Issue run for stage {{{stage}}} ({{{stageName}}}). Perform the work required by the current stage according to the authoritative Issue context in the system instructions, and request a handoff only when the stage work is complete.

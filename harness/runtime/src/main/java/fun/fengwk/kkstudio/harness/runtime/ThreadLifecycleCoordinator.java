@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -43,8 +44,8 @@ import java.util.UUID;
 public final class ThreadLifecycleCoordinator {
 
   public static final String DEFAULT_MAX_TURNS_REMINDER_TEXT =
-      """
-      The delegated task has reached its suggested turn budget. Wrap up your current work and report the result, including any incomplete work, to the requesting agent.""";
+      PromptRenderer.render("fun/fengwk/kkstudio/harness/prompts/messages/task-budget.md", Map.of())
+          .stripTrailing();
   public static final String DEFAULT_MAX_TURNS_REMINDER_TAG = "task-budget";
 
   /** 无状态协调器：所有操作都以显式事务句柄与显式时钟驱动。 */

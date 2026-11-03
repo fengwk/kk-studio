@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentPrompts;
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 
 import java.time.format.DateTimeFormatter;
@@ -41,19 +42,13 @@ public final class AgentPromptComposer {
     // current_environment 段始终存在：未选择 Environment 时渲染 name: none 与 Platform 日期。
     sections.add(currentEnvironment(currentEnvironment));
     if (!skills.isEmpty()) {
-      sections.add(
-          SubagentPrompts.agentSkillsTemplate().render(Map.of("skills", skillEntries(skills))));
+      sections.add(SubagentPrompts.agentSkills(skillEntries(skills)));
     }
     if (!subagents.isEmpty()) {
       sections.add(
-          SubagentPrompts.agentSubagentsTemplate()
-              .render(
-                  Map.of(
-                      "taskInstructions",
-                      SubagentPrompts.systemInstructions(
-                          configProvider.subagentConfig().maxTurns()),
-                      "subagents",
-                      subagentEntries(subagents))));
+          SubagentPrompts.agentSubagents(
+              SubagentPrompts.systemInstructions(configProvider.subagentConfig().maxTurns()),
+              subagentEntries(subagents)));
     }
     return String.join("\n\n", sections);
   }
@@ -111,9 +106,7 @@ public final class AgentPromptComposer {
     addEnvironmentField(fields, "temp", context.tempDirectory());
     addEnvironmentField(fields, "date", DATE_FORMAT.format(context.currentDate()));
     addEnvironmentField(fields, "note", context.note());
-    return SubagentPrompts.currentEnvironmentTemplate()
-        .render(Map.of("fields", String.join("\n", fields)))
-        .stripTrailing();
+    return SubagentPrompts.currentEnvironment(String.join("\n", fields)).stripTrailing();
   }
 
   /**
@@ -143,17 +136,10 @@ public final class AgentPromptComposer {
    */
   public static String skillFragment(SkillPromptEntry skill) {
     Objects.requireNonNull(skill, "skill");
-    return "  <skill>\n"
-        + "    <name>"
-        + escapeXml(skill.name())
-        + "</name>\n"
-        + "    <description>"
-        + escapeXml(skill.description())
-        + "</description>\n"
-        + "    <path>"
-        + escapeXml(skill.path())
-        + "</path>\n"
-        + "  </skill>";
+    return PromptRenderer.render(
+            "fun/fengwk/kkstudio/harness/prompts/system/skill.md",
+            Map.of("name", skill.name(), "description", skill.description(), "path", skill.path()))
+        .stripTrailing();
   }
 
   private static String subagentEntries(List<SubagentBinding> subagents) {
@@ -162,14 +148,10 @@ public final class AgentPromptComposer {
       String description =
           subagent.description().isBlank() ? "(no description)" : subagent.description();
       values.add(
-          "  <subagent>\n"
-              + "    <name>"
-              + escapeXml(subagent.name())
-              + "</name>\n"
-              + "    <description>"
-              + escapeXml(description)
-              + "</description>\n"
-              + "  </subagent>");
+          PromptRenderer.render(
+                  "fun/fengwk/kkstudio/harness/prompts/system/subagent.md",
+                  Map.of("name", subagent.name(), "description", description))
+              .stripTrailing());
     }
     return String.join("\n", values);
   }

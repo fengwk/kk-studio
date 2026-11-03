@@ -1,5 +1,0 @@
-The conversation history before this point was compacted into the following summary:
-
-<summary>
-${summary}
-</summary>

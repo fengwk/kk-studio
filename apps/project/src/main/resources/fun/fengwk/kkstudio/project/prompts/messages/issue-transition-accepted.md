@@ -1,0 +1,1 @@
+{{#replayed}}Handoff was already accepted for this run: {{/replayed}}{{^replayed}}Handoff accepted: this run will close out and the Issue stage will then move {{/replayed}}{{{from}}} -> {{{to}}}. Do not start new business writes; finish the run with a final report of what was done and how it was verified.

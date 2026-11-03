@@ -211,6 +211,9 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
+资源输出外置与媒体后置的模型说明保存在本模块的
+[`prompts/messages`](../../platform/runtime/src/main/resources/fun/fengwk/kkstudio/platform/prompts/messages/)；
+文本预览作为原文插入，不执行模板语法。
 
 Tool 网关先做资源解析与无等待 admission（纯本地：并发租约、目录租用与分支视图），返回
 `Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。Runtime 持久化 RUNNING 后在

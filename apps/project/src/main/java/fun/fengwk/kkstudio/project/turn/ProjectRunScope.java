@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.project.turn;
 
+import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
+
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -80,62 +83,27 @@ public record ProjectRunScope(
    * #ISSUE_TRANSITION_TOOL} 在事务中校验，绝不由本段文本授予。
    */
   public String contextSection() {
-    StringBuilder section = new StringBuilder();
-    section
-        .append("# Issue Agent Context\n\n")
-        .append("- issue_id: ")
-        .append(issueId)
-        .append('\n')
-        .append("- project_id: ")
-        .append(projectId)
-        .append('\n')
-        .append("- run_id: ")
-        .append(runId)
-        .append('\n')
-        .append("- stage: ")
-        .append(stage)
-        .append(" (")
-        .append(stageName)
-        .append(")\n")
-        .append("- agent_name: ")
-        .append(agentName)
-        .append("\n\n")
-        .append("## Current Issue\n\n")
-        .append("#")
-        .append(issueNumber)
-        .append(' ')
-        .append(issueTitle);
-    if (issueDescription != null && !issueDescription.isBlank()) {
-      section.append("\n\n").append(issueDescription);
-    }
-    section.append("\n\n## Stage Instructions\n\n");
-    if (stageInstructions == null || stageInstructions.isBlank()) {
-      section.append("(this stage declares no additional instructions)");
-    } else {
-      section.append(stageInstructions);
-    }
-    section
-        .append("\n\n## Handoff\n\n")
-        .append(
-            "- The Issue requirements and stage instructions above are the authoritative current"
-                + " state of this run; they were frozen when the run was accepted, so never rely on"
-                + " earlier conversation for the current requirements.\n")
-        .append("- Request a handoff with `")
-        .append(ISSUE_TRANSITION_TOOL)
-        .append(
-            "` only when the current stage work is done; the target is stored on the current"
-                + " run and takes effect when the run is safely closed out.\n");
-    if (nextStates.isEmpty()) {
-      section.append("- This stage declares no legal next stage.\n");
-    } else {
-      section
-          .append("- Allowed handoff targets: ")
-          .append(String.join(", ", nextStates))
-          .append(".\n");
-    }
-    section.append(
-        "- After a handoff has been accepted, do not start new business writes; finish the run with"
-            + " a final report of what was done and how it was verified.");
-    return section.toString();
+    return PromptRenderer.render(
+            "fun/fengwk/kkstudio/project/prompts/messages/issue-context.md",
+            Map.ofEntries(
+                Map.entry("issueId", issueId),
+                Map.entry("projectId", projectId),
+                Map.entry("runId", runId),
+                Map.entry("stage", stage),
+                Map.entry("stageName", stageName),
+                Map.entry("agentName", agentName),
+                Map.entry("issueNumber", issueNumber),
+                Map.entry("issueTitle", issueTitle),
+                Map.entry(
+                    "hasDescription", issueDescription != null && !issueDescription.isBlank()),
+                Map.entry("issueDescription", issueDescription == null ? "" : issueDescription),
+                Map.entry(
+                    "stageInstructions",
+                    stageInstructions == null || stageInstructions.isBlank()
+                        ? "(this stage declares no additional instructions)"
+                        : stageInstructions),
+                Map.entry("hasNext", !nextStates.isEmpty()),
+                Map.entry("nextStates", String.join(", ", nextStates))))
+        .stripTrailing();
   }
 }
