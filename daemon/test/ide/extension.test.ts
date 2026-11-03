@@ -40,16 +40,24 @@ interface FakeTerminal {
 function fakeVscode(
   workspaceFile: string | undefined,
   folders: string[],
-  options: { processId?: () => Promise<number>; updateWorkspaceFolders?: () => boolean } = {},
+  options: {
+    processId?: () => Promise<number>
+    updateWorkspaceFolders?: () => boolean
+    closeTabs?: () => Promise<boolean>
+  } = {},
 ) {
   const calls = {
     updateWorkspaceFolders: [] as unknown[],
     createTerminal: [] as { name: string; cwd?: string }[],
     applyEdit: [] as unknown[],
+    closeTabs: [] as unknown[][],
   }
   const terminals: FakeTerminal[] = []
   const openedDocuments = new Map<string, Record<string, unknown>>()
   const folderListeners = new Set<() => void>()
+  const openListeners = new Set<(document: Record<string, unknown>) => void>()
+  const closeListeners = new Set<(document: Record<string, unknown>) => void>()
+  const watchers: Array<{ base: unknown; pattern: string; disposed: boolean; dispose(): void }> = []
   const fireFolders = (): void => {
     for (const listener of [...folderListeners]) {
       listener()
@@ -69,8 +77,12 @@ function fakeVscode(
       this.edits.push({ uri, range, text })
     }
   }
+  class FakeRelativePattern {
+    constructor(readonly base: unknown, readonly pattern: string) {}
+  }
   const vscode = {
     Uri: { file: (path: string) => ({ fsPath: path, scheme: 'file' }) },
+    RelativePattern: FakeRelativePattern,
     Range: FakeRange,
     Position: FakePosition,
     WorkspaceEdit: FakeWorkspaceEdit,
@@ -80,6 +92,24 @@ function fakeVscode(
       onDidChangeWorkspaceFolders(listener: () => void) {
         folderListeners.add(listener)
         return { dispose: () => folderListeners.delete(listener) }
+      },
+      onDidOpenTextDocument(listener: (document: Record<string, unknown>) => void) {
+        openListeners.add(listener)
+        return { dispose: () => openListeners.delete(listener) }
+      },
+      onDidCloseTextDocument(listener: (document: Record<string, unknown>) => void) {
+        closeListeners.add(listener)
+        return { dispose: () => closeListeners.delete(listener) }
+      },
+      createFileSystemWatcher(pattern: FakeRelativePattern) {
+        const watcher = {
+          base: pattern.base,
+          pattern: pattern.pattern,
+          disposed: false,
+          dispose() { watcher.disposed = true },
+        }
+        watchers.push(watcher)
+        return watcher
       },
       textDocuments: [] as Array<Record<string, unknown>>,
       async openTextDocument(uri: { fsPath: string }) {
@@ -109,6 +139,26 @@ function fakeVscode(
     },
     window: {
       terminals,
+      tabGroups: {
+        all: [] as Array<{ tabs: Array<{ input?: unknown }> }>,
+        async close(tabs: unknown[]): Promise<boolean> {
+          calls.closeTabs.push(tabs)
+          let closed: boolean
+          if (options.closeTabs) {
+            closed = await options.closeTabs()
+          } else {
+            // Simulate a user cancelling the native confirmation for dirty or custom editors.
+            closed = !vscode.workspace.textDocuments.some((document) => document.isDirty)
+              && !vscode.window.tabGroups.all.some((group) => group.tabs.some((tab) => tab.input))
+          }
+          if (closed) {
+            for (const group of vscode.window.tabGroups.all) {
+              group.tabs = group.tabs.filter((tab) => !tabs.includes(tab))
+            }
+          }
+          return closed
+        },
+      },
       async showTextDocument(): Promise<void> {},
       createTerminal(options_: { name: string; cwd?: string }): FakeTerminal {
         calls.createTerminal.push({ name: options_.name, cwd: options_.cwd })
@@ -134,7 +184,7 @@ function fakeVscode(
       },
     },
   }
-  return { vscode, calls, terminals, openedDocuments, fireFolders, folderListeners }
+  return { vscode, calls, terminals, openedDocuments, fireFolders, folderListeners, openListeners, closeListeners, watchers }
 }
 
 async function setupWith(fake: ReturnType<typeof fakeVscode>, workspacePath: string) {
@@ -158,6 +208,95 @@ async function setup(workspacePath: string) {
 const signal = (): AbortSignal => new AbortController().signal
 
 describe('VS Code bridge extension host', () => {
+  it('watches only open file documents non-recursively and releases subscriptions and watchers', () => {
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'])
+    const file = (path: string) => ({ scheme: 'file', fsPath: path, toString: () => `file://${path}` })
+    const initial = { uri: file('/home/user/a[1].txt'), isClosed: false }
+    const outside = { uri: file('/elsewhere/b.txt'), isClosed: false }
+    const virtual = { uri: { scheme: 'untitled', toString: () => 'untitled:1' } }
+    fake.vscode.workspace.textDocuments.push(initial, virtual)
+    const host = createBridgeHost(fake.vscode, {})
+    // A literal file URI avoids interpreting glob metacharacters in its name.
+    expect(fake.watchers.map(({ base, pattern }) => [base, pattern])).toEqual([[initial.uri, '*']])
+    for (const listener of fake.openListeners) {
+      listener(initial)
+      listener(outside)
+      listener(virtual)
+    }
+    expect(fake.watchers.map(({ base }) => base)).toEqual([initial.uri, outside.uri])
+    for (const listener of fake.closeListeners) listener(initial)
+    expect(fake.watchers[0]?.disposed).toBe(true)
+    expect(fake.watchers[1]?.disposed).toBe(false)
+    for (const listener of fake.openListeners) listener(initial)
+    expect(fake.watchers).toHaveLength(3)
+    host.dispose()
+    expect(fake.watchers[1]?.disposed).toBe(true)
+    expect(fake.watchers[2]?.disposed).toBe(true)
+    expect(fake.openListeners.size).toBe(0)
+    expect(fake.closeListeners.size).toBe(0)
+  })
+
+  it('waits for native closing of tabs in every group and preserves terminals on cancellation', async () => {
+    let decide: (value: boolean) => void = () => {}
+    const decision = new Promise<boolean>((resolve) => { decide = resolve })
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], { closeTabs: () => decision })
+    const first = {}
+    const second = {}
+    fake.vscode.window.tabGroups.all = [{ tabs: [first] }, { tabs: [second] }]
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    await bridge.request(viewId, { op: 'focusTerminal' }, signal())
+    const closing = bridge.request(viewId, { op: 'closeView' }, signal())
+    await waitFor(() => fake.calls.closeTabs.length === 1)
+    expect(fake.calls.closeTabs).toEqual([[first, second]])
+    expect(fake.terminals).toHaveLength(1)
+    decide(false)
+    expect(await closing).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(fake.terminals).toHaveLength(1)
+  })
+
+  it('accepts native close after the user resolves dirty editors', async () => {
+    const dirty = { isDirty: true }
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], {
+      closeTabs: async () => {
+        dirty.isDirty = false
+        return true
+      },
+    })
+    fake.vscode.workspace.textDocuments.push(dirty)
+    fake.vscode.window.tabGroups.all = [{ tabs: [{}] }]
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    await bridge.request(viewId, { op: 'focusTerminal' }, signal())
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: true })
+    expect(fake.terminals).toHaveLength(0)
+  })
+
+  it('rejects closing when native close leaves a hidden dirty document', async () => {
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], { closeTabs: async () => true })
+    fake.vscode.workspace.textDocuments.push({ isDirty: true })
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+  })
+
+  it('rejects closing if another editor opens during the native prompt', async () => {
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], {
+      closeTabs: async () => {
+        fake.vscode.window.tabGroups.all[0]!.tabs.push({})
+        return true
+      },
+    })
+    fake.vscode.window.tabGroups.all = [{ tabs: [{}] }]
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+  })
+
+  it('does not show a native prompt for an explicit discard after the daemon backup', async () => {
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'])
+    fake.vscode.workspace.textDocuments.push({ isDirty: true })
+    const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
+    expect(await bridge.request(viewId, { op: 'closeView', discard: true }, signal())).toMatchObject({ ok: true })
+    expect(fake.calls.closeTabs).toEqual([])
+  })
+
   it('cancels pending control POSTs on retirement without disposing the terminal', async () => {
     const bridge = await createIdeBridge()
     cleanups.push(() => bridge.close())
@@ -737,9 +876,7 @@ describe('VS Code bridge extension host', () => {
     expect(snapshot.complete).toBe(true)
 
     class TabInputCustom {}
-    ;(fake.vscode.window as unknown as { tabGroups: unknown }).tabGroups = {
-      all: [{ tabs: [{ input: new TabInputCustom() }] }],
-    }
+    fake.vscode.window.tabGroups.all = [{ tabs: [{ input: new TabInputCustom() }] }]
     ;(fake.vscode as unknown as { TabInputCustom: unknown }).TabInputCustom = TabInputCustom
     expect(await bridge.request(viewId, { op: 'inspect' }, signal())).toMatchObject({ ok: true, clean: false })
     const opaqueSnapshot = await bridge.request(viewId, { op: 'snapshot', maxBytes: 1024 }, signal())

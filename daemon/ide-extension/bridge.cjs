@@ -7,8 +7,8 @@
  * per-service secret delivered through the code-server process environment (never the browser)
  * using an `Authorization: Bearer` header, registers the exact assigned workspace file plus its
  * live folders, receives commands over a long-lived NDJSON stream and uses only public VS Code
- * APIs: `workspace.updateWorkspaceFolders`, `window.createTerminal`, `Terminal.show` and
- * `Terminal.processId`. The managed `.code-workspace` file is persisted by the daemon.
+ * APIs for workspace changes, opened-file watching, native tab closing and terminal supervision.
+ * The managed `.code-workspace` file is persisted by the daemon.
  *
  * No `executeCommand`, private SDK or DOM workbench hacks are used.
  */
@@ -41,6 +41,34 @@ function createBridgeHost(vscode, options) {
   let terminal = null
   const terminals = []
   const pendingPosts = new Set()
+
+  // Watching an exact file URI with a non-recursive pattern lets VS Code's file service deliver
+  // changes to the editor, including its native dirty-file conflict handling. It also works for
+  // files outside the workspace and avoids recursively watching large workspace roots.
+  const fileWatchers = new Map()
+  const watchDocument = (document) => {
+    const uri = document.uri
+    if (document.isClosed || !uri || uri.scheme !== 'file') {
+      return
+    }
+    const key = uri.toString()
+    if (!fileWatchers.has(key)) {
+      fileWatchers.set(key, vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(uri, '*')))
+    }
+  }
+  const unwatchDocument = (document) => {
+    const key = document.uri.toString()
+    const watcher = fileWatchers.get(key)
+    if (watcher) {
+      watcher.dispose()
+      fileWatchers.delete(key)
+    }
+  }
+  const openSubscription = vscode.workspace.onDidOpenTextDocument(watchDocument)
+  const closeSubscription = vscode.workspace.onDidCloseTextDocument(unwatchDocument)
+  for (const document of vscode.workspace.textDocuments) {
+    watchDocument(document)
+  }
 
   const folderPaths = () => {
     const folders = vscode.workspace.workspaceFolders || []
@@ -369,15 +397,20 @@ function createBridgeHost(vscode, options) {
   }
 
   const closeView = async (message) => {
-    // A normal close requires an explicit clean observation. Unknown/custom editor state is not clean;
-    // discard/expiry is an explicit decision that the daemon made after its own backup attempt.
-    if (message.discard !== true && !canProveClean()) {
-      await reply(message.id, {
-        ok: false,
-        code: 'DIRTY',
-        message: 'save or discard unsaved changes before closing the view',
-      })
-      return
+    // Explicit discard/expiry follows the daemon's backup attempt and cannot await an interactive window.
+    if (message.discard !== true) {
+      // Let the workbench handle dirty and custom editors, including save, discard and cancel.
+      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      const closed = await vscode.window.tabGroups.close(tabs)
+      // A hidden dirty document or a newly opened tab must not be destroyed with the view.
+      if (!closed || hasDirtyDocuments() || vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)) {
+        await reply(message.id, {
+          ok: false,
+          code: 'DIRTY',
+          message: 'closing the view was cancelled or editors remain open',
+        })
+        return
+      }
     }
     disposeTerminals()
     await reply(message.id, { ok: true })
@@ -533,6 +566,12 @@ function createBridgeHost(vscode, options) {
     dispose() {
       disposed = true
       folderSubscription.dispose()
+      openSubscription.dispose()
+      closeSubscription.dispose()
+      for (const watcher of fileWatchers.values()) {
+        watcher.dispose()
+      }
+      fileWatchers.clear()
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

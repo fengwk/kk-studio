@@ -100,7 +100,7 @@ OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件�
 
 使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期释放；
 创建成功但一直没有浏览器证明的视图最多保留 600 秒；`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。释放走 `OPEN → CLOSING` 门闩：
-正常关闭先由当前桥接宿主检查未保存内容并接受关闭，随后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。dirty 或未知状态的拒绝不释放流或终端。
+正常关闭先由当前桥接宿主检查未保存内容，再请求桥接扩展关闭标签页；扩展使用 IDE 原生关闭流程处理保存、不保存和取消，取消或仍有未关闭编辑器时不释放终端。当前 Daemon 在请求原生关闭前仍会拒绝已知 dirty 或未知状态，桥接请求也仍有 20 秒超时。桥接接受后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server。
 普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
 
@@ -117,7 +117,9 @@ Daemon 通过 code-server 的本机管理接口操作视图（[`codeServer.ts`](
 
 ### IDE 轻量默认值与按需能力
 
-桥接扩展通过原生 `configurationDefaults` 贡献默认值（不写用户 settings，也不禁用扩展）：`task.autoDetect` 与 `npm.autoDetect` 为 `off`，`npm.fetchOnlinePackageInfo` 为 `false`，`typescript.disableAutomaticTypeAcquisition` 为 `true`。这些声明由 IDE 扫描扩展时注册，不依赖桥接代码激活；用户或工作区的显式设置优先。需要自动发现任务、npm 脚本、在线包信息或自动获取 JavaScript 类型包时，可在 IDE 设置中修改对应项。
+桥接扩展通过原生 `configurationDefaults` 贡献默认值，不写用户 settings，也不禁用扩展。主题为 `Dark Modern`，标签页为 `compact`；关闭内置 AI 功能和扩展推荐提示；`task.autoDetect` 与 `npm.autoDetect` 为 `off`，`npm.fetchOnlinePackageInfo` 为 `false`，`typescript.disableAutomaticTypeAcquisition` 为 `true`。这些声明由 IDE 扫描扩展时注册，不依赖桥接代码激活；用户或工作区的显式设置优先。需要这些功能时可在 IDE 设置中重新启用。
+
+默认的 `files.watcherExclude: {"**": true}` 排除工作区递归监听，避免监听大型目录树。桥接扩展只为已打开的本地文件文档建立非递归监听，文档关闭或扩展停用时释放；工作区外的打开文件也适用。文件在外部变化时，未修改的编辑器由 VS Code 重新加载；有未保存修改时保留缓冲区，由 VS Code 的保存冲突设置处理。用户可以覆盖监听排除设置；其他扩展也可能自行请求监听。
 
 Git 不设置覆盖值，保留原生自动仓库发现。文件树、编辑、语法高亮、主动搜索、终端、调试、扩展安装与目录切换桥接保留原生能力；实际调试器与高级语言能力仍取决于已安装扩展和宿主工具链。关闭 npm 自动发现避免持续自动扫描 package.json，但不承诺没有 ripgrep：扩展激活探测、主动搜索或用户重新启用发现仍可能执行检索。
 
@@ -158,7 +160,7 @@ Daemon 拥有独立的 Node.js 工程与测试套件：
 - 单元与集成测试：`npm --prefix daemon run test`
 - 覆盖率统计：`npm --prefix daemon run coverage`（基于 Vitest 与 `@vitest/coverage-v8`）
 
-配置贡献的真实 extension-host 集成测试：安装前端测试依赖与 Playwright Chromium 后，运行 `KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压的code-server目录> node --test daemon/test/ide/configuration-native.test.mjs`（Node 24）。测试用独立临时 HOME、user-data、extensions 和动态 loopback 端口启动三个可信工作区，比较无桥接、桥接默认值、用户显式覆盖的 `inspect/get` 结果；不修改真实用户设置，不请求模型。
+桥接的真实 extension-host 集成测试：安装前端测试依赖与 Playwright Chromium 后，运行 `KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压的code-server目录> node --test daemon/test/ide/configuration-native.test.mjs`（Node 24）。测试用独立临时 HOME、user-data、extensions 和动态 loopback 端口验证配置默认值与用户覆盖、主题实际生效、外部文件变更与保存冲突，以及原生关闭的取消、保存和不保存；不修改真实用户设置，不请求模型。
 
 多平台 CI 由 [.github/workflows/daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 守卫，覆盖 Linux (amd64/arm64)、macOS (arm64/amd64) 与 Windows (amd64) 五大目标环境。发行归档由 [`scripts/daemon/prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存，并由 [`scripts/daemon/smoke-archive.sh`](../../scripts/daemon/smoke-archive.sh) 与 [`scripts/daemon/smoke-archive.ps1`](../../scripts/daemon/smoke-archive.ps1) 验证自足运行能力。
 

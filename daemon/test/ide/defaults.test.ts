@@ -5,6 +5,11 @@ it('contributes only lightweight native defaults without disabling Git or bridge
   // Manifest contributions are consumed by VS Code, not imperative settings writes at activation.
   const manifest = JSON.parse(await readFile(new URL('../../ide-extension/package.json', import.meta.url), 'utf8'))
   expect(manifest.contributes.configurationDefaults).toEqual({
+    'workbench.colorTheme': 'Dark Modern',
+    'window.density.editorTabHeight': 'compact',
+    'chat.disableAIFeatures': true,
+    'extensions.ignoreRecommendations': true,
+    'files.watcherExclude': { '**': true },
     'task.autoDetect': 'off',
     'npm.autoDetect': 'off',
     'npm.fetchOnlinePackageInfo': false,
