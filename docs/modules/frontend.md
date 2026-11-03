@@ -5,7 +5,7 @@ REST Snapshot 提供权威业务事实，WebSocket 提供对账提示和短暂�
 Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 开发代理和发布打包分别见 [`vite.config.ts`](../../frontend/vite.config.ts)、
 [`package.json`](../../frontend/package.json) 与 [Web](web.md)。
-页面密度、卡片、控件、状态与文案遵循[前端视觉与交互语言](frontend-design-language.md)。
+页面密度、卡片、控件、状态与文案遵循下文[视觉与交互语言](#视觉与交互语言)。
 
 ## 组装与路由
 
@@ -424,9 +424,78 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 新增认证形态须同步静态组件、Share/TypeScript contract、i18n 与测试；
 后端 authKind:null 的管理形态需要先定义对应前端状态。
 
+## 视觉与交互语言
+
+前端是日常工作的工作台。设计首先让当前任务、真实状态和下一步操作容易找到，再以紧凑、克制的布局承载信息。资源列表以智能 AI 卡片为共同基准；业务不同，不应产生另一套按钮、表单、颜色和弹层。
+
+### 从任务选择页面结构
+
+资源列表采用“标题与搜索 → 新建卡和资源卡”，不添加营销横幅、重复的中英文标题或没有数据来源的预览图。卡片只呈现识别资源和作出下一步决定所需的信息，标识符与版本保留在诊断和并发协议，不占主视觉。
+
+工作区采用单层内部头部：“返回入口 → 当前对象 → 必要操作”。看板、画布和对话不重复应用导航头。查看详情、调试或只读执行时，标题与操作反映当前可见对象，不借用隐藏对象的身份。加载失败仍须能返回入口。
+
+编辑围绕用户能理解的字段和结果组织。普通用户无需编辑协议 JSON；阶段配置用阶段列表与字段表单表达。保存、取消、危险操作和错误恢复的位置稳定。背景更新不能改写输入或让未确认的草稿覆盖远端数据。
+
+### 密度与层级
+
+以 4px 为间距步进：同一控件内部 4–8px，关联字段/动作之间 8–12px，卡片和面板内边距 16px，页面区块之间 16–24px。避免在每页任意选择一套 padding，也不靠负 margin 或 transform 修齐标题。
+
+- 正文沿用 13px、1.5 行高；辅助信息 12px，不能用大量灰色小字替代清晰结构。
+- 卡片标题 15px、600 字重；页面标题 20–24px。每个区域只有一个主标题，不叠加空白标题栏。
+- 普通控件高度 32px，紧凑控件 28px；图标动作点击区域至少 28px，图标通常 16px。紧凑不能牺牲焦点、点击与阅读。
+- 卡片图标框沿用 AI 区域的 40px。资源卡不强制固定高度；同一栅格行自然拉齐，不用空白占位字段撑高。
+- 资源栅格根据可用宽度自适应，间距 16px。窄窗口先减少列数，再让内容自然换行，不缩小文字或挤掉操作。
+- 长标题可截断并提供完整名称；正文、工具参数、错误和任务报告可自然换行，展开后必须完整。
+
+### Token 分层与门禁
+
+样式只有一个事实源：[`styles.css`](../../frontend/src/styles.css) 的 `:root`，分三层，组件只消费后两层。
+
+1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。
+2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。
+3. **组件层**：只在多处规则共享同一取值时才有，例如 `--topbar-bg`、`--stage-node`。
+
+标尺同样是 token：间距 `--space-1..8`（4px 步进）、字号 `--font-size-xs/sm/md/lg/xl`（12 / 13 / 15 / 20 / 24px）、圆角 `--radius-*`、动效 `--duration-fast/base`、层级 `--z-raised/sticky/dropdown/modal/popover/toast`（局部堆叠只用 0–10 的整数）。字体 `--font` 与 `--mono`：标识符、id、版本号和数据值使用等宽，正文使用无衬线。
+
+| 用途 | Token |
+| --- | --- |
+| 页面/图形舞台 | `--bg` / `--stage-bg` |
+| 普通卡片/控件 | `--surface` |
+| Hover/选中层 | `--surface-hover` / `--surface-active` |
+| 弹层/抬升层 | `--surface-raised` / `--surface-overlay` |
+| 正文/辅助文字 | `--fg` / `--fg-muted` |
+| 边框/hover边框 | `--border` / `--border-hover` |
+| 主动作/选择 | `--accent` / `--accent-soft` |
+| 键盘焦点 | `--focus`（全局 `:focus-visible` 2px 轮廓）/ `--focus-ring` |
+| 成功/等待/危险/信息 | `--success` / `--warning` / `--danger` / `--info` 及 soft、border |
+
+没有同义别名，也没有 `var(--x, fallback)`：缺失的 token 应补进 `:root`，而不是在使用处兜底。
+`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的色值与命名色（TS 中只允许重复 palette 色值，供 Mermaid 这类只能吃具体颜色的 JS 消费者）、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
+
+### 颜色与卡片
+
+资源卡共享 AI 区域的低对比表面、细边框、12px 圆角、标题图标、元信息与底部动作。新建卡使用同一尺寸语言的虚线边框；没有图像预览事实时显示类型图标和真实元信息，不展示伪缩略图。
+内容卡、设置、审批与回执共享表面和控件规范，但保留必要密度与状态。subagent 回执用轻量信息染色，不沿用黑底思考块。Canvas 节点和播放器保留图形、连接、媒体职责，不强套资源卡的底部动作结构。
+绿色用于主动作、选中和真实成功，蓝色用于信息，橙色用于等待/提醒，红色用于危险/失败。状态同时使用文字或图标，不能只靠颜色。`READY`、完成和成功只能来自权威事实；已受理、等待与阶段报告不能伪装成目标验收。
+
+### 控件、动作与反馈
+
+普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock/EmptyState、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
+
+Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。工作区使用唯一顶栏呈现当前查看身份，Debug 独占期间在左上提供“关闭 Debug”；子执行最左是“回到父 agent”，取当前执行的直接父身份，不同时显示“回到对话”。Debug 与 subagent 选择只从根输入区命令进入。
+
+一个操作区只有一个突出的主动作。编辑、查看和取消采用次级或无框动作；删除、拒绝等明确使用 danger 语义，不能因外观统一而取消确认、在途禁用或并发围栏。多动作卡使用非交互外壳和独立操作，不嵌套按钮，不让编辑/删除触发进入或新建。
+加载、空态和错误分别说明真实情况。失败保留输入和明确重试；空态给出下一步，不把失败当空数据。成功提示短暂且不重复；需要决定或恢复的错误留在相关操作处。正常数据由单连接推送失效与权威回读更新，不要求用户手动刷新。
+弹层沿用同一 portal、焦点陷阱与焦点归还路径。Escape 自内向外只关闭顶层可关闭界面，尊重输入法和在途门禁；关闭不是停止、提交或清除草稿。隐藏 pane 和调试背后的输入不能接收焦点或快捷键。
+
+### 文案与维护
+
+用户操作围绕 thread、项目、Issue、画布、Agent 和环境，不暴露独立 branch 实体或内部绑定路径。名称、配置标识和用户正文原样保留；系统文案通过 i18n，中英文的语义、单位和占位符一致。不重复展示“中文标题 + 英文标题”，不以裸 UUID 代替可读名称。
+按钮描述结果，例如“创建并进入”“保存工作流”“返回项目”；错误说明当前阻塞与可采取的动作。诊断严格区分当前草稿预览、冻结调用输入与历史重建，不把重建内容称为实际 HTTP 原文。
+
 ## 共享 UI 与测试
 
-三层 token（palette、语义、组件）在 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，由 `npm run lint:css` 门禁（见[视觉与交互语言](frontend-design-language.md#token-分层与门禁)）；Canvas 样式由 feature 拥有。
+三层 token（palette、语义、组件）在 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，由 `npm run lint:css` 门禁（见上文[Token 分层与门禁](#token-分层与门禁)）；Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
 Select、Switch、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
 ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、

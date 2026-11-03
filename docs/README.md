@@ -11,7 +11,7 @@
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 核对 Environment、Daemon、IDE 与 tab 工作状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
-| 修改页面或共享 UI，保持紧凑与一致 | [前端视觉与交互语言](modules/frontend-design-language.md) |
+| 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools-design.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |

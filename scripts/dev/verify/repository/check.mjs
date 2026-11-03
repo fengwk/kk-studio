@@ -38,7 +38,6 @@ const moduleDocuments = [
   'canvas.md',
   'common.md',
   'daemon.md',
-  'frontend-design-language.md',
   'frontend.md',
   'harness-agent-builtin.md',
   'harness-environment.md',
