@@ -146,7 +146,7 @@ public record SystemSettings(
       SystemSettingsValidation.requireAtLeast(
           subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
-      // 白名单的唯一权威校验/规范化在 ModelHttpErrorPolicy：这里只复用，不再保留第二份 400–599 规则。
+      // 白名单的唯一权威校验/规范化在 ModelHttpErrorPolicy，此处直接复用。
       modelHttpRetryStatusCodes =
           new ModelHttpErrorPolicy(
                   Objects.requireNonNull(

@@ -145,7 +145,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void mapsOwnerAndCreationTargets() {
-    // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型；THREAD 不再由创建型 union 承载。
+    // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型；THREAD 不由创建型 union 承载。
     HarnessCommandOwnerDTO chatOwner = new HarnessCommandOwnerDTO();
     chatOwner.setType("CHAT");
     chatOwner.setChatId(idText(10));
@@ -184,7 +184,7 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(id(4), forked.threadId());
     assertFalse(forked.yoloEnabled());
 
-    // 既有 Thread 不再经由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
+    // 既有 Thread 不经由 target union 承载：type "THREAD" 按未知 target 类型拒绝。
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
     thread.setType("THREAD");
     thread.setThreadId(idText(1));

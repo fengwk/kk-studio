@@ -76,7 +76,7 @@ class ProviderFactoriesTest {
     assertEquals(1, calls.get());
   }
 
-  /** 意图：固定档位工厂的 promptCacheRetention(configJson) 默认回退至无参方法，确保历史适配器无缝兼容。 */
+  /** 意图：固定档位工厂的 promptCacheRetention(configJson) 默认回退至无参方法。 */
   @Test
   void fixedFactoryDelegatesConfigAwareRetentionToParameterlessMethod() {
     ProviderFactory factory =

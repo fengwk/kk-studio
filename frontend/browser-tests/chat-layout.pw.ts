@@ -419,7 +419,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(metaUsageStyle.clientHeight).toBeLessThanOrEqual(24)
     expect(metaUsageStyle.title).toContain('未缓存输入：12400 tokens')
     expect(metaUsageStyle.title).toContain('生成速度：900 tok/s')
-    // 图例只保留短对照，不再夹带内部实现说明。
+    // 图例只保留短对照，不夹带内部实现说明。
     expect(metaUsageStyle.title).not.toContain('注：')
 
     // 基础 meta 样式保留换行；省略规则只作用于回合用量。

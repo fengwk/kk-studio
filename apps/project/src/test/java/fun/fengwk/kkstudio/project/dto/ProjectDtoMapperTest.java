@@ -58,7 +58,7 @@ class ProjectDtoMapperTest {
 
   @Test
   void testWorkflowMaxRunsRejectsNonCanonicalDecimal() {
-    // 测试意图：maxRuns 走共享 canonical 十进制；空白仍表示缺省，前后空白不再被裁剪后接受。
+    // 测试意图：maxRuns 走共享 canonical 十进制；空白仍表示缺省，前后空白不被裁剪接受。
     ProjectWorkflowDTO padded = maxRunsWorkflow(" 1");
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> mapper.toWorkflow(padded));

@@ -923,9 +923,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertBadImportDoesNotLeak("settings:\n  aiRuntime:\n    retryBaseDelayMillis: ''\n", secret);
     assertBadImportDoesNotLeak("settings:\n  network:\n    proxyUrl: false\n", secret);
     assertBadImportDoesNotLeak("settings:\n  network:\n    noProxyHosts: 123\n", secret);
-    // 已退役的旧 integrations 段既不补齐六节设置契约，也不被静默忽略：只带旧段的输入被明确拒绝。
+    // 未知设置段既不补齐设置契约，也不被静默忽略：只带未知段的输入被明确拒绝。
     assertBadImportDoesNotLeak(
-        "settings:\n  integrations:\n    openCliHub:\n      enabled: ''\n", secret);
+        "settings:\n  unknownSection:\n    foo:\n      enabled: ''\n", secret);
 
     // 未知顶层类别是条目级 skip，而不是整份文档错误。
     JsonNode unknownCategory = importYaml("unknownThing: []\n", true);

@@ -11,7 +11,7 @@
 [`upstream-test-manifest.json`](upstream-test-manifest.json) maps tests from
 `langchain4j-google-ai-gemini/src/test/java` and tracked inherited methods to local
 wire-contract tests. The manifest contains 51 source files, 676 methods and 676 invocation records:
-145 `PORTED`, 0 `PORT_PENDING` and 531 `OUT_OF_SCOPE`. Independently, 281 records carry
+145 `PORTED` and 531 `OUT_OF_SCOPE`. Independently, 281 records carry
 `realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
 
 `UpstreamTestManifestTest` recounts these manifest records and checks the summary. These counts
@@ -30,7 +30,7 @@ the manifest test checks the resource independently of how the target test consu
 `executionStatus: PASSED` is checked metadata for a `PORTED` mapping. Run the target tests to
 establish their current result; the manifest test establishes target/fixture validity, rather
 than executing each target or proving all upstream assertions equivalent. `capabilityMismatch`
-explains each `OUT_OF_SCOPE` decision, and `PORT_PENDING` identifies unfinished local mappings.
+explains each `OUT_OF_SCOPE` decision.
 
 Credential status is independent of the mapping: an offline port can exist while the corresponding
 live integration remains `NOT_EXECUTED_REQUIRES_CREDENTIAL`. A local pass verifies the tested

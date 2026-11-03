@@ -37,9 +37,9 @@ class EnvironmentInstallConfigsTest {
     assertNull(EnvironmentInstallConfigs.write(null));
   }
 
-  /** 旧安装字段 javaHome 已删除：它现在与其它未知字段一样是硬错误，不再静默丢弃或兼容迁移。 */
+  /** 未知字段与非法系统字段一样是硬错误，严格拒绝。 */
   @Test
-  void rejectsUnknownJavaHomeInvalidOperatingSystemAndNull() {
+  void rejectsUnknownFieldsInvalidOperatingSystemAndNull() {
     assertThrows(
         AiValidationException.class,
         () ->
@@ -48,7 +48,7 @@ class EnvironmentInstallConfigsTest {
                     Map.of(
                         "operatingSystem",
                         "linux",
-                        "javaHome",
+                        "extraField",
                         "/opt/jdk21",
                         "daemon",
                         Map.of("studioUrl", "https://studio.example.com")))));
@@ -77,7 +77,6 @@ class EnvironmentInstallConfigsTest {
             "{\"expectedVersion\":0,\"installConfig\":{}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{},\"unknown\":1}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
-            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"javaHome\":\"/opt/jdk\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com/path\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{}}}}}")) {
       assertThrows(

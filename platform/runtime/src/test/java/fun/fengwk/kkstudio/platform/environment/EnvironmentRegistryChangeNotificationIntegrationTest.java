@@ -35,7 +35,7 @@ import java.util.UUID;
 /**
  * environment_connection 六组写的 Java 通知契约：真实短事务内「围栏 SQL + environment_changed 发布」要么一起提交、要么一起回滚。
  *
- * <p>测试基座已删除两个数据库行触发器，并用独立 LISTEN 连接直接观测：真实写入（含 HEARTBEAT 与 Skill 投影）提交后各投递一次； 认证拒绝、活跃租约冲突、0
+ * <p>测试基座直接使用独立 LISTEN 连接观测：真实写入（含 HEARTBEAT 与 Skill 投影）提交后各投递一次； 认证拒绝、活跃租约冲突、0
  * 行围栏与自然到期保持静默；发布失败必须回滚对应围栏写。
  */
 class EnvironmentRegistryChangeNotificationIntegrationTest

@@ -84,7 +84,7 @@ export function ChatDefaultsHarnessApp() {
   const [title, setTitle] = useState(() => {
     const openParam = params.get('open')
     if (openParam === 'edit') return 'Existing Chat'
-    if (openParam === 'edit-unavailable') return 'Legacy Chat'
+    if (openParam === 'edit-unavailable') return 'Unavailable Env Chat'
     return ''
   })
   const [selectedAgentName, setSelectedAgentName] = useState('assistant')
@@ -120,7 +120,7 @@ export function ChatDefaultsHarnessApp() {
 
   function openEditUnavailable() {
     setModalMode('edit')
-    setTitle('Legacy Chat')
+    setTitle('Unavailable Env Chat')
     setSelectedAgentName('assistant')
     setYoloEnabled(false)
     setSelectedEnvironmentName('deleted-env')

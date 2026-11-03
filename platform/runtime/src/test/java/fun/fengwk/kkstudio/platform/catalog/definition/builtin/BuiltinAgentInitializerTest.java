@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.definition.builtin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -81,11 +80,10 @@ class BuiltinAgentInitializerTest {
     verify(repository).create(any());
   }
 
-  /** 测试意图：内置压缩 Agent 的规范身份固定为字面量 {@code Compaction}，旧的小写 {@code compaction} 不再是保留名。 */
+  /** 测试意图：内置压缩 Agent 的规范身份固定为字面量 {@code Compaction}。 */
   @Test
-  void canonicalCompactionNameIsCompactionAndLowercaseIsNotReserved() {
+  void canonicalCompactionNameIsCompaction() {
     assertEquals("Compaction", BuiltinAgentDefinitions.COMPACTION_NAME);
     assertTrue(BuiltinAgentDefinitions.isReservedName(BuiltinAgentDefinitions.COMPACTION_NAME));
-    assertFalse(BuiltinAgentDefinitions.isReservedName("compaction"));
   }
 }

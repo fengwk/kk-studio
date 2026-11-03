@@ -478,7 +478,7 @@ export async function runComposerMatrix(ui) {
           await expectStorage(page, draftKey, draft)
 
           // 再次打开 Thread picker，Enter 直接切换到同 Session sibling；旧 Thread
-          // 草稿按 per-thread scope 保留，不再使用已删除的 discard modal。
+          // 草稿按 per-thread scope 保留，不使用 discard modal。
           await page.getByRole('button', { name: '打开命令表' }).click()
           await page.getByRole('option', { name: /^thread/ }).click()
           const switchPanel = await openFixtureThreadPanel(page, fixture)

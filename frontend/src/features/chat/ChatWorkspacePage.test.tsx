@@ -1160,7 +1160,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(openEnvironment).toHaveBeenCalledTimes(1)
   })
 
-  // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片
+  // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费
   // RootAgentPane 提供的 EntryBranchContext（null = 不渲染）；按钮到达 workspace 的
   // 请求形状与 /tree 完全一致，因此上面的用例同时覆盖两条入口的命名与目标流程。
 })

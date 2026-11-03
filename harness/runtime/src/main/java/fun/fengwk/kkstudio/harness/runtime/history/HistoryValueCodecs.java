@@ -70,7 +70,7 @@ final class HistoryValueCodecs {
     ObjectNode node = NODES.objectNode();
     node.put("agentName", settings.agentName());
     node.set("execution", ExecutionSelectionJsonCodec.encode(settings.execution()));
-    // environmentName 是完整快照的一部分：null 必须显式输出，解码端据此区分「未选择」与旧的两字段 shape。
+    // environmentName 是完整快照的一部分：null 必须显式输出，据此表达「未选择」。
     if (settings.environmentName() == null) {
       node.putNull("environmentName");
     } else {

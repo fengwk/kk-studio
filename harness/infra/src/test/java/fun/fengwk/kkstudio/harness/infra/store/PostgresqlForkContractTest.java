@@ -39,10 +39,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 真实 PostgreSQL / Testcontainers 下的 fork 契约：本切片新增 {@code EntryType.FORK}，其持久化依赖 {@code
- * .workspace/unified-fork/SCHEMA.md} 描述的 {@code ck_harness_entry_type} 扩展（本切片不修改 V1
- * baseline）。本测试在独占容器内 <b>局部</b>应用该 DDL，验证 FORK 事实经真实 SQL / jsonb 往返保真，且会话 fork 的 initial creation
- * replay 幂等。
+ * 真实 PostgreSQL / Testcontainers 下的 fork 契约：持久化依赖 {@code
+ * schema/src/main/resources/db/migration/V1__schema.sql} 中 {@code ck_harness_entry_type} 包含的 {@code
+ * FORK} 约束。本测试验证 FORK 事实经真实 SQL / jsonb 往返保真，且会话 fork 的 initial creation replay 幂等。
  *
  * <p>测试意图：
  *
@@ -149,9 +148,8 @@ class PostgresqlForkContractTest {
   }
 
   /**
-   * 按 {@code .workspace/unified-fork/SCHEMA.md} 在独占测试容器内局部扩展 {@code ck_harness_entry_type}：不修改 V1
-   * baseline 文件，只让本测试的 schema 与集成者将要合入的约束一致。约束未扩展时 {@code FORK} 会被真实 SQL 完整性约束拒绝， 该必要性由 SCHEMA.md
-   * 记录。
+   * 确保独占测试容器内生效与 {@code schema/src/main/resources/db/migration/V1__schema.sql} 一致的 {@code
+   * ck_harness_entry_type} 约束。
    */
   private static void applyDocumentedForkEntryTypeConstraint() {
     DataSource dataSource = PostgresqlHarnessStoreFixture.dataSource();

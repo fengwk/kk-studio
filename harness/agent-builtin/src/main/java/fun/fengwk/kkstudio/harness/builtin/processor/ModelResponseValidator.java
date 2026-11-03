@@ -20,7 +20,7 @@ import java.util.Set;
  *
  * <p>Canonical 不变量：stop reason 非空；tool call ID 唯一；call ID/name 非空；arguments 是合法 JSON object； {@code
  * FILTERED} 的 toolCalls 必须为空。usage/cost 的合法性（非负、total 精确等于分项和）由 {@code ModelUsage} / {@code
- * ModelCost} 构造器保证，此处不再重复校验。Tool 是否在冻结 binding 中可见、参数是否符合 Tool schema 属于 {@link
+ * ModelCost} 构造器保证，此处不重复校验。Tool 是否在冻结 binding 中可见、参数是否符合 Tool schema 属于 {@link
  * ModelResponsePlanner} 的决策，不在此处校验；stop reason 与 tool call 存在性正交，无等价约束。
  *
  * <p>这里只拒绝所有调用都不可能接受的 malformed response（transport 边界）。压缩摘要的完整性（无 tool intent 的 LENGTH 截断 final、空

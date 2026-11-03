@@ -109,7 +109,7 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
     return null;
   }
 
-  /** workdir 只决定 {@code process.exec} 的实际执行目录，属于动作语义；文件工具已不接受 workdir。 */
+  /** workdir 只决定 {@code process.exec} 的实际执行目录，属于动作语义；文件工具不接受 workdir。 */
   private String withWorkdir(String action, JsonNode args) {
     if (!capabilityId.equals(EnvironmentCapabilityIds.PROCESS_EXEC)) {
       return action;

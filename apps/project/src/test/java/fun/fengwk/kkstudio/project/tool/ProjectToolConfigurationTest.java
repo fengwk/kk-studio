@@ -46,7 +46,7 @@ class ProjectToolConfigurationTest {
 
   /**
    * 测试意图：Contributor 冻结出唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择），并注册 {@code
-   * project/run} custom entry type 与对应的上下文 projector；运行时不再按 Thread owner 注入工具或上下文。
+   * project/run} custom entry type 与对应的上下文 projector；运行时不按 Thread owner 注入工具或上下文。
    */
   @Test
   void freezesSelectableTransitionToolAndRunContextProjector() {

@@ -52,11 +52,7 @@ class MiniMaxMavisAutoConfigurationTest {
               assertThat(context).hasSingleBean(StudioPlugin.class);
               assertThat(context).hasSingleBean(MiniMaxMavisPlugin.class);
 
-              // 旧装配路径必须彻底消失：没有独立 Contributor、工具执行器、capability 缓存或资源访问 bean。
-              assertThat(context).doesNotHaveBean(MiniMaxMavisHarnessContributor.class);
-              assertThat(context).doesNotHaveBean(MiniMaxMavisCapabilityCache.class);
-              assertThat(context).doesNotHaveBean(MiniMaxMavisResourceAccess.class);
-              assertThat(context.containsBean("mavisToolExecutor")).isFalse();
+              // 验证未向容器注册全局 Contributor 或 Tool bean
               assertThat(context.getBeansOfType(HarnessContributor.class)).isEmpty();
               assertThat(context.getBeansOfType(Tool.class)).isEmpty();
 

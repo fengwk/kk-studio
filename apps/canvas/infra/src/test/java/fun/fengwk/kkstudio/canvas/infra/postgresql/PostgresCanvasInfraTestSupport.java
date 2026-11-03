@@ -212,7 +212,7 @@ public abstract class PostgresCanvasInfraTestSupport {
       return new NodeRecord(nodeId, canvasId, name, transform, groupId, function);
     }
 
-    /** 同一节点的改名形态，用于验证兼容折叠唯一键冲突。 */
+    /** 同一节点的改名形态，用于验证规范化折叠唯一键冲突。 */
     protected NodeRecord renamed(String newName, CanvasFunction function) {
       return new NodeRecord(nodeId, canvasId, newName, transform, groupId, function);
     }

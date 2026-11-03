@@ -342,7 +342,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   /**
    * 受控 Harness 运行时假件：真实写 Harness 行，投影用最小 mock 表达。
    *
-   * <p>只覆盖本切片消费的契约（NEW_SESSION / THREAD 接受与 Thread 快照），不承担模型/工具执行语义。
+   * <p>只覆盖当前消费的契约（NEW_SESSION / THREAD 接受与 Thread 快照），不承担模型/工具执行语义。
    */
   @TestConfiguration(proxyBeanMethods = false)
   public static class HarnessRuntimeTestConfiguration {

@@ -81,7 +81,7 @@ const ACTIVITY_FIELDS = [
   'createdAt',
 ]
 
-/** ProjectSnapshotDTO / ProjectIssueSnapshotDTO 精确字段集合：快照不再聚合依赖图。 */
+/** ProjectSnapshotDTO / ProjectIssueSnapshotDTO 精确字段集合：快照不聚合依赖图。 */
 const SNAPSHOT_FIELDS = ['project', 'issues', 'referencedStateCodes']
 const SNAPSHOT_ISSUE_FIELDS = ['issue', 'currentOrLatestRun']
 
@@ -767,7 +767,7 @@ registerCase({
         status: 400,
       })
 
-      // Snapshot：只聚合 Project 真相与每个 Issue 的当前/最近 Run，不再携带依赖图。
+      // Snapshot：只聚合 Project 真相与每个 Issue 的当前/最近 Run，不携带依赖图。
       const snapshot = envelopeData(
         (await ctx.call('GET', `/api/projects/${project.id}/snapshot`)).json,
       )

@@ -200,7 +200,7 @@ test('previewProviderRequest posts the owner-free cursor body and validates the 
 })
 
 test('preview wire rejects a non-preview shape instead of guessing notice/kind', async () => {
-  // 测试意图：旧的 click-time snapshotNotice 字段（以及缺字段/多字段/错 kind）都不是预览契约，
+  // 测试意图：非契约字段（如 snapshotNotice）或非预览形状（以及缺字段/多字段/错 kind）都不是预览契约，
   // helper 必须直接拒绝，而不是继续接受一个无法证明「按当前 catalog 重建」的响应。
   const { notice: _omitted, ...withoutNotice } = previewDto()
   const cases = [

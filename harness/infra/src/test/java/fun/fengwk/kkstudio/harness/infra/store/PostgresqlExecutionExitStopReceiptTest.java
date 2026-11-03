@@ -146,7 +146,7 @@ class PostgresqlExecutionExitStopReceiptTest {
 
   @Test
   void missingStopReceiptLeavesJoinUnsettled() {
-    // 故障注入：仅在独立 PG 中删除目标回执，验证本切片明确的「无匹配持久回执不得结算」边界；
+    // 故障注入：仅在独立 PG 中删除目标回执，验证「无匹配持久回执不得结算」边界；
     // 正常运行不会自行删除回执。确认执行事实后 Join、通知与 STOPPED Work 均不得被推进。
     Tree tree = seedJoinAndUnconfirmedExecution();
     stopAndBoundary(tree.targetThreadId(), FIRST_STOP_REQUEST_ID);

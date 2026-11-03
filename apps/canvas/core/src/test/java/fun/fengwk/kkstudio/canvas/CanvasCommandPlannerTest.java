@@ -368,7 +368,7 @@ class CanvasCommandPlannerTest {
 
   /** 节点名按 NFKC 归一化后比较，重复名或非法名称在构造命令时即被拒绝。 */
   @Test
-  void nodeNamesAreUniqueAfterCompatibilityFolding() {
+  void nodeNamesAreUniqueAfterNormalizedFolding() {
     CanvasResourceNode node = textNode(nodeId(1), "name", "body");
     CanvasResourceNode other = textNode(nodeId(2), "other", "body");
 

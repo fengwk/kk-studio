@@ -305,7 +305,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   @Test
   void parentExecutionControlUnchangedByChildSessionAndThreadCommands() {
-    // 测试意图：执行控制只有 RUNNABLE / STOPPED 两态，不再有 IDLE / WAITING_CHILDREN 递归生命周期：
+    // 测试意图：执行控制为 RUNNABLE / STOPPED 两态；
     // 接纳新子会话（acceptNewSession）或在既有子线程上接纳新命令（acceptOnThread）都不会改写父/祖先线程的执行控制。
     AcceptedCommands parent =
         runtime.acceptCommands(session(60, 61, null), AcceptancePreflight.IDENTITY);

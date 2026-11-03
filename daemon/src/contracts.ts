@@ -192,7 +192,7 @@ export interface IdeStreamUpstream {
   host: string
   port: number
   path: string
-  /** 已移除 hop-by-hop/凭据/连接级头的上游请求头；适配器仍须注入私有 cookie。 */
+  /** 剔除 hop-by-hop/凭据/连接级头后的上游请求头；适配器仍须注入私有 cookie。 */
   headers: [string, string][]
   /** Daemon 注入的私有上游 cookie，永不来自浏览器。 */
   cookie?: string

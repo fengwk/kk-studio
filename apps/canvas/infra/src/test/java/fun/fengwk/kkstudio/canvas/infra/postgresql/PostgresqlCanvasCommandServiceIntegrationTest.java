@@ -38,8 +38,7 @@ import java.util.UUID;
 /**
  * typed command 的 PostgreSQL 接受语义：原子性、幂等、语义组前置条件、资源生命周期与画布深删除。
  *
- * <p>这是本切片的验收证据：断言都落在真实数据库行上，因此“拒绝不留部分写入”“接受恰好前进一次 revision”“重复请求只返回当时的接受位置”等 事实不由 mock
- * 声称，而由提交后的行状态证明。
+ * <p>断言都落在真实数据库行上，因此“拒绝不留部分写入”“接受恰好前进一次 revision”“重复请求只返回当时的接受位置”等事实不由 mock 声称，而由提交后的行状态证明。
  */
 class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
 

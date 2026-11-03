@@ -71,8 +71,7 @@ class AnthropicOpaqueReplayTest {
 
   /**
    * 测试意图：server tool use 这类 native block 携带 {@code input_json_delta} 时，partial JSON 依序累积并在终态解析为
-   * {@code input} 对象；block 其余字段（含未知官方字段）原样保留。旧的最小通用 merge 会把 {@code partial_json} 当成普通字段递归并入 {@code
-   * input}，本测试即对该行为的反例。
+   * {@code input} 对象；block 其余字段（含未知官方字段）原样保留。解析时不把 {@code partial_json} 当成普通字段递归并入 {@code input}。
    */
   @Test
   void assemblesNativeToolInputFromJsonDeltaAndReplaysExactly() throws IOException {

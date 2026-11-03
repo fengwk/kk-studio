@@ -6,7 +6,7 @@ const reportsDir = process.env.KK_LAYOUT_REPORTS_DIR
   ?? resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
 async function expectSinglePlanningScroll(page: Page) {
-  // 提示词完整自然高度，仅整列纵向滚动，不再把内容关进 50cqh 的嵌套滚动区。
+  // 提示词完整自然高度，仅整列纵向滚动，不使用 50cqh 的嵌套滚动区。
   const metrics = await page.locator('.thread-system-prompt-body').evaluate((el) => ({
     overflowY: getComputedStyle(el).overflowY,
     scrollHeight: el.scrollHeight,
@@ -117,7 +117,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await composerInput.fill('测试任务指令')
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
-    // 8. 验证快照按钮存在，复制按钮已移除
+    // 8. 验证快照按钮存在，无复制按钮
     await colPreview.evaluate((el) => { el.scrollTop = 0 })
     const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）', exact: true })
     await expect(snapshotBtn).toBeVisible()

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
  * helper 入口的定位。
  *
  * <p>helper **只运行编译产物** `helper.js`：Node 的类型剥离不支持 parameter property 等语法，源码态直接执行并不可靠，因此这里
- * 绝不退回 `.ts`，也不做任何 transform-types/loader hook 兼容。
+ * 不退回 `.ts`，也不做 transform-types/loader hook 处理。
  *
  * <p>生产取同目录 `helper.js`；Vitest 源码开发态（本文件仍在 `src/` 下）取本仓库 `daemon/dist/native/helper.js`。两者都不存在
  * 时显式失败并提示先构建，绝不退回到「没有范围」的直接执行。

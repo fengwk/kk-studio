@@ -125,7 +125,7 @@ class ResultContentTest {
     assertThrows(IllegalArgumentException.class, () -> new TextArtifactMetadata(0, -1));
   }
 
-  /** 验证 ResourceResultContent 兼容构造器与 textMetadata 字段保持。 */
+  /** 验证 ResourceResultContent 便捷构造器与 textMetadata 字段保持。 */
   @Test
   void resourceResultContentCompatibilityAndTextMetadata() {
     ResourceRef ref = new ResourceRef("https://example.com/a", "text/plain", "a", null, null);

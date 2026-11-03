@@ -55,7 +55,7 @@ management:
     propagation:
       type: W3C
     baggage:
-      # 本切片不传播/关联 baggage，避免任意 baggage key 进入 MDC。
+      # 不传播/关联 baggage，避免任意 baggage key 进入 MDC。
       enabled: false
     export:
       otlp:

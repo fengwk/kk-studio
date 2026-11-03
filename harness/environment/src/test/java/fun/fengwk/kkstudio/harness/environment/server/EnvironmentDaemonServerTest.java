@@ -1892,7 +1892,7 @@ class EnvironmentDaemonServerTest {
             case "lsp.java-decompile" -> ",\"target\":\"jdt://contents/library/Foo.class\"";
             default -> "";
           };
-      // 携带已移除的 workdir 参数在发送前被 Schema 校验拒绝
+      // 携带未定义的 extra 属性在发送前被 Schema 校验拒绝
       assertThrows(
           IllegalArgumentException.class,
           () ->
@@ -1902,7 +1902,7 @@ class EnvironmentDaemonServerTest {
                       descriptor,
                       new EnvironmentCapabilityCall(
                           CALL_ONE.toString(),
-                          "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\""
+                          "{\"path\":\"/srv/repo/App.java\",\"extra\":\"unexpected\""
                               + fields
                               + "}"),
                       Duration.ofSeconds(5)),

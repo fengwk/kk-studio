@@ -39,7 +39,6 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_TOTAL_METHODS = 502;
   private static final int EXPECTED_TOTAL_INVOCATIONS = 659;
   private static final int EXPECTED_PORTED_INVOCATIONS = 238;
-  private static final int EXPECTED_IN_SCOPE_PENDING_INVOCATIONS = 0;
   private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 421;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 390;
 
@@ -1112,8 +1111,7 @@ class UpstreamTestManifestTest {
     assertEquals(EXPECTED_TOTAL_METHODS, summary.get("totalMethods").asInt(0));
     assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.get("totalInvocations").asInt(0));
     assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.get("portedInvocations").asInt(0));
-    assertEquals(
-        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.get("inScopePendingInvocations").asInt(0));
+    assertEquals(0, summary.get("inScopePendingInvocations").asInt(0));
     assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.get("outOfScopeInvocations").asInt(0));
     assertEquals(
         EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.get("realCredentialInvocations").asInt(0));
@@ -1128,7 +1126,6 @@ class UpstreamTestManifestTest {
     int countedMethods = 0;
     int countedInvocations = 0;
     int countedPortedInvocations = 0;
-    int countedInScopePendingInvocations = 0;
     int countedOutOfScopeInvocations = 0;
     int countedRealCredentialInvocations = 0;
 
@@ -1197,16 +1194,6 @@ class UpstreamTestManifestTest {
           assertNotNull(inv.get("fixture"));
           validateFixture(inv.get("fixture").asString(""));
           assertFalse("not-applicable".equals(validationLayer));
-        } else if ("PORT_PENDING".equals(mappingStatus)) {
-          countedInScopePendingInvocations++;
-          assertEquals("NOT_EXECUTED_PENDING_IMPLEMENTATION", executionStatus);
-          assertTrue(
-              inv.get("capabilityMismatch") == null || inv.get("capabilityMismatch").isNull());
-          assertNotNull(inv.get("targetTest"));
-          assertFalse(inv.get("targetTest").asString("").isBlank());
-          assertNotNull(inv.get("fixture"));
-          assertFalse(inv.get("fixture").asString("").isBlank());
-          assertFalse("not-applicable".equals(validationLayer));
         } else if ("OUT_OF_SCOPE".equals(mappingStatus)) {
           countedOutOfScopeInvocations++;
           assertEquals("NOT_EXECUTED_OUT_OF_SCOPE", executionStatus);
@@ -1226,7 +1213,6 @@ class UpstreamTestManifestTest {
     assertEquals(EXPECTED_TOTAL_METHODS, countedMethods);
     assertEquals(EXPECTED_TOTAL_INVOCATIONS, countedInvocations);
     assertEquals(EXPECTED_PORTED_INVOCATIONS, countedPortedInvocations);
-    assertEquals(EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, countedInScopePendingInvocations);
     assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, countedOutOfScopeInvocations);
     assertEquals(EXPECTED_REAL_CREDENTIAL_INVOCATIONS, countedRealCredentialInvocations);
 

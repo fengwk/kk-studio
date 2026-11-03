@@ -575,7 +575,7 @@ create table canvas_node (
     )
 );
 
-comment on table canvas_node is 'Canvas 唯一的节点形态：普通资源节点或可携带资源输出的 Function 节点；name_key 折叠兼容空白与大小写后同 Canvas 唯一';
+comment on table canvas_node is 'Canvas 唯一的节点形态：普通资源节点或可携带资源输出的 Function 节点；name_key 规范化折叠空白与大小写后同 Canvas 唯一';
 comment on column canvas_node.id is 'Node 全局唯一 UUID（客户端生成）';
 comment on column canvas_node.canvas_id is '所属 Canvas（RESTRICT）';
 comment on column canvas_node.name is '展示名（非空白且无环绕空白；控制字符由应用校验）';
@@ -850,7 +850,7 @@ insert into system_setting (id, config) values (
 --
 -- 所有 Harness 生成的持久实体 ID（Session / Entry / Thread / ThreadCommand client id / ModelInvocation /
 -- ToolInvocation / WorkTarget）均为 PostgreSQL uuid，由 HarnessStore 注入的 Supplier<UUID> 生成（生产：
--- UUID::randomUUID），本 schema 不再提供任何序列。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
+-- UUID::randomUUID），本 schema 不提供任何序列。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
 -- 时间列统一使用毫秒精度 timestamptz(3)，与 HarnessStore 的时间精度契约一致。
 
 create table harness_session (

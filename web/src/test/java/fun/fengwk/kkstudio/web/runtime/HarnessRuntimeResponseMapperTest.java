@@ -526,7 +526,7 @@ class HarnessRuntimeResponseMapperTest {
 
   @Test
   void projectsStoppedAndReplayedStopResultsWithReceipts() {
-    // STOPPED/REPLAYED 两态与每节点聚合回执必须由 StopResult 唯一决定；不再有顶层取消消息与 IDLE 兼容状态。
+    // STOPPED/REPLAYED 两态与每节点聚合回执由 StopResult 唯一决定。
     StoppedThreadReceipt receipt =
         new StoppedThreadReceipt(
             id(1),

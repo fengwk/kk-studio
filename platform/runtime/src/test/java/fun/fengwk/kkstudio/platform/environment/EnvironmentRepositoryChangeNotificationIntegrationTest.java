@@ -29,7 +29,7 @@ import java.util.UUID;
 /**
  * environment 注册行的 Java 通知契约：每次真实 insert/update/delete 在同一事务内发布 {@code environment_changed}。
  *
- * <p>测试基座已删除两个数据库行触发器，并用独立 LISTEN 连接直接观测：仅提交后可见；未提交与回滚不可见；删除级联连接仍由同一 environment 通知覆盖，不需要连接级第二来源。
+ * <p>测试基座直接使用独立 LISTEN 连接观测：仅提交后可见；未提交与回滚不可见；删除级联连接仍由同一 environment 通知覆盖，不需要连接级第二来源。
  */
 class EnvironmentRepositoryChangeNotificationIntegrationTest
     extends EnvironmentNotificationTestSupport {

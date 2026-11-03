@@ -64,7 +64,7 @@ export function AgentPane({
   onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus?: () => void
   initialTarget?: PaneTarget
-  /** Chat workspace 持有的共享呈现目标；提供时本面板不再自行持久化目标。 */
+  /** Chat workspace 持有的共享呈现目标；提供时本面板不自行持久化目标。 */
   target?: PaneTarget
   onTargetChange?: (next: PaneTarget) => void
   onTargetConsumed?: (target: PaneTarget) => void

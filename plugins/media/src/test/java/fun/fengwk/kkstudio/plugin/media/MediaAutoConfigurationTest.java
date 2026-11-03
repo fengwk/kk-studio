@@ -18,7 +18,7 @@ import java.util.List;
 /**
  * MediaAutoConfiguration 自动装配与契约凭证测试。
  *
- * <p>验证加载 MediaAutoConfiguration 时只注册一个 {@link StudioPlugin} 安装定义，不再把函数 adapter 发布为宿主内置 Bean；
+ * <p>验证加载 MediaAutoConfiguration 时只注册一个 {@link StudioPlugin} 安装定义，不把函数 adapter 发布为宿主内置 Bean；
  * 验证用户自定义 Bean 覆盖，以及 AutoConfiguration.imports 声明符合 Spring Boot 约定。
  */
 class MediaAutoConfigurationTest {

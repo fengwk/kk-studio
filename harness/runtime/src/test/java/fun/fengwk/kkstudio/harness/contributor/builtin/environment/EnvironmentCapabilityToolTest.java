@@ -251,9 +251,9 @@ class EnvironmentCapabilityToolTest {
     assertTrue(error.getMessage().contains("workdir is required"), error.getMessage());
   }
 
-  /** 验证文件能力请求携带已废弃的 workdir 时在构造期被拒绝。 */
+  /** 验证文件能力请求携带未知字段时在构造期被拒绝。 */
   @Test
-  void requestCreationRejectsWorkdirForFileTools() {
+  void requestCreationRejectsUnknownFieldsForFileTools() {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
@@ -262,13 +262,13 @@ class EnvironmentCapabilityToolTest {
             FS_READ.inputSchema(),
             ToolSideEffect.READ_ONLY,
             FS_READ.defaultTimeout());
-    ToolCall callWithWorkdir =
+    ToolCall callWithUnknownField =
         new ToolCall(
-            "call-read", "read", "{\"path\":\"/srv/repo/demo.txt\",\"workdir\":\"/srv/repo\"}");
+            "call-read", "read", "{\"path\":\"/srv/repo/demo.txt\",\"unknownField\":\"value\"}");
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ToolExecutionRequest(descriptor, callWithWorkdir, Duration.ZERO));
-    assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
+            () -> new ToolExecutionRequest(descriptor, callWithUnknownField, Duration.ZERO));
+    assertTrue(error.getMessage().contains("unknownField is not allowed"), error.getMessage());
   }
 }

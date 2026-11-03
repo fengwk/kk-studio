@@ -366,7 +366,7 @@ class DatabaseProviderResolutionServiceTest {
             List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(persistedResult))),
             List.of());
 
-    // 意图：验证解析服务交给后续 Provider transport 的 effectiveRequest 已移除嵌套 durable Resource。
+    // 意图：验证解析服务交给后续 Provider transport 的 effectiveRequest 不包含嵌套 durable Resource。
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
 

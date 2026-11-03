@@ -202,7 +202,7 @@ describe('install command', () => {
   })
 
   it.each([
-    { javaHome: '/opt/jdk' },
+    { extra: 'value' },
     { operatingSystem: 'unknown' }, { daemon: { studioUrl: '' } },
     { daemon: { studioUrl: 'https://host', note: 'x'.repeat(513) } },
     { daemon: { studioUrl: 'https://host', note: '' } },
@@ -213,11 +213,6 @@ describe('install command', () => {
   ])('rejects invalid fields without echoing values %#', patch => {
     expect(() => validateInstallConfig({ ...config(), ...patch } as unknown as EnvironmentInstallConfigDTO))
       .toThrow(/^Invalid /)
-  })
-
-  it('rejects javaHome as an unknown field', () => {
-    expect(() => validateInstallConfig({ ...config(), javaHome: '/opt/jdk' } as unknown as EnvironmentInstallConfigDTO))
-      .toThrow('Invalid installConfig')
   })
 
   it.each([

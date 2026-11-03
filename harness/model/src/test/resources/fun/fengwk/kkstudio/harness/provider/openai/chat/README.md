@@ -11,7 +11,7 @@
 [`upstream-test-manifest.json`](upstream-test-manifest.json) records the Chat Completions mapping
 from `langchain4j-open-ai/src/test/java` and tracked inherited methods. It contains 70 source files,
 502 methods and 659 invocation records, including expanded parameter cases:
-238 `PORTED`, 0 `PORT_PENDING` and 421 `OUT_OF_SCOPE`. Independently, 390 records carry
+238 `PORTED` and 421 `OUT_OF_SCOPE`. Independently, 390 records carry
 `realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
 
 These numbers describe this manifest. `UpstreamTestManifestTest` recounts its records and checks
@@ -30,7 +30,7 @@ of how the target test consumes payloads.
 `executionStatus: PASSED` is manifest metadata checked for ported records. Run the target tests
 to establish their current result. Target existence and fixture validity alone establish a usable
 mapping, not equivalence to every upstream assertion. Each `OUT_OF_SCOPE` record states its
-`capabilityMismatch`; `PORT_PENDING` records identify unfinished mappings.
+`capabilityMismatch`.
 
 The credential dimension remains separate: a local offline port can coexist with
 `NOT_EXECUTED_REQUIRES_CREDENTIAL` for its upstream live test. A local pass establishes the tested
