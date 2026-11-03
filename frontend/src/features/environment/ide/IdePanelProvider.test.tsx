@@ -109,9 +109,12 @@ function sessionRecovery(environmentId: string): IdeRecovery | undefined {
 }
 
 function Harness() {
-  const { openEnvironment } = useIdePanel()
+  const { openEnvironment, togglePanel } = useIdePanel()
   return (
     <div>
+      <button data-testid="toggle-a" onClick={() => togglePanel({ id: ENV_A, name: 'local-node', ready: true })}>
+        Toggle
+      </button>
       <button
         data-testid="open-a"
         onClick={() => openEnvironment({
@@ -228,6 +231,22 @@ describe('IdePanelProvider', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('opens the conversation environment once and toggles the same mounted view', async () => {
+    // 首次切换创建视图，之后收起和展开不能重建 iframe 或再次 claim。
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    const iframe = await screen.findByTestId('ide-iframe')
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByTestId('toggle-a'))
+    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+    await user.click(screen.getByTestId('toggle-a'))
+    expect(screen.getByTestId('ide-overlay-panel')).not.toHaveAttribute('hidden')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
   })
 
   it('restores the session viewId through an ack, resume claim and holding epoch without touching local', async () => {
@@ -554,7 +573,7 @@ describe('IdePanelProvider', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
     await waitFor(() => {
-      expect(screen.getByTestId('ide-dirty-close-dialog')).toBeInTheDocument()
+      expect(screen.getByRole('alertdialog', { name: '放弃未保存的修改？' })).toBeInTheDocument()
     })
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     expect(service.closeIdeView).toHaveBeenNthCalledWith(1, ENV_A, expect.any(String), expect.objectContaining({
@@ -562,7 +581,7 @@ describe('IdePanelProvider', () => {
       discard: false,
     }))
 
-    await user.click(screen.getByTestId('ide-discard-close-btn'))
+    await user.click(screen.getByRole('button', { name: '放弃并关闭' }))
     await waitFor(() => {
       expect(service.closeIdeView).toHaveBeenCalledTimes(2)
     })

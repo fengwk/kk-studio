@@ -87,3 +87,10 @@
 .chat-workspace-title {
   min-width: 0;
 }
+
+@media (max-width: 760px) {
+  .chat-workspace-actions .chat-ide-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import { useApplicationEventIdentity, useApplicationEvents, ApplicationEventProvider } from '@/shared/app-events'
@@ -57,16 +58,21 @@ const queryClient = new QueryClient({
 })
 
 function Harness() {
-  const { openEnvironment } = useIdePanel()
+  const { openEnvironment, togglePanel } = useIdePanel()
   const identity = useApplicationEventIdentity()
   const events = useApplicationEvents()
   const [pane1Draft, setPane1Draft] = useState('pane 1 initial text')
   const [pane2Draft, setPane2Draft] = useState('pane 2 initial text')
-
+  useEffect(() => {
+    const root = document.querySelector('[data-testid="ide-harness-root"]')
+    if (root) root.setAttribute('data-renders', String(Number(root.getAttribute('data-renders')) + 1))
+  })
   return (
     <div className="harness-container" data-testid="ide-harness-root">
       <div className="harness-controls">
         <span style={{ fontWeight: 600 }}>Global IDE Panel Harness</span>
+        <Link to="/other">其他页面</Link>
+        <Button size="compact" data-testid="toggle-a" onClick={() => togglePanel(CARD_A)}>切换 IDE</Button>
         <span data-testid="harness-event-status" data-connected={identity != null ? 'true' : 'false'}>
           {identity != null ? 'connected' : 'reconnecting'}
         </span>
@@ -156,7 +162,12 @@ function HarnessApp() {
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
         <IdePanelProvider>
-          <Harness />
+          <MemoryRouter>
+            <Routes>
+              <Route path="/" element={<Harness />} />
+              <Route path="/other" element={<Link to="/">返回对话</Link>} />
+            </Routes>
+          </MemoryRouter>
         </IdePanelProvider>
       </ApplicationEventProvider>
     </QueryClientProvider>

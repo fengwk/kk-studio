@@ -6,6 +6,22 @@ export const environmentCatalog = {
     'en-US': 'Workspace IDE',
     'zh-CN': '工作区 IDE',
   },
+  'ai.ide.resize': {
+    'en-US': 'Resize IDE panel',
+    'zh-CN': '调整 IDE 面板宽度',
+  },
+  'ai.ide.toggle': {
+    'en-US': 'Show or collapse IDE',
+    'zh-CN': '显示或收起 IDE',
+  },
+  'ai.ide.selectChatEnvironment': {
+    'en-US': 'Select an environment for this conversation first',
+    'zh-CN': '请先为当前对话选择环境',
+  },
+  'ai.ide.chatEnvironmentUnavailable': {
+    'en-US': 'The conversation environment is unavailable',
+    'zh-CN': '当前对话的环境不可用',
+  },
   'ai.ide.collapse': {
     'en-US': 'Collapse',
     'zh-CN': '收起',
@@ -85,6 +101,18 @@ export const environmentCatalog = {
   'ai.ide.openDirectory': {
     'en-US': 'Open Directory',
     'zh-CN': '打开目录',
+  },
+  'ai.ide.copyDirectory': {
+    'en-US': 'Copy directory path',
+    'zh-CN': '复制目录路径',
+  },
+  'ai.ide.directoryCopied': {
+    'en-US': 'Directory path copied',
+    'zh-CN': '目录路径已复制',
+  },
+  'ai.ide.directoryCopyFailed': {
+    'en-US': 'Could not copy the directory path',
+    'zh-CN': '无法复制目录路径',
   },
   'ai.ide.openDirectoryTitle': {
     'en-US': 'Open Host Directory',

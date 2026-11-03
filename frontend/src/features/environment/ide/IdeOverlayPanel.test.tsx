@@ -103,6 +103,20 @@ describe('IdeOverlayPanel', () => {
     expect(props.onCollapse).toHaveBeenCalledTimes(1)
   })
 
+  it('copies the full directory path and reports clipboard errors', async () => {
+    // 路径截断只影响显示，复制必须使用完整路径并暴露失败。
+    const user = userEvent.setup()
+    const write = vi.spyOn(navigator.clipboard, 'writeText')
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('denied'))
+    render(<IdeOverlayPanel {...baseProps()} />)
+    await user.click(screen.getByTestId('ide-copy-directory-btn'))
+    expect(write).toHaveBeenCalledWith(DIRECTORY_A)
+    expect(await screen.findByText('目录路径已复制')).toBeVisible()
+    await user.click(screen.getByTestId('ide-copy-directory-btn'))
+    expect(await screen.findByText('无法复制目录路径')).toBeVisible()
+  })
+
   it('keeps the iframe after a dirty close and only sends discard from the explicit confirmation', async () => {
     const user = userEvent.setup()
     const onCloseEnvironment = vi.fn()
@@ -112,12 +126,12 @@ describe('IdeOverlayPanel', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
 
-    const dialog = await screen.findByTestId('ide-dirty-close-dialog')
+    const dialog = await screen.findByRole('alertdialog', { name: '放弃未保存的修改？' })
     expect(within(dialog).getByText('IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？')).toBeVisible()
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
 
-    await user.click(screen.getByTestId('ide-discard-close-btn'))
+    await user.click(within(dialog).getByRole('button', { name: '放弃并关闭' }))
     await waitFor(() => {
       expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, ENV_A, true)
     })

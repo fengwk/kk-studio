@@ -127,6 +127,23 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(gridScroll.scrollWidth).toBeLessThanOrEqual(gridScroll.clientWidth + 1)
   })
 
+  test('layouts 5 and 7 stack by conversation width even in a wide viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 900 })
+    await page.goto('/browser-tests/chat-layout-harness.html')
+    for (const layout of ['5', '7']) {
+      await selectLayoutOption(page, `grid-${layout}`, layout)
+      const first = page.getByTestId('pane-item-1')
+      const second = page.getByTestId('pane-item-2')
+      expect((await second.boundingBox())!.x).toBeGreaterThan((await first.boundingBox())!.x)
+      await page.locator('.harness-chat-workspace').evaluate((element: HTMLElement) => { element.style.width = '800px' })
+      const firstNarrow = (await first.boundingBox())!
+      const secondNarrow = (await second.boundingBox())!
+      expect(secondNarrow.y).toBeGreaterThanOrEqual(firstNarrow.y + firstNarrow.height - 2)
+      expect(secondNarrow.width).toBeCloseTo(firstNarrow.width, 0)
+      await page.locator('.harness-chat-workspace').evaluate((element: HTMLElement) => { element.style.width = '100vw' })
+    }
+  })
+
   test('Chevron icon is visible with bounding box >= 12px', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/browser-tests/chat-layout-harness.html')

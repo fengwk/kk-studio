@@ -25,6 +25,7 @@ import {
   type IdeTabStorage,
 } from '@/features/environment/ide/ide-tab-state'
 import { IdeOverlayPanel, type IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
+import { IdeSplitShell } from '@/features/environment/ide/IdeSplitShell'
 import {
   recoveryFromViews,
   type IdeViewState,
@@ -269,14 +270,24 @@ export function IdePanelProvider({
   }, [environmentsQuery.data, environmentsQuery.isSuccess, claimReconciliation, commitPresentation])
 
   const contextValue = useMemo(
-    () => ({ openEnvironment: openEnvironmentStable }),
-    [openEnvironmentStable],
+    () => ({
+      openEnvironment: openEnvironmentStable,
+      panelVisible: presentation.panelVisible,
+      togglePanel: (environment: IdeEnvironmentInfo) => {
+        const current = presentationRef.current
+        if (current.openedEnvironmentIds.length === 0) {
+          openEnvironmentStable({ environment, mode: 'files' })
+        } else {
+          commitPresentation({ ...current, panelVisible: !current.panelVisible }, 'both')
+        }
+      },
+    }),
+    [openEnvironmentStable, presentation.panelVisible, commitPresentation],
   )
 
   return (
     <IdePanelContext.Provider value={contextValue}>
-      {children}
-      <IdeOverlayPanel
+      <IdeSplitShell isOpen={presentation.panelVisible} panel={<IdeOverlayPanel
         isOpen={presentation.panelVisible}
         selectedEnvironmentId={presentation.selectedEnvironmentId}
         openedEnvironmentIds={presentation.openedEnvironmentIds}
@@ -301,7 +312,9 @@ export function IdePanelProvider({
         onReloadEnvironments={() => {
           void environmentsQuery.refetch()
         }}
-      />
+      />}>
+        {children}
+      </IdeSplitShell>
     </IdePanelContext.Provider>
   )
 }

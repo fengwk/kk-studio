@@ -353,6 +353,8 @@ test.describe('tab-global IDE panel', () => {
     expect(panelBox).not.toBeNull()
     expect(Math.abs((panelBox!.x + panelBox!.width) - 2560)).toBeLessThanOrEqual(2)
     expect(Math.abs(panelBox!.width - 720)).toBeLessThanOrEqual(2)
+    const contentBox = await page.getByTestId('ide-harness-root').boundingBox()
+    expect(contentBox!.width + panelBox!.width + 8).toBeCloseTo(2560, 0)
 
     await page.evaluate(([environmentA, environmentB]) => {
       const win = window as unknown as {
@@ -398,6 +400,105 @@ test.describe('tab-global IDE panel', () => {
     expect(stored).not.toContain('bindingEpoch')
     expect(await page.evaluate((key) => sessionStorage.getItem(key) ?? '', SESSION_KEY))
       .toContain(viewA)
+  })
+
+  test('resizes the persistent shell, remembers width, and covers mobile safely', async ({ page }, testInfo) => {
+    const state = createState()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openHarness(page, state)
+    await openEnvironment(page, 'A')
+    const frame = page.getByTestId('ide-iframe')
+    await expect(frame).toHaveCount(1)
+    await page.evaluate(() => {
+      ;(window as unknown as { savedFrame: Element | null }).savedFrame = document.querySelector('[data-testid="ide-iframe"]')
+      const iframe = document.querySelector<HTMLIFrameElement>('[data-testid="ide-iframe"]')
+      iframe?.contentDocument?.body.setAttribute('data-state', 'preserved')
+    })
+    const divider = page.getByRole('separator', { name: '调整 IDE 面板宽度' })
+    await divider.focus()
+    await page.keyboard.press('Home')
+    expect((await page.getByTestId('ide-overlay-panel').boundingBox())!.width).toBe(360)
+    await page.keyboard.press('End')
+    expect((await page.getByTestId('ide-harness-root').boundingBox())!.width).toBe(320)
+    // 回到默认宽度后检查指针与键盘增量。
+    const maxBox = (await divider.boundingBox())!
+    await page.mouse.move(maxBox.x + maxBox.width / 2, maxBox.y + maxBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(720, maxBox.y + maxBox.height / 2)
+    await page.mouse.up()
+    const initialRenders = await page.getByTestId('ide-harness-root').getAttribute('data-renders')
+    const box = (await divider.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 160, box.y + box.height / 2, { steps: 8 })
+    await page.mouse.up()
+    const panel = page.getByTestId('ide-overlay-panel')
+    expect((await panel.boundingBox())!.width).toBeCloseTo(560, -1)
+    expect(await page.getByTestId('ide-harness-root').getAttribute('data-renders')).toBe(initialRenders)
+    await divider.focus()
+    await page.keyboard.press('ArrowLeft')
+    const chosenWidth = (await panel.boundingBox())!.width
+    expect(chosenWidth).toBeCloseTo(570, -1)
+    await page.screenshot({ path: testInfo.outputPath('ide-desktop.png') })
+
+    await page.getByRole('link', { name: '其他页面' }).click()
+    await expect(page.getByRole('link', { name: '返回对话' })).toBeVisible()
+    expect(await page.evaluate(() =>
+      (window as unknown as { savedFrame: Element }).savedFrame === document.querySelector('[data-testid="ide-iframe"]'),
+    )).toBe(true)
+    await page.getByRole('link', { name: '返回对话' }).click()
+    await page.getByTestId('toggle-a').click()
+    await expect(panel).toBeHidden()
+    await page.getByTestId('toggle-a').click()
+    await expect(panel).toBeVisible()
+    expect(await page.evaluate(() =>
+      (window as unknown as { savedFrame: Element }).savedFrame === document.querySelector('[data-testid="ide-iframe"]'),
+    )).toBe(true)
+    expect(state.iframeRequests[String(state.openCalls[0]!.body.viewId)]).toBe(1)
+    expect(await frame.evaluate((element: HTMLIFrameElement) => element.contentDocument?.body.getAttribute('data-state')))
+      .toBe('preserved')
+
+    await page.setViewportSize({ width: 840, height: 900 })
+    expect((await panel.boundingBox())!.width).toBe(512)
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect((await panel.boundingBox())!.width).toBe(390)
+    await expect(divider).toBeHidden()
+    const mobileTargets = [
+      ...['ide-terminal-btn', 'ide-collapse-btn', 'ide-close-btn', 'ide-copy-directory-btn', 'ide-open-directory-btn']
+        .map((id) => page.getByTestId(id)),
+      page.getByRole('button', { name: '环境' }),
+    ]
+    for (const control of mobileTargets) {
+      const target = (await control.boundingBox())!
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+    }
+    await page.screenshot({ path: testInfo.outputPath('ide-mobile.png') })
+    await page.getByTestId('ide-open-directory-btn').click()
+    const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
+    const modalBox = (await dialog.boundingBox())!
+    expect(modalBox.width).toBe(390)
+    expect(modalBox.height).toBe(844)
+    await page.screenshot({ path: testInfo.outputPath('ide-mobile-directory.png') })
+    await page.getByRole('button', { name: '取消' }).click()
+    state.dirtyCloseOnce = true
+    await page.getByTestId('ide-close-btn').click()
+    const confirmation = page.getByRole('alertdialog', { name: '放弃未保存的修改？' })
+    await expect(confirmation).toBeVisible()
+    for (const label of ['取消', '放弃并关闭']) {
+      const target = (await confirmation.getByRole('button', { name: label }).boundingBox())!
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+    }
+    await confirmation.getByRole('button', { name: '取消' }).click()
+    await page.getByTestId('ide-collapse-btn').click()
+    await expect(panel).toBeHidden()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.getByTestId('toggle-a').click()
+    expect((await panel.boundingBox())!.width).toBeCloseTo(chosenWidth, 0)
+    await page.reload()
+    await expect(frame).toHaveCount(1)
+    expect((await panel.boundingBox())!.width).toBeCloseTo(chosenWidth, 0)
   })
 
   test('a duplicated tab cannot steal the original view and requires an explicit new view', async ({ page, context }) => {
@@ -520,7 +621,7 @@ test.describe('tab-global IDE panel', () => {
 
     state.dirtyCloseOnce = true
     await page.getByTestId('ide-close-btn').click()
-    await expect(page.getByTestId('ide-dirty-close-dialog')).toBeVisible()
+    await expect(page.getByRole('alertdialog', { name: '放弃未保存的修改？' })).toBeVisible()
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
     await expect.poll(() => state.closeCalls.length).toBe(1)
     expect(state.closeCalls[0]).toMatchObject({
@@ -529,7 +630,7 @@ test.describe('tab-global IDE panel', () => {
       body: { discard: false },
     })
 
-    await page.getByTestId('ide-discard-close-btn').click()
+    await page.getByRole('button', { name: '放弃并关闭' }).click()
     await expect(page.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
     await expect(page.getByTestId('ide-iframe')).toHaveCount(0)
     await expect.poll(() => state.closeCalls.length).toBe(2)
