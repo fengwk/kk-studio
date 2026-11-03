@@ -12,6 +12,11 @@
   "activationEvents": ["*"],
   "contributes": {
     "configurationDefaults": {
+      "workbench.colorTheme": "Dark Modern",
+      "window.density.editorTabHeight": "compact",
+      "chat.disableAIFeatures": true,
+      "extensions.ignoreRecommendations": true,
+      "files.watcherExclude": { "**": true },
       "task.autoDetect": "off",
       "npm.autoDetect": "off",
       "npm.fetchOnlinePackageInfo": false,

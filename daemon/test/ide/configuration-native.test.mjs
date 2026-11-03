@@ -10,17 +10,28 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile, access } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const runtime = process.env.KK_STUDIO_IDE_ACCEPTANCE_DIR
 const requireFrontend = createRequire(new URL('../../../frontend/package.json', import.meta.url))
 const defaults = {
+  'workbench.colorTheme': 'Dark Modern',
+  'window.density.editorTabHeight': 'compact',
+  'chat.disableAIFeatures': true,
+  'extensions.ignoreRecommendations': true,
+  'files.watcherExclude': { '**': true },
   'task.autoDetect': 'off',
   'npm.autoDetect': 'off',
   'npm.fetchOnlinePackageInfo': false,
   'typescript.disableAutomaticTypeAcquisition': true,
 }
 const opposite = {
+  'workbench.colorTheme': 'Light Modern',
+  'window.density.editorTabHeight': 'default',
+  'chat.disableAIFeatures': false,
+  'extensions.ignoreRecommendations': false,
+  'files.watcherExclude': { '**': false },
   'task.autoDetect': 'on',
   'npm.autoDetect': 'on',
   'npm.fetchOnlinePackageInfo': true,
@@ -194,6 +205,18 @@ exports.activate = async () => {
           })
           if (!snapshot) await delay(100)
         }
+        if (mode === 'defaults') {
+          // A registered value alone is insufficient: assert the actual Dark Modern theme is applied.
+          await page.waitForFunction(() =>
+            getComputedStyle(document.querySelector('.monaco-workbench')).getPropertyValue('--vscode-editor-background').trim().toLowerCase() === '#1f1f1f',
+          null, { timeout: 10_000 }).catch(async error => {
+            const theme = await page.locator('.monaco-workbench').evaluate(element => ({
+              classes: element.className,
+              background: getComputedStyle(element).getPropertyValue('--vscode-editor-background'),
+            }))
+            throw new Error(`theme not applied: ${JSON.stringify(theme)}`, { cause: error })
+          })
+        }
         snapshots.push(JSON.parse(snapshot))
       } catch (error) {
         failures.push(error)
@@ -227,11 +250,20 @@ exports.activate = async () => {
     if (failures.length === 0) {
       const [baseline, contributed, user] = snapshots
       for (const [key, value] of Object.entries(defaults)) {
-        assert.equal(contributed[key].defaultValue, value, key)
-        assert.equal(contributed[key].effective, value, key)
-        assert.equal(user[key].defaultValue, value, key)
-        assert.equal(user[key].globalValue, opposite[key], key)
-        assert.equal(user[key].effective, opposite[key], key)
+        if (key === 'files.watcherExclude') {
+          // Object-valued settings merge with VS Code's other default exclusions.
+          assert.equal(contributed[key].defaultValue['**'], true, key)
+          assert.equal(contributed[key].effective['**'], true, key)
+          assert.equal(user[key].defaultValue['**'], true, key)
+          assert.deepEqual(user[key].globalValue, opposite[key], key)
+          assert.equal(user[key].effective['**'], false, key)
+        } else {
+          assert.equal(contributed[key].defaultValue, value, key)
+          assert.equal(contributed[key].effective, value, key)
+          assert.equal(user[key].defaultValue, value, key)
+          assert.equal(user[key].globalValue, opposite[key], key)
+          assert.equal(user[key].effective, opposite[key], key)
+        }
       }
       assert.equal(baseline['git.autoRepositoryDetection'].defaultValue, true)
       assert.equal(baseline['git.autoRepositoryDetection'].effective, true)
@@ -267,6 +299,196 @@ exports.activate = async () => {
     throw new AggregateError(failures, 'native acceptance failed')
   }
 })
+
+// Exercise the actual bridge against Code OSS: its non-recursive file watches must feed the
+// workbench file service, and native close must await the user's choice instead of prechecking.
+test('opened files reload, dirty saves conflict, and native close can be cancelled or accepted',
+  { skip: !runtime, timeout: 120_000 }, async () => {
+    const { chromium } = requireFrontend('@playwright/test')
+    const root = await mkdtemp(join(tmpdir(), 'kk-native-bridge-'))
+    const workspace = join(root, 'workspace')
+    const extensions = join(root, 'extensions')
+    const userData = join(root, 'user-data')
+    const result = join(root, 'result.json')
+    const file = join(workspace, 'open[1].txt')
+    let browser
+    let page
+    let child
+    let closed
+    let childClosed = true
+    let stream
+    const replies = new Map()
+    const server = createServer((request, response) => {
+      if (request.url.startsWith('/bridge/stream?')) {
+        stream = response
+        response.writeHead(200, { 'content-type': 'application/x-ndjson' })
+        response.flushHeaders()
+      } else if (request.url === '/bridge/result') {
+        let body = ''
+        request.setEncoding('utf8')
+        request.on('data', chunk => { body += chunk })
+        request.on('end', () => {
+          const reply = JSON.parse(body)
+          replies.set(reply.id, reply)
+          response.writeHead(200).end()
+        })
+      } else {
+        response.writeHead(404).end()
+      }
+    })
+    const failures = []
+    try {
+      await mkdir(join(extensions, 'probe'), { recursive: true })
+      await mkdir(join(userData, 'User'), { recursive: true })
+      await mkdir(workspace, { recursive: true })
+      await writeFile(file, 'initial')
+      await cp(new URL('../../ide-extension/', import.meta.url), join(extensions, 'bridge'), { recursive: true })
+      await writeFile(join(userData, 'User/settings.json'), JSON.stringify({
+        'security.workspace.trust.enabled': false,
+        'files.autoSave': 'off',
+      }))
+      await writeFile(join(extensions, 'probe/package.json'), JSON.stringify({
+        name: 'bridge-probe', publisher: 'test', version: '1.0.0',
+        engines: { vscode: '^1.80.0' }, main: './extension.cjs', activationEvents: ['*'],
+        extensionKind: ['workspace'], capabilities: { untrustedWorkspaces: { supported: true } },
+      }))
+      await writeFile(join(extensions, 'probe/extension.cjs'), `
+const vscode = require('vscode');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+exports.activate = async () => {
+  try {
+    await vscode.extensions.getExtension('kk-studio.kk-studio-ide-bridge').activate();
+    const uri = vscode.Uri.file(${JSON.stringify(file)});
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+    // Retry until the real watcher delivers both an atomic replacement and a later write.
+    const waitForReload = async (text, write) => {
+      const deadline = Date.now() + 15000;
+      while (doc.getText() !== text) {
+        if (Date.now() > deadline) throw new Error('clean document did not reload: ' + text);
+        await write();
+        const nextWrite = Date.now() + 1000;
+        while (doc.getText() !== text && Date.now() < nextWrite) await delay(25);
+      }
+    };
+    await waitForReload('atomic replacement', async () => {
+      const replacement = uri.fsPath + '.tmp';
+      await fs.writeFile(replacement, 'atomic replacement');
+      await fs.rename(replacement, uri.fsPath);
+    });
+    await waitForReload('external clean', () => fs.writeFile(uri.fsPath, 'external clean'));
+    const cleanStat = await fs.stat(uri.fsPath);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), 'unsaved');
+    if (!await vscode.workspace.applyEdit(edit)) throw new Error('edit failed');
+    // A test-only observer acknowledges the dirty-file event rather than relying on a sleep.
+    const observer = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(path.dirname(uri.fsPath)), '*'));
+    let changed = false;
+    observer.onDidChange(event => { if (event.fsPath === uri.fsPath) changed = true; });
+    const dirtyDeadline = Date.now() + 10000;
+    let dirtyStat;
+    do {
+      if (Date.now() > dirtyDeadline) throw new Error('dirty-file event was not observed');
+      await fs.writeFile(uri.fsPath, 'external newer content');
+      dirtyStat = await fs.stat(uri.fsPath);
+      const nextWrite = Date.now() + 1000;
+      while (!changed && Date.now() < nextWrite) await delay(25);
+    } while (!changed || dirtyStat.mtimeMs <= cleanStat.mtimeMs);
+    observer.dispose();
+    const retained = doc.isDirty && doc.getText() === 'unsaved';
+    const saved = await doc.save();
+    await fs.writeFile(${JSON.stringify(result)}, JSON.stringify({
+      retained, saved, dirty: doc.isDirty, text: doc.getText(), disk: await fs.readFile(uri.fsPath, 'utf8')
+    }));
+    // A second dirty file checks the native Save choice independently of the conflict.
+    const gate = ${JSON.stringify(join(root, 'next'))};
+    const nextDeadline = Date.now() + 30000;
+    while (!await fs.access(gate).then(() => true, () => false)) {
+      if (Date.now() > nextDeadline) throw new Error('next step was not requested');
+      await delay(50);
+    }
+    const nextUri = vscode.Uri.file(${JSON.stringify(join(workspace, 'save.txt'))});
+    await fs.writeFile(nextUri.fsPath, 'before');
+    const nextDoc = await vscode.workspace.openTextDocument(nextUri);
+    await vscode.window.showTextDocument(nextDoc, { preview: false });
+    const nextEdit = new vscode.WorkspaceEdit();
+    nextEdit.replace(nextUri, new vscode.Range(nextDoc.positionAt(0), nextDoc.positionAt(nextDoc.getText().length)), 'saved by user');
+    if (!await vscode.workspace.applyEdit(nextEdit)) throw new Error('second edit failed');
+    await fs.writeFile(${JSON.stringify(join(root, 'ready'))}, '');
+  } catch (error) {
+    await fs.writeFile(${JSON.stringify(result)}, JSON.stringify({ error: String(error.stack || error) }));
+  }
+};
+`)
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+      const bridgeUrl = `http://127.0.0.1:${server.address().port}`
+      ;({ child, closed } = spawnTracked(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
+        join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
+        '--user-data-dir', userData, '--extensions-dir', extensions,
+        '--config', join(root, 'config.yaml'), '--disable-telemetry', workspace,
+      ], { stdio: ['ignore', 'pipe', 'pipe'], env: {
+        ...process.env, HOME: root, XDG_DATA_HOME: root, XDG_CONFIG_HOME: root,
+        KK_STUDIO_IDE_BRIDGE_URL: bridgeUrl, KK_STUDIO_IDE_BRIDGE_TOKEN: 'test-bridge-token',
+      } }))
+      childClosed = false
+      let output = ''
+      child.stdout.on('data', chunk => { output += chunk })
+      child.stderr.on('data', chunk => { output += chunk })
+      browser = await chromium.launch({ headless: true })
+      page = await browser.newPage()
+      page.on('console', message => { output += '\nBROWSER: ' + message.text() })
+      await waitUntil(() => /http:\/\/127\.0\.0\.1:\d+/.test(output), 45_000, 'code-server did not listen')
+      await page.goto(`${output.match(/http:\/\/127\.0\.0\.1:\d+/)[0]}/?folder=${encodeURIComponent(workspace)}`)
+      await waitUntil(() => pathExists(result), 35_000, 'probe did not report: ' + output)
+      const observation = JSON.parse(await readFile(result, 'utf8'))
+      assert.equal(observation.error, undefined, observation.error)
+      assert.deepEqual(observation, {
+        retained: true, saved: false, dirty: true, text: 'unsaved', disk: 'external newer content',
+      })
+      await waitUntil(() => Boolean(stream), 10_000, 'bridge did not connect')
+      stream.write(`${JSON.stringify({ type: 'command', id: 'cancel', op: 'closeView' })}\n`)
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click({ timeout: 10_000 })
+      await waitUntil(() => replies.has('cancel'), 10_000, 'bridge did not report cancellation')
+      assert.equal(replies.get('cancel').ok, false)
+      assert.equal(replies.get('cancel').code, 'DIRTY')
+      assert.equal(await readFile(file, 'utf8'), 'external newer content')
+      stream.write(`${JSON.stringify({ type: 'command', id: 'close', op: 'closeView' })}\n`)
+      await page.getByRole('button', { name: /don.t save/i }).click({ timeout: 10_000 })
+      await waitUntil(() => replies.has('close'), 10_000, 'bridge did not report close')
+      assert.equal(replies.get('close').ok, true)
+      assert.equal(await readFile(file, 'utf8'), 'external newer content')
+      await writeFile(join(root, 'next'), '')
+      await waitUntil(() => pathExists(join(root, 'ready')), 10_000, 'second dirty document was not ready')
+      stream.write(`${JSON.stringify({ type: 'command', id: 'save', op: 'closeView' })}\n`)
+      await page.getByRole('button', { name: 'Save', exact: true }).click({ timeout: 10_000 })
+      await waitUntil(() => replies.has('save'), 10_000, 'bridge did not report save and close')
+      assert.equal(replies.get('save').ok, true)
+      assert.equal(await readFile(join(workspace, 'save.txt'), 'utf8'), 'saved by user')
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      try { if (page) await bounded(page.close(), stopGraceMs, 'page did not close') } catch (error) { failures.push(error) }
+      try { if (browser) await bounded(browser.close(), stopGraceMs, 'browser did not close') } catch (error) { failures.push(error) }
+      if (child) {
+        try {
+          await stopChild(child, closed)
+          childClosed = true
+        } catch (error) {
+          childClosed = error.childClosed === true
+          failures.push(error)
+        }
+      }
+      if (stream) stream.destroy()
+      await new Promise(resolve => server.close(resolve))
+      if (childClosed) await rm(root, { recursive: true, force: true })
+      else console.error(`preserving ${root}: a code-server child did not close`)
+    }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'native bridge acceptance failed')
+  })
 
 // Public-boundary evidence: a real child exits while a tracked grandchild keeps stdout
 // open. The ACK instrument proves the holder is alive, so 'close' cannot have fired only
