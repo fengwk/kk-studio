@@ -173,7 +173,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 模型调用要求上游返回对应协议的完整 usage；缺少整份 usage 或必需计数会以
 `INVALID_RESPONSE` 失败，不再按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
-与[模型用量与计价](../modules/model-pricing.md#协议来源)。
+与[Harness Model：用量与计价](../modules/harness-model.md#协议来源)。
 
 兼容的数据面继续复用，App 节点可以逐个替换。节点收到 SIGTERM 后自动排空（停止领取新 Work，在 `KK_STUDIO_HARNESS_RUNTIME_DRAIN_TIMEOUT` 内等待本机执行，然后让 Daemon 重连到其它节点，接手节点通过重新挂接在途远端调用（不重发 INVOKE、在 reattach 窗口内等待终态，详见 [Harness Runtime](../modules/harness-runtime.md#toolprocessor-执行)）继续等待结果；单节点重启时由新进程接手）。容器或进程管理器的停止宽限期需大于“排空超时 + dispatcher 租约时长（`KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION`，默认 30s）”并留出余量，默认配置下建议设为 120s（例如 Docker Compose 的 `stop_grace_period: 120s`）；否则排空会被强制终止，在途执行按崩溃恢复处理。由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和 Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
 
