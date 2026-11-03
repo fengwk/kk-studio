@@ -289,8 +289,8 @@ message TemporaryResourcePolicy {
 message Update {
   optional string operation_id = 1;
   optional string target_version = 2;
-  optional string artifact_url = 3;
-  optional string artifact_sha256 = 4;
+  reserved 3, 4;
+  reserved "artifact_url", "artifact_sha256";
 }
 
 message UpdateResult {

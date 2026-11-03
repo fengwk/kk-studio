@@ -457,8 +457,6 @@ describe('runtime managed update branches', () => {
   const command = create(UpdateSchema, {
     operationId,
     targetVersion: artifactFixture.targetVersion,
-    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
-    artifactSha256: artifactFixture.artifactSha256,
   })
 
   function makeUpdateEnvelope(): Envelope {

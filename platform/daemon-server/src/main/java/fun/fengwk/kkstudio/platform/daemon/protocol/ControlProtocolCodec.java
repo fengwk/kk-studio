@@ -696,21 +696,17 @@ public final class ControlProtocolCodec {
     return Update.newBuilder()
         .setOperationId(command.operationId())
         .setTargetVersion(command.targetVersion())
-        .setArtifactUrl(command.artifactUrl())
-        .setArtifactSha256(command.artifactSha256())
         .build();
   }
 
   public static DaemonUpdateCommand toDomainUpdate(Update proto) {
     Objects.requireNonNull(proto, "proto");
-    return new DaemonUpdateCommand(
-        proto.getOperationId(),
-        proto.getTargetVersion(),
-        proto.getArtifactUrl(),
-        proto.getArtifactSha256());
+    validateUpdate(proto);
+    return new DaemonUpdateCommand(proto.getOperationId(), proto.getTargetVersion());
   }
 
   public static void validateUpdate(Update update) {
+    requireNoUnknown(update, "update");
     String operationId =
         requireText(
             update.hasOperationId(), update.getOperationId(), "update.operationId", 36, true);
@@ -719,26 +715,8 @@ public final class ControlProtocolCodec {
     } catch (IllegalArgumentException error) {
       throw new ControlProtocolException(error.getMessage(), error);
     }
-    String targetVersion =
-        requireDaemonVersion(
-            update.hasTargetVersion(), update.getTargetVersion(), "update.targetVersion");
-    String url =
-        requireText(
-            update.hasArtifactUrl(),
-            update.getArtifactUrl(),
-            "update.artifactUrl",
-            Integer.MAX_VALUE,
-            true);
-    try {
-      DaemonUpdateCommand.validateArtifactUrl(targetVersion, url);
-    } catch (IllegalArgumentException error) {
-      throw new ControlProtocolException(error.getMessage(), error);
-    }
-    requirePattern(
-        update.hasArtifactSha256(),
-        update.getArtifactSha256(),
-        "update.artifactSha256",
-        DaemonUpdateArtifact.SHA256_PATTERN);
+    requireDaemonVersion(
+        update.hasTargetVersion(), update.getTargetVersion(), "update.targetVersion");
   }
 
   private static void validateUpdateResult(UpdateResult result) {

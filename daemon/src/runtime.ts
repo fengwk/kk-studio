@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
+import { parseReleaseArtifactUrl } from './release.js'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -426,7 +427,10 @@ export class Runtime {
       return
     }
     if (statusCode === 426) {
-      if (upgradeRequired?.artifactUrl && upgradeRequired?.artifactSha256 && this.update !== null) {
+      const target = upgradeRequired?.artifactUrl ? parseReleaseArtifactUrl(upgradeRequired.artifactUrl) : null
+      if (target !== null && upgradeRequired?.artifactSha256 && this.update !== null) {
+        const operationId = randomUUID()
+        const commandKey = JSON.stringify([target.targetVersion])
         const updateCommand = create(EnvelopeSchema, {
           messageType: MessageType.UPDATE,
           environmentId: this.boundEnvironmentId ?? undefined,
@@ -434,29 +438,27 @@ export class Runtime {
             case: 'update',
             value: {
               $typeName: 'kkstudio.environment.control.Update',
-              operationId: randomUUID(),
-              targetVersion: String(upgradeRequired.targetProtocolVersion),
-              artifactUrl: upgradeRequired.artifactUrl,
-              artifactSha256: upgradeRequired.artifactSha256,
+              operationId,
+              targetVersion: target.targetVersion,
             },
           },
         })
         const active: ActiveUpdate = {
-          operationId: randomUUID(),
-          commandKey: JSON.stringify([String(upgradeRequired.targetProtocolVersion), upgradeRequired.artifactUrl, upgradeRequired.artifactSha256]),
-          targetVersion: String(upgradeRequired.targetProtocolVersion),
+          operationId,
+          commandKey,
+          targetVersion: target.targetVersion,
           controller: new AbortController(),
           receipt: {
-            commandKey: '',
+            commandKey,
             result: create(UpdateResultSchema, {
-              operationId: randomUUID(),
+              operationId,
               phase: 1, // UPDATE_ACCEPTED
             }),
           },
           prepared: false,
         }
         this.activeUpdate = active
-        this.runtimeStatus.beginUpdate(String(upgradeRequired.targetProtocolVersion))
+        this.runtimeStatus.beginUpdate(target.targetVersion)
         void this.track(
           (async () => {
             await this.executeUpdate(active, updateCommand.payload.value as Update)
@@ -1177,6 +1179,25 @@ export class Runtime {
     this.runtimeStatus.beginUpdate(command.targetVersion ?? '')
     this.publishRuntimeStatus()
     this.rememberUpdateResult(command.operationId ?? '', receipt)
+    const stopWatching = attempt.prepared.watchFailure?.((message) => {
+      if (this.activeUpdate !== active) {
+        return
+      }
+      active.stopWatching?.()
+      this.activeUpdate = null
+      this.runtimeStatus.clearUpdate()
+      this.publishRuntimeStatus()
+      const failed = executionFailureReceipt(active, command, new Error(message))
+      this.rememberUpdateResult(command.operationId ?? '', failed)
+      this.deliverUpdateResult(failed)
+    })
+    if (stopWatching !== undefined) {
+      active.stopWatching = stopWatching
+    }
+    if (this.activeUpdate !== active) {
+      stopWatching?.()
+      return
+    }
     this.deliverUpdateResult(receipt)
   }
 
@@ -1471,6 +1492,7 @@ export class Runtime {
     this.ideInFlight.clear()
     this.activeUpdate?.controller?.abort('SHUTDOWN')
     if (this.activeUpdate !== null) {
+      this.activeUpdate.stopWatching?.()
       this.activeUpdate.controller = null
     }
     void this.finalize(terminalState)

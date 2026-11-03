@@ -387,16 +387,17 @@ HOME 也不是默认工作目录。
 
 更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
 必须是非草稿、tag 匹配、五件套资产齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、
-`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到命令后再次校验 URL 形状、
-SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧二进制。
+`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该版本的官方安装脚本，
+由安装脚本校验官方归档及校验文件，并使用现有配置和令牌执行安装。
 
 - 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
   capability 调用在起点被 busy 拒绝，连接仍保持认证。
-- 只有受管安装（存在 `lib/main.js` 与同目录 `daemon.json`）接受更新；更新只替换
-  `lib` 下的程序发行目录，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
-- 下载/预检/备份后，Daemon 把制品交给一个 **OS 级独立、短生命周期的更新器**（Linux `systemd-run`
-  瞬时单元、macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务）完成替换与重启。
-  更新器不常驻、不提权、不自动回滚；受管服务定义缺失或归属标记不匹配时 fail closed，不改动二进制。
+- 只有官方受管安装接受更新。安装器以当前 `daemon.json` 和 `daemon.token` 为输入进行预检和快照发布；
+  配置与令牌内容、技能和数据会保留，程序与服务定义由安装器更新。
+- Daemon 启动 **OS 级独立、短生命周期的任务**（Linux `systemd-run` 瞬时单元、
+  macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），由其调用官方安装脚本完成替换与重启。
+  安装器日志保存在 `~/.kk-studio/updates/<operationId>-*/install.log`；服务仍在运行时安装失败会发送安全的失败回执，
+  服务停止后可通过该日志及安装器报告的备份路径排查，不自动重试。
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。

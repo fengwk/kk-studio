@@ -55,11 +55,8 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityS
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
-import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
@@ -2137,13 +2134,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-send-update");
     String operationId = UUID.randomUUID().toString();
-    DaemonUpdateCommand command =
-        new DaemonUpdateCommand(
-            operationId,
-            "1.0.9",
-            DaemonUpdateArtifact.artifactUrl(
-                "1.0.9", DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64),
-            "a".repeat(64));
+    DaemonUpdateCommand command = new DaemonUpdateCommand(operationId, "1.0.9");
 
     assertThrows(
         EnvironmentCapabilityBusyException.class,
@@ -2152,6 +2143,9 @@ class EnvironmentDaemonServerTest {
     fixture.server.beginUpdate(ENVIRONMENT_ID, operationId);
     fixture.server.sendUpdate(ENVIRONMENT_ID, command);
     assertEquals(List.of(MessageType.SETTINGS, MessageType.UPDATE), channel.messageTypes());
+    assertEquals(operationId, channel.envelopes().get(1).getUpdate().getOperationId());
+    assertEquals("1.0.9", channel.envelopes().get(1).getUpdate().getTargetVersion());
+    assertEquals(2, channel.envelopes().get(1).getUpdate().getAllFields().size());
 
     channel.busyNextOffer = true;
     assertThrows(
