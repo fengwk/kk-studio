@@ -89,7 +89,7 @@ Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First
 的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
-应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
+应用 codec 在读写时严格校验，非法数据在读取时明确拒绝。
 `environment.install_code` 是同一行上的 jsonb 列，只保存随机一次性安装 code 的 SHA-256 摘要与
 UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null 表示没有未核销的 code；
 CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；

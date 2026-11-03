@@ -16,7 +16,7 @@
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Plugins](modules/plugins.md) 与 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
-| 从数据面不兼容的版本升级（导出备份后在全新空库重建） | [部署与运行：从数据面不兼容的版本升级](operations/deployment.md#从数据面不兼容的版本升级) |
+| Schema 不匹配时的数据库重建与恢复 | [部署与运行：Schema 不匹配时的数据库重建与恢复](operations/deployment.md#schema-不匹配时的数据库重建与恢复) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
 | 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas](modules/canvas.md) 与 [Project](modules/project.md) |
