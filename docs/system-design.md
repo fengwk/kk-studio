@@ -200,7 +200,7 @@ Plugin 通过 Spring Boot auto-configuration 注册安装定义；配置实例�
 Plugin 与应用同进程，拥有相同 JVM 权限，部署者须信任其代码。
 Web 将插件实例和内置贡献一次聚合为完整 `PluginCatalogSnapshot`，校验依赖与名称后
 提供同一快照中的 HarnessCatalog / CanvasFunctionCatalog；失败候选统一释放资源。
-Contributor 契约和 Plugin 装配见
+内置插件详见 [Plugins](modules/plugins.md)，Contributor 契约和 Plugin 装配见
 [Harness Runtime](modules/harness-runtime.md#contributor-与目录)、[Platform Plugin API](modules/platform-plugin-api.md)
 和 [Platform](modules/platform.md)。
 MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消见
