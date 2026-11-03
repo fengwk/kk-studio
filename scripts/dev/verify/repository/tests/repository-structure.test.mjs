@@ -1158,3 +1158,36 @@ test('module boundary guard rejects plugin imports outside the plugin SPI in iso
     rmSync(mirrorRoot, { recursive: true, force: true })
   }
 })
+
+test('repository check rejects prohibited session artifacts with file and line number', () => {
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const testFile = path.join(mirrorRoot, 'harness/test-session-artifact.txt')
+    const badTermSlice = ['本', '切片'].join('')
+    const badTermBranch = ['Branch', 'B'].join(' ')
+    writeFileSync(
+      testFile,
+      `line 1\nline 2 with ${badTermSlice}\nline 3\nline 4 with ${badTermBranch}\n`,
+    )
+    assert.throws(
+      () =>
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      (error) => {
+        const stderr = error.stderr || ''
+        const hasSliceHit = stderr.includes(
+          `harness/test-session-artifact.txt:2: contains prohibited session artifact '${badTermSlice}'`,
+        )
+        const hasBranchHit = stderr.includes(
+          `harness/test-session-artifact.txt:4: contains prohibited session artifact '${badTermBranch}'`,
+        )
+        return hasSliceHit && hasBranchHit
+      },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})

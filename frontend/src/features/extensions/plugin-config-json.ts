@@ -103,7 +103,7 @@ export function parseStrictJsonObject(text: string): StrictJsonParseResult {
 }
 
 /**
- * 获取节点原始文本切片，避免 JS number 导致的精度与科学记数法坍塌。
+ * 获取节点原始文本片段，避免 JS number 导致的精度与科学记数法坍塌。
  */
 export function getNodeSlice(text: string, node: Node): string {
   return text.slice(node.offset, node.offset + node.length)
@@ -197,7 +197,7 @@ export function updateStrictJsonField({
     return replaceOrInsertRawSlice(rawJson, parseResult.tree, path, trimmed, 0)
   }
 
-  // 2. 如果传了 rawSnippetString（复杂容器数组或对象），直接替换原始文本切片
+  // 2. 如果传了 rawSnippetString（复杂容器数组或对象），直接替换原始文本片段
   if (rawSnippetString !== undefined) {
     const trimmed = rawSnippetString.trim()
     const snippet = parseStrictJsonContainer(trimmed)
