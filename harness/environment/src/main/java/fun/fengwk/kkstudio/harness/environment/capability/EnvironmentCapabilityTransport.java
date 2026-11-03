@@ -9,9 +9,7 @@ import java.util.UUID;
  *
  * <p>实现只负责向冻结的 {@link EnvironmentId} 发送 Capability Invocation 并透传异步事件，不拥有持久化 Invocation 状态机。
  *
- * <p>实现必须在发送前按目标 Daemon 冻结的 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem} 校验需要 workdir 的能力参数 ——
- * 目录只存在于具体 arguments 中，传输外壳不携带第二份 workdir。
+ * <p>实现必须在发送前按目标 Daemon 冻结的操作系统校验需要 workdir 的能力参数 —— 目录只存在于具体 arguments 中，传输外壳不携带第二份 workdir。
  */
 public interface EnvironmentCapabilityTransport {
 

@@ -4,8 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
+import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;

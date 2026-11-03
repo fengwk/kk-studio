@@ -4,10 +4,10 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
-import fun.fengwk.kkstudio.harness.environment.daemon.OfficialReleaseHttp;
+import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
+import fun.fengwk.kkstudio.platform.daemon.OfficialReleaseHttp;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

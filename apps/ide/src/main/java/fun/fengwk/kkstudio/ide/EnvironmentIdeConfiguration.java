@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

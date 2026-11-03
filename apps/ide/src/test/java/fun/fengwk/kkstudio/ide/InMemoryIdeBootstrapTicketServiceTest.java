@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 /** 意图：bootstrap 票据绑定 Daemon 实例 + view + epoch + workspace，且按实例或视图精确撤销，不误伤其它代际/视图。 */
 class InMemoryIdeBootstrapTicketServiceTest {

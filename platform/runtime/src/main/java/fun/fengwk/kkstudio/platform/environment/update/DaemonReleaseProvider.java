@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.update;
 
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 
 import java.util.Optional;
 

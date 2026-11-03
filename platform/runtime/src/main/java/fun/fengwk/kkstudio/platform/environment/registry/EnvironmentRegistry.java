@@ -9,10 +9,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
-import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilitiesCodec;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonLeaseStore;
+import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 

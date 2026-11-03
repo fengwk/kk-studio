@@ -19,45 +19,6 @@
             <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>tools.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-io</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-http</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.http2</groupId>
-            <artifactId>jetty-http2-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>jetty-websocket-jetty-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.http2</groupId>
-            <artifactId>jetty-http2-server</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>jetty-websocket-jetty-server</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-server</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
@@ -65,47 +26,7 @@
     </dependencies>
 
     <build>
-        <extensions>
-            <!-- Official protoc native artifact for the build host. -->
-            <extension>
-                <groupId>kr.motd.maven</groupId>
-                <artifactId>os-maven-plugin</artifactId>
-                <version>1.7.1</version>
-            </extension>
-        </extensions>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.4.2</version>
-                <executions>
-                    <!-- 把隧道测试替身打包为 test-jar，供 apps/ide 测试复用。 -->
-                    <execution>
-                        <id>tunnel-test-support</id>
-                        <phase>process-test-classes</phase>
-                        <goals>
-                            <goal>test-jar</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.xolstice.maven.plugins</groupId>
-                <artifactId>protobuf-maven-plugin</artifactId>
-                <configuration>
-                    <protoSourceRoot>${project.basedir}/src/main/protocol</protoSourceRoot>
-                    <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!-- 协议源不是下游可复用资源；避免把同目录的生成脚本/fixture 打进 jar。 -->
-                    <attachProtoSources>false</attachProtoSources>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -122,27 +43,6 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionSession</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonInvocationTracker</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonTransferCoordinator</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonIdeCoordinator</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.server.DaemonUpdateCoordinator</include>
-                                        <include>fun.fengwk.kkstudio.harness.environment.tunnel.*</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                                <rule>
-                                    <element>PACKAGE</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.harness.environment.transport</include>
                                     </includes>
                                     <limits>
                                         <limit>

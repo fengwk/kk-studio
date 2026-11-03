@@ -42,7 +42,7 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录与 Daemon wire 协议如何定义？Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
+| [Harness Environment](modules/harness-environment.md) | Environment 身份与能力契约如何定义？Platform 连接服务如何管理 Daemon 协议、会话、route lease、调用所有权和上传票据？ |
 | [Environment Daemon](modules/daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
 
 ### 平台

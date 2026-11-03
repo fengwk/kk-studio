@@ -22,9 +22,9 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;

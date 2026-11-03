@@ -30,15 +30,15 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelHttpRequest;
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// 意图：把 Java 生产 API/codec 生成的 UPDATE 命令 protobuf 帧产物（harness/environment/target/daemon-update-java-commands.json）
+// 意图：把 Java 生产 API/codec 生成的 UPDATE 命令 protobuf 帧产物（platform/daemon-server/target/daemon-update-java-commands.json）
 // 送进 Daemon 生产 codec，证明两端对同一份共享 fixture 的「接受 ⇔ 拒绝」集合逐条一致。
 // 只做真实解码与校验：不伪造产物、不替身 codec、无可选环境开关，产物或 dist 缺失即失败。
 

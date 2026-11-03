@@ -13,7 +13,7 @@ import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

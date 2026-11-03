@@ -1,6 +1,6 @@
 # Harness Environment
 
-`harness-environment` 是 Agent 使用主机能力的内核契约与服务端会话核心：路由身份、原子能力目录、调用侧发送语义、Gateway 与 Daemon 之间的 wire 协议，以及按连接代际、路由租约与 `invocationId` 裁决调用的 [`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java)。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；主机进程侧的实现见 [Environment Daemon](daemon.md)，数据库、WebSocket 与对象存储由 [Platform](platform.md) 与 [Web](web.md) 经窄端口接入。
+`harness-environment` 定义 Agent 使用主机能力的内核契约：路由身份、原子能力目录与调用侧发送语义。[Platform](platform.md) 的 `platform-daemon-server` 拥有 Gateway 与 Daemon 的 wire 协议及按连接代际、路由租约与 `invocationId` 裁决调用的 [`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java)。修改调用参数或协议时，以对应模块的值对象、schema 与 codec 为准；主机进程侧的实现见 [Environment Daemon](daemon.md)，数据库、WebSocket 与对象存储由 Platform 与 [Web](web.md) 经窄端口接入。
 
 ## Environment 身份
 
@@ -115,7 +115,7 @@ Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT`
 
 ## daemon wire 协议会话与消息流
 
-控制协议基于单一 Protobuf 定义 [`control.proto`](../../harness/environment/src/main/protocol/control.proto)，传输层由 [`ControlProtocolCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/protocol/ControlProtocolCodec.java) 进行 4 字节大端长度前缀成帧与单阶段应用层 wire 校验。消息集合包括：
+控制协议基于单一 Protobuf 定义 [`control.proto`](../../platform/daemon-server/src/main/protocol/control.proto)，传输层由 [`ControlProtocolCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java) 进行 4 字节大端长度前缀成帧与单阶段应用层 wire 校验。消息集合包括：
 
 ```text
 SETTINGS / READY / HEARTBEAT / RUNTIME_STATUS
@@ -176,7 +176,7 @@ Studio -> IDE_LEASE(round, bindings)
 
 控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlProtocolCodec.decodeFrame` 完成单一阶段 wire 校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
 
-宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
+宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
 - `runtime_info`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
 - `skill_state`：可重建投影，READY 后重新同步；旧代际不能覆盖新代际。
 - `recent_events`：最近 200 条去敏、有界运维事件，包括更新失败；不作为锁或完整审计账本。
@@ -210,7 +210,7 @@ runtimeStatus: {
 - **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
 - **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 codec 校验。codec 两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
+`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 codec 校验。codec 两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
 
 二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
 
@@ -225,7 +225,7 @@ Tool，READY 与 Package 发布后的同步由 Platform 发起。
 
 ## workdir 词法契约（`process.exec`）
 
-[`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java) 的 `requireAbsolute(workdir, operatingSystem)` 是发送前的纯文本校验：
+[`DaemonWorkdirSyntax`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonWorkdirSyntax.java) 的 `requireAbsolute(workdir, operatingSystem)` 是发送前的纯文本校验：
 
 - 拒绝 null、空白、周边空白、ISO 控制字符与超过 `MAX_LENGTH = 2048` 的值；
 - 拒绝 `~/`、`~\` 以及未展开的 `$VAR`、`${VAR}`、`%VAR%` 占位符，不做 home 或环境变量展开；
@@ -236,15 +236,15 @@ Tool，READY 与 Package 发布后的同步由 Platform 发起。
 
 ## 依赖边界
 
-生产依赖只有 [Common](common.md) 与 Jackson（见 [`pom.xml`](../../harness/environment/pom.xml)）；Runtime、Platform、IDE 应用与 Daemon 都向本模块单向依赖，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
+生产依赖为 [Common](common.md)（见 [`pom.xml`](../../harness/environment/pom.xml)）；Runtime 与 Platform 等 Java 模块单向依赖能力契约，Daemon 通过协议及生成的能力 schema 消费契约。连接服务的依赖见 [`platform/daemon-server/pom.xml`](../../platform/daemon-server/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
 
 ## 服务端会话核心
 
-服务端核心管理连接代际、路由租约围栏与按 `invocationId` 关联的在途调用。它不持久化任何状态：数据库、WebSocket 和对象存储由宿主通过 lease、registration、channel 与 ticket 端口接入，可用内存 fake 在普通单元测试中驱动；进程重启后的会话事实由 Daemon 重新握手建立。
+`platform-daemon-server` 服务端核心管理连接代际、路由租约围栏与按 `invocationId` 关联的在途调用。它不持久化任何状态：数据库、WebSocket 和对象存储由宿主通过 lease、registration、channel 与 ticket 端口接入，可用内存 fake 在普通单元测试中驱动；进程重启后的会话事实由 Daemon 重新握手建立。
 
 ### 会话建立与租约围栏
 
-`EnvironmentDaemonServer` 实现核心服务接口：面向会话管理的 [`DaemonSessions`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSessions.java)（`admit` / `open`）、面向数据面隧道的 [`EnvironmentTunnels`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/tunnel/EnvironmentTunnels.java)，以及面向产品调用方的 `EnvironmentCapabilityTransport.invoke`。此外它提供 `isReady`、`readyEnvironments`、`holdsReadyLease` 与 `expire(handle)` 供宿主判定与收敛，并为 [IDE](ide.md) 提供不解析载荷的 `requestIde` / `abandonIde` 通道与连接代际快照 `connectionIdentity`。
+`EnvironmentDaemonServer` 实现核心服务接口：面向会话管理的 [`DaemonSessions`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)（`admit` / `open`）、面向数据面隧道的 [`EnvironmentTunnels`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/tunnel/EnvironmentTunnels.java)，以及面向产品调用方的 `EnvironmentCapabilityTransport.invoke`。此外它提供 `isReady`、`readyEnvironments`、`holdsReadyLease` 与 `expire(handle)` 供宿主判定与收敛，并为 [IDE](ide.md) 提供不解析载荷的 `requestIde` / `abandonIde` 通道与连接代际快照 `connectionIdentity`。
 
 一次连接的建立顺序固定如下：
 
@@ -264,9 +264,9 @@ close(connectionId)
   -> leaseStore.disconnect                               # 幂等，保留重连宽限
 ```
 
-[`DaemonLeaseStore`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
+[`DaemonLeaseStore`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
 
-准入阶段在升级前裁决：`Rejected` 映射为 HTTP 401（注册凭据无效），`RetryLater` 映射为 HTTP 503 与 Retry-After 响应头（暂不可准入）。存储运行时异常使连接 fail closed，错误响应给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
+准入阶段在升级前裁决：`Rejected` 映射为 HTTP 401（注册凭据无效），`RetryLater` 映射为 HTTP 503 与 Retry-After 响应头（暂不可准入）。存储运行时异常使连接 fail closed，错误响应给出独立说明文本。[`DaemonRegistrationDirectory`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
 
 ### 调用所有权与并发
 
@@ -276,7 +276,7 @@ close(connectionId)
 2. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
 3. arguments 携带 `workdir` 时，按该连接 READY 时冻结的目标 OS 做词法校验；是否必填由各能力 input schema 决定；
 4. 在核心锁外调用 `leaseStore.holdsReadyLease` 复核归属，存储不可用同样判定环境不可用；
-5. 在连接状态锁内二次复核 READY 与围栏代次，登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java) 的三态映射为调用结果。
+5. 在连接状态锁内二次复核 READY 与围栏代次，登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonOfferResult.java) 的三态映射为调用结果。
 
 | 递交结果 | 映射 | 确定性 |
 | --- | --- | --- |
@@ -306,7 +306,7 @@ COMPLETED
   -> 保留结果实际引用的上传给 history 物化事务，释放其余上传
 ```
 
-同一 `transferId` 的重复同形 REQUEST 是幂等的：已绑定的票据直接复用，绝不重复创建上行；同一 transfer 漂移为不同请求、对未申请的 transfer 提交、使用与签发值不同的 uploadId、引用已释放的 transfer，都是协议违规。[`DaemonResourceTicketService`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonResourceTicketService.java) 的所有数据库与对象存储动作、票据回调与释放动作都在核心状态锁之外执行；同一 binding 自身串行化重复 reserve/commit，因此同实例重连重放不会重复创建上传行。
+同一 `transferId` 的重复同形 REQUEST 是幂等的：已绑定的票据直接复用，绝不重复创建上行；同一 transfer 漂移为不同请求、对未申请的 transfer 提交、使用与签发值不同的 uploadId、引用已释放的 transfer，都是协议违规。[`DaemonResourceTicketService`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonResourceTicketService.java) 的所有数据库与对象存储动作、票据回调与释放动作都在核心状态锁之外执行；同一 binding 自身串行化重复 reserve/commit，因此同实例重连重放不会重复创建上传行。
 
 票据服务异常统一转换为固定的 `resource upload is unavailable` 失败回执：预签名 URL、签名 header 与存储异常原文都不进入控制面反馈。`FAILED` 票据不缓存，允许在 invocation deadline 内再次触达服务；`FAILED`/`CANCELLED`、接管、`expire` 与调用放弃都幂等释放全部未消费上传，而 `COMPLETED` 只释放未被结果引用的上传。
 
@@ -340,9 +340,9 @@ COMPLETED
 
 #### 优雅排空与路由释放
 
-[`DaemonControlChannel`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
+[`DaemonControlChannel`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
 
-[`EnvironmentDaemonServer`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。此外，`drain()` 之后本节点不再代表任何 Environment，调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不再向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。`drain()` 操作保证幂等。
+[`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点立即接管；排空开始后，随后的准入请求一律拒绝并返回 `RetryLater`，`invoke` 与 `attach` 均判定环境不可用。此外，`drain()` 之后本节点不再代表任何 Environment，调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不再向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。`drain()` 操作保证幂等。
 
 #### 回调顺序与背压上界
 
@@ -372,14 +372,14 @@ COMPLETED
 
 构造器只接收五个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentSessionListener`、`DaemonResourceTicketService` 与 `Supplier<EnvironmentServerSettings>`。
 
-[`EnvironmentServerSettings`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)
+[`EnvironmentServerSettings`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentServerSettings.java)
 携带心跳超时（同时用作租约期限）、资源字节上限与临时资源 TTL/扫描间隔，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
-生效，核心不缓存配置；临时资源策略在同一连接的心跳通道按需推送 `TEMPORARY_RESOURCE_POLICY`，只对尚未回收的 workspace 生效。[`EnvironmentSessionListener`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
+生效，核心不缓存配置；临时资源策略在同一连接的心跳通道按需推送 `TEMPORARY_RESOURCE_POLICY`，只对尚未回收的 workspace 生效。[`EnvironmentSessionListener`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentSessionListener.java)
 在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
 异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。另一个 Daemon 实例在本节点接管某个 Environment 时，
 listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关闭旧实例的 IDE 代际；同一实例断线重连不触发该回调。
 
-持久化实现（连接注册、租约、上传行与对象存储）与 WebSocket 传输实现在 `platform` 与 `web` 模块完成适配；本模块只定义窄端口语义，不感知 SQL、bucket、对象 key 或 Spring。
+持久化实现（连接注册、租约、上传行与对象存储）与 WebSocket 传输实现在 `platform-runtime` 与 `web` 模块完成适配；`platform-daemon-server` 只定义窄端口语义，不感知 SQL、bucket、对象 key 或 Spring。
 
 ## 包架构
 
@@ -387,28 +387,26 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment` | canonical Environment UUID，无 I/O |
 | `fun.fengwk.kkstudio.harness.environment.capability` | 固定目录、schema、执行与传输 SPI、发送确定性与终态契约 |
-| `fun.fengwk.kkstudio.harness.environment.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
-| `fun.fengwk.kkstudio.harness.environment.protocol` | 控制协议的 protobuf binary：单一 `control.proto` 生成类型、四字节成帧与应用层校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷 |
-| `fun.fengwk.kkstudio.harness.environment.server` | 会话、调用、transfer、IDE 通道与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
-| `fun.fengwk.kkstudio.harness.environment.tunnel` | 本节点隧道、HTTP 交换与 WebSocket 隧道（RFC 8441 extended CONNECT）端口及值对象；不选择传输引擎。测试 fake 使用零缓冲 rendezvous 与 16KiB 分段，通过 environment test-jar 复用 |
-| `fun.fengwk.kkstudio.harness.environment.transport` | 基于 Jetty 12 的传输实现：`WebSocketEndPoint`（单槽 demand 驱动 backpressure、flush 模式缓冲维护）、`DaemonHttp2ClientSession`（HTTP/2 会话生命周期、15s PING/30s ACK 超时、GOAWAY 状态与优雅终止）、`DaemonControlStream`（`POST /control` 封帧、256 帧/16 MiB 预算与 BUSY 背压、10s 超时）、`DaemonEnvironmentTunnel`（流式 HTTP 交换与 RFC 8441 扩展 CONNECT 双向字节管道） |
+
+连接服务包架构见 [Platform](platform.md#daemon-连接服务)。
 
 ## 源码与测试
 
-主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`ControlProtocolCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/protocol/ControlProtocolCodec.java)、[`DaemonSessions.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSessions.java)、[`DaemonSession.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSession.java)、[`EnvironmentDaemonServer.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java)、[`DaemonConnectionSession.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonConnectionSession.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)。
+主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`ControlProtocolCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodec.java)、[`DaemonSessions.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSessions.java)、[`DaemonSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonSession.java)、[`EnvironmentDaemonServer.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java)、[`DaemonConnectionSession.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonConnectionSession.java)、[`DaemonCapabilitiesCodec.java`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodec.java)。
 
 测试守卫：
 
+- [`EnvironmentDependencyBoundaryTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentDependencyBoundaryTest.java)：契约模块运行时类路径不包含 Jetty 与 Protobuf。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
-- [`ControlProtocolCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/protocol/ControlProtocolCodecTest.java)：成帧大端长度、超限防爆（16 MiB 上限）、强类型 Protobuf 消息往返与各消息类型字段校验。
-- [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：宿主 metadata 只接受 `{daemonVersion, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。
-- [`DaemonWorkdirSyntaxTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntaxTest.java)：workdir 占位符、长度、跨 OS 与分隔符归一规则。
-- [`EnvironmentDaemonServerTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭；[`EnvironmentDaemonServerIdeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerIdeTest.java) 覆盖 IDE 通道的准入、单次回执与断线收尾。基座 [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java) 只表达核心依赖的窄端口语义。
-- [`WebSocketEndPointTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/WebSocketEndPointTest.java)、[`DaemonControlStreamTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonControlStreamTest.java)、[`DaemonEnvironmentTunnelTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonEnvironmentTunnelTest.java)、[`DaemonHttp2ClientSessionTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonHttp2ClientSessionTest.java)、[`DaemonHttp2SessionLoopbackTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/transport/DaemonHttp2SessionLoopbackTest.java)：通过管道和内存 HTTP/2 验证端到端握手、控制通道背压/超限、通道生命周期、PING/ACK 存活心跳超时与断线清理。
+- [`ControlProtocolCodecTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodecTest.java)：成帧大端长度、超限防爆（16 MiB 上限）、强类型 Protobuf 消息往返与各消息类型字段校验。
+- [`DaemonCapabilitiesCodecTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/DaemonCapabilitiesCodecTest.java)：宿主 metadata 只接受 `{daemonVersion, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。
+- [`DaemonWorkdirSyntaxTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/DaemonWorkdirSyntaxTest.java)：workdir 占位符、长度、跨 OS 与分隔符归一规则。
+- [`EnvironmentDaemonServerTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭；[`EnvironmentDaemonServerIdeTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerIdeTest.java) 覆盖 IDE 通道的准入、单次回执与断线收尾。基座 [`EnvironmentDaemonServerTestSupport.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServerTestSupport.java) 只表达核心依赖的窄端口语义。
+- [`WebSocketEndPointTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/transport/WebSocketEndPointTest.java)、[`DaemonControlStreamTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonControlStreamTest.java)、[`DaemonEnvironmentTunnelTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonEnvironmentTunnelTest.java)、[`DaemonHttp2ClientSessionTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonHttp2ClientSessionTest.java)、[`DaemonHttp2SessionLoopbackTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/transport/DaemonHttp2SessionLoopbackTest.java)：通过管道和内存 HTTP/2 验证端到端握手、控制通道背压/超限、通道生命周期、PING/ACK 存活心跳超时与断线清理。
 
-覆盖率门禁为 POM 中绑定到 `verify` 的 JaCoCo `check`：能力目录、控制编解码器、`EnvironmentDaemonServer` / `DaemonConnectionSession` / `DaemonInvocationTracker` / `DaemonTransferCoordinator` / `DaemonIdeCoordinator` / `DaemonUpdateCoordinator` 等核心组件，以及传输实现（`fun.fengwk.kkstudio.harness.environment.transport.*`）行覆盖率不低于 `0.90`。
+覆盖率门禁为各模块 POM 中绑定到 `verify` 的 JaCoCo `check`：能力目录由 `harness-environment` 按类检查；控制编解码器、`EnvironmentDaemonServer` / `DaemonConnectionSession` / `DaemonInvocationTracker` / `DaemonTransferCoordinator` / `DaemonIdeCoordinator` / `DaemonUpdateCoordinator` 与隧道类由 `platform-daemon-server` 按类检查，传输实现按包检查，行覆盖率均不低于 `0.90`。
 
 ---
 

@@ -46,6 +46,18 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 
+## Daemon 连接服务
+
+`platform-daemon-server` 依赖 Common 与 Harness Environment 能力契约，拥有 wire 协议、连接会话与传输；产品持久化与 Web 入口分别由 `platform-runtime` 和 Web 适配。协议与会话细节见 [Harness Environment](harness-environment.md)。
+
+| 包路径 | 职责与边界 |
+| --- | --- |
+| `fun.fengwk.kkstudio.platform.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
+| `fun.fengwk.kkstudio.platform.daemon.protocol` | protobuf binary：单一 `control.proto` 生成类型、四字节成帧与应用层校验；覆盖 SETTINGS（含资源预算）、调用、恢复、上传、更新、IDE 元数据与 426 `UpgradeRequired` 载荷 |
+| `fun.fengwk.kkstudio.platform.daemon.server` | 会话、调用、transfer、IDE 通道与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
+| `fun.fengwk.kkstudio.platform.daemon.tunnel` | 本节点隧道、HTTP 交换与 WebSocket 隧道（RFC 8441 extended CONNECT）端口及值对象；不选择传输引擎。测试 fake 使用零缓冲 rendezvous 与 16KiB 分段，通过 daemon-server test-jar 复用 |
+| `fun.fengwk.kkstudio.platform.daemon.transport` | 基于 Jetty 12 的传输实现：`WebSocketEndPoint`（单槽 demand 驱动 backpressure、flush 模式缓冲维护）、`DaemonHttp2ClientSession`（HTTP/2 会话生命周期、15s PING/30s ACK 超时、GOAWAY 状态与优雅终止）、`DaemonControlStream`（`POST /control` 封帧、256 帧/16 MiB 预算与 BUSY 背压、10s 超时）、`DaemonEnvironmentTunnel`（流式 HTTP 交换与 RFC 8441 扩展 CONNECT 双向字节管道） |
+
 ## 待处理交互
 
 `GET /api/interactions` 合并三类待处理事项：`INPUT`、`APPROVAL` 与只读
@@ -293,8 +305,8 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 
 明文 token/code 不落库、不写日志，脚本响应使用 no-store。兑换响应丢失后 code 已被消费，用户重新签发。
 
-Platform 适配注册、租约和资源票据；会话代际、在途调用和重连裁决由
-[Harness Environment](harness-environment.md) 拥有。
+`platform-runtime` 适配注册、租约和资源票据；会话代际、在途调用和重连裁决由
+`platform-daemon-server` 拥有，细节见 [Harness Environment](harness-environment.md)。
 同实例重连依赖 Gateway 在途记录和 Daemon 进程内 journal；新实例接管使旧调用进入
 结果不确定，恢复保证止于这两个进程内记录的生命周期。
 

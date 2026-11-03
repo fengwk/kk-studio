@@ -15,9 +15,9 @@ import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.Callback;
 
-import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
-import fun.fengwk.kkstudio.harness.environment.protocol.Envelope;
-import fun.fengwk.kkstudio.harness.environment.transport.WebSocketEndPoint;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
+import fun.fengwk.kkstudio.platform.daemon.transport.WebSocketEndPoint;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -115,8 +115,8 @@ class DaemonTestHttp2Server {
   }
 
   private static byte[] loadReadyFrame(String environmentId) {
-    Path p1 = Path.of("harness/environment/src/main/protocol/golden/ready.bin");
-    Path p2 = Path.of("../harness/environment/src/main/protocol/golden/ready.bin");
+    Path p1 = Path.of("platform/daemon-server/src/main/protocol/golden/ready.bin");
+    Path p2 = Path.of("../platform/daemon-server/src/main/protocol/golden/ready.bin");
     Path target = Files.isRegularFile(p1) ? p1 : p2;
     try {
       Envelope golden = ControlProtocolCodec.decodeBinary(Files.readAllBytes(target));

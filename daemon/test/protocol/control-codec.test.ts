@@ -91,7 +91,7 @@ import {
 } from './control-fixtures.mjs'
 
 const GOLDEN = fileURLToPath(
-  new URL('../../../harness/environment/src/main/protocol/golden/', import.meta.url),
+  new URL('../../../platform/daemon-server/src/main/protocol/golden/', import.meta.url),
 )
 
 function readGolden(name: string): Uint8Array {

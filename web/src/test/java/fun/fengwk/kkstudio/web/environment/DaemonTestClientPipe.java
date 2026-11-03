@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.web.environment;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.eclipse.jetty.websocket.api.Callback;
 
-import fun.fengwk.kkstudio.harness.environment.transport.WebSocketEndPoint;
-import fun.fengwk.kkstudio.harness.environment.transport.WebSocketPipe;
+import fun.fengwk.kkstudio.platform.daemon.transport.WebSocketEndPoint;
+import fun.fengwk.kkstudio.platform.daemon.transport.WebSocketPipe;
 
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;

@@ -7,7 +7,7 @@ import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 
 /** {@link EnvironmentDaemonGateway} 产品适配契约测试。 */

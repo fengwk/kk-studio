@@ -261,7 +261,7 @@ Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical 
 - `KK-Daemon-Instance` 必须为规范小写 UUID 格式；非法或畸变参数返回 HTTP 400 Bad Request。
 - 准入成功后返回 HTTP 101 Switching Protocols，并在锁外注册 10 秒超时定时器：若 Daemon 未在 10 秒内发起 HTTP/2 连接并成功建立控制通道，连接自动抛弃释放。
 
-底层传输与会话裁决见 [Harness Environment](harness-environment.md)。
+底层传输与会话裁决由 [Platform Daemon 连接服务](platform.md#daemon-连接服务)负责，协议细节见 [Harness Environment](harness-environment.md)。
 
 ## 启动与静态分发
 

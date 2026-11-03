@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;

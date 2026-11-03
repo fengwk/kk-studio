@@ -382,7 +382,7 @@ test('Java update commands are replayed through the built Node decoder as a requ
   assert.equal(stepField(build, 'if'), undefined, 'the daemon build must not be conditional')
   assert.doesNotMatch(build, /continue-on-error:|\|\|\s*true/u)
   const run = stepField(step, 'run')
-  assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs harness\/environment\/target\/daemon-update-java-commands\.json/u)
+  assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs platform\/daemon-server\/target\/daemon-update-java-commands\.json/u)
   assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)
 })

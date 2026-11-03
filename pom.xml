@@ -184,6 +184,11 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-platform-daemon-server</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-platform-runtime</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>

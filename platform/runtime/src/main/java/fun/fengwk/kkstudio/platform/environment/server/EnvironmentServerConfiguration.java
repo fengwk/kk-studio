@@ -5,12 +5,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonRegistration;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentServerSettings;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonRegistration;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentServerSettings;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentUpdateListener;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;

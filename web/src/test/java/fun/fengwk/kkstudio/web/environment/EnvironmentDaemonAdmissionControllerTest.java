@@ -18,16 +18,16 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.environment.protocol.ControlProtocolCodec;
-import fun.fengwk.kkstudio.harness.environment.protocol.UpgradeRequired;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonAdmission;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonControlChannel;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonHandshake;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSession;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSessions;
-import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
+import fun.fengwk.kkstudio.platform.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
+import fun.fengwk.kkstudio.platform.daemon.protocol.UpgradeRequired;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonControlChannel;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonHandshake;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSessions;
+import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseProvider;
 import fun.fengwk.kkstudio.platform.environment.update.DaemonReleaseTarget;
 

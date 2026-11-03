@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
-import fun.fengwk.kkstudio.harness.environment.protocol.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.protocol.IdeLease;
-import fun.fengwk.kkstudio.harness.environment.protocol.IdeLeaseBinding;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonIdeCall;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLease;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeLeaseBinding;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonIdeCall;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
 import java.util.Objects;
 import java.util.Optional;

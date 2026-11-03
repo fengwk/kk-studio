@@ -7,10 +7,10 @@ import org.eclipse.jetty.websocket.api.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.environment.server.DaemonAdmission;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonSessions;
-import fun.fengwk.kkstudio.harness.environment.transport.DaemonHttp2ClientSession;
-import fun.fengwk.kkstudio.harness.environment.transport.WebSocketPipe;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonAdmission;
+import fun.fengwk.kkstudio.platform.daemon.server.DaemonSessions;
+import fun.fengwk.kkstudio.platform.daemon.transport.DaemonHttp2ClientSession;
+import fun.fengwk.kkstudio.platform.daemon.transport.WebSocketPipe;
 
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
