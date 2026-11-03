@@ -13,10 +13,8 @@ import {
   threadCommandsForTarget,
   type ThreadCommand,
 } from '@/features/chat/runtime/thread-panel/thread-commands'
-import type {
-  HashFile,
-  StorageService,
-} from '@/features/chat/composer'
+import type { StorageService } from '@/features/chat/composer'
+import type { HashFile } from '@/shared/lib/upload-file'
 import { AttachmentStrip } from '@/features/chat/composer/attachment-strip'
 import type { AttachmentUpload } from '@/features/chat/composer/use-attachment-uploads'
 import type { ThreadComposerSettingsInput } from '@/features/chat/runtime/thread-panel/ThreadComposerControls'

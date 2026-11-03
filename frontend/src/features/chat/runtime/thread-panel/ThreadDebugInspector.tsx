@@ -10,7 +10,7 @@ import type {
   ThreadModelRequestDebugTool,
   ThreadProviderRequestPreviewData,
 } from '@/features/chat/runtime/thread-timeline-types'
-import { formatFileSize } from '@/features/chat/composer'
+import { formatFileSize } from '@/shared/lib/upload-file'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 

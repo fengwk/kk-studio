@@ -7,9 +7,9 @@ import {
   createAttachmentPart,
   partsToMessageContents,
   type ComposerPart,
-  type HashFile,
   type StorageService,
 } from '@/features/chat/composer'
+import type { HashFile } from '@/shared/lib/upload-file'
 
 type StorageUploadDTO = Awaited<ReturnType<StorageService['reserveUpload']>>
 

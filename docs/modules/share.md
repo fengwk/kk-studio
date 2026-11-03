@@ -112,7 +112,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 ## 从哪里改
 
 - 改 Canvas wire：[share/canvas/](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [Canvas 的 `CanvasCommand`](canvas.md#typed-command-与并发语义)（若命令集合变化）、[`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
-- 改 Project wire：[share/project/](../../share/src/main/java/fun/fengwk/kkstudio/share/project/)，同时同步 Web Controller、[`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java) 与前端 [features/projects/types.ts](../../frontend/src/features/projects/types.ts) 及 codec。
+- 改 Project wire：[share/project/](../../share/src/main/java/fun/fengwk/kkstudio/share/project/)，同时同步 Web Controller、[`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java) 与前端生成的 [HTTP 契约](../../frontend/src/shared/api/generated/contracts.ts)。
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest`、`CanvasDtoContractTest` 与 `ProjectDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 share：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
 

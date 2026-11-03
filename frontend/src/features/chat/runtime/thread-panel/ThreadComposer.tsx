@@ -42,9 +42,9 @@ import {
   useAttachmentUploads,
   type AttachmentUpload,
   type AttachmentUploadError,
-  type HashFile,
   type StorageService,
 } from '@/features/chat/composer'
+import type { HashFile } from '@/shared/lib/upload-file'
 import { useComposerMessageHistory } from '@/features/chat/runtime/thread-panel/useComposerMessageHistory'
 import { useComposerFocus } from '@/features/chat/runtime/thread-panel/useComposerFocus'
 import { useComposerSubmissionSettle } from '@/features/chat/runtime/thread-panel/useComposerSubmissionSettle'

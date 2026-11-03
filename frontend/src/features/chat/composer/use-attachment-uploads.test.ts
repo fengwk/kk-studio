@@ -5,8 +5,8 @@ import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/chat/composer/composer-parts'
 import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/chat/composer/composer-draft'
+import { createWorkerHasher } from '@/shared/lib/upload-file'
 import {
-  createWorkerHasher,
   isAmbiguousUploadOutcome,
   useAttachmentUploads,
   type AttachmentUploadError,

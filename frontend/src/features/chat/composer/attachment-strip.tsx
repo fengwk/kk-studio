@@ -12,9 +12,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
+import { formatFileSize, mediaKindOf } from '@/shared/lib/upload-file'
 import {
-  formatFileSize,
-  mediaKindOf,
   uploadOccurrence,
   type AttachmentUpload,
 } from '@/features/chat/composer/use-attachment-uploads'

@@ -17,7 +17,7 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { validateUploadFile, type HashFile } from '@/features/chat/composer'
+import { validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
 import { isConflictError } from '@/shared/api/client'
 import {
   storageService as defaultStorageService,

@@ -7,8 +7,7 @@ import path from 'node:path'
 
 // Exact entry points currently shared by features; new dependencies require review.
 const featureDependencies = {
-  canvas: ['chat/composer'],
-  projects: ['chat/composer', 'chat/runtime/AgentPane'],
+  projects: ['chat/runtime/AgentPane'],
   settings: ['chat/runtime/thread-notifications', 'extensions/PluginsTab', 'catalog/agent-capability-candidates'],
   chat: ['catalog', 'environment/ide/ide-panel-context'],
 }

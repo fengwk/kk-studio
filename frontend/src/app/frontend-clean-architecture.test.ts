@@ -23,7 +23,9 @@ describe('Frontend architecture and entry contracts', () => {
     const filePath = 'src/features/canvas/guard-probe.ts'
     for (const source of [
       "import '@/features/chat/runtime/AgentPane'",
+      "import '@/features/chat/composer'",
       "import '../chat/runtime/AgentPane'",
+      "import '../chat/composer'",
       "export * from '@/features/chat/runtime/AgentPane'",
       "import type { AgentPane } from '@/features/chat/runtime/AgentPane'",
       "void import('@/features/chat/runtime/AgentPane')",
@@ -33,10 +35,9 @@ describe('Frontend architecture and entry contracts', () => {
       expect(result.messages.some((message) => message.ruleId === 'architecture/feature-dependencies')).toBe(true)
     }
     for (const source of [
-      "import '@/features/chat/composer'",
-      "import '../chat/composer'",
       "import '@/features/canvas/types'",
       "import '@/shared/api/client'",
+      "import '@/shared/lib/upload-file'",
     ]) {
       const [result] = await eslint.lintText(source, { filePath })
       expect(result.messages.filter((message) => message.ruleId === 'architecture/feature-dependencies')).toEqual([])

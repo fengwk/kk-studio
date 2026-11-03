@@ -128,12 +128,9 @@ describe('IssueDetailModal', () => {
     recoverIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     reopenIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resolveUnknown: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    pauseIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    resumeIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     appendIssueActivity: vi.fn().mockResolvedValue(mockActiveIssueDetail.activities[0]),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn().mockResolvedValue({
       issueId,
       blobId: 'blob-1',
@@ -145,8 +142,6 @@ describe('IssueDetailModal', () => {
     }),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
-    archiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    unarchiveIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     ...overrides,
   })
 
