@@ -6,7 +6,10 @@ import {
   modelConfigMatrix,
   providerCreateBody,
 } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /**
  * 为每个矩阵行注册独立 case，报告里逐条 PASS/FAIL。

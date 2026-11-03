@@ -31,12 +31,15 @@ import {
   waitForModelContentDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { registerCase, getCase } from '../lib/registry.mjs'
-
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
   MINIMAX_ANTHROPIC_M3,
 } from '../lib/real-models.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(cases, id)
 
 /** 最小确定性稳定前缀字节数（>= 16KiB = 16384 bytes）。 */
 export const MIN_CACHE_PREFIX_BYTES = 16 * 1024

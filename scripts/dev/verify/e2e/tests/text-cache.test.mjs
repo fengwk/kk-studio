@@ -4,8 +4,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { REAL_MODEL_DEFINITIONS } from '../lib/real-models.mjs'
-import '../cases/real.mjs'
-import { getCase } from '../lib/registry.mjs'
+import { getCase } from '../run-matrix.mjs'
 
 const usages = JSON.parse(readFileSync(new URL('./resources/text-cache/usage.json', import.meta.url), 'utf8'))
 

@@ -8,20 +8,8 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:performance-baseline}
 DURATION_SECONDS=10

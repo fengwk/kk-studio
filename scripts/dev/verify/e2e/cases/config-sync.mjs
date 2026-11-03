@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 import { assert, envelopeData, assertExactFields, cid, expectHttpError } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
 import { providerCreateBody } from '../lib/fixtures.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
 import { assertInstallConfig, linuxInstallConfig } from './environment-install-config.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /** 服务端只保存注册令牌的 SHA-256；导出与导入都使用这一摘要。 */
 function tokenHash(token) {

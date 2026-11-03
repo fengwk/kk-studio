@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { ProviderPreviewTrap } from '../cases/seed-and-harness.mjs'
-import { getCase } from '../lib/registry.mjs'
+import { getCase } from '../run-matrix.mjs'
 import { HttpError } from '../lib/http.mjs'
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
