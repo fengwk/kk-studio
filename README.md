@@ -165,7 +165,7 @@ node scripts/dev/verify/repository/check-sensitive-data.mjs
 | [部署与运行](docs/operations/deployment.md) | Fat JAR、镜像、部署拓扑和运行配置 |
 | [开发与测试](docs/operations/development-and-testing.md) | 开发环境和全部质量入口 |
 | [系统设计](docs/system-design.md) | 系统职责、依赖、配置与执行恢复链 |
-| [Canvas、Project 与交互](docs/canvas-project.md) | 资源编辑、Function 运行、Issue 分工、交接和人工输入 |
+| [Canvas 与 Project](docs/modules/canvas.md) | 资源编辑、Function 运行、Issue 分工、交接和人工输入 |
 | [文档导航](docs/README.md) | 所有模块与 Operations 文档 |
 
 ## 安全与许可证

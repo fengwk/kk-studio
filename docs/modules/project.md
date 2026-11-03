@@ -4,7 +4,7 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 `workflow` JSON 中，Issue 保存当前阶段，Run 记录一次已接受执行的历史坐标；Agent 身份由
 `Issue + Agent` 唯一绑定到一条持久 Thread，同一阶段的预算按 `Issue + state` 计数，
 不会因为切换 Agent 重置。先从[系统设计](../system-design.md)理解模块边界；
-完整的事务边界和表关系见[Canvas / Project](../canvas-project.md)。
+跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
 [`apps/project`](../../apps/project/pom.xml) 是建立在平台之上的应用，集中提供领域规则、Issue 用例、
 PostgreSQL 持久化、Issue 调度与 Agent 业务工具，经
@@ -45,22 +45,139 @@ Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前
 
 ## 工作流配置
 
+`project.workflow` 是严格 JSON。例如由设计和检查两个 Agent 阶段组成的流程：
+
+```json
+{
+  "states": [
+    {"state": "INIT", "name": "待开始", "next": ["DESIGN"]},
+    {
+      "state": "DESIGN",
+      "name": "设计",
+      "agent": "designer",
+      "instructions": "完成可交付方案",
+      "maxRuns": 3,
+      "next": ["REVIEW"]
+    },
+    {
+      "state": "REVIEW",
+      "name": "检查",
+      "agent": "reviewer",
+      "instructions": "按 Issue 验收要求检查",
+      "maxRuns": 3,
+      "next": ["DESIGN", "DONE"]
+    },
+    {"state": "BLOCKED", "name": "业务阻塞"},
+    {"state": "DONE", "name": "完成"}
+  ]
+}
+```
+
+数组顺序决定展示顺序，`next` 声明正常转移白名单。状态编码匹配
+`[A-Z][A-Z0-9_]{0,63}`，项目内唯一。INIT、BLOCKED、DONE 是必备保留态，其余为工作
+阶段，数量由项目配置决定。工作阶段可配置 `agent`、`environment`、`instructions`、
+`maxRuns` 和 `enabled`（默认 true）。绑定 Agent 要求正数 maxRuns；人工阶段省略
+Agent、Environment 与 Run 额度，由人工显式推进。
+
+默认流程为 INIT→WORK→DONE，另含 BLOCKED，WORK 是人工阶段。业务阻塞与恢复使用
+专用操作；DONE 显式重开回 INIT。流程允许返工环，拒绝自身边。启用工作阶段须从
+INIT 可达，INIT 须存在到 DONE 的正常路径。
+
+workflow 整体保存时锁定 Project、检查版本，并要求项目无活动 Run。保存校验编码、
+合法边、可达性与引用；包含已归档 Issue 在内的当前阶段及阻塞恢复点都须保留。
+工作流编辑读取 Project Snapshot 的 `referencedStateCodes` 实施相同引用保护，
+不依赖仅包含未归档 Issue 的可见看板列表。后台推送刷新约束而不覆盖打开中的草稿。
+Agent 与阶段 Environment 由 Project 在执行接受时以显式命令提交并冻结，缺失引用明确拒绝；
+live turn 只读取冻结的命令，不按 workflow 反查。
+
 [`ProjectWorkflowJsonCodec`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)
 严格解析 `{"states":[...]}`：拒绝重复字段、未知字段、尾随内容和非法类型；编码为确定性 JSON，
-可用于请求指纹。每个 state 使用项目内唯一的大写自然编码（`[A-Z][A-Z0-9_]{0,63}`），
-阶段数量由项目配置决定。默认流程为 `INIT -> WORK -> DONE`，另含 `BLOCKED`；默认 WORK 是人工阶段。
-`INIT`、`BLOCKED`、`DONE` 必须存在；正常边只指向已声明阶段，不通往 `BLOCKED`。
-启用工作阶段须从 `INIT` 可达，且存在到 `DONE` 的正常路径。
+可用于请求指纹。
 
 [`IssueStateTransitions`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStateTransitions.java)
 区分正常转移、业务阻塞与恢复，以及从 DONE 显式重开。问卷等待与人工暂停分别由 Runtime 等待事实和 Issue 暂停字段表达。
 
 ## 预算与运行记录
 
+```text
+Issue A
+  +-- designer -> Thread D -> Run 1(DESIGN), Run 3(REWORK)
+  +-- reviewer -> Thread R -> Run 2(REVIEW), Run 4(REVIEW)
+```
+
+`(issueId, agentName)` 在首次接受执行时创建稳定 Thread 绑定；同 Agent 跨阶段、
+返工与重开复用该 Thread。每个绑定拥有独立 Harness Session，提供历史与附件授权
+范围；Thread 解析 Session，Run 冻结 Session/Thread 和历史区间。
+
+阶段额度按 `(issueId,state)` 授权：
+
+```text
+used = COUNT(Run WHERE issue_id = ? AND state = ?
+                   AND ordinal > budget_after_ordinal)
+remaining = max(0, max_runs - used)
+```
+
+Run ordinal 在 Issue 内单调分配。新 Run 的失败、取消和 UNKNOWN 都消耗一次额度；
+恢复已接受 Run、工具循环、协议续生成和问答等待沿用原次数。更换 Agent、返工或重开
+仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由明确授权或重置操作维护。
+
 [`IssueStageBudget`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStageBudget.java)
 承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
 `nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
 Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
+人工重置要求无活动 Run，高水位取服务端 `next_run_ordinal - 1`，前后额度与高水位写入 CONTROL
+活动。used/remaining 在读取时计算，Agent 通过受控执行使用额度。已接受 Run 还受
+持久活动时长余额与模型、工具安全上限约束，安全等待暂停活动计时。
+
+### 业务状态与控制门禁
+
+| 事实 | 表达方式 | 用户操作 |
+| --- | --- | --- |
+| 当前工作阶段 | `Issue.state` | 沿合法边转移，DONE 可显式重开 |
+| 业务阻塞 | BLOCKED、原阶段和原因 | 阻塞后显式恢复到原阶段 |
+| 人工暂停或执行失败 | USER / ERROR 暂停原因 | 检查后显式恢复 |
+| 副作用结果不明 | UNKNOWN Run 与暂停原因 | 记录核查依据，再显式恢复 |
+| 工具等待输入或审批 | Harness ToolInvocation | 在 Pane 或待处理入口回答/决定 |
+| 新 Run 额度耗尽 | 阶段预算与 Run 历史计算 | 人工授权或重置 |
+
+同一 Issue 只有一个 RUNNING/WAITING 主 Run。门禁关闭后停止新派发，在途调用按原 Run
+身份收尾，到安全点才置 WAITING。回答问卷后，业务 BLOCKED 或人工暂停仍需各自恢复。
+输入等待恢复沿用原 Run，即使新 Run 额度已经用尽也可继续。
+
+人工 Stop 收尾为 CANCELLED 并保留 USER 暂停；在途结果不明时进入 UNKNOWN。
+UNKNOWN 核查记录提交后转为 USER 暂停，执行需再显式恢复。直接换阶段和归档要求无
+活动 Run，归档后的产品拒绝执行。
+
+### 接受、交接与报告
+
+Run 接受在同一物理事务内完成状态和额度检查、Thread 选择或创建、起点冻结、显式
+Agent/Model/Environment/contributor state 命令与任务输入提交、Run 与 RUN 活动插入、
+Harness 命令接受及 Work 登记。首次创建先写 Harness Session、
+ROOT 和 Thread，再写产品绑定与 Run，满足即时外键；失败时全部回滚。
+
+进入有 Agent 的阶段登记 Work。Agent 正常结束且未交接时，Run 终结并保持当前阶段；
+再次执行需要接受新 Run 并检查额度。额度耗尽时等待人工授权。
+
+Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先写入 Run.next_state，
+工具返回“已接受，收尾后生效”。随后派发仅允许模型收尾与冻结 descriptor 声明的只读
+工具；用户输入继续受控接受，处理完后才能交接。
+
+```text
+接受 next_state
+  -> 处理剩余输入、问答与在途调用，到安全点
+  -> root Join 冻结 terminalEntryId / finalAnswerEntryId
+  -> 事务复验 Run ID/version、历史区间、合法边与门禁
+  -> 冻结报告，Run=COMPLETED，写 active=false scope
+  -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
+```
+
+暂停时保留原 Run 的交接目标，恢复后继续收尾；失败或取消终结该 Run。旧 Worker、
+旧 Run 和迟到 callback 通过执行身份与版本围栏拒绝。崩溃恢复继续原 Run，沿用原额度。
+
+Run 区间为 `(start_entry_id,end_entry_id]`，沿 Entry 父链解释；最终回答必须是区间内
+真实可见 Entry（取自 root Join 冻结的 `finalAnswerEntryId`），缺少报告时展示终态原因。
+Issue 的要求由需求和阶段定义，Agent 交接走 `issue_transition`；Issue Run 的任务输入是
+可信 `CUSTOM_MESSAGE`，其 owner 命令不出现在公共 batch 端点。
 
 执行记录落在 model 行：
 [`IssueAgentThread`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueAgentThread.java)
@@ -110,13 +227,15 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
 写入也会覆盖。Work 租约/唤醒只影响内部调度，走共享的 `durable_work` 通道，不产生项目快照失效信号。
 幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放；`body` 的非空性按 `kind` 固定：
-COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STATE_CHANGE、CONTROL 必须为空）；
+COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STATE_CHANGE、CONTROL 必须为空；定向 INSTRUCTION 只投递给明确的当前 Run，普通评论用于时间线沟通，要影响当前执行时提交定向指令；指令接受与处理游标推进同事务完成）；
 Stage 预算与 Evidence 分别落在 `project_issue_stage_budget`、`project_issue_evidence`；
 Work 邮箱是共享 `durable_work` 表中 target type 为 `ISSUE` 的行。
 
 [`IssueEvidenceService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEvidenceService.java)
 管 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用，
-与 Session 引用各自独立计数，不由 Session 生命周期决定。人工附件经 `lockReadyUpload -> retain ->
+`(issueId, blobId)` 唯一，首次发布时 retain。最终报告中的合法受管资源在收尾时发布，也支持人工上传；
+文本文件交付需先物化为 Blob；公开证据展示与 Agent Session 的读取授权分别校验，未授权资源访问拒绝；
+证据与 Session 引用各自独立计数，不由 Session 生命周期决定。人工附件经 `lockReadyUpload -> retain ->
 deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不重复
 retain，重复交付不双计。深删除 Session 只释放该 Session 自己的引用。
 

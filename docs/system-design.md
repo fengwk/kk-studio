@@ -139,7 +139,7 @@ Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上�
 Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` /
 `SET_CONTRIBUTOR_STATE`），并冻结本次 Run 的 `ProjectRunScope`。每个 live turn 只按该分支设置规划；
 `issue_transition` 等业务工具从冻结 scope 取得 runId，在业务锁内复核 Run/Issue/阶段/版本与调用
-Thread 身份。产品行为见 [Canvas、Project 与交互](canvas-project.md)，规划适配见
+Thread 身份。产品行为见 [Project](modules/project.md)，规划适配见
 [Platform](modules/platform.md)。
 
 ### Tools、Skills 与委派
@@ -276,7 +276,7 @@ Agent/Model/Environment 与业务工具）提交、Run/Activity 写入、Harness
 Issue Reconciler 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
 `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
 交接提交时复验 Run 身份、版本、合法边与门禁，并在同一业务锁内写入 `active=false` 快照。
-Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas、Project 与交互](canvas-project.md)。
+Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas](modules/canvas.md)、[Project](modules/project.md) 与 [Schema](modules/schema.md)。
 
 ### 附件与媒体
 

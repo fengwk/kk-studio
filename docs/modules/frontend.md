@@ -275,6 +275,7 @@ RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spi
 没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
+`/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。
 `/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
 [Harness Runtime](harness-runtime.md#内置工具)。
 

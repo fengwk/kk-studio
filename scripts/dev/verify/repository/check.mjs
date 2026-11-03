@@ -61,7 +61,6 @@ const moduleDocuments = [
 const documentPaths = [
   'docs/README.md',
   'docs/system-design.md',
-  'docs/canvas-project.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',

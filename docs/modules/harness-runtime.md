@@ -113,6 +113,35 @@ RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 
 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 
+### 问答与审批
+
+`ask_user` 在接受时冻结问卷：
+
+```json
+{
+  "questions": [
+    {
+      "question": "交付格式？",
+      "options": [
+        {"label": "PDF", "recommended": true},
+        {"label": "Markdown"}
+      ]
+    },
+    {
+      "question": "需要哪些附件？",
+      "multiple": true,
+      "options": [{"label": "图片"}, {"label": "源文件"}]
+    }
+  ]
+}
+```
+
+答案按问题位置提交，例如 `{"answers":[["PDF"],["图片","源文件"]]}`。单选默认，每题提供自定义输入；推荐仅做标记，等待用户选择。答案须覆盖所有题，单选恰好一个，多选去重并允许一项自定义文本；题数、选项数与长度有界。模型只提供问题与选项，问卷由接受路径冻结。同题选项标签唯一，单选至多一个推荐，多选允许多个；选项为空时使用自定义回答。
+
+用户明确提交回答或拒答。拒答形成 `{"declined":true}` 工具结果；Stop 取消等待，迟到回复被拒绝。委派子 Thread 也可等待回答，祖先按自身状态与执行树对账恢复，不递归投影子树等待。
+
+回答回执保存 submissionId、actor 与 acceptedAt。终态结果追加到 Entry 后，在同一事务删除 Invocation，并把 invocationId、调用坐标与回执转入 Runtime 历史元数据。清理后重试沿历史父链核验原 Thread；相同提交返回原接受事实，同键异内容、冲突提交和已取消目标被拒绝。问卷答案保存在结果内容，审批审计保存在 Runtime 元数据。审批允许只授予调用资格，执行结果由工具实际返回。
+
 ## Work
 
 [`Work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java) 是每个 target 一行的调度邮箱：`availableAt`、`wakeVersion`、租约与可选的 `requiredEnvironmentId`。所有跃迁都是纯函数：`request` 把 `availableAt` 提前并让 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除行、被新唤醒推进时只清租约，`reschedule` 清租约且不让旧 claim 推迟新唤醒。租约 token、有效期与认领时的 `wakeVersion` 共同拦截迟到的旧执行体。
