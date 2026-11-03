@@ -37,7 +37,31 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 
-表、列的准确清单与约束名直接查 V1；跨域关系与事务职责见 [Canvas / Project](../canvas-project.md)。
+```text
+canvas_document
+  +--< canvas_group
+  +--< canvas_node --? canvas_group
+  |       +--< canvas_resource >--? storage_blob
+  |       +--0..1 canvas_function_run
+  |                   +--< canvas_function_resource_pin >-- canvas_resource
+  +--< canvas_command_dedup
+
+project
+  +--< project_issue
+          +--< project_issue_agent_thread >-- harness_thread
+          +--< project_issue_stage_budget
+          +--< project_issue_run >-- harness_thread / harness_entry
+          +--< project_issue_activity --? project_issue_run
+          +--< project_issue_evidence >-- storage_blob
+
+chat --< chat_session >-- harness_session
+harness_thread >-- harness_session --< harness_entry
+harness_tool_invocation >-- harness_model_invocation >-- harness_thread
+```
+
+Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
+复合外键关联同 Issue 的 Thread 和同阶段预算，并绑定同 Session 的 Thread/Entry。
+父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
 
 ## 数据库兜底的不变量
@@ -65,7 +89,7 @@ Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First
 的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
-应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
+应用 codec 在读写时严格校验，非法数据在读取时明确拒绝。
 `environment.install_code` 是同一行上的 jsonb 列，只保存随机一次性安装 code 的 SHA-256 摘要与
 UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null 表示没有未核销的 code；
 CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；
@@ -86,17 +110,13 @@ Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 ## 修改结构
 
 修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
-已有数据库记录 Flyway checksum，源码变更须通过批准的数据库维护操作才能应用；
-当前基线的插件表、ThreadJoin 与 Environment 安装 code/更新操作结构需要空库初始化或批准的迁移与备份，
-不能用 `flyway repair` 代替结构转换。ThreadJoin 中已匹配的 `NOTIFY_PARENT` 行必须同时具有
-交付命令序号；既有库不能仅更新应用镜像后继续启动。应用发布本身不授权修改已有库。
+新环境部署由当前 Schema 初始化空库。
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
 需要重建时，通过产品 YAML 同步保留配置，在空库应用当前 Schema 后导入；
-UUID、行版本、连接和执行状态不随配置文件恢复，完整运行数据恢复仍依赖数据库与对象存储备份。
-当前产品 YAML 不包含 Plugin 配置历史与认证秘密；这部分保留与恢复需要数据库备份
-或明确批准的转换方案，不能只导出 YAML 后删除数据库。
+UUID、行版本、连接和执行状态不随配置文件恢复，完整运行数据恢复依赖数据库与对象存储备份。
+产品 YAML 不包含 Plugin 认证秘密；秘密保留与恢复需要数据库备份，不能只导出 YAML 后清空数据库。
 
 新增 seed 数据放入对应 repeatable SQL，保持幂等并使用公开占位值。
 并发或旁路写入可违反的不变量用 CHECK/unique/FK 兜底，策略校验保留在应用层。

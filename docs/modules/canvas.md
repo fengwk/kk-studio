@@ -7,7 +7,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | [`apps/canvas/core`](../../apps/canvas/core/) | 不可变 graph、typed command、纯领域命令规划、冲突语义与全部端口 | [Common](common.md)、[Platform Plugin API](platform-plugin-api.md#canvas-function-spi)（Function SPI 与 `CanvasJson`）、Jackson core |
 | [`apps/canvas/infra`](../../apps/canvas/infra/) | PostgreSQL 持久化、Snapshot 一致性读、Function Run 运行时、领域与 share DTO 映射，以及对平台 Storage 与插件目录的适配 | Core、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC |
 
-平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。领域与 share DTO 的映射在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它，[Web](web.md) 只组装 HTTP。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
+平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。领域与 share DTO 的映射在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它，[Web](web.md) 只组装 HTTP。Canvas 与 Project 并列存在，各自拥有领域数据，跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
 ## Graph 聚合
 
@@ -24,6 +24,34 @@ CanvasDocument                    identity、标题、revision 同步游标与�
 [`CanvasDocument`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasDocument.java) 的 `revision` 从 0 起单调递增，只用于同步排序、补漏和确认接受位置，不是普通编辑的整图前置版本。Canvas 独立存在，不冗余存储会话或归属引用（见 [Schema](schema.md)）。
 
 [`CanvasResourceNode`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceNode.java) 构造期强制一致性：资源同属一个 Canvas 且 `ownerNodeId` 指向本节点，槽位 `resourceIndex` 从 0 连续递增，同一节点的资源全为文本或全为媒体；`run` 只能挂在 Function 节点上；普通资源节点至少持有一个 Resource，Function 节点首次成功前可以没有资源。[`CanvasResource`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResource.java) 的 `blobId` 与 `textContent` 恰好一个非空；物化中的目标资源、被其他 Run pin 的输入资源或源节点已删除的历史资源可以暂时没有 owner，直到成功挂接或最后一个 pin 释放。
+
+节点名称按 NFKC、去首尾空格和小写得到唯一键，要求画布内非空且唯一，显示名可保留大小写。引用使用 UUID，重命名保持绑定。分组是单层视觉组织。
+
+TEXT 使用内联正文，媒体引用不可变 Blob；每条 Resource 恰好选择一种内容来源。节点资源数组保持内容分支一致：全为内联文本或全为媒体。编辑文字或替换媒体创建新 Resource，复制媒体时新建 Resource 并共享 Blob 字节。Resource 由节点挂接或 Function pin 保护，解除挂接且无 pin 后可回收。
+
+### Function 配置与引用
+
+Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限制和有界输出计划（1..8 个槽位）。例如裁剪函数：
+
+```json
+{
+  "name": "image.crop",
+  "args": {
+    "source": {"type": "resource", "nodeId": "...", "index": 0},
+    "x": 100,
+    "y": 50,
+    "width": 640,
+    "height": 480
+  }
+}
+```
+
+`{"type":"resource","nodeId":"...","index":0}` 是核心资源引用值，可出现在 args 的任意嵌套位置。连线由配置投影，插件未安装时仍可识别引用。`index` 从零开始，指向源节点当前输出位置；运行接受时解析为实际 Resource 并冻结。
+
+- 保存引用时校验同画布目标；尚无输出的位置可保存为显式失效引用，启动前要求完整解析并校验类型。
+- 位置失效需用户修正；删除被引用节点需显式解除引用，可以放入同一原子编辑批。
+- 配置大小、引用数和遍历深度均有上限。
+- 上游输出更新后，由用户显式启动下游 Function。
 
 引用连线是读取投影而不是自动执行 DAG：上游输出变化不会触发下游，真正触发执行的是显式的 Function run。[`CanvasReference`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasReference.java) 禁止自环。
 
@@ -54,11 +82,19 @@ CanvasDocument                    identity、标题、revision 同步游标与�
 
 [`CanvasConflict`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflict.java) 有 `TargetMissing`、`TargetPresent`、`StaleNode` / `StaleGroup`（携带当前权威投影）、`NodeRunning`（执行中禁止换输出或删除）与 `NodeReferenced`（须在同批中解除引用）。冲突不写入任何数据，服务端不会用旧基线偷偷重试。[`CanvasPatch`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasPatch.java) 携带结果 revision 与节点、分组的 upsert/remove；精确重放只携带当时的 revision。
 
+浏览器按三层状态展示：
+
+```text
+服务端已确认快照 + 待确认操作 + 编辑草稿 = 当前展示
+```
+
+草稿记录编辑基线与 generation。远端更新只推进确认层，ACK 只清除对应操作和 generation；dirty 输入、编辑器和选择保留。请求发送后冻结 ID、参数与前置条件，网络重试沿用原请求；解决冲突时创建新请求。去重记录与业务修改同事务提交，精确重试返回原接受回执。浏览器草稿、IndexedDB 存储与冲突恢复细节见 [Frontend](frontend.md)。
+
 ## 持久化与读模型
 
 Infra 用 `JdbcClient` 实现 Core 的端口：[`PostgresqlCanvasStore`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 聚合 document、node、group 与幂等记账的行操作，[`PostgresqlCanvasCommandService`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java) 执行上面的写协议，资源与 pin 由各自的 Repository 写入。`canvas_*` 的外键全部 RESTRICT，删除顺序由代码显式保证，不依赖 cascade。
 
-删除画布先锁 Document：存在 `READY`、`RUNNING` 或 `UNKNOWN` Run 时整体拒绝；否则依次释放 pin、删除终态 Run、删除 Resource 行并释放全局 Blob 引用、删除 Node、Group、幂等记账，最后删除 Document。Blob 引用释放失败使整个事务回滚。
+删除画布先锁 Document：存在 `READY`、`RUNNING` 或 `UNKNOWN` Run 时整体拒绝；允许删除后，依次释放 pin、删除终态 Run、删除 Resource 行并释放全局 Blob 引用、删除 Node、Group、幂等记账，最后删除 Document。解除挂接后被其他运行 pin 的资源继续保留；Blob 引用释放失败使整个事务回滚。
 
 [`PostgresqlCanvasQueryService.findSnapshot`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java) 装配 document、runs、按 owner 分组的资源、node、group 与 references，并在返回前重读对比 document 与 runs：读取窗口内有并发提交就重新读取，保证 graph 与 Run 投影属于同一代次。单资源读取由 [`CanvasQueryService.findResource`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java) 直接按 `(canvasId, resourceId)` 查询已挂载资源（`ownerNodeId != null`），供资源下载/预览直接定位，无需全量加载画布快照。
 
@@ -104,7 +140,7 @@ heartbeat 按固定间隔续租，不触碰业务事实；续租失败即停止�
 
 - **成功**要求输出计划的每个槽位都已物化且与槽位一一对应：媒体槽位是同画布、无 owner、有 blob 且 MIME 与 kind 匹配的资源，`TEXT` 槽位只有文本；随后整组替换节点当前资源，Run 置为 `SUCCEEDED` 并释放 pin。绝不发布半成品数组。
 - **失败与取消**先写终态，再释放 pin，最后丢弃无 owner 的计划输出；取消来自客户端，CAS 只要求 Run 活跃，不需要租约。
-- **人工决议**由 [`CanvasFunctionService`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionService.java) 接收：必须给出核对说明，[`CanvasFunctionUnknownResolution`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionUnknownResolution.java) 的 `RESUME` 把 Run 还回 `READY`（只重新查询，不重新提交），`FAILED` / `CANCELLED` 释放 pin 与未挂接输出。取消与 `resolve(CANCELLED)` 在事务完成后 best-effort 调用 adapter 的 `cancel`。
+- **人工决议**由 [`CanvasFunctionService`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionService.java) 接收：必须给出核对说明，[`CanvasFunctionUnknownResolution`](../../apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionUnknownResolution.java) 的 `RESUME` 把 Run 还回 `READY`（只重新查询，不重新提交），`FAILED` / `CANCELLED` 释放 pin 与未挂接输出。取消与 `resolve(CANCELLED)` 在事务完成后 best-effort 调用 adapter 的 `cancel`。UNKNOWN 的取消与删除要求先完成核实；租约围栏防止旧 Worker 发布结果，外部是否执行由查询或人工核查确认，取消请求的接受与外部取消成功分别判断。
 
 同一槽位重复物化返回既有 Resource 行，不新增行、不重复 pin，因此部分物化后崩溃的 Run 恢复后只补齐缺失槽位。
 

@@ -9,17 +9,17 @@
 | --- | --- |
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
-| 核对 Environment、Daemon、IDE 与 tab 工作状态 | [Environment、Daemon 与 IDE 契约](modules/environment-ide-design.md) |
+| 核对 Environment、Daemon、IDE 与 tab 工作状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
-| 修改页面或共享 UI，保持紧凑与一致 | [前端视觉与交互语言](modules/frontend-design-language.md) |
-| 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools-design.md) |
+| 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
+| 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
-| 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
+| 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Plugins](modules/plugins.md) 与 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
-| 从数据面不兼容的版本升级（导出备份后在全新空库重建） | [部署与运行：从数据面不兼容的版本升级](operations/deployment.md#从数据面不兼容的版本升级) |
+| Schema 不匹配时的数据库重建与恢复 | [部署与运行：Schema 不匹配时的数据库重建与恢复](operations/deployment.md#schema-不匹配时的数据库重建与恢复) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
-| 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas、Project 与交互](canvas-project.md) |
+| 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas](modules/canvas.md) 与 [Project](modules/project.md) |
 | 核对数据库关系、约束与基线 | [Schema](modules/schema.md)及 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
@@ -34,9 +34,8 @@
 | [Harness Runtime](modules/harness-runtime.md) | Session、Entry Tree、Thread、Invocation、Work 和 Processor 如何推进 Agent？Tool、Contributor 与内置工具约定什么契约？ |
 | [Harness Agent Builtin](modules/harness-agent-builtin.md) | Builtin Driver 如何冻结并物化模型请求、推进 MODEL Work、处理流式、重试、模型组与自动压缩？ |
 | [Harness Infra](modules/harness-infra.md) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
-| [Harness Model](modules/harness-model.md) | 模型契约、Provider 请求、SSE、reasoning replay 和上游错误如何处理？ |
-| [模型用量与计价](modules/model-pricing.md) | 原生用量、推理与缓存分类如何计价，缺少事实时如何表达未知？ |
-| [内置工具与异步委派](modules/builtin-tools-design.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
+| [Harness Model](modules/harness-model.md) | 模型契约、Provider 请求、SSE、reasoning replay、用量与计价和上游错误如何处理？ |
+| [内置工具与异步委派](modules/builtin-tools.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
 | [Common](modules/common.md) | 严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
 
 ### Environment 与主机能力
@@ -52,6 +51,7 @@
 | --- | --- |
 | [Platform](modules/platform.md) | Catalog、Plugin、Chat、Storage、Environment、MCP 与外部系统如何编排？ |
 | [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、Canvas Function SPI、凭据与资源端口契约？ |
+| [Plugins](modules/plugins.md) | 内置的 ComfyUI、Media、MiniMax Mavis 和 OpenCLI 插件如何配置、认证与提供能力？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
 | [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
@@ -70,7 +70,6 @@
 | --- | --- |
 | [Web](modules/web.md) | Spring Boot composition root 如何按 Maven dependency 装配可选 Plugin、HTTP、WebSocket、Worker 和生命周期？ |
 | [Frontend](modules/frontend.md) | 浏览器如何把 durable Snapshot 与 lossy realtime 合并为可恢复体验？ |
-| [Thread 控制与展示](modules/thread-control-and-presentation.md) | 根人工控制、子代理只读、交互归属与消息阅读如何协作？ |
 
 ## 仓库与文档维护
 

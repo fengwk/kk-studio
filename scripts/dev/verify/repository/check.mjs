@@ -35,12 +35,10 @@ const repositoryRoot = resolveRepositoryRoot()
 const docsRoot = path.join(repositoryRoot, 'docs')
 
 const moduleDocuments = [
-  'builtin-tools-design.md',
+  'builtin-tools.md',
   'canvas.md',
   'common.md',
   'daemon.md',
-  'environment-ide-design.md',
-  'frontend-design-language.md',
   'frontend.md',
   'harness-agent-builtin.md',
   'harness-environment.md',
@@ -48,13 +46,12 @@ const moduleDocuments = [
   'harness-model.md',
   'harness-runtime.md',
   'ide.md',
-  'model-pricing.md',
   'platform.md',
   'platform-plugin-api.md',
+  'plugins.md',
   'project.md',
   'schema.md',
   'share.md',
-  'thread-control-and-presentation.md',
   'web.md',
   'work.md',
 ]
@@ -62,7 +59,6 @@ const moduleDocuments = [
 const documentPaths = [
   'docs/README.md',
   'docs/system-design.md',
-  'docs/canvas-project.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',
@@ -86,6 +82,7 @@ const checkableTopLevels = new Set([
   'frontend',
   'harness',
   'platform',
+  'plugins',
   'schema',
   'scripts',
   'share',

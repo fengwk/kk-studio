@@ -133,13 +133,13 @@ YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的�
 精确 +1，最后一次序列化写入生效。子代理在权限决定时读取其执行根的开关，
 不复制开关，也不因根切换而更新自身 version。开启时跳过普通工具 preflight；
 已等待的审批仍需人工处理，`ask_user` 始终等待回答。控制与投影规则见
-[Thread 控制与展示](modules/thread-control-and-presentation.md)。
+[Harness Runtime](modules/harness-runtime.md) 与 [Frontend](modules/frontend.md)。
 
 Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
 Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` /
 `SET_CONTRIBUTOR_STATE`），并冻结本次 Run 的 `ProjectRunScope`。每个 live turn 只按该分支设置规划；
 `issue_transition` 等业务工具从冻结 scope 取得 runId，在业务锁内复核 Run/Issue/阶段/版本与调用
-Thread 身份。产品行为见 [Canvas、Project 与交互](canvas-project.md)，规划适配见
+Thread 身份。产品行为见 [Project](modules/project.md)，规划适配见
 [Platform](modules/platform.md)。
 
 ### Tools、Skills 与委派
@@ -167,7 +167,7 @@ kkstudio:/resources/<blobId>
 不接受 `workdir`；只有 `process.exec`（bash）要求显式绝对 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
 Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
 按自己的地址、响应预算与凭据约束承担。
-路径与读取契约见 [内置工具设计](modules/builtin-tools-design.md)。
+路径与读取契约见 [内置工具与异步委派](modules/builtin-tools.md)。
 
 Skill 身份为 `(packageName, name)`。Package 保存仓库、branch、人工确认的
 `currentCommit`、最近观察到的 `observedHeadCommit` 与当前 Skill manifest；检查 branch
@@ -185,7 +185,7 @@ Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join �
 后代审批和问卷归属人工控制根，但不会改变 Join 的直接父订阅。继续委派使用 `thread_id` 并复验父子归属；
 深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
 `inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见
-[异步委派](modules/builtin-tools-design.md)与 [Harness Runtime](modules/harness-runtime.md)。
+[内置工具与异步委派](modules/builtin-tools.md)与 [Harness Runtime](modules/harness-runtime.md)。
 
 ### 构建期扩展
 
@@ -200,7 +200,7 @@ Plugin 通过 Spring Boot auto-configuration 注册安装定义；配置实例�
 Plugin 与应用同进程，拥有相同 JVM 权限，部署者须信任其代码。
 Web 将插件实例和内置贡献一次聚合为完整 `PluginCatalogSnapshot`，校验依赖与名称后
 提供同一快照中的 HarnessCatalog / CanvasFunctionCatalog；失败候选统一释放资源。
-Contributor 契约和 Plugin 装配见
+内置插件详见 [Plugins](modules/plugins.md)，Contributor 契约和 Plugin 装配见
 [Harness Runtime](modules/harness-runtime.md#contributor-与目录)、[Platform Plugin API](modules/platform-plugin-api.md)
 和 [Platform](modules/platform.md)。
 MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消见
@@ -276,7 +276,7 @@ Agent/Model/Environment 与业务工具）提交、Run/Activity 写入、Harness
 Issue Reconciler 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
 `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
 交接提交时复验 Run 身份、版本、合法边与门禁，并在同一业务锁内写入 `active=false` 快照。
-Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas、Project 与交互](canvas-project.md)。
+Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas](modules/canvas.md)、[Project](modules/project.md) 与 [Schema](modules/schema.md)。
 
 ### 附件与媒体
 
