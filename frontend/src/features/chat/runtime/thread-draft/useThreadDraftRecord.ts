@@ -370,7 +370,7 @@ export function useThreadDraftRecord({
     if (attemptedReceiptSignatureRef.current === stopReceiptSignature) {
       return
     }
-    // 每个回执集合只自动尝试一次：失败不自动重试，改为保留原回执并提示用户手动重试。
+    // 每个回执集合只自动尝试一次：失败不自动重试，保留原回执并提示用户手动重试。
     attemptedReceiptSignatureRef.current = stopReceiptSignature
     void applyStopReceipts(stopReceipts, threadId, bindingEpochRef.current)
     // 只按回执身份补偿；applyStopReceipts 每次渲染都是新引用。

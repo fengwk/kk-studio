@@ -324,7 +324,7 @@ public final class ConfigSyncPlanner {
     return new SkillPlan(skillImports, availableSkills);
   }
 
-  /** 新 manifest 不再提供、但仍被 Agent 引用的 Skill（按名称排序，用于硬拒绝判定）。 */
+  /** 新 manifest 未提供、但仍被 Agent 引用的 Skill（按名称排序，用于硬拒绝判定）。 */
   private List<String> referencedRemovedSkills(
       String packageName, SkillPackage existing, List<SkillManifestEntry> manifest) {
     Set<String> published = new LinkedHashSet<>(skillNames(manifest));

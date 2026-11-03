@@ -93,7 +93,7 @@ class ManualCompactionLifecycleRegressionTest {
     CompactThreadResult result =
         runtime.compactThread(new CompactThreadCommand(baseline.childThreadId, 0));
 
-    // (a) 后代 Child 就地推进 version 0 -> 1，执行控制保持 RUNNABLE（不再有 IDLE/ACTIVE 生命周期翻转）
+    // (a) 后代 Child 就地推进 version 0 -> 1，执行控制保持 RUNNABLE
     assertEquals(ThreadExecutionControl.RUNNABLE, result.thread().executionControl());
     assertEquals(1L, result.thread().version());
     assertEquals(

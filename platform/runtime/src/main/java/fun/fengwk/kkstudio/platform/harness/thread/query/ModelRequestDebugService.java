@@ -40,7 +40,7 @@ import java.util.UUID;
  * 等基础设施或编程异常照常传播，绝不伪装成 planning 失败。
  *
  * <p>只要 snapshot 暴露活动 Driver generation，就独立附加可空的 {@code FROZEN_INVOCATION}：它直接使用 Driver 冻结的
- * canonical request-spec 诊断 JSON，不再读取任何 Provider DTO 或 Driver 私有状态。冻结事实只来自原始 snapshot，与草稿 model /
+ * canonical request-spec 诊断 JSON，不读取任何 Provider DTO 或 Driver 私有状态。冻结事实只来自原始 snapshot，与草稿 model /
  * environment 无关，也不新建、复制或延长任何持久事实的寿命。
  *
  * <p>冻结请求视图与顶层现算预览相互独立——预览被拒绝时冻结事实仍然成立。

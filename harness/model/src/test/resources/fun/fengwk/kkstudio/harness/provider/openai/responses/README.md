@@ -10,7 +10,7 @@
 
 [`upstream-test-manifest.json`](upstream-test-manifest.json) records the Responses mapping from
 `langchain4j-open-ai/src/test/java` and tracked inherited methods. Its current inventory has
-15 source files, 165 methods and 165 invocation records: 45 `PORTED`, 0 `PORT_PENDING` and
+15 source files, 165 methods and 165 invocation records: 45 `PORTED` and
 120 `OUT_OF_SCOPE`. Independently, 93 records carry
 `realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
 
@@ -30,8 +30,7 @@ encoding, stream completion and reasoning replay, including encrypted content an
 `executionStatus: PASSED` is checked manifest metadata. Run the target tests to establish their
 current result; the manifest test establishes usable targets and fixtures, rather than executing
 all targets or proving upstream assertion equivalence. `OUT_OF_SCOPE` records explain their
-contract differences through `capabilityMismatch`, and `PORT_PENDING` identifies unfinished
-local mappings.
+contract differences through `capabilityMismatch`.
 
 `realInteropStatus` is orthogonal to `mappingStatus`: an offline port may exist while the
 corresponding live integration remains `NOT_EXECUTED_REQUIRES_CREDENTIAL`. A local pass verifies

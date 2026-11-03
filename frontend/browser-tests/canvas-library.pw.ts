@@ -62,7 +62,7 @@ test.describe('Canvas library real browser regression', () => {
         expectedPadding,
       }
     })
-    // 与共享资源卡基座一致，而不是旧的 project-card 皮肤。
+    // 与共享资源卡基座规范一致。
     expect(metrics.padding).toBe('16px')
     expect(metrics.borderRadius).toBe('12px')
     expect(metrics.iconWidth).toBe('40px')

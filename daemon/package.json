@@ -11,6 +11,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "generate:control": "node ../harness/environment/src/main/protocol/ts/generate.mjs",
     "check:control": "node ../harness/environment/src/main/protocol/ts/generate.mjs --check",
+    "golden:control": "node scripts/write-control-golden.mjs",
     "test": "npm run build && vitest run",
     "coverage": "npm run build && vitest run --coverage"
   },

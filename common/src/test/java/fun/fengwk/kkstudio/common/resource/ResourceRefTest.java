@@ -78,7 +78,7 @@ class ResourceRefTest {
                 "text/plain", null, 3L, sha256("a/b".getBytes(StandardCharsets.UTF_8))));
   }
 
-  /** 验证合法 http/https URI 接受且 digest 可选；节点本地 file 与裸 s3 引用不再是合法资源。 */
+  /** 验证合法 http/https URI 接受且 digest 可选；节点本地 file 与裸 s3 引用不是合法资源。 */
   @Test
   void acceptsHttpUrisWithOptionalDigestAndRejectsFileAndS3() {
     for (String uri : List.of("file:///a/b.txt", "s3://my-bucket/dir/file.txt")) {

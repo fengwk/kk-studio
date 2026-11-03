@@ -464,7 +464,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect(composer).toContainText('Claude')
     await expect(composer).toContainText('fast')
 
-    // 2. + 命令表进入 Debug（不消费草稿），断言旧预览操作按钮与规划标题已删除
+    // 2. + 命令表进入 Debug（不消费草稿），断言无多余预览操作按钮与规划标题
     await enterDebugView(page)
     await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: '当前规划' })).toHaveCount(0)
@@ -499,8 +499,8 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
   test('inspect action and redundant headings are removed in both layouts without losing the draft', async ({
     page,
   }) => {
-    // .thread-debug-preview-action、当前规划与检查操作已移除；
-    // 宽窄布局下均断言旧入口已删除，草稿全程不变。
+    // 不存在 .thread-debug-preview-action、当前规划与检查操作；
+    // 宽窄布局下均断言旧入口不存在，草稿全程不变。
     const cursor: Cursor = INITIAL_CURSOR
     await installPreviewApiMock(page, { cursor: () => cursor })
 
@@ -538,7 +538,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     expect(dockMetrics.dockScrollWidth).toBeLessThanOrEqual(dockMetrics.dockClientWidth + 1)
     expect(dockMetrics.composerScrollWidth).toBeLessThanOrEqual(dockMetrics.composerClientWidth + 1)
 
-    // 4. 带草稿进入 Debug：宽布局下断言旧操作按钮与冗余标题已删除
+    // 4. 带草稿进入 Debug：宽布局下断言无多余操作按钮与冗余标题
     await enterDebugView(page)
 
     const shell = page.locator('.thread-events-shell')
@@ -568,7 +568,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
 
     await page.screenshot({ path: resolve(reportsDir, 'debug-preview-title-wide.png'), animations: 'disabled' })
 
-    // 7. 窄布局复核：同一棵 Debug，旧入口与标题同样已删除
+    // 7. 窄布局复核：同一棵 Debug，旧入口与标题同样不存在
     await page.setViewportSize(NARROW_VIEWPORT)
     await expect(shell).toHaveAttribute('data-layout', 'narrow')
     const tabs = page.locator('.thread-debug-tabs')

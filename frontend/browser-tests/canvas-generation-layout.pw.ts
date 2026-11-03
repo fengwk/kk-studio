@@ -37,7 +37,7 @@ test.describe('Canvas Generation Panel Real Browser Layout Regression', () => {
     await expect(candidateBtn).toContainText('@Source Photo_0')
 
     // 5. 验证参数控件：比例下拉与数量数字输入框
-    // 比例使用共享 Select：选中值以 data-value 暴露，不再有原生 value。
+    // 比例使用共享 Select：选中值以 data-value 暴露，无原生 value。
     const ratioSelect = panel.getByLabel('比例')
     await expect(ratioSelect).toBeVisible()
     await expect(ratioSelect).toHaveAttribute('data-value', '16:9')

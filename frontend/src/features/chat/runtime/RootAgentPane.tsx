@@ -114,7 +114,7 @@ export function RootAgentPane({
     pane.controller.dismissActionError()
   }
 
-  // 分支名不再在 pane 内重复展示（顶栏面包屑承载身份）；这里只保留状态标签判定。
+  // 分支名由顶栏面包屑承载身份，pane 内不重复展示；这里只保留状态标签判定。
   const boundThreadName = pane.boundBranchName
 
   // Debug 主视图接管主滚动区时，输入/审批/分支控制面整体隐藏（保持挂载以保留草稿与绑定）。

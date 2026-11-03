@@ -20,7 +20,7 @@ import type { ExitReport, LaunchSpec } from './state.js'
  * <p>「父进程确认之后才启动命令」是本文件的核心约定：许可之前失败（取消、超时、父进程退出）因此永远等价于「用户命令没有产生
  * 任何副作用」。命令自然退出时先把退出事实原子发布，再收敛整个范围并把收敛事实发布到 `cleanup`。
  *
- * <p>本入口只以**编译产物** `helper.js` 运行（见 helper-path.ts）：同目录模块一律用静态 `.js` import，不再做源码态扩展名探测。
+ * <p>本入口只以**编译产物** `helper.js` 运行（见 helper-path.ts）：同目录模块一律使用静态 `.js` import。
  * `posix-session`/`win32` 的原生库都是惰性加载，因此非目标平台 import 本文件也不会触碰 kernel32/libc。
  */
 

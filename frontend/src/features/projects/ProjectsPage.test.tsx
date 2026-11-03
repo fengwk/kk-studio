@@ -225,7 +225,7 @@ describe('ProjectsPage', () => {
     })
     fireEvent.click(saveBtn)
 
-    // 冲突（结果未确认）时不自动推进版本，改为显式恢复入口
+    // 冲突（结果未确认）时不自动推进版本，提供显式恢复入口
     await waitFor(() => {
       expect(screen.getByText(/基础信息未确认写入结果/)).toBeInTheDocument()
     })

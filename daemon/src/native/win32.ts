@@ -547,8 +547,8 @@ class JobScope implements WindowsJobScope {
   /**
    * 等待命令进程退出。
    *
-   * <p>绝不用 `WaitForSingleObject(handle, INFINITE)`：那会同步阻塞 helper 的 Node 事件循环，父进程被强杀时内核关闭 IPC 通道
-   * 产生的 `disconnect` 永远不会被派发，收尾也就永远不会发生。这里改为 `Wait(..., 0)` + 小步异步让出，既拿到同样的退出事实，
+   * <p>不用 `WaitForSingleObject(handle, INFINITE)`：避免同步阻塞 helper 的 Node 事件循环（父进程被强杀时内核关闭 IPC 通道
+   * 产生的 `disconnect` 无法被派发）。这里使用 `Wait(..., 0)` + 小步异步让出，既拿到退出事实，
    * 又让 IPC 收尾始终可被处理。
    */
   async awaitExit(): Promise<ExitReport> {
@@ -871,7 +871,7 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
 /**
  * 以 owner-only DACL **原子**写入敏感文件。
  *
- * <p>绝不对目标做「先写内容再收紧 DACL」：那会先把明文落进继承来的宽松权限文件里。这里改为在同一个私有父目录里独占创建
+ * <p>不对目标做「先写内容再收紧 DACL」，避免明文落入继承来的宽松权限文件。这里在同一个私有父目录里独占创建
  * **空**临时文件，先把它的属主显式设为当前用户并把 DACL 收紧成 owner-only、读回通过，再写满、`fsync`，最后原子 `rename`
  * 覆盖目标并读回验证。覆盖既有目标之前先核验它是属主自己的、已经收紧的普通文件；任何外部属主/宽松 ACL 都在写入前失败关闭，
  * 绝不截断改写，也绝不改写未知路径的属主。

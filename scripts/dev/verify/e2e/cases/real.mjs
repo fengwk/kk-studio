@@ -1758,7 +1758,7 @@ registerCase({
       typeof match.homeDirectory === 'string' && match.homeDirectory.startsWith('/'),
       safeDiagnosticJson(match),
     )
-    // 目录浏览能力已随产品 Workspace 删除，不再是 catalog 的一部分。
+    // 目录浏览能力不是 catalog 的一部分。
     const modelCapabilityIds = [
       'fs.read',
       'fs.write',
@@ -2228,9 +2228,9 @@ export function subagentResults(entries) {
 /**
  * 断言一个由 `task` 委派产生的子 Thread：执行父关系指回发起方，ROOT 只保存 settings。
  *
- * <p>执行父子关系是 Thread 行的不可变事实（`HarnessThreadDTO.parentThreadId`），不再物化进 ROOT
+ * <p>执行父子关系是 Thread 行的不可变事实（`HarnessThreadDTO.parentThreadId`），不物化进 ROOT
  * payload；ROOT 只冻结初始 branch settings，历史是对话历史而不是运行树，因此这里拒绝任何额外的
- * ROOT 字段（例如旧的 `subagentContext`）。
+ * ROOT 字段。
  */
 export function delegatedChildFacts(parentThreadId, childSnapshot) {
   const thread = childSnapshot?.thread

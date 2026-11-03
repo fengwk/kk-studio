@@ -974,7 +974,7 @@ describe('EditProjectModal', () => {
           ...workflowProject,
           workflow: {
             states: workflowProject.workflow.states.map((state) =>
-              state.state === 'WORK' ? { ...state, agent: 'legacy-agent' } : state,
+              state.state === 'WORK' ? { ...state, agent: 'missing-agent' } : state,
             ),
           },
         }}
@@ -987,7 +987,7 @@ describe('EditProjectModal', () => {
     await user.click(screen.getByRole('tab', { name: '工作流' }))
 
     expect(
-      await screen.findByText(/已配置的 Agent 当前不在目录中，已保留原名称：legacy-agent/),
+      await screen.findByText(/已配置的 Agent 当前不在目录中，已保留原名称：missing-agent/),
     ).toBeInTheDocument()
   })
 })

@@ -182,17 +182,17 @@ class ReadToolTest {
     assertSame(failure, thrown);
   }
 
-  /** 验证 read 工具参数中携带已废弃的 workdir 时，在请求构造期抛出 IllegalArgumentException。 */
+  /** 验证 read 工具参数中携带未知字段时，在请求构造期抛出 IllegalArgumentException。 */
   @Test
-  void executeRejectsWorkdirInArguments() {
+  void executeRejectsUnknownFieldsInArguments() {
     ReadTool tool = new ReadTool((request, progress) -> null);
-    ToolCall callWithWorkdir =
-        new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\",\"workdir\":\"/srv/repo\"}");
+    ToolCall callWithUnknownField =
+        new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\",\"unknownField\":\"value\"}");
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new ToolExecutionRequest(tool.descriptor(), callWithWorkdir, Duration.ZERO));
-    assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
+            () -> new ToolExecutionRequest(tool.descriptor(), callWithUnknownField, Duration.ZERO));
+    assertTrue(error.getMessage().contains("unknownField is not allowed"), error.getMessage());
   }
 
   /** 验证 read 工具参数接受 kkstudio: resources 与 skills 两种稳定 URI 格式并委托执行。 */

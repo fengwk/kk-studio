@@ -65,7 +65,7 @@ test.describe('Shared resource card foundation', () => {
     // 紧凑动作 = 28px（普通控件 32px 的紧凑档）。
     expect(metrics.actionHeight).toBe(28)
     expect(metrics.actionFontSize).toBe('12px')
-    // 卡片不再带固定 min-height。
+    // 卡片不带固定 min-height。
     expect(metrics.cardMinHeight).toBe('auto')
 
     const gridGap = await page
@@ -213,7 +213,7 @@ test.describe('Shared resource card foundation', () => {
 const PANELS_HARNESS_URL = '/browser-tests/resource-card-harness.html?panels=1'
 
 test.describe('Real Models and Providers panels layout and CreateCard contract', () => {
-  // 1280px 宽屏：空态新建卡片保持至少 280px 最小高度，不再矮扁坍塌
+  // 1280px 宽屏：空态新建卡片保持至少 280px 最小高度，避免矮扁坍塌
   test('ensures empty state CreateCard respects min-height 280px on 1280px desktop', async ({
     page,
   }, testInfo) => {

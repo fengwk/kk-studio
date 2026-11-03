@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -110,7 +111,7 @@ const forbiddenDocumentationTerms = [
   ],
   ['template responsibility heading', /^#{2,6}\s+(?:核心职责|协作边界)\s*$/mu],
   ['Workspace NOTES', /workspace\s+notes/i],
-  ['本切片', /本切片/],
+  [['本', '切片'].join(''), new RegExp(['本', '切片'].join(''))],
   ['路线图', /路线图/],
   ['TODO', /\bTODO\b/i],
   ['SET_MODEL', /\bSET_MODEL\b/],
@@ -878,6 +879,109 @@ function checkEnvironmentRouteDocs() {
   }
 }
 
+const forbiddenSessionArtifactTerms = [
+  [['本', '切片'].join(''), new RegExp(['本', '切片'].join(''))],
+  [['Branch', 'B'].join(' '), new RegExp(['Branch', 'B'].join(' '))],
+]
+
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.svg',
+  '.jar', '.class', '.war', '.ear',
+  '.woff', '.woff2', '.ttf', '.eot',
+  '.bin', '.exe', '.dll', '.so', '.dylib',
+  '.tar', '.gz', '.tgz', '.zip', '.7z',
+  '.pdf', '.mp3', '.mp4',
+])
+
+function isBinaryBuffer(buffer) {
+  const checkLength = Math.min(buffer.length, 8192)
+  for (let i = 0; i < checkLength; i++) {
+    if (buffer[i] === 0) {
+      return true
+    }
+  }
+  return false
+}
+
+function collectTextFilesRecursively(dir, rootDir = dir) {
+  const files = []
+  const ignored = new Set([
+    '.git',
+    'node_modules',
+    'target',
+    'dist',
+    'coverage',
+    'reports',
+    '.workspace',
+    '.kkstudio',
+    'logs',
+    'pids',
+  ])
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (ignored.has(entry.name)) {
+      continue
+    }
+    const full = path.join(dir, entry.name)
+    let stat
+    try {
+      stat = statSync(full)
+    } catch {
+      continue
+    }
+    if (stat.isDirectory()) {
+      files.push(...collectTextFilesRecursively(full, rootDir))
+    } else if (stat.isFile()) {
+      const rel = path.relative(rootDir, full).replace(/\\/g, '/')
+      files.push(rel)
+    }
+  }
+  return files
+}
+
+function getTrackedTextFiles(root) {
+  try {
+    const stdout = execFileSync('git', ['ls-files', '-z'], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 1 << 28,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return stdout.split('\0').filter(Boolean)
+  } catch {
+    return collectTextFilesRecursively(root)
+  }
+}
+
+function checkNoSessionArtifacts() {
+  const trackedFiles = getTrackedTextFiles(repositoryRoot)
+  for (const relativePath of trackedFiles) {
+    const ext = path.extname(relativePath).toLowerCase()
+    if (BINARY_EXTENSIONS.has(ext)) {
+      continue
+    }
+    const fullPath = path.join(repositoryRoot, relativePath)
+    let buffer
+    try {
+      buffer = readFileSync(fullPath)
+    } catch {
+      continue
+    }
+    if (isBinaryBuffer(buffer)) {
+      continue
+    }
+    const content = buffer.toString('utf8')
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      for (const [label, pattern] of forbiddenSessionArtifactTerms) {
+        if (pattern.test(line)) {
+          addError(`${relativePath}:${i + 1}: contains prohibited session artifact '${label}'`)
+        }
+      }
+    }
+  }
+}
+
 checkFixedLayout()
 checkHeadings()
 checkLinks()
@@ -889,6 +993,7 @@ checkNoHarnessModuleDocs()
 checkPackageInfo()
 checkPackageArchitectureDocs()
 checkEnvironmentRouteDocs()
+checkNoSessionArtifacts()
 
 if (errors.length > 0) {
   console.error(`FAIL docs (${errors.length} error${errors.length === 1 ? '' : 's'})`)

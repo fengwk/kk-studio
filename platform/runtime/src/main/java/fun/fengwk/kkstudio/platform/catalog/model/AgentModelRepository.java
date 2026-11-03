@@ -236,7 +236,7 @@ public class AgentModelRepository {
           .update();
     }
     if (model.kind() == AgentModelKind.GROUP) {
-      // 组改名同样是一次配置写：旧名字下的冷却不再属于当前组。
+      // 组改名同样是一次配置写：清除原名称下的冷却状态。
       deleteGroupCooldowns(model.name());
     }
   }

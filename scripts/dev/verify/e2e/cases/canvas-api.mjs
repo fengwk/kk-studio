@@ -10,7 +10,7 @@ import { registerCase } from '../lib/registry.mjs'
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** CanvasDocumentDTO 精确字段集合：revision 是同步坐标系，不再是整图前置版本。 */
+/** CanvasDocumentDTO 精确字段集合：revision 是同步坐标系。 */
 const DOCUMENT_FIELDS = ['id', 'title', 'revision', 'createdAt', 'updatedAt']
 
 /** CanvasPatchDTO 精确字段集合。 */

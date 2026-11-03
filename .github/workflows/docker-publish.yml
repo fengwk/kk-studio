@@ -58,6 +58,8 @@ jobs:
         run: node scripts/dev/verify/repository/check.mjs
       - name: Scan for sensitive data
         run: node scripts/dev/verify/repository/check-sensitive-data.mjs
+      - name: Verify capability schema synchronization
+        run: node scripts/dev/verify/generated-contracts/capabilities.mjs --check
 
   # 五平台 Daemon 平台门禁与安装器宿主验收由可复用工作流提供：main 发布镜像前必须通过，
   # dev 只发布镜像，不需要等待该矩阵；改动 daemon/** 时 PR 门禁仍会独立触发。

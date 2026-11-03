@@ -34,8 +34,8 @@ import java.util.Set;
  * <ul>
  *   <li>源文件、类与方法自洽性：精确枚举 51 个测试源文件与 676 个真实方法全集，拒绝虚构、重复或遗漏。
  *   <li>状态诚实与无虚假对等：精确维护 145 项适用 invocation 为 PORTED 与 PASSED，全部 targetTest
- *       经反射机制验证真实存在且带 @Test/@ParameterizedTest 注解且无 @Disabled；0 项待处理（PORT_PENDING）；全部 531 项
- *       OUT_OF_SCOPE 详述架构不匹配原因；拒绝用虚假同名测试建立不合规对等。
+ *       经反射机制验证真实存在且带 @Test/@ParameterizedTest 注解且无 @Disabled；全部 531 项 OUT_OF_SCOPE
+ *       详述架构不匹配原因；拒绝用虚假同名测试建立不合规对等。
  *   <li>类路径测试夹具校验：所有 PORTED 声明的 fixture 资源均通过相对路径检查、防止路径穿越、在类路径下真实非空存在。
  *   <li>能力不匹配（mismatch）显式化：全部 531 项 OUT_OF_SCOPE 均详述具体架构不匹配原因，其 targetTest 严格为 null。
  *   <li>真实凭据隔离正交性：281 项依赖真实凭据（@EnabledIfEnvironmentVariable）的集成测试独立标为
@@ -52,7 +52,6 @@ class UpstreamTestManifestTest {
   private static final int EXPECTED_TOTAL_METHODS = 676;
   private static final int EXPECTED_TOTAL_INVOCATIONS = 676;
   private static final int EXPECTED_PORTED_INVOCATIONS = 145;
-  private static final int EXPECTED_IN_SCOPE_PENDING_INVOCATIONS = 0;
   private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 531;
   private static final int EXPECTED_REAL_CREDENTIAL_INVOCATIONS = 281;
 
@@ -191,8 +190,7 @@ class UpstreamTestManifestTest {
     assertEquals(EXPECTED_TOTAL_METHODS, summary.path("totalMethods").asInt(0));
     assertEquals(EXPECTED_TOTAL_INVOCATIONS, summary.path("totalInvocations").asInt(0));
     assertEquals(EXPECTED_PORTED_INVOCATIONS, summary.path("portedInvocations").asInt(0));
-    assertEquals(
-        EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, summary.path("inScopePendingInvocations").asInt(0));
+    assertEquals(0, summary.path("inScopePendingInvocations").asInt(0));
     assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, summary.path("outOfScopeInvocations").asInt(0));
     assertEquals(
         EXPECTED_REAL_CREDENTIAL_INVOCATIONS, summary.path("realCredentialInvocations").asInt(0));
@@ -203,7 +201,6 @@ class UpstreamTestManifestTest {
     int dynamicTotalInvocations = 0;
     int dynamicPorted = 0;
     int dynamicOos = 0;
-    int dynamicPending = 0;
     int dynamicRealCred = 0;
 
     JsonNode methodsArray = root.path("methods");
@@ -224,9 +221,7 @@ class UpstreamTestManifestTest {
         assertTrue(seenInvocationIds.add(id), () -> "duplicate invocationId: " + id);
 
         String mappingStatus = inv.path("mappingStatus").asString("");
-        assertFalse(
-            "PORT_PENDING".equals(mappingStatus) || "SKIPPED".equals(mappingStatus),
-            () -> "Zero pending / skipped allowed: " + id);
+        assertFalse("SKIPPED".equals(mappingStatus), () -> "SKIPPED not allowed: " + id);
 
         if ("PORTED".equals(mappingStatus)) {
           dynamicPorted++;
@@ -261,7 +256,6 @@ class UpstreamTestManifestTest {
     assertEquals(EXPECTED_TOTAL_INVOCATIONS, dynamicTotalInvocations);
     assertEquals(EXPECTED_PORTED_INVOCATIONS, dynamicPorted);
     assertEquals(EXPECTED_OUT_OF_SCOPE_INVOCATIONS, dynamicOos);
-    assertEquals(EXPECTED_IN_SCOPE_PENDING_INVOCATIONS, dynamicPending);
     assertEquals(EXPECTED_REAL_CREDENTIAL_INVOCATIONS, dynamicRealCred);
   }
 

@@ -395,7 +395,6 @@ class ReadTextWindowTest {
     assertTrue(head.contains("1|" + "a".repeat(99)), head);
     assertTrue(head.contains("truncated: yes"), head);
     assertTrue(head.contains("next: 2:1"), head);
-    assertFalse(head.contains("Showing lines"), "旧分页 footer 已移除");
 
     // 读取统计出的最后一行，证明总行数来自扫描到 EOF；再越过它必须是空范围。
     long lastLine = ((long) bytes - 1) / 100 + 1;

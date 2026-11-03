@@ -570,7 +570,7 @@ test('the local branch draft Debug provides read-only overlay with clean exit wi
   await expect(back).toBeVisible()
   await expect(composer).toContainText('branch draft preview')
 
-  // 已移除草稿预览操作按钮，且未触发任何分支预览或命令批次请求。
+  // 不显示草稿预览操作按钮，且未触发任何分支预览或命令批次请求。
   await expect(page.locator('.thread-debug-preview')).toHaveCount(0)
   await expect(page.locator('.thread-debug-preview-action')).toHaveCount(0)
   expect(recorded.branchPreviews).toEqual([])
@@ -589,7 +589,7 @@ test('the local branch draft Debug provides read-only overlay with clean exit wi
 
 /**
  * per-turn hover 真实读数：由该回合的真实 usage 事实生成完整数字与全称字段，
- * 不再复述可见的紧凑缩写图例（真实浏览器里读取 title 属性）。
+ * 不复述可见的紧凑缩写图例（真实浏览器里读取 title 属性）。
  */
 test('the turn footer hover readout uses full usage facts instead of the compact legend', async ({
   page,

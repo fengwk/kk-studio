@@ -322,7 +322,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
    * 历史 open Turn 的 head 已落到部分 ToolResult descendant（partial prefix）：新的 {@link
    * ThreadContextClassifier}（rule 6：head/requestHead/result 任一不等视为历史）走 IDLE_OR_HISTORICAL → INPUT
    * normalization，按 path 中已有的 ToolResult callIndex 前缀补写缺失 synthetic 并补 CANCELLED TURN_END 与新 INPUT
-   * Turn。Tool 行 不再有 resultEntryId 字段，"已挂载" 状态由 Entry 路径事实承载。
+   * Turn。"已挂载" 状态由 Entry 路径事实承载。
    */
   @Test
   void partialHistoricalToolResultPathWithRealInvocationsNormalizesFreshTurn() {

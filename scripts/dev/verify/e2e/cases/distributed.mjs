@@ -102,7 +102,7 @@ registerCase({
       createdId = created.id
       latestVersion = created.version
 
-      // 2. 在 node B 读取并验证一致性（注意 registrationToken 不再暴露）
+      // 2. 在 node B 读取并验证一致性（注意 registrationToken 不暴露）
       const getBRes = await ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
       const fromB = envelopeData(getBRes.json)
       assert(fromB.id === createdId, 'node B get: id mismatch')

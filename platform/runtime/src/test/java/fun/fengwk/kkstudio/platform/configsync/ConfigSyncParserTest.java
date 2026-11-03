@@ -213,8 +213,8 @@ class ConfigSyncParserTest {
         (Map<String, Object>) yaml.toMap(ConfigSyncFixtures.defaultSettings(), "settings");
     ((Map<String, Object>) settings.get("tool")).put("bogus", 1);
     settings.put("unknownSection", Map.of("x", 1));
-    // 已退役的旧 integrations 段与其它未知字段同规则：明确报告为 unsupported field，绝不静默忽略。
-    settings.put("integrations", Map.of("comfyui", Map.of("enabled", true)));
+    // 未知设置段与其它未知字段同规则：明确报告为 unsupported field，绝不静默忽略。
+    settings.put("extraSection", Map.of("comfyui", Map.of("enabled", true)));
     String yamlText = yaml.dump(Map.of("settings", settings));
     ConfigSyncParser.ParsedDocument document = parser.parse(yamlText);
 
@@ -224,7 +224,7 @@ class ConfigSyncParserTest {
         document.skipped().stream().filter(skip -> "settings".equals(skip.getKind())).toList();
     assertEquals(3, settingsSkips.size());
     assertTrue(
-        settingsSkips.stream().anyMatch(skip -> skip.getReason().contains("integrations")),
+        settingsSkips.stream().anyMatch(skip -> skip.getReason().contains("extraSection")),
         document.skipped().toString());
   }
 

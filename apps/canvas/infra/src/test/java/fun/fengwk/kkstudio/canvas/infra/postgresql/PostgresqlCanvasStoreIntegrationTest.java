@@ -96,9 +96,9 @@ class PostgresqlCanvasStoreIntegrationTest extends PostgresCanvasInfraTestSuppor
     assertTrue(canvasStore.advanceRevision(canvasId, 0L, 1L));
   }
 
-  /** 节点行是目标模型：名称唯一键按兼容折叠比较，Function 以 base shape JSONB 往返。 */
+  /** 节点行是目标模型：名称唯一键按规范化折叠比较，Function 以 base shape JSONB 往返。 */
   @Test
-  void nodeRowsCarryFunctionAndCompatibilityFoldedNameKey() {
+  void nodeRowsCarryFunctionAndNormalizedFoldedNameKey() {
     UUID canvasId = addDocument();
     NodeFixture functionNode = addFunctionNode(canvasId, "video.generate");
     NodeFixture textNode = addTextNode(canvasId, "body");

@@ -81,8 +81,8 @@ import java.util.function.Supplier;
  * 是纯本地检查：申请并发租约、钉住目录租用、装配分支视图与可选环境绑定，不触碰任何外部系统，因此 {@link ToolGateway.Busy} / {@link
  * ToolGateway.Rejected} 肯定没有副作用。
  *
- * <p>{@link #preflight} 与 {@link #admit} 都在当前目录租用中严格取回冻结贡献：工具已移除（例如插件被关闭）或定义、贡献身份、 requirements
- * 变化时以确定性错误告知模型，绝不按新定义执行旧参数。
+ * <p>{@link #preflight} 与 {@link #admit} 都在当前目录租用中严格取回冻结贡献：工具不存在或已被停用（例如插件被关闭）或定义、贡献身份、
+ * requirements 变化时以确定性错误告知模型，绝不按新定义执行旧参数。
  *
  * <p>{@link GatewayRun#execute} 在调用方的执行线程上阻塞调用 {@link Tool#execute}：中断映射为取消，工具异常按固定表分类（远程发送不确定性 上报
  * {@code unknown}，不按普通失败处理）。并发租约与目录租用只由 {@link GatewayRun#close()} 释放：Processor 在终态决议提交之后、

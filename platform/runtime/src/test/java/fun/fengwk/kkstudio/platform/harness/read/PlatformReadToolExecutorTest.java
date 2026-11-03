@@ -455,7 +455,7 @@ class PlatformReadToolExecutorTest {
     verifyNoInteractions(skillReader, resourceReader);
   }
 
-  /** 单斜杠 URI 仍需完整非空段和规范 UUID，不能因删除兼容分支而放宽校验。 */
+  /** 单斜杠 URI 仍需完整非空段和规范 UUID，严格执行校验。 */
   @ParameterizedTest
   @ValueSource(
       strings = {

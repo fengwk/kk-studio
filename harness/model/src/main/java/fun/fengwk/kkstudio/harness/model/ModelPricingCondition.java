@@ -36,7 +36,7 @@ public record ModelPricingCondition(
   public static final ModelPricingCondition ALWAYS =
       new ModelPricingCondition(null, null, null, null, null, null, null, null);
 
-  /** 兼容未使用 request-body 条件的调用方；语义等价于 requestBody=null。 */
+  /** 便捷构造器，语义等价于 requestBody=null。 */
   public ModelPricingCondition(
       Context context,
       List<String> serviceTier,
