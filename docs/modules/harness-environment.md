@@ -170,17 +170,45 @@ Studio -> IDE_LEASE(round, bindings)
 
 `SETTINGS` 载荷通告认证准入后的资源预算（`max_resource_bytes`）与临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`）。Daemon 收到 `SETTINGS` 并回执 `READY` 后连接进入可用状态。
 
-`daemon_instance_id` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Studio 在同实例重连后，对未收敛调用发送 `RECOVER`（已取消的发送 `CANCEL`）而绝不重发 `INVOKE`，Daemon 命中 journal 时重放既有事实，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启或迁移的执行恢复。握手失败时 Studio 以 `ERROR` 帧并关闭连接收尾。
+`daemon_instance_id` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Studio 在同实例重连后，对未收敛调用发送 `RECOVER`（已取消的发送 `CANCEL`）而绝不重发 `INVOKE`，Daemon 命中 journal 时重放既有事实，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启的执行恢复。握手失败时 Studio 以 `ERROR` 帧并关闭连接收尾。
 
 ## 载荷与编解码
 
 控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlProtocolCodec.decodeFrame` 完成单一阶段 wire 校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
 
-宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。
+宿主环境元数据持久化：[`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码宿主侧环境元数据，由 Server 持久化到 `runtime_info`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
+- `runtime_info`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
+- `skill_state`：可重建投影，READY 后重新同步；旧代际不能覆盖新代际。
+- `recent_events`：最近 200 条去敏、有界运维事件，包括更新失败；不作为锁或完整审计账本。
 
-`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据包含目标操作系统、时区、Daemon 进程用户、用户 HOME、操作者备注、受控临时目录与 CPU 架构。运行状态（`RuntimeStatus`）由 revision 与状态详情组成，版本更新状态（`target_version`、`downloaded_bytes`、`total_bytes`）在增量变化时通过 `RUNTIME_STATUS` 或心跳载荷同步。
+`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据包含目标操作系统、时区、Daemon 进程用户、用户 HOME、操作者备注、受控临时目录与 CPU 架构。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
+
+```text
+runtimeStatus: {
+  revision: string (规范正十进制且不超过 long 上限)
+  status: {
+    daemonVersion: string
+    update: {
+      targetVersion: string
+      downloadedBytes: number (非负)
+      totalBytes: number | null (非负且不小于已下载量)
+    } | null
+  }
+}
+```
+
+版本更新状态在增量变化时通过 `RUNTIME_STATUS` 或心跳载荷同步；无更新时 `update` 为 null。Server 仅在接受更高 revision 后替换缓存；同 revision 内容不同是协议错误，更低 revision 视为迟到快照忽略。
 
 `IDE_COMMAND` 与 `IDE_RESULT` 是连接上的 IDE 控制通道；`IDE_LEASE` 承载 IDE 租约批量证明下发。资源上传控制消息（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）通过 `invocationId` 与 `transferId` 精确关联单次上传。二进制字节不进入控制通道，实际 PUT 上传由 Daemon 直连对象存储。
+
+### 数据面环境隧道与多节点路由
+
+数据面复用与当前 Daemon 连接绑定的环境隧道（`EnvironmentTunnel`），专用于受控 IDE 视图的 HTTP 请求与 WebSocket 流量：
+
+- **HTTP 交换**：网关通过 `EnvironmentTunnel.openHttp` 提交请求行、请求头与输入流；响应头到达后写入浏览器响应，响应体通过流式复制透传至浏览器输出，完成后正常关闭交换。
+- **WebSocket 隧道**：网关通过 `EnvironmentTunnel.openWebSocket` 发起隧道建立，上游 code-server 确认后返回双向字节流，网关直接接管底层 TCP/WebSocket 连接进行双向透传。
+- **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
+- **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
 `transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 codec 校验。codec 两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
 
