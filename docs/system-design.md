@@ -133,7 +133,7 @@ YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的�
 精确 +1，最后一次序列化写入生效。子代理在权限决定时读取其执行根的开关，
 不复制开关，也不因根切换而更新自身 version。开启时跳过普通工具 preflight；
 已等待的审批仍需人工处理，`ask_user` 始终等待回答。控制与投影规则见
-[Thread 控制与展示](modules/thread-control-and-presentation.md)。
+[Harness Runtime](modules/harness-runtime.md) 与 [Frontend](modules/frontend.md)。
 
 Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
 Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` /

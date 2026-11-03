@@ -264,7 +264,6 @@ RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节
 `historyRows`，未绑定草稿禁用该命令。
 修饰键与中键保留独立 Thread 地址的浏览器行为。刷新失败明确提示，不伪造最新树。
 输入编排由 `ThreadComposer` 持有，DOM、光标、IME 与 Pill 由 `ComposerEditor` 隔离。
-控制、投影和阅读规则见 [Thread 控制与展示](thread-control-and-presentation.md)。
 工具卡片按各自 invocation 的结果判定终态：同批其他调用尚未物化 durable 结果时，
 已完成调用仍显示其结果，等待审批的调用保持未决。结果配对使用
 `assistantEntryId:callIndex`，相同 toolCallId 的历史结果不会占用当前调用。
@@ -278,6 +277,14 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 `/interactions` 待处理入口、Pane 卡片与角标读取相同 Invocation 事实：`WAITING_INPUT` 呈现冻结问卷卡片（单选/多选/自定义输入项，支持提交回答或明确拒答），`WAITING_APPROVAL` 呈现冻结调用的审批卡片（允许或拒绝）；审批和问卷回答均由用户显式提交。
 `/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
 [Harness Runtime](harness-runtime.md#内置工具)。
+
+### 思考、系统通知与压缩卡片
+
+思考框无 Header、标题或内部分隔线，展开/收起按钮位于第一行末尾：收起时合并为一行，按可用宽度保留最新尾部，左侧显示省略标记；展开时由 MarkdownRenderer 渲染；空思考不留空框。
+工具静态正文从顶部阅读，只有仍在执行的 bash 流式输出默认跟随底部；用户上滚后暂停，回到底部恢复。工具、思考与压缩卡片通过冒泡的阅读意图通知外层暂停跟随；恢复必须来自外层真实滚动回到底部阈值内。外层只对新增记录与显式流式正文更新调度一次布局后贴底，手动展开、样式切换和图片加载不触发外层强制贴底。
+
+`SUBAGENT_RESULT` 和 `TASK_BUDGET` 使用全宽淡色系统卡片，不留图标列缩进。子代理回执展示来源、Thread 链接和结果/错误/partial，信封分段且正文使用安全 Markdown。回执默认折叠，摘要顺序为 agent、真实状态图标、任务预览、执行链接、展开箭头。
+完整成功的压缩在对话时间线留下“上下文已压缩”系统卡片，位于原压缩回合位置（此前对话之后、后续对话之前），默认折叠，展开后完整摘要在有界正文区域滚动。摘要只读取 `COMPACTION.payload.summaryText`，复用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全 Markdown，不支持的 XML 标签保留为普通文本。
 
 ## Canvas 编辑与上传
 
@@ -327,9 +334,8 @@ assistantMetadata 缺失或为 null 的人工 ASSISTANT 消息不计用量；显
 缓存比例缺少计数或分母溢出时显示 `—`，只有已知输入总量为零时摘要显示 `0.00%`。
 费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
-措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，
-包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事。
-展示规则见 [Thread 控制与展示](thread-control-and-presentation.md#状态-footer)。
+措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。组间使用 `∣` (U+2223)，统计项使用 `·` (U+00B7)，环境名无前缀。
+累计口径覆盖全部 Entry，包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事：回合 footer 在时间线展示本轮真实用量与“从此处分支”入口，无可用 usage 时只以 ASCII `-` 占位，只读子代理不显示分支入口。
 
 ## 功能入口
 

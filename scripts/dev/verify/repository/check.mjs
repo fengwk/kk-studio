@@ -52,7 +52,6 @@ const moduleDocuments = [
   'project.md',
   'schema.md',
   'share.md',
-  'thread-control-and-presentation.md',
   'web.md',
   'work.md',
 ]
