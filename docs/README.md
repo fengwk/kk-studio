@@ -14,7 +14,7 @@
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
-| 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
+| 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Plugins](modules/plugins.md) 与 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 从数据面不兼容的版本升级（导出备份后在全新空库重建） | [部署与运行：从数据面不兼容的版本升级](operations/deployment.md#从数据面不兼容的版本升级) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
@@ -51,6 +51,7 @@
 | --- | --- |
 | [Platform](modules/platform.md) | Catalog、Plugin、Chat、Storage、Environment、MCP 与外部系统如何编排？ |
 | [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、Canvas Function SPI、凭据与资源端口契约？ |
+| [Plugins](modules/plugins.md) | 内置的 ComfyUI、Media、MiniMax Mavis 和 OpenCLI 插件如何配置、认证与提供能力？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
 | [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
