@@ -4,7 +4,7 @@
 
 Runtime 经 [`runtime.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/) 窄契约调用组合根注册的 Driver，按 `ExecutionSelection.driver` 路由；不动态加载、不读取 Driver 私有状态。Builtin 是当前唯一的生产 Driver，详见 [Harness Agent Builtin](harness-agent-builtin.md)。
 
-模块是纯 Java：生产依赖只有 [Common](common.md)、[Harness Environment](harness-environment.md)、[Harness Model](harness-model.md)、Jackson 3、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化与调度分发在 [Harness Infra](harness-infra.md)，模型契约与协议编码在 [Harness Model](harness-model.md)，网关、目录与产品用例在 [Platform](platform.md)，组合根在 [Web](web.md)。
+模块是纯 Java：生产依赖只有 [Common](common.md)、[Harness Environment](harness-environment.md)、[Harness Model](harness-model.md)、Jackson 3、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化、调度分发、网关、目录与产品用例在 [Platform](platform.md)，模型契约与协议编码在 [Harness Model](harness-model.md)，组合根在 [Web](web.md)。
 
 ## 持久模型
 
@@ -34,7 +34,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 行锁阶梯：Session -> Thread -> Command -> Model -> Tool -> Work
 ```
 
-tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork、Join 结算、压缩 spawn）与整树查询，以 Thread 行上不可变的 `rootThreadId` 定位并在锁内重读确认；单 Thread 控制与 Model/Tool 状态提交只锁自己的 Thread 及其 Model/Tool/Work，与持 tree 锁的写操作在同一 Thread 行上线性化。task 接受另取全局准入锁，使跨树的子代理额度判定与接受原子。创建、请求或删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一只锁单条 Work 的事务，且不得制造新的业务唤醒。同级排序与树内交付的细节见 [Harness Infra](harness-infra.md#事务边界与锁序)。
+tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork、Join 结算、压缩 spawn）与整树查询，以 Thread 行上不可变的 `rootThreadId` 定位并在锁内重读确认；单 Thread 控制与 Model/Tool 状态提交只锁自己的 Thread 及其 Model/Tool/Work，与持 tree 锁的写操作在同一 Thread 行上线性化。task 接受另取全局准入锁，使跨树的子代理额度判定与接受原子。创建、请求或删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一只锁单条 Work 的事务，且不得制造新的业务唤醒。同级排序与树内交付的细节见 [Platform](platform.md#事务边界与锁序)。
 
 ## Entry Tree 与回合文法
 
@@ -250,7 +250,7 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 新增 Driver 不需要修改 Runtime：
 
 1. **模块**：新建 `harness/agent-<id>`，包根 `fun.fengwk.kkstudio.harness.<id>` 只属于该模块；只依赖 `harness-runtime` 的公开 API，需要 Environment 时再依赖 `harness-environment`。在根 POM 登记模块，在仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 中登记该模块允许的内部依赖与模块文档。
-2. **持久化与执行**：私有 Store 视图由 `harness-infra` 实现；Work 处理器复用 `ClaimedExecutionSupport`。
+2. **持久化与执行**：私有 Store 视图由 `platform-runtime` 实现；Work 处理器复用 `ClaimedExecutionSupport`。
 3. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集），向 `HarnessWorkDispatcher` 注册 Work 处理器，把本地取消与活跃检查并入 `HarnessRuntime` 与 `HarnessRuntimeLifecycle` 的组合函数，并在 `WebModuleArchitectureTest` 中按文件放行装配所需的导入。
 4. **测试**：复用 `harness-runtime` 的 test-jar：内存 Store、Store 契约基类与 `FakeAgentDriver`。
 
@@ -438,11 +438,11 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 ## 源码与测试
 
 - 内核测试集中在 [`harness/runtime/src/test`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/)：控制面、Thread/Join、历史与 Store 契约都在本模块内运行，`mvn -pl harness/runtime -am verify` 可独立完成测试与覆盖门禁。
-- Runtime test-jar 是唯一中立 kernel 测试基座：提供内存 Store、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `infra` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
+- Runtime test-jar 是唯一中立 kernel 测试基座：提供内存 Store、Store 契约基类、`StoreTestSupport` 与 `FakeAgentDriver`。`agent-builtin` 与 `platform-runtime` 的测试通过该 test-jar 复用中立内核 fixture；`agent-builtin` 自己的 test-jar 只导出 Builtin 私有模型语义支撑，二者职责不混。
 - 内存参考 Store 与 PostgreSQL 实现同构：`InMemoryHarnessStore` 只持有唯一已提交快照与全局 monitor，`InMemoryHarnessTransaction` 负责复制快照、commit/rollback、事务时钟、id 分配与锁阶梯，九个聚合原语各由一个 `InMemory*Store` 类实现，Driver 私有行经事务核心公开的测试 hook 在同一事务快照内挂载。锁阶梯为 `Session → Thread → Command → Driver → Tool → Work`，不存在第二份状态或按聚合拆分的快照。
 - `FakeAgentDriver` 是 `AgentDriver` 的最小确定性实现：默认没有私有状态，Stop 只为位于 request basis 的活跃 generation 追加 CANCELLED barrier；可配置 turn resolution、活动投影、响应物化与停止结果。其私有状态只存在内存、不参与 Store 事务回滚，因此只用于不验证 Driver 私有持久化的内核测试。
-- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 29 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
+- 关键类覆盖由模块自身 `verify` 阶段的 native `jacoco:check` 校验：Runtime 负责 29 个 runtime/kernel 类，逐类 `LINE` 覆盖率不低于 90%。Builtin 的 5 个关键类由 `agent-builtin` 自己的 check 负责，不存在跨模块 Ant report。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Platform](platform.md#harness-持久化与调度) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、[Harness Model](harness-model.md)、[Harness Environment](harness-environment.md)、[Common](common.md)、[Platform](platform.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Model](harness-model.md)、[Harness Environment](harness-environment.md)、[Common](common.md)、[Platform](platform.md)。

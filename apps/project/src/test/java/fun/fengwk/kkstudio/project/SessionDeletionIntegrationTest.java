@@ -13,7 +13,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -35,6 +34,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
+import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
@@ -92,7 +93,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUpOrchestrator() {
-    store = new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
+    store = new PostgresqlBuiltinHarnessStore(dataSource, transactionManager, UUID::randomUUID);
     ObjectProvider<HarnessStore> stores = mock(ObjectProvider.class);
     when(stores.getIfAvailable()).thenReturn(store);
     orchestrator =

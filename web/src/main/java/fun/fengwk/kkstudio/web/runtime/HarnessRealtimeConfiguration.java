@@ -8,11 +8,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
-import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
-import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
-import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
@@ -21,6 +16,11 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadCl
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotificationCodec;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
+import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSink;
+import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeNotificationCodec;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
 
 import javax.sql.DataSource;
 

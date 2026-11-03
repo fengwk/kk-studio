@@ -28,7 +28,7 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 该函数已移除或定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
-是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlHarnessStore，
+是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlBuiltinHarnessStore，
 装配唯一的 Builtin Driver、资源工具目录、PluginResourceGateway、HarnessRuntime、
 请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
 Processor、realtime 与 Environment 会话由它显式导入，不在核心类里再声明一遍。
@@ -285,4 +285,4 @@ Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) �
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
-[Harness Infra](harness-infra.md)、[Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。
+[Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。

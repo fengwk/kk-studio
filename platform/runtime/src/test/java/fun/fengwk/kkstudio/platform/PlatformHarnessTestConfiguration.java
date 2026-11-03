@@ -56,7 +56,7 @@ public class PlatformHarnessTestConfiguration {
   }
 
   /**
-   * 结算扫描器的锁定复核依赖 Runtime store；platform 测试上下文不装配 harness/infra，这里给出占位 bean 仅为满足装配 （platform
+   * 结算扫描器的锁定复核依赖 Runtime store；platform 测试上下文不装配 PostgreSQL store，这里给出占位 bean 仅为满足装配 （platform
    * 测试从不触发结算，真实结算路径由 web 的 PostgreSQL 集成测试覆盖）。
    */
   @Bean

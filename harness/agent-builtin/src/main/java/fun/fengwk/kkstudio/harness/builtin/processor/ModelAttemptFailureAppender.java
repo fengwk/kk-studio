@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;

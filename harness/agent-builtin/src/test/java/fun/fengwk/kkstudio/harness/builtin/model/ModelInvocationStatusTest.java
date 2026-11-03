@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+
 /** ModelInvocationStatus 终态分类。 */
 class ModelInvocationStatusTest {
 

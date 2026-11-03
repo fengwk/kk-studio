@@ -15,9 +15,6 @@ import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
-import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
@@ -32,9 +29,12 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
@@ -91,9 +91,9 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
-  public PostgresqlHarnessStore harnessStore(
+  public PostgresqlBuiltinHarnessStore harnessStore(
       DataSource dataSource, PlatformTransactionManager transactionManager) {
-    return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
+    return new PostgresqlBuiltinHarnessStore(dataSource, transactionManager, UUID::randomUUID);
   }
 
   /**
@@ -102,13 +102,13 @@ public class HarnessRuntimeConfiguration {
    * <p>Driver 只在 Runtime 已开启的事务内工作，不执行外部 I/O。
    */
   @Bean
-  public AgentDriver agentDriver(PostgresqlHarnessStore store, TurnResolver turnResolver) {
+  public AgentDriver agentDriver(PostgresqlBuiltinHarnessStore store, TurnResolver turnResolver) {
     return new BuiltinAgentDriver(store, turnResolver);
   }
 
   /** Builtin debug 专属只读查询；公共快照不暴露 ModelRequestSpec。 */
   @Bean
-  public BuiltinRequestQuery builtinRequestQuery(PostgresqlHarnessStore store) {
+  public BuiltinRequestQuery builtinRequestQuery(PostgresqlBuiltinHarnessStore store) {
     return new BuiltinRequestQuery(store, store);
   }
 

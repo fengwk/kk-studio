@@ -252,4 +252,4 @@ Anthropic 的 `usage.output_tokens_details.thinking_tokens` 是输出的只读�
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md)、[Platform](platform.md)、[Harness Environment](harness-environment.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、[Platform](platform.md)、[Harness Environment](harness-environment.md)。

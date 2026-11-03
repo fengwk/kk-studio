@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.thread.query;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpecJsonCodec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestView;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;

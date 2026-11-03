@@ -22,8 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
@@ -116,6 +116,26 @@ public abstract class HarnessStoreDeletionContract {
           tx.work().request(toolWork);
         });
 
+    // 深删跨越通用与 Driver 私有行；回调失败时所有删除必须一起回滚。
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.threads().lockTree(baseline.threadId());
+                  tx.threads().lock(baseline.threadId()).orElseThrow();
+                  tx.threads().delete(List.of(baseline.threadId()));
+                  throw new IllegalStateException("abort deletion");
+                }));
+    assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isPresent());
+    assertTrue(store.transaction(tx -> tx.commands().find(baseline.threadId(), 1L)).isPresent());
+    assertTrue(
+        store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.tools().find(toolId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.work().find(threadWork)).isPresent());
+    assertTrue(store.transaction(tx -> tx.work().find(modelWork)).isPresent());
+    assertTrue(store.transaction(tx -> tx.work().find(toolWork)).isPresent());
+
     int deleted =
         store.transaction(
             tx -> {
@@ -127,6 +147,7 @@ public abstract class HarnessStoreDeletionContract {
 
     assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.commands().find(baseline.threadId(), 1L)).isEmpty());
     assertTrue(store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.tools().find(toolId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.work().find(threadWork)).isEmpty());

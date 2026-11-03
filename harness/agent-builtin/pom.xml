@@ -89,11 +89,11 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator</include>
-                                        <include>fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec</include>
                                     </includes>
                                     <limits>
                                         <limit>
