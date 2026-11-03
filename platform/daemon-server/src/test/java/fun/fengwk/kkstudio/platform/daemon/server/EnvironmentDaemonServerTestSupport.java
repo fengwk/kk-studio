@@ -679,6 +679,9 @@ final class EnvironmentDaemonServerTestSupport {
     boolean rejected;
     boolean retryLater;
     DaemonCapabilities readyCapabilities;
+    final List<EnvironmentId> runtimeStatusChanges = new ArrayList<>();
+    boolean runtimeStatusNotificationFails;
+    boolean runtimeStatusFenceLost;
 
     Throwable disconnectFailure;
 
@@ -717,6 +720,18 @@ final class EnvironmentDaemonServerTestSupport {
     @Override
     public boolean heartbeat(EnvironmentId environmentId, UUID leaseToken, Duration leaseDuration) {
       return heartbeatResult;
+    }
+
+    @Override
+    public boolean runtimeStatusChanged(EnvironmentId environmentId, UUID leaseToken) {
+      if (runtimeStatusNotificationFails) {
+        throw new IllegalStateException("runtime status notification unavailable");
+      }
+      if (runtimeStatusFenceLost || !holdsReadyLease) {
+        return false;
+      }
+      runtimeStatusChanges.add(environmentId);
+      return true;
     }
 
     @Override

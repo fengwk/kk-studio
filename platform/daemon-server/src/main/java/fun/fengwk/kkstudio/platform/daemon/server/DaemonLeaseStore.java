@@ -28,6 +28,9 @@ public interface DaemonLeaseStore {
   /** 续约路由租约；围栏失效返回 false。 */
   boolean heartbeat(EnvironmentId environmentId, UUID leaseToken, Duration leaseDuration);
 
+  /** 运行状态实际变化后发布失效提示；READY 租约围栏失效返回 false。 */
+  boolean runtimeStatusChanged(EnvironmentId environmentId, UUID leaseToken);
+
   /** 连接断开时回退为 CONNECTING 并保留重连宽限租约。 */
   boolean disconnect(EnvironmentId environmentId, UUID leaseToken, Duration graceDuration);
 
