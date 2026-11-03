@@ -36,8 +36,8 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;

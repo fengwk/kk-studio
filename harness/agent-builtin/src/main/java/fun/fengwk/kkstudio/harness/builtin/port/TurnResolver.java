@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.port;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;

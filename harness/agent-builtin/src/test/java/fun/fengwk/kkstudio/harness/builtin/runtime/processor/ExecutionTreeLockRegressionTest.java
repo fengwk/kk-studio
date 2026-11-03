@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;

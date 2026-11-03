@@ -34,12 +34,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupMemberExecution;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;

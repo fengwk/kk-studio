@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
+
 /** StreamCheckpoint 的 attempt/sequence/content 不变式。 */
 class StreamCheckpointTest {
 

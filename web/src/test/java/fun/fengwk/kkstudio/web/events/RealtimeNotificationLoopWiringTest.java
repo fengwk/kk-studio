@@ -14,14 +14,14 @@ import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
-import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
-import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
-import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotificationCodec;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
+import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeNotificationCodec;
+import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import javax.sql.DataSource;

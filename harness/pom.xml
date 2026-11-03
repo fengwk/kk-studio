@@ -18,6 +18,5 @@
         <module>model</module>
         <module>runtime</module>
         <module>agent-builtin</module>
-        <module>infra</module>
     </modules>
 </project>

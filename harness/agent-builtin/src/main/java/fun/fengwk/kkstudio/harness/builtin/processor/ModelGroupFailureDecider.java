@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 

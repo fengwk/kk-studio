@@ -52,12 +52,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-schema</artifactId>
-            <scope>test</scope>
+            <artifactId>kk-studio-work</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-infra</artifactId>
+            <artifactId>kk-studio-schema</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

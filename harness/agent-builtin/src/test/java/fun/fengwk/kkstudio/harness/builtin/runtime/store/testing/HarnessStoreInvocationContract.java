@@ -49,11 +49,11 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;

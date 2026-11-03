@@ -6,9 +6,9 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.hostBinding;
 
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;

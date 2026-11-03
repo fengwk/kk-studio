@@ -6,8 +6,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 
 import java.time.Duration;
 import java.time.Instant;

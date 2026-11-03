@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;

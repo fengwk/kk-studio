@@ -18,11 +18,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
-import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.runtime.execution.RemoteExitReconciler;
 import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
+import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;

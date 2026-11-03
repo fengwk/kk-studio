@@ -32,7 +32,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |
 | Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
@@ -131,4 +131,4 @@ UUID、行版本、连接和执行状态不随配置文件恢复，完整运行�
 验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Web](web.md)、
-[Canvas](canvas.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。
+[Canvas](canvas.md)、[Project](project.md)。

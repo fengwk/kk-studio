@@ -21,14 +21,13 @@ import java.util.stream.Stream;
  *
  * <p>生产源码不得引用 Harness Tool execution/Daemon 包或选定的 Core 基础设施实现；DTO mapping 只放行列出的 canonical Tool
  * 类型；Driver 类型只允许精确的组合根使用；web.controller 包不得引用 Harness runtime processor。web 模块是 Harness 组合根：它按设计将
- * Runtime、Builtin Driver 与 infra 适配器声明为直接依赖。
+ * Runtime 与 Builtin Driver 声明为直接依赖，基础设施由 Platform 提供。
  */
 class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
   private static final String HARNESS_RUNTIME_PROCESSOR_PREFIX =
       "fun.fengwk.kkstudio.harness.runtime.processor.";
-  private static final String HARNESS_INFRA_PREFIX = "fun.fengwk.kkstudio.harness.infra.";
   private static final String HARNESS_CONTRIBUTOR_API_PREFIX =
       "fun.fengwk.kkstudio.harness.contributor.api.";
   private static final String HARNESS_ENVIRONMENT_PREFIX =
@@ -39,11 +38,7 @@ class WebModuleArchitectureTest {
       "fun.fengwk.kkstudio.platform.environment.";
   private static final String PROJECT_REPO_PREFIX = "fun.fengwk.kkstudio.project.repo.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
-      List.of(
-          HARNESS_RUNTIME_PREFIX,
-          HARNESS_INFRA_PREFIX,
-          HARNESS_CONTRIBUTOR_API_PREFIX,
-          HARNESS_ENVIRONMENT_PREFIX);
+      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_CONTRIBUTOR_API_PREFIX, HARNESS_ENVIRONMENT_PREFIX);
 
   /** Web DTO 适配直接使用的公共值类型，不包含 Model/Driver 的私有执行实现。 */
   private static final List<String> ALLOWED_HARNESS_VALUE_IMPORTS =
@@ -92,7 +87,6 @@ class WebModuleArchitectureTest {
           "kk-studio-platform-plugin-api",
           "kk-studio-platform-runtime",
           "kk-studio-canvas-infra",
-          "kk-studio-harness-infra",
           "kk-studio-harness-environment",
           "kk-studio-harness-runtime",
           "kk-studio-harness-agent-builtin",

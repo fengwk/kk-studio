@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;

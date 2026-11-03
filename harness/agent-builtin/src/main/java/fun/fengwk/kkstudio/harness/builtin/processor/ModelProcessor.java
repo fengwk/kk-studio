@@ -2,16 +2,16 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelAttemptFailure;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupExecution;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelGroupProgress;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;

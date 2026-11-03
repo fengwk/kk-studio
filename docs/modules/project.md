@@ -263,7 +263,7 @@ Work 的请求、claim、续租、完成与重排由共享的
 并递增 wake_version，完成与重排以 lease token 围栏，处理期间到达的新 wake 不会被吞掉。
 工作者拒绝、reconciler 失败与 stop 后未 handoff 的 claim，都由该配置在短事务中先
 `lockClaimed` 确认仍持有有效租约，再按对应延迟 `reschedule`；失权则不归还。
-Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
+Harness 的调度时间域见 [Platform](platform.md#work-的-claim--lease--wake)。
 
 ## 错误映射
 
