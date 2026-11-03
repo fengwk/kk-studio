@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * {@code mcp_server} 与当前发现结果 {@code mcp_tool} 的 JdbcClient 仓库。
@@ -65,19 +66,34 @@ public class McpServerRepository {
   }
 
   public Page<McpServer> page(PageQuery pageQuery) {
-    List<McpServer> results =
+    // 聚合行始终存在，左连接保留越界空页的 total；同一语句共享 PostgreSQL 快照。
+    List<ServerPageRow> rows =
         jdbcClient
             .sql(
-                "select "
-                    + SERVER_COLUMNS
-                    + " from mcp_server order by name asc limit :limit offset :offset")
+                """
+                select page.*, totals.total_count
+                from (select count(*) as total_count from mcp_server) totals
+                left join lateral (
+                    select %s from mcp_server order by name asc limit :limit offset :offset
+                ) page on true
+                order by page.name asc
+                """
+                    .formatted(SERVER_COLUMNS))
             .param("limit", pageQuery.getPageSize())
             .param("offset", pageQuery.getOffset())
-            .query(SERVER_ROW_MAPPER)
+            .query(
+                (rs, rowNum) ->
+                    new ServerPageRow(
+                        rs.getString("name") == null ? null : SERVER_ROW_MAPPER.mapRow(rs, rowNum),
+                        rs.getLong("total_count")))
             .list();
-    long total = jdbcClient.sql("select count(*) from mcp_server").query(Long.class).single();
-    return new Page<>(pageQuery.getPageNumber(), pageQuery.getPageSize(), results, total);
+    List<McpServer> results =
+        rows.stream().map(ServerPageRow::server).filter(Objects::nonNull).toList();
+    return new Page<>(
+        pageQuery.getPageNumber(), pageQuery.getPageSize(), results, rows.getFirst().total());
   }
+
+  private record ServerPageRow(McpServer server, long total) {}
 
   /** 返回全部 server 行（按 name 排序）。 */
   public List<McpServer> listAllServers() {
@@ -227,6 +243,22 @@ public class McpServerRepository {
         .param("serverName", serverName)
         .query(Integer.class)
         .single();
+  }
+
+  /** 一次统计本页各 server 的工具数；没有工具的 server 不在结果中。 */
+  public Map<String, Integer> countToolsByServerNames(List<String> serverNames) {
+    if (serverNames.isEmpty()) {
+      return Map.of();
+    }
+    return jdbcClient
+        .sql(
+            "select server_name, count(*) as tool_count from mcp_tool"
+                + " where server_name in (:serverNames) group by server_name")
+        .param("serverNames", serverNames)
+        .query((rs, rowNum) -> Map.entry(rs.getString("server_name"), rs.getInt("tool_count")))
+        .list()
+        .stream()
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
   /** 物理删除该 server 的全部工具行；调用方事务必须已经以 {@code FOR UPDATE} 持有父 server。 */

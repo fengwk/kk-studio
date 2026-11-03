@@ -61,9 +61,11 @@ public class McpServerService {
   }
 
   public Page<McpServerDTO> pageServers(PageQuery pageQuery) {
-    return repository
-        .page(pageQuery)
-        .map(server -> toDto(server, repository.countTools(server.name())));
+    Page<McpServer> page = repository.page(pageQuery);
+    Map<String, Integer> toolCounts =
+        repository.countToolsByServerNames(
+            page.getResults().stream().map(McpServer::name).toList());
+    return page.map(server -> toDto(server, toolCounts.getOrDefault(server.name(), 0)));
   }
 
   /** 按不可变 name 获取 Server 安全公开视图。 */

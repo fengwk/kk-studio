@@ -312,6 +312,8 @@ listener 建连/重连全量对账。Daemon installed commit 与 current commit 
 
 Server 以不可变 name 寻址。常规 Card 返回 enabled、timeout、发现状态、工具数和版本；
 URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位符保持原样。
+分页的 Server 列表与总数来自同一数据库语句快照，越界空页仍返回总数；
+本页工具数另以一次分组查询获取，未发现工具的 Server 计数为零。
 发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 

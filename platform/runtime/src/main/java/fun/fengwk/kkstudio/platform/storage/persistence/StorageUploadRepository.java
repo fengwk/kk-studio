@@ -47,10 +47,8 @@ public class StorageUploadRepository {
       where id = :id
         and (cleanup_token is null or cleanup_until <= :now)
       returning
-          id, candidate_blob_id, blob_id, filename, declared_media_type,
-          declared_size, declared_sha256, cleanup_requested_at, cleanup_token, cleanup_until,
-          created_at as create_time
-      """;
+      """
+          + COLUMNS;
 
   private static final RowMapper<StorageUpload> ROW_MAPPER = StorageUploadRepository::mapRow;
 
