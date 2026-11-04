@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 
 import java.util.Map;
 

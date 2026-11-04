@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 
 import java.util.List;
@@ -98,7 +97,7 @@ class PluginConnectionCheckResultTest {
           }
 
           @Override
-          public List<CanvasFunctionAdapter> canvasAdapters() {
+          public <T> List<T> contributions(Class<T> type) {
             return List.of();
           }
 

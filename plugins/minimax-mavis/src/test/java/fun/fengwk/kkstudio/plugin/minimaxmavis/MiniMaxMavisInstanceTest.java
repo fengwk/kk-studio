@@ -52,7 +52,9 @@ class MiniMaxMavisInstanceTest {
 
     assertEquals(
         1, instance.harnessContributors().size(), "enabled instance contributes one contributor");
-    assertTrue(instance.canvasAdapters().isEmpty(), "MiniMax Mavis has no Canvas contribution");
+    assertTrue(
+        instance.contributions(Object.class).isEmpty(),
+        "MiniMax Mavis contributes no product domain");
     MiniMaxMavisHarnessContributor contributor =
         (MiniMaxMavisHarnessContributor) instance.harnessContributors().get(0);
     assertEquals(15, contributor.toolCount(), "must expose all 15 tools");
@@ -64,7 +66,6 @@ class MiniMaxMavisInstanceTest {
     // 两域列表冻结，调用方无法修改；实例关闭后仍可安全读取。
     assertThrows(
         UnsupportedOperationException.class, () -> instance.harnessContributors().add(null));
-    assertThrows(UnsupportedOperationException.class, () -> instance.canvasAdapters().add(null));
 
     // 装配期不联网、不读取凭据；宿主注入的 client 完全未被触达。
     assertEquals(0, credentialAccess.resolveCount(), "configure must not resolve credentials");
@@ -73,7 +74,7 @@ class MiniMaxMavisInstanceTest {
     instance.close();
     instance.close();
     assertEquals(
-        1, instance.harnessContributors().size(), "close must not mutate the frozen lists");
+        1, instance.harnessContributors().size(), "close must not mutate the frozen contributions");
   }
 
   /** 显式停用实例：两域都没有新贡献，装配期同样不联网、不读取凭据。 */
@@ -86,7 +87,7 @@ class MiniMaxMavisInstanceTest {
     PluginInstance instance = plugin.configure(new PluginConfig(3, "{\"enabled\":false}"), context);
 
     assertTrue(instance.harnessContributors().isEmpty(), "disabled instance contributes nothing");
-    assertTrue(instance.canvasAdapters().isEmpty(), "disabled instance has no Canvas contribution");
+    assertTrue(instance.contributions(Object.class).isEmpty(), "disabled instance has no product");
     assertEquals(
         0, credentialAccess.resolveCount(), "disabled configure must not resolve credentials");
     verifyNoInteractions(client);

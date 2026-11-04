@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockRank;

@@ -4,11 +4,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
+import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 
 import java.util.Objects;

@@ -318,8 +318,9 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
             + "values ('m1', 'MODEL', 'test_p_mcp', 'm1', '{}'::jsonb) on conflict do nothing");
 
     jdbc.update(
-        "insert into agent_definition (name, model_name, config) "
-            + "values ('test_agent_mcp', 'm1', "
+        "insert into agent_definition (name, execution, config) "
+            + "values ('test_agent_mcp', "
+            + "'{\"driver\":\"builtin\",\"settings\":{\"modelName\":\"m1\",\"variant\":null}}'::jsonb, "
             + "cast('{\"tools\": [\""
             + modelName
             + "\"]}' as jsonb))");

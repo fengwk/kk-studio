@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 
 import java.util.Objects;
 import java.util.UUID;

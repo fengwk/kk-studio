@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.realtime;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 
 import java.nio.charset.StandardCharsets;

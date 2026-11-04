@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+
 import java.time.Duration;
 
 /** 正常失败与租约失联恢复共用的 retry 判定契约：已消耗 attempt 必须包含本次失败，预算允许才返回带策略 delay 的重试决策，否则明确不重试。 */

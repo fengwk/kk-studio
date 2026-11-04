@@ -2,44 +2,37 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.Objects;
 
-/** 按最新 Agent/Model catalog 为新建或恢复的 Agent branch 物化路由 settings。 */
+/** 按最新 Agent 配置为新建或恢复的 Agent branch 物化路由 settings。 */
 @Component
 public final class AgentBranchSettingsMaterializer {
 
   private final AgentDefinitionRepository agentRepository;
-  private final AgentModelRepository modelRepository;
-  private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final BuiltinAgentExecutionMaterializer builtinMaterializer;
   private final AgentDefinitionConfigCodec agentConfigCodec;
 
   public AgentBranchSettingsMaterializer(
       AgentDefinitionRepository agentRepository,
-      AgentModelRepository modelRepository,
-      AgentModelRuntimeConfigParser modelConfigParser,
+      BuiltinAgentExecutionMaterializer builtinMaterializer,
       AgentDefinitionConfigCodec agentConfigCodec) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
-    this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
-    this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
+    this.builtinMaterializer = Objects.requireNonNull(builtinMaterializer, "builtinMaterializer");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
   }
 
   /**
-   * 普通 root 调用物化：只物化自身的 Agent/Model 选择，{@code environmentName} 恒为 null——root branch 没有父调用， 因此不受任何
-   * Environment 继承语义影响。
+   * 普通 root 调用物化：只物化自身的执行选择，{@code environmentName} 恒为 null——root branch 没有父调用， 因此不受任何 Environment
+   * 继承语义影响。
    */
   public BranchSettings materialize(String agentName) {
     return materialize(agentName, requireAgent(agentName), null);
@@ -79,47 +72,14 @@ public final class AgentBranchSettingsMaterializer {
 
   private BranchSettings materialize(
       String agentName, AgentDefinition agent, String environmentName) {
-    if (agent.modelName() == null) {
-      // 未配置模型的内置 Agent（如 compaction）不能被普通调用当作路由来源：明确拒绝，不猜测或回退。
-      throw new IllegalArgumentException("agent model is not configured: " + agentName);
+    ExecutionSelection execution = agent.execution();
+    if (execution == null) {
+      // 未配置的内置 Agent 不能被普通调用当作路由来源：明确拒绝，不猜测或回退。
+      throw new IllegalArgumentException("agent execution is not configured: " + agentName);
     }
-    AgentModel model = modelRepository.getByName(agent.modelName());
-    if (model == null) {
-      throw new IllegalArgumentException("subagent model not found: " + agent.modelName());
+    if (BuiltinExecution.DRIVER.equals(execution.driver())) {
+      execution = builtinMaterializer.materialize(agentName, execution);
     }
-    if (model.kind() == AgentModelKind.GROUP) {
-      // 组没有组级 Variant；具体成员 Variant 在 Runtime 冻结的成员快照中解析。
-      if (agent.variant() != null && !agent.variant().isBlank()) {
-        throw new IllegalArgumentException(
-            "subagent model group must not select a variant: " + agentName);
-      }
-      return new BranchSettings(
-          agent.name(),
-          BuiltinExecution.of(ModelSelection.group(agent.modelName())),
-          environmentName);
-    }
-    ParsedAgentModelConfig parsed;
-    try {
-      parsed = modelConfigParser.parse(model.configJson());
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "invalid subagent model configuration: " + agentName, error);
-    }
-    String variantName =
-        agent.variant() == null || agent.variant().isBlank()
-            ? parsed.defaultVariant()
-            : agent.variant();
-    // 校验所选 variant 存在于 catalog；ModelVariant 字段由 Resolver 在运行时按引用读取。
-    parsed.variants().stream()
-        .filter(candidate -> candidate.id().equals(variantName))
-        .findFirst()
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    "subagent model variant not found: " + agentName + " variant=" + variantName));
-    return new BranchSettings(
-        agent.name(),
-        BuiltinExecution.of(ModelSelection.model(agent.modelName(), variantName)),
-        environmentName);
+    return new BranchSettings(agent.name(), execution, environmentName);
   }
 }

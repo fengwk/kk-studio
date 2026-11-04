@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
@@ -50,4 +52,31 @@ test('stack help documents the explicit snapshot anchor contract', () => {
   assert.equal(result.status, 0)
   assert.match(result.stdout, /PI_ANCHOR=\/path\/to\/pi/)
   assert.match(result.stdout, /PI_BASE_ANCHOR=\/path\/to\/pi-base/)
+})
+
+test('reliability commands target only their project and preserve volume cleanup semantics', () => {
+  // Record real shell invocations without starting or removing any containers.
+  const directory = mkdtempSync(path.join(tmpdir(), 'kk-reliability-compose-'))
+  try {
+    const docker = path.join(directory, 'docker')
+    const log = path.join(directory, 'calls')
+    writeFileSync(docker, '#!/bin/sh\nprintf "%s\\n%s\\n" "$COMPOSE_PROFILES" "$*" >> "$CALL_LOG"\n')
+    chmodSync(docker, 0o755)
+    const env = { PATH: `${directory}:${process.env.PATH}`, CALL_LOG: log, COMPOSE_PROFILES: 'app' }
+    for (const args of [['logs', 'postgres', 'app'], ['down'], ['down', '--volumes']]) {
+      const result = runStack(args, env)
+      assert.equal(result.status, 0, result.stderr)
+    }
+    const calls = readFileSync(log, 'utf8').trim().split('\n')
+    assert.equal(calls.length, 6)
+    for (const index of [0, 2, 4]) {
+      assert.equal(calls[index], 'reliability')
+      assert.match(calls[index + 1], /compose --project-name kk-studio-reliability --file .*deploy\/test\/compose\.yaml/)
+    }
+    assert.match(calls[1], /logs .*reliability-postgres reliability-app$/)
+    assert.match(calls[3], /down --remove-orphans$/)
+    assert.match(calls[5], /down --remove-orphans --volumes$/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

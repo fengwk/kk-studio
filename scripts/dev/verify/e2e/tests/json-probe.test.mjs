@@ -31,6 +31,14 @@ test('test intent: environment-status prints the named status or an empty line',
   const rows = { data: [{ name: 'a', status: 'READY' }, { name: 'b', status: 'OFFLINE' }] }
   assert.equal(probe(['environment-status', 'b'], rows).stdout, 'OFFLINE\n')
   assert.equal(probe(['environment-status', 'zzz'], rows).stdout, '\n')
+  assert.equal(probe(['environment-status', 'a'], { data: [{ name: 'a', status: false }] }).stdout, 'False\n')
+})
+
+test('test intent: unknown commands retain their exit code and diagnostic', () => {
+  const result = probe(['unknown'], {})
+  assert.equal(result.status, 2)
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, 'unknown probe: unknown\n')
 })
 
 test('test intent: providers-ready lists the missing target providers in sorted order', () => {

@@ -119,7 +119,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
 
     // 8. 验证快照按钮存在，无复制按钮
     await colPreview.evaluate((el) => { el.scrollTop = 0 })
-    const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）', exact: true })
+    const snapshotBtn = page.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文', exact: true })
     await expect(snapshotBtn).toBeVisible()
     await expect(snapshotBtn).toHaveText('冻结调用输入')
     await expect(page.locator('.thread-debug-prompt-copy')).toHaveCount(0)

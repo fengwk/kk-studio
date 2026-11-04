@@ -11,17 +11,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
+import fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
 
 import java.util.HashSet;
 import java.util.List;

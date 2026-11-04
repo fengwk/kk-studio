@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  compareCatalogVersions,
   filterChats,
   formatBackendDate,
   mergeChatIntoList,
   mergeChatList,
   preferNewerChat,
 } from '@/features/chat/chat-utils'
+import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import type { ChatDTO } from '@/shared/api/generated/contracts'
 
 function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {

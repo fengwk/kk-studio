@@ -87,8 +87,7 @@ describe('agentService', () => {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
     const updateProviderBody: AgentProviderUpdateDTO = {
@@ -118,8 +117,7 @@ describe('agentService', () => {
       description: 'updated',
       expectedVersion: '9',
       systemPrompt: null,
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
 

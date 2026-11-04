@@ -33,6 +33,8 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
 | [harness/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
+| [harness/tool/permission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission) | Tool permission 的规则模型与有序求值、Bash 静态 surface 分析，以及部署范围 permission 快照的现读端口 `ToolSettingsProvider`；只产出策略候选 |
+| [harness/admission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission) | Model 与 Tool 网关共用的进程内并发槽位 `ConcurrencyAdmission`：无等待队列、幂等释放，不持久化、不跨进程协调 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseAgentTurnContextResolver` 解析与模型无关的 Agent 目录快照；`DatabaseTurnResolver` 在其上规划模型、压缩与预算，不反查 Thread 归属 |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
 | [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、payload 解析、进程内定点分发与 resync |
@@ -47,6 +49,8 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
 
 ## Harness 持久化与调度
 
@@ -270,7 +274,7 @@ Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全�
 PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
 路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
 引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
-删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+删除 GROUP 前校验 Agent 入边；Builtin Agent 引用由应用在持有模型行锁的同一事务中校验和更新。
 
 GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
 禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
@@ -302,10 +306,16 @@ TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账�
 非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
 其他模型信息，但保留已有价格，不用零价覆盖。
 
-Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
-（默认 true）；工具候选和 Skill 引用在写入时校验。
+Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 Thread 的
+`ExecutionSelection` 相同。写入和导入预检先根据实际注册的 Driver 校验 settings；
+当前提供 `builtin`，其 settings 精确为 `{modelName, variant}`，`variant: null` 表示
+使用单 MODEL 的默认 Variant，GROUP 不允许指定组级 Variant。Builtin 适配在写事务中
+锁定并校验模型和显式 Variant；模型改名仅更新指向它的 Builtin Agent 并推进其版本，
+模型或 Variant 被引用时阻止删除，不解释其他 Driver 的 settings。
+Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)`、subagents 与
+`inheritParentEnvironment`（默认 true）；工具候选和 Skill 引用在写入时校验。
 
-Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、model、tools、skills 与普通执行配置，但不能删除或改名；内置定义允许显式未配置模型（独立选择，不继承调用 Thread 的模型，也不静默 fallback），用户创建的 Agent 仍要求模型。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
+Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
 
 ### Git Skill Package
 
@@ -398,12 +408,17 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
+输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
+作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的
 [`prompts/messages`](../../platform/runtime/src/main/resources/fun/fengwk/kkstudio/platform/prompts/messages/)；
 文本预览作为原文插入，不执行模板语法。
 
 Tool 网关先做资源解析与无等待 admission（纯本地：并发租约与目录租用；分支视图由执行上下文提供），返回
-`Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。Runtime 持久化 RUNNING 后在
+`Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。并发槽位由本模块的
+[`admission`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission/) 提供，Model 与 Tool 各自持有独立实例；
+权限判定与配置现读由 [`tool/permission`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/) 提供，
+内核只声明 `ToolGateway` 端口。Runtime 持久化 RUNNING 后在
 独占的虚拟线程上阻塞执行 `run`，工具异常由网关分类为失败、取消或 UNKNOWN（远程发送不确定时绝不重放）。
 Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；有效超时仅经 `Tool.resolveTimeout`
 解析一次并原样传递。具体状态转换见 [Harness Runtime](harness-runtime.md)。
@@ -428,6 +443,9 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 都在同一条正式规划、物化与编码路径上生成点击瞬间的请求体（可能含内联媒体），
 以只读方式检查附件，不写任何内部事实、不消费附件、不调用 transport；
 历史入口按该输出记录的显式时间重建普通模型输出；父 COMPACTION 输出按冻结 child Thread / join 的 `finalAnswerEntryId` 定位压缩子最后一次调用并重建其前缀，结果仍是历史重建、不等于原始发送字节。
+预览与 Turn 规划读取的规划事实都来自 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 门面：
+未落库命令 batch 的 candidate 路径、按结果 Entry 定位的压缩 turn 冻结元数据与请求输入 token 估算，
+因此 platform 不复制规划算法，也不直接依赖 `runtime.*` 实现类。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
 用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt` 与 Provider 报告的 `responseServiceTier`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
@@ -493,12 +511,15 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，
 通过 `AutoConfiguration.imports` 创建 bean。`StudioPluginRegistry` 冻结唯一 pluginId；
 `StudioPlugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
-`PluginInstance`，按需提供独立的 Harness Contributor / Canvas Adapter，两域可为空。
+`PluginInstance`：Harness 贡献由 `harnessContributors()` 直接声明，其它产品域贡献按类型读取
+（`contributions(CanvasFunctionAdapter.class)`），可以都为空。
 安装集合随发行物构建确定；`StudioPlugin`、安装目录以及凭据与资源端口的纯契约见
 [Platform Plugin API](platform-plugin-api.md)。
 
-`PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
-任一配置、贡献或目录失败时释放全部已建实例，错误只携带阶段与 pluginId。Web 从同一快照提供两域 Catalog。
+`PluginCatalogSnapshot` 逐个配置实例，合并内置 Harness 贡献，并在返回前验证完整 Harness 目录；
+平台自身不认识任何产品目录，产品目录视图由产品模块提供的 `Function<PluginCatalogSnapshot, ?>`
+在同一个构建窗口里冻结一次，平台只按视图类型保存与读取。任一配置、Harness 贡献或产品目录校验失败时
+先释放全部已建实例，再以只携带阶段与 pluginId 的错误失败，候选快照因此不会发布。Web 从同一快照提供 Harness 与产品目录。
 
 ### Plugin 配置存储
 
@@ -520,7 +541,9 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
-Canvas 应用经自己的租用适配消费同一份快照里的 Function 目录，冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
+产品目录投影由持有该目录的应用提供：Canvas 在每次快照构建时把内置 adapter 与插件贡献合并校验成唯一目录并冻结，
+再经自己的租用适配提供给执行路径，插件详情里的 `canvasFunctionNames` 也由同一冻结视图投影，因此管理面与执行使用同一份事实；
+冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
 
 ### 新增 Plugin
 
@@ -607,7 +630,9 @@ YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
-Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
+Agent 使用 `execution: {driver, settings}` 往返，不接受旧的顶层 `model` / `variant`。
+Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
+优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`

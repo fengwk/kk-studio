@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -110,6 +111,31 @@ class ConfigSyncGraphTest {
     // 闭包不含自身，也不反向扩展 Environment。
     assertFalse(closure.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
     assertFalse(closure.contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
+  }
+
+  /** 非 builtin driver 的私有 settings 不形成模型边，但 Agent 的技能依赖仍需展开。 */
+  @Test
+  void nonBuiltinExecutionDoesNotCreateModelDependency() {
+    AgentDefinition external =
+        agent("external", "m", agentConfig(List.of(), List.of(skillRef("pkg", "s")), List.of()))
+            .toBuilder()
+            .execution(new ExecutionSelection("external", "{\"modelName\":\"m\"}"))
+            .build();
+    ConfigSyncSnapshot snapshot =
+        snapshot(
+            List.of(provider("p")),
+            List.of(model("p", "m")),
+            List.of(external),
+            List.of(skillPackage("pkg", "s")),
+            List.of(),
+            List.of(),
+            List.of());
+    List<ConfigSyncRef> closure =
+        graph.closure(graph.graph(snapshot), new ConfigSyncRef(ConfigSyncKind.AGENTS, "external"));
+
+    assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertFalse(closure.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
+    assertFalse(closure.contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
   }
 
   @Test

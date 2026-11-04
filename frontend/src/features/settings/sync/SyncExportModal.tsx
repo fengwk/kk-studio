@@ -3,7 +3,7 @@ import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
-import { configSyncService } from '@/shared/api/config-sync-service'
+import { configSyncService } from '@/features/settings/config-sync-service'
 import {
   CONFIG_SYNC_GROUPS,
   configSyncErrorMessage,

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 
 import java.util.Objects;
 

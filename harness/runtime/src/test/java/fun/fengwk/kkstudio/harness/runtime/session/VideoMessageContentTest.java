@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
+
 /** VideoMessageContent 与现有图片、音频内容共享 non-blank 持久化边界。 */
 class VideoMessageContentTest {
 

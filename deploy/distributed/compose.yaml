@@ -89,13 +89,8 @@ services:
     environment:
       <<: *minio-credentials
       MINIO_BUCKET: kk-studio-distributed
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
-        mc anonymous set none "local/$${MINIO_BUCKET}"
-        mc stat "local/$${MINIO_BUCKET}"
+    # 初始化命令随镜像发布（../dependencies/minio-client/init-bucket.sh），不做 bind mount。
+    entrypoint: ["/bin/sh", "/usr/local/bin/init-bucket.sh"]
     networks:
       - node-a-db
 

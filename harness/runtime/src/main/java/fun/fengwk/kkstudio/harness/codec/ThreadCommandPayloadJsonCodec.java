@@ -1,0 +1,403 @@
+package fun.fengwk.kkstudio.harness.codec;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.harness.api.command.CommandValueValidation;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * 5 类 typed Thread command payload 的严格、确定性 JSON codec。
+ *
+ * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
+ * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；GOAL 携带 nullable 目标正文（null 表示清除
+ * Goal）；SET_MODEL 携带完整 {@link ModelSelection}；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除
+ * 环境选择）。
+ *
+ * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
+ * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
+ * {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION}）。字段顺序固定；list 顺序保留。
+ */
+public final class ThreadCommandPayloadJsonCodec {
+
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // SET_CONTRIBUTOR_STATE 的 state.data 是自由 JSON 树，encode/decode 都必须按 BigDecimal 搬运以保精度。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> USER_MESSAGE_FIELDS = orderedSet("message");
+  private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
+  private static final Set<String> GOAL_FIELDS = orderedSet("text");
+  private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
+  private static final Set<String> SET_EXECUTION_FIELDS = orderedSet("execution");
+  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
+  private static final Set<String> NOTIFICATION_FIELDS =
+      orderedSet("notificationId", "kind", "sourceThreadId", "message");
+  private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
+  private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
+      orderedSet("contributorId", "customType", "data");
+
+  private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
+
+  private static final ThreadCommandPayloadJsonCodec REQUEST_HASH_CODEC =
+      new ThreadCommandPayloadJsonCodec();
+
+  public ThreadCommandPayloadJsonCodec() {}
+
+  /** 把 {@link ThreadCommandPayload} 编码为 canonical JSON 文本；不包含 command type discriminator。 */
+  public String encode(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    return write(encodeNode(payload));
+  }
+
+  /**
+   * 把 {@link ThreadCommandPayload} 编码为 client command 请求的 canonical JSON 文本：与 {@link #encode} 相同， 但
+   * USER message 内容允许瞬时 {@code attachment} 单元（含 ordered uploadId）。CUSTOM_MESSAGE 永远使用 durable
+   * 形态（attachment / media 内容确定性拒绝）。请求 hash 只基于该形态计算。
+   */
+  public String encodeRequest(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    return write(encodeRequestNode(payload));
+  }
+
+  /**
+   * 计算 client command 的 canonical request hash：SHA-256（小写 hex，64 字符）作用于显式 canonical 信封 {@code
+   * {"type":<ThreadCommandType>,"payload":<encodeRequest>}}。
+   *
+   * <p>信封同时包含 command type 与 raw 请求 payload（含 ordered contents 与 uploadId），因此不同 type 的 payload 即使
+   * JSON 形状相同也不会碰撞；同一 raw 请求永远得到同一 hash；durable 表示（如附件已物化为 RESOURCE）不影响 hash。
+   */
+  public static String requestHash(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    byte[] canonical = write(encodeRequestEnvelopeNode(payload)).getBytes(StandardCharsets.UTF_8);
+    return Sha256.hex(canonical);
+  }
+
+  /** 编码 request hash 的 canonical 信封节点：{@code type}（command discriminator）+ {@code payload}。 */
+  public static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    ObjectNode envelope = NODES.objectNode();
+    envelope.put("type", payload.type().name());
+    envelope.set("payload", encodeRequestNode(payload));
+    return envelope;
+  }
+
+  /**
+   * 把 canonical JSON 文本按指定 {@link ThreadCommandType} 解码为对应 payload；任何非法结构抛 {@link
+   * IllegalArgumentException}。
+   */
+  public ThreadCommandPayload decode(ThreadCommandType type, String json) {
+    Objects.requireNonNull(type, "type");
+    Objects.requireNonNull(json, "json");
+    JsonNode root;
+    try {
+      root = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException(
+          "malformed " + type.name() + " command payload JSON", error);
+    }
+    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
+    if (root == null || root.isMissingNode()) {
+      throw new IllegalArgumentException("malformed " + type.name() + " command payload JSON");
+    }
+    return switch (type) {
+      case USER_MESSAGE -> decodeUserMessage(root);
+      case CUSTOM_MESSAGE -> decodeCustomMessage(root);
+      case GOAL -> decodeGoal(root);
+      case SET_AGENT -> decodeSetAgent(root);
+      case SET_EXECUTION -> decodeSetExecution(root);
+      case SET_ENVIRONMENT -> decodeSetEnvironment(root);
+      case NOTIFICATION -> decodeNotification(root);
+      case SET_CONTRIBUTOR_STATE -> decodeSetContributorState(root);
+    };
+  }
+
+  // ---------- 编码器 ----------
+
+  private static ObjectNode encodeNode(ThreadCommandPayload payload) {
+    return encodeNode(payload, false);
+  }
+
+  /** 请求形态编码：USER/CUSTOM message 内容使用支持瞬时 ATTACHMENT 的请求 codec。 */
+  private static ObjectNode encodeRequestNode(ThreadCommandPayload payload) {
+    return encodeNode(payload, true);
+  }
+
+  private static ObjectNode encodeNode(ThreadCommandPayload payload, boolean requestForm) {
+    return switch (payload) {
+      case UserMessageCommandPayload value -> NODES
+          .objectNode()
+          .set(
+              "message",
+              requestForm
+                  ? MESSAGE_CODEC.encodeRequestNode(value.message())
+                  : MESSAGE_CODEC.encodeNode(value.message()));
+        // CUSTOM_MESSAGE 永远使用 durable message 形态：request hash 同样基于 durable 形态，
+        // attachment / media 内容在 durable codec 中确定性拒绝。
+      case CustomMessageCommandPayload value -> NODES
+          .objectNode()
+          .set("message", MESSAGE_CODEC.encodeNode(value.message()));
+      case GoalCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        // text 必须显式存在：null 表示清除 Goal，与「字段缺失」严格区分。
+        if (value.text() == null) {
+          node.putNull("text");
+        } else {
+          node.put("text", value.text());
+        }
+        yield node;
+      }
+      case SetAgentCommandPayload value -> NODES.objectNode().put("agentName", value.agentName());
+      case SetExecutionCommandPayload value -> NODES
+          .objectNode()
+          .set("execution", ExecutionSelectionJsonCodec.encode(value.execution()));
+      case SetEnvironmentCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        // environmentName 必须显式存在：null 表示解除环境选择，与「字段缺失」严格区分。
+        if (value.environmentName() == null) {
+          node.putNull("environmentName");
+        } else {
+          node.put("environmentName", value.environmentName());
+        }
+        yield node;
+      }
+      case NotificationCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        node.put("notificationId", value.notificationId().toString());
+        node.put("kind", value.kind().name());
+        node.put("sourceThreadId", value.sourceThreadId().toString());
+        node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
+        yield node;
+      }
+      case SetContributorStateCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        node.set("state", encodeContributorState(value.state()));
+        yield node;
+      }
+    };
+  }
+
+  private static ObjectNode encodeContributorState(CustomEntryPayload state) {
+    ObjectNode node = NODES.objectNode();
+    node.put("contributorId", state.contributorId());
+    node.put("customType", state.customType());
+    node.set("data", parseCanonicalObject(state.dataJson(), "state.data"));
+    return node;
+  }
+
+  // ---------- 解码器 ----------
+
+  private static UserMessageCommandPayload decodeUserMessage(JsonNode value) {
+    ObjectNode node = requireObject(value, "USER_MESSAGE");
+    requireExactFields(node, USER_MESSAGE_FIELDS, "USER_MESSAGE");
+    return new UserMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static CustomMessageCommandPayload decodeCustomMessage(JsonNode value) {
+    ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
+    requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
+    return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static GoalCommandPayload decodeGoal(JsonNode value) {
+    ObjectNode node = requireObject(value, "GOAL");
+    requireExactFields(node, GOAL_FIELDS, "GOAL");
+    return new GoalCommandPayload(nullableGoalText(node, "text", "GOAL"));
+  }
+
+  /** 解码可空 Goal 正文：text 或 null；其他类型（含对象/数组）确定性拒绝。 */
+  private static String nullableGoalText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return CommandValueValidation.requireCanonicalGoalText(
+        value.stringValue(), context + "." + field);
+  }
+
+  private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_AGENT");
+    requireExactFields(node, SET_AGENT_FIELDS, "SET_AGENT");
+    return new SetAgentCommandPayload(canonicalText(node, "agentName", "SET_AGENT"));
+  }
+
+  private static SetExecutionCommandPayload decodeSetExecution(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_EXECUTION");
+    requireExactFields(node, SET_EXECUTION_FIELDS, "SET_EXECUTION");
+    return new SetExecutionCommandPayload(
+        ExecutionSelectionJsonCodec.decode(node.get("execution"), "SET_EXECUTION.execution"));
+  }
+
+  private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
+    requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
+    return new SetEnvironmentCommandPayload(
+        nullableEnvironmentName(node, "environmentName", "SET_ENVIRONMENT"));
+  }
+
+  /** 解码可空 Environment 名：text 或 null；其他类型（含对象/数组）确定性拒绝。 */
+  private static String nullableEnvironmentName(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return CommandValueValidation.requireCanonicalEnvironmentName(
+        value.stringValue(), context + "." + field);
+  }
+
+  private static NotificationCommandPayload decodeNotification(JsonNode value) {
+    ObjectNode node = requireObject(value, "NOTIFICATION");
+    requireExactFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
+    return new NotificationCommandPayload(
+        requiredUuid(node, "notificationId", "NOTIFICATION"),
+        requiredNotificationKind(node, "kind", "NOTIFICATION"),
+        requiredUuid(node, "sourceThreadId", "NOTIFICATION"),
+        MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static SetContributorStateCommandPayload decodeSetContributorState(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_CONTRIBUTOR_STATE");
+    requireExactFields(node, SET_CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE");
+    ObjectNode state = requireObject(node.get("state"), "SET_CONTRIBUTOR_STATE.state");
+    requireExactFields(state, CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE.state");
+    return new SetContributorStateCommandPayload(
+        new CustomEntryPayload(
+            canonicalText(state, "contributorId", "SET_CONTRIBUTOR_STATE.state"),
+            canonicalText(state, "customType", "SET_CONTRIBUTOR_STATE.state"),
+            write(requireObject(state.get("data"), "SET_CONTRIBUTOR_STATE.state.data"))));
+  }
+
+  private static UUID requiredUuid(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be a UUID string");
+    }
+    try {
+      return UUID.fromString(value.stringValue());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + " must be a UUID string", error);
+    }
+  }
+
+  private static NotificationKind requiredNotificationKind(
+      ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be a notification kind");
+    }
+    try {
+      return NotificationKind.valueOf(value.stringValue());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a notification kind", error);
+    }
+  }
+
+  private static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToInt()
+        || value.intValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
+  // ---------- 通用工具方法 ----------
+
+  private static String write(ObjectNode node) {
+    try {
+      return MAPPER.writeValueAsString(node);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode thread command payload JSON", error);
+    }
+  }
+
+  /** 解析已经是 canonical 形态的 dataJson 为 object 节点；{@link CustomEntryPayload} 保证其合法性。 */
+  private static JsonNode parseCanonicalObject(String json, String context) {
+    JsonNode node;
+    try {
+      node = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException(context + " must contain JSON", error);
+    }
+    if (node == null || !node.isObject()) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return node;
+  }
+
+  private static ObjectNode requireObject(JsonNode value, String context) {
+    if (!(value instanceof ObjectNode object)) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return object;
+  }
+
+  private static String canonicalText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    return CommandValueValidation.requireCanonicalName(value.stringValue(), context + "." + field);
+  }
+
+  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    Iterator<String> names = node.propertyNames().iterator();
+    while (names.hasNext()) {
+      actual.add(names.next());
+    }
+    if (!actual.equals(expected)) {
+      throw new IllegalArgumentException(
+          context + " unexpected fields: " + actual + " (expected " + expected + ")");
+    }
+  }
+
+  private static Set<String> orderedSet(String... values) {
+    Set<String> set = new LinkedHashSet<>();
+    for (String value : values) {
+      set.add(value);
+    }
+    return Set.copyOf(set);
+  }
+}

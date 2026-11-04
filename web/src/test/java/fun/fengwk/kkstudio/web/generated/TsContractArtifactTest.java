@@ -13,7 +13,7 @@ import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO;
+import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.io.IOException;
@@ -35,7 +35,8 @@ class TsContractArtifactTest {
   /** 生成产物相对仓库根的位置。 */
   static final String ARTIFACT_RELATIVE_PATH = "frontend/src/shared/api/generated/contracts.ts";
 
-  private static final String CONTRACT_PACKAGE = "fun.fengwk.kkstudio.share";
+  private static final List<String> CONTRACT_PACKAGES =
+      List.of("fun.fengwk.kkstudio.share", "fun.fengwk.kkstudio.canvas.dto");
 
   /** 嵌在错误响应 {@code errors} 上下文里、无法从处理方法签名发现的结构化载荷。 */
   private static final List<Class<?>> ERROR_PAYLOAD_TYPES = List.of(CanvasConflictDTO.class);
@@ -89,28 +90,33 @@ class TsContractArtifactTest {
   private static String generate() {
     return new TsContractGenerator(
             StrictHttpJsonMapperTestSupport.get(),
-            CONTRACT_PACKAGE,
+            CONTRACT_PACKAGES,
             controllers(),
             ERROR_PAYLOAD_TYPES)
         .generate();
   }
 
-  /** Web 生产代码中的全部 {@code @RestController}；测试源码里的控制器不进入契约。 */
+  /** 全仓生产代码（{@code fun.fengwk.kkstudio}）中的全部 {@code @RestController}；测试产物里的控制器不进入契约。 */
   static List<Class<?>> controllers() {
     ClassPathScanningCandidateComponentProvider scanner =
         new ClassPathScanningCandidateComponentProvider(false);
     scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
     List<Class<?>> controllers = new ArrayList<>();
     ClassLoader loader = TsContractArtifactTest.class.getClassLoader();
-    for (BeanDefinition candidate : scanner.findCandidateComponents("fun.fengwk.kkstudio.web")) {
+    for (BeanDefinition candidate : scanner.findCandidateComponents("fun.fengwk.kkstudio")) {
       Class<?> type = ClassUtils.resolveClassName(candidate.getBeanClassName(), loader);
-      String location = type.getProtectionDomain().getCodeSource().getLocation().getPath();
-      if (!location.contains("test-classes")) {
+      if (isProductionArtifact(type)) {
         controllers.add(type);
       }
     }
     controllers.sort(Comparator.comparing(Class::getName));
     return controllers;
+  }
+
+  /** 扫描根覆盖全仓后，测试目录与 test-jar 中的同名控制器必须排除，否则契约会随测试夹具漂移。 */
+  private static boolean isProductionArtifact(Class<?> type) {
+    String location = type.getProtectionDomain().getCodeSource().getLocation().getPath();
+    return !location.contains("test-classes") && !location.endsWith("-tests.jar");
   }
 
   /** 提交产物与重新生成结果一致；缺失或任何差异都以清晰的信息失败。 */

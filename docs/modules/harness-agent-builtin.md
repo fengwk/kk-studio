@@ -58,7 +58,7 @@ groupExecution?
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
 - `Admitted` 后先持久化 `READY -> RUNNING`，这一步同时是陈旧启动围栏。
 
-随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
+随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
 
 流式增量在内存合并，按 [`ModelStreamConfig`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamConfig.java) 的窗口推送有损增量；累计文本按独立节奏落库为 checkpoint，提交成功后才发布 checkpoint 事件，集成方也可以请求当前 owner 立即追帧。默认值为 50ms 推送窗口、256 个事件、64 KiB 增量载荷与 1500ms checkpoint 间隔。旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交批次。
 
@@ -76,7 +76,7 @@ groupExecution?
 
 ## 自动压缩
 
-[`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) 是 Builtin 的自动压缩策略，按 owned `HISTORY` -> hard overflow -> eligible threshold 的顺序计算下一次压缩。它复用 Runtime 的 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 与 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java)，不复制阈值判定；无压缩义务时返回 `null`。Runtime 只通过 `AgentDriver.prepareAutomaticCompaction` 调用本策略，不反向依赖 Builtin 的压缩实现。压缩回合的父子结构、子 Thread 创建与 `SETTLE_OWNER_TURN` 结算仍由 [Harness Runtime](harness-runtime.md#压缩) 掌握。
+[`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) 是 Builtin 的自动压缩策略，按 owned `HISTORY` -> hard overflow -> eligible threshold 的顺序计算下一次压缩。它复用 Runtime 的 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 与 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java)，不复制阈值判定；无压缩义务时返回 `null`。Runtime 只通过 `AgentDriver.prepareAutomaticCompaction` 调用本策略，不反向依赖 Builtin 的压缩实现。压缩回合的父子结构、子 Thread 创建与 `SETTLE_OWNER_TURN` 结算仍由 [Harness Runtime](harness-runtime.md#压缩) 掌握。
 
 ## 私有查询
 
