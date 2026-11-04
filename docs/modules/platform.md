@@ -313,7 +313,9 @@ Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只�
 
 每个 Package 保存不可变 `packageName`、repository URL，以及 branch、`currentCommit`、
 `observedHeadCommit`、检查结果和从当前 commit 派生的 Skill 列表。
-根目录 `<name>/SKILL.md` 的 frontmatter 必须满足名称与目录一致、description 非空且有界；
+Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字符分隔。
+根目录 `<name>/SKILL.md` 的 frontmatter 名称必须与目录一致；description 去掉首尾空白后为
+1–1024 个字符，允许换行；
 路径和符号链接保持在仓库树内。正文和附属文件由 Git 保存。
 
 创建发布当时 branch 的 exact HEAD；Check 只更新观察事实。Update 要求

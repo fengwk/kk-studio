@@ -65,6 +65,15 @@ public class JGitSkillCacheTest {
       # chatgpt agent content
       """;
 
+  @Test
+  void manifestTrimsMultilineDescription() {
+    // frontmatter 解析与名称校验的组合必须保存规范化后的描述。
+    SkillManifestEntry entry =
+        SkillManifestScanner.parseFrontmatter(
+            "dev", "---\nname: dev\ndescription: |\n  first\n  second\n---\n");
+    assertEquals("first\nsecond", entry.description());
+  }
+
   private RevCommit createRepo(File repoDir, Map<String, String> files) throws Exception {
     try (Git git = Git.init().setDirectory(repoDir).setInitialBranch("main").call()) {
       for (Map.Entry<String, String> entry : files.entrySet()) {

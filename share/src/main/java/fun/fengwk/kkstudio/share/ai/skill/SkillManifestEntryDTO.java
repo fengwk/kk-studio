@@ -11,7 +11,7 @@ import lombok.Data;
 @Data
 public class SkillManifestEntryDTO {
 
-  /** Skill 名：非空白、无环绕空白、≤128，与目录 basename 完全一致。 */
+  /** Skill 名：1–64 个小写字母或数字，以单个连字符分隔，与目录 basename 完全一致。 */
   private String name;
 
   /** Skill 描述（非空、无环绕空白、≤1024），Prompt 与选择器都用它区分同名 Skill。 */

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
-import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Platform 全局 Skill 目录的 canonical 文本契约。
@@ -11,27 +11,22 @@ import java.util.Objects;
 public final class SkillNames {
 
   /** Skill / package name 的最大字符数。 */
-  public static final int MAX_NAME_CHARS = 128;
-
-  /** package version 的最大字符数。 */
-  public static final int MAX_PACKAGE_VERSION_CHARS = 128;
+  public static final int MAX_NAME_CHARS = 64;
 
   /** Skill description 的最大字符数。 */
   public static final int MAX_DESCRIPTION_CHARS = 1024;
 
-  /** 与既有模型可见短名契约一致的保留字符。 */
-  private static final char[] FORBIDDEN_NAME_CHARS = {':', '/', '@', '\\'};
+  private static final Pattern NAME = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
 
   private SkillNames() {}
 
-  /** 校验并返回 canonical Skill 名：非空、无环绕空白、单行、无控制字符、≤{@value #MAX_NAME_CHARS} 且不含保留字符。 */
+  /** 校验 Agent Skills 短名：小写字母和数字以单个连字符分隔，长度 1–64。 */
   public static String canonicalSkillName(String value) {
-    String name = canonicalText(value, "name", MAX_NAME_CHARS);
-    if (name.codePoints().anyMatch(SkillNames::isLineOrControl)) {
-      throw new IllegalArgumentException("name must not contain line or control characters");
+    if (value == null || value.length() > MAX_NAME_CHARS || !NAME.matcher(value).matches()) {
+      throw new IllegalArgumentException(
+          "name must be 1-64 lowercase letters or digits separated by single hyphens");
     }
-    requireNoReservedChar(name, "name");
-    return name;
+    return value;
   }
 
   /** 校验并返回 canonical package 名：与 {@link #canonicalSkillName} 同一规则（Skill 与 package 共享短名契约）。 */
@@ -39,19 +34,17 @@ public final class SkillNames {
     return canonicalSkillName(value);
   }
 
-  /** 校验并返回 canonical package version：非空、无环绕空白、无控制字符、≤{@value #MAX_PACKAGE_VERSION_CHARS}。 */
-  public static String canonicalPackageVersion(String value) {
-    String version = canonicalText(value, "packageVersion", MAX_PACKAGE_VERSION_CHARS);
-    if (version.codePoints().anyMatch(SkillNames::isLineOrControl)) {
-      throw new IllegalArgumentException(
-          "packageVersion must not contain line or control characters");
-    }
-    return version;
-  }
-
-  /** 校验并返回 canonical Skill 描述：非空、无环绕空白、只允许 LF 换行、≤{@value #MAX_DESCRIPTION_CHARS}。 */
+  /** 去掉环绕空白并校验 Skill 描述：非空、只允许 LF 换行、≤{@value #MAX_DESCRIPTION_CHARS}。 */
   public static String canonicalDescription(String value) {
-    String description = canonicalText(value, "description", MAX_DESCRIPTION_CHARS);
+    if (value == null) {
+      throw new IllegalArgumentException("description must not be null");
+    }
+    String description = value.strip();
+    if (description.isEmpty()
+        || description.codePointCount(0, description.length()) > MAX_DESCRIPTION_CHARS) {
+      throw new IllegalArgumentException(
+          "description must be between 1 and " + MAX_DESCRIPTION_CHARS + " characters");
+    }
     if (description
         .codePoints()
         .anyMatch(codePoint -> codePoint != '\n' && isLineOrControl(codePoint))) {
@@ -59,40 +52,6 @@ public final class SkillNames {
           "description must not contain control characters other than line feeds");
     }
     return description;
-  }
-
-  /** 校验并返回 Skill 正文：非空，且不得包含字符 NUL（正文长度不设人为上限）。 */
-  public static String canonicalContent(String value) {
-    if (value == null || value.isEmpty()) {
-      throw new IllegalArgumentException("content must not be empty");
-    }
-    if (value.indexOf('\u0000') >= 0) {
-      throw new IllegalArgumentException("content must not contain NUL characters");
-    }
-    return value;
-  }
-
-  private static void requireNoReservedChar(String value, String field) {
-    for (char reserved : FORBIDDEN_NAME_CHARS) {
-      if (value.indexOf(reserved) >= 0) {
-        throw new IllegalArgumentException(
-            field + " must not contain reserved character: " + reserved);
-      }
-    }
-  }
-
-  private static String canonicalText(String value, String field, int maxLength) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not have surrounding whitespace");
-    }
-    if (value.length() > maxLength) {
-      throw new IllegalArgumentException(field + " must be at most " + maxLength + " characters");
-    }
-    return value;
   }
 
   private static boolean isLineOrControl(int codePoint) {

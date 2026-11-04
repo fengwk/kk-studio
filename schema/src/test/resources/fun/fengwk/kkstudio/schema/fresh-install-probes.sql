@@ -1251,6 +1251,18 @@ select pg_temp.rejects('an empty access token is rejected',
     $$insert into skill_package(package_name,repository_url,branch,current_commit,token)
       values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),'')$$,
     '23514', 'ck_skill_package_token');
+select pg_temp.rejects('skill package names reject repeated hyphens',
+    $$insert into skill_package(package_name,repository_url,branch,current_commit)
+      values('probe--pkg','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    '23514', 'ck_skill_package_name');
+select pg_temp.rejects('skill package names reject uppercase',
+    $$insert into skill_package(package_name,repository_url,branch,current_commit)
+      values('Probe','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    '23514', 'ck_skill_package_name');
+select pg_temp.rejects('skill package names reject non-ASCII letters',
+    $$insert into skill_package(package_name,repository_url,branch,current_commit)
+      values('é','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    '23514', 'ck_skill_package_name');
 
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.

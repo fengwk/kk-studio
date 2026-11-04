@@ -17,7 +17,7 @@ import java.util.List;
 @Data
 public class SkillPackageDTO {
 
-  /** Package 名（不可变路由身份）：非空白、无环绕空白、不含 {@code : / @ \}、≤128。 */
+  /** Package 名：1–64 个小写字母或数字，以单个连字符分隔。 */
   private String packageName;
 
   /** 可空 package 描述；null 表示未填写。 */

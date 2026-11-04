@@ -586,6 +586,9 @@ public class SkillCatalogServiceTest {
     assertThrows(AiValidationException.class, () -> fixture.service.editPackage("pkg", null));
     assertThrows(
         AiValidationException.class, () -> fixture.service.createPackage(create("../invalid")));
+    for (String name : List.of("Invalid", "a--b", "-pkg", "a".repeat(65))) {
+      assertThrows(AiValidationException.class, () -> fixture.service.createPackage(create(name)));
+    }
     for (String url :
         List.of(
             "",

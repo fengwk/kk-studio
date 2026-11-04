@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
 @Data
 public class SkillPackageCreateDTO {
 
-  /** package 名：非空白、无环绕空白、不含 {@code : / @ \}、≤128，且全局未占用。 */
+  /** package 名：1–64 个小写字母或数字，以单个连字符分隔，且全局未占用。 */
   private String packageName;
 
   /** 可空 package 描述；null/空白视为未填写。 */

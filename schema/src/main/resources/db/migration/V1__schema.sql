@@ -240,11 +240,11 @@ comment on column agent_model_group_cooldown.group_version is
 -- commit、最近观察到的 branch HEAD 与检查结果，以及从 current commit 派生的 Skill
 -- manifest JSON。repository URL 创建后不可改，更换仓库要使用新的 Package。
 --
--- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
+-- Package 名与 SkillNames 共用 Agent Skills 短名规则。
 -- -----------------------------------------------------------------------------
 
 create table skill_package (
-    package_name         varchar(128)  not null,
+    package_name         varchar(64)   not null,
     description          text,
     repository_url       text          not null,
     branch               varchar(255)  not null,
@@ -259,13 +259,7 @@ create table skill_package (
     update_time          timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
-        package_name = btrim(package_name)
-        and char_length(package_name) > 0
-        and package_name !~ '[[:cntrl:]]'
-        and position(':' in package_name) = 0
-        and position('/' in package_name) = 0
-        and position('@' in package_name) = 0
-        and position('\' in package_name) = 0
+        package_name collate "C" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
     ),
     constraint ck_skill_package_description check (
         description is null
@@ -308,7 +302,7 @@ create table skill_package (
 );
 
 comment on table skill_package is 'Platform 全局 Skill Package 权威行：每个 packageName 恰一行，内容保存在 Git，数据库只保存不可变仓库事实、人工确认的 exact commit、branch 检查观察值与派生的 Skill manifest';
-comment on column skill_package.package_name is 'package 名（主键与不可变路由身份；非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
+comment on column skill_package.package_name is 'package 名（主键；1–64 个小写字母或数字，以单个连字符分隔）';
 comment on column skill_package.description is '可空 package 描述；null 表示未填写';
 comment on column skill_package.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
 comment on column skill_package.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
