@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Duration;
@@ -146,16 +147,12 @@ public class IssueEditingService {
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.COMMENT, "COMMENT", requestKey, validBody);
-    IssueActivity replayed = mutationSupport.replayedActivity(issueId, identity);
-    if (replayed != null) {
-      return replayed;
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.activity();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    IssueActivity replayedUnderLock =
-        mutationSupport.replayedActivityUnderLock(locked.issue(), identity);
-    if (replayedUnderLock != null) {
-      return replayedUnderLock;
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     mutationSupport.appendActivity(
@@ -180,16 +177,12 @@ public class IssueEditingService {
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.INSTRUCTION, "INSTRUCTION", requestKey, validBody);
-    IssueActivity replayed = mutationSupport.replayedActivity(issueId, identity);
-    if (replayed != null) {
-      return replayed;
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
+      return receipt.activity();
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    IssueActivity replayedUnderLock =
-        mutationSupport.replayedActivityUnderLock(locked.issue(), identity);
-    if (replayedUnderLock != null) {
-      return replayedUnderLock;
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);

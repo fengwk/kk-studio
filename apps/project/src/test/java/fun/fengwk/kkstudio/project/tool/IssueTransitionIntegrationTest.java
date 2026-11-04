@@ -177,12 +177,14 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     RunFixture fixture = designRun("收尾后交接");
     UUID assistantEntryId = appendAssistantTurn(fixture.run().getThreadId());
     IssueRun completed =
-        issueRunService.completeRun(
+        issueRunService.finishRun(
             fixture.run().getId(),
             fixture.run().getVersion(),
             key("complete"),
+            IssueRunStatus.COMPLETED,
             assistantEntryId,
             assistantEntryId,
+            null,
             null);
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
 
@@ -222,13 +224,15 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
         issueTransitionService.accept(threadId, staleAssistantEntryId, "REVISE").toState());
     IssueRun beforeClose = issueRunService.getRun(first.getId());
     IssueRun handedOff =
-        issueRunService.completeRun(
+        issueRunService.finishRun(
             first.getId(),
             beforeClose.getVersion(),
             key("complete-1"),
+            IssueRunStatus.COMPLETED,
             firstFinalEntryId,
             firstFinalEntryId,
-            "REVISE");
+            "REVISE",
+            null);
     assertEquals(IssueRunStatus.COMPLETED, handedOff.getStatus());
     assertEquals("REVISE", issueEditingService.getIssue(issue.getId()).getState());
 
@@ -260,8 +264,15 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     RunFixture fixture = designRun("迟到物化");
     UUID threadId = fixture.run().getThreadId();
     UUID oldTurn = beginHandoffTurn(threadId);
-    issueRunService.cancelRun(
-        fixture.run().getId(), fixture.run().getVersion(), key("close"), headEntry(threadId));
+    issueRunService.finishRun(
+        fixture.run().getId(),
+        fixture.run().getVersion(),
+        key("close"),
+        IssueRunStatus.CANCELLED,
+        headEntry(threadId),
+        null,
+        null,
+        null);
     Issue stopped = issueEditingService.getIssue(fixture.issueId());
     Issue resumed =
         issueLifecycleService.resumeIssue(fixture.issueId(), stopped.getVersion(), key("resume"));
@@ -310,8 +321,15 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertTrue(message.contains("Allowed handoff targets: REVIEW"), message);
 
     UUID endEntryId = appendHistoryEntry(threadId);
-    issueRunService.completeRun(
-        run.getId(), run.getVersion(), key("complete"), endEntryId, endEntryId, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        key("complete"),
+        IssueRunStatus.COMPLETED,
+        endEntryId,
+        endEntryId,
+        null,
+        null);
 
     assertEquals(
         4L, count("select count(*) from harness_thread_command where thread_id = ?", threadId));
