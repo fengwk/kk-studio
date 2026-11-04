@@ -61,7 +61,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       仍可用；
  *   <li><b>Issue 删除释放全部证据引用</b>：深删除 Issue 释放其持有的证据 Blob 引用，相关表行按依赖顺序清理；
  *   <li><b>Project 删除释放全部引用</b>：证据行消失、Issue 与 Session 引用都释放、Blob 归零切 DELETING，且删除顺序满足外键约束；
- *   <li><b>活跃或 UNKNOWN 门禁拒绝删除</b>：存在活动 Run 或未核查 UNKNOWN 时严格拒绝删除 Project / Issue。
+ *   <li><b>活跃 Run 拒绝删除</b>：存在活动 Run 时严格拒绝删除 Project / Issue；已收尾的 FAILED/ERROR 暂停不阻止深删除。
  * </ul>
  */
 @AutoConfigureMockMvc
@@ -242,7 +242,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
   }
 
   @Test
-  void deleteProjectRejectsWhenIssueHasActiveRunOrUnknownGate() {
+  void deleteProjectRejectsWhenIssueHasActiveRun() {
     String executor = createTestAgent();
     Fixture fixture = createIssue(executor);
     IssueRun run = issueRunService.acceptRun(fixture.issueId(), "req:accept:" + UUID.randomUUID());
@@ -254,29 +254,14 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             projectService.deleteProject(
                 fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
 
-    // 置为 UNKNOWN 门禁
+    // 结果未知的失败收尾（FAILED + ERROR 暂停）不是删除门禁：只要 Run 已收尾就可以深删除
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
-    issueRunService.markUnknown(
+    issueRunService.failRun(
         run.getId(),
         run.getVersion(),
         "req:unk:" + UUID.randomUUID(),
         endEntryId,
-        "Unknown failure");
-
-    // UNKNOWN 门禁拒绝删除
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            projectService.deleteProject(
-                fixture.projectId(), projectService.getProject(fixture.projectId()).getVersion()));
-
-    // 人工核查后解除 UNKNOWN
-    Issue unkIssue = issueEditingService.getIssue(fixture.issueId());
-    issueLifecycleService.resolveUnknown(
-        unkIssue.getId(),
-        unkIssue.getVersion(),
-        "req:res:" + UUID.randomUUID(),
-        "Manually verified");
+        "Run stopped with in-flight side effects; outcome unknown");
 
     // 现在可以成功删除
     projectService.deleteProject(
@@ -386,7 +371,9 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
             + "\"overrides\":[],\"multipliers\":[]}}");
     jdbc.update(
-        "insert into agent_definition (name, model_name, config) values (?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, execution, config) values (?, "
+            + "jsonb_build_object('driver', 'builtin', 'settings', "
+            + "jsonb_build_object('modelName', ?::text, 'variant', 'default')), '{}'::jsonb)",
         agentName,
         modelName);
     return agentName;

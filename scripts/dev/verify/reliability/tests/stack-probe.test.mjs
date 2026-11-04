@@ -51,5 +51,17 @@ test('test intent: compose status accepts an array, a single object or NDJSON, s
   const expected = 'service=a state=exited health=-\nservice=b state=running health=healthy\n'
   assert.equal(probe(['compose-status'], rows).stdout, expected)
   assert.equal(probe(['compose-status'], rows.map((row) => JSON.stringify(row)).join('\n')).stdout, expected)
+  assert.equal(probe(['compose-status'], rows[1]).stdout, 'service=a state=exited health=-\n')
   assert.equal(probe(['compose-status'], '  ').stdout, 'no reliability containers\n')
+})
+
+test('test intent: unknown commands fail before parsing input, while malformed NDJSON fails on parsing', () => {
+  const unknown = probe(['unknown'], 'not json')
+  assert.equal(unknown.status, 2)
+  assert.equal(unknown.stdout, '')
+  assert.equal(unknown.stderr, 'unknown probe: unknown\n')
+  const malformed = probe(['compose-status'], '{"Service":"a"}\ninvalid')
+  assert.equal(malformed.status, 1)
+  assert.equal(malformed.stdout, '')
+  assert.notEqual(malformed.stderr, '')
 })

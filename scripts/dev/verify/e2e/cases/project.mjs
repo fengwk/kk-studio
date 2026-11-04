@@ -9,7 +9,10 @@ import {
   pageResults,
 } from '../lib/http.mjs'
 import { canonicalUuid } from '../lib/harness.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /** ProjectDTO 精确字段集合：Project 只拥有展示事实、workflow 与 YOLO 启动策略，没有 Coordinator 身份字段。 */
 const PROJECT_FIELDS = [
@@ -144,7 +147,7 @@ registerCase({
   level: 'L1',
   title: 'Project workflow/Issue 状态机与 Activity 事实流',
   docs:
-    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(UNKNOWN)/resolve-unknown/resume 门禁与 400 约定、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
+    '免费 L1：UUID/版本严格 canonical（大写 UUID 与带空白版本返回 400）；Project 默认 workflow（INIT→WORK 人工阶段→DONE，含保留 BLOCKED）、设置 CAS（标题/描述与 YOLO 各自独立更新）、workflow JSON 整体替换与非法配置拒绝；Issue 从 INIT 起按 workflow next 白名单 transition（工作流外目标、保留状态与未声明状态一律拒绝）、BLOCKED 由专用 block/recover 进出并记录原阶段与原因、pause(ERROR/结果未知)/resume 门禁与 400 约定（UNKNOWN 暂停原因与 resolve-unknown 端点已移除：前者 400、后者 404）、无活动 Run 时 INSTRUCTION 明确拒绝、COMMENT 幂等重放；Activity 有界窗口分页（nextActivityCursor 语义）与 snapshot 投影（referencedStateCodes 聚合全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不可丢引用）；旧七态/依赖/Run 控制端点（/status、/cancel、/inputs、/dependencies）已不存在',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let project = null
@@ -614,25 +617,33 @@ registerCase({
         { status: 400 },
       )
 
-      // 控制暂停与业务阻塞分离：UNKNOWN 门禁只能由人工核查事实解除，解除后转 USER 门禁。
+      // 控制暂停与业务阻塞分离：暂停原因只有 USER/ERROR；结果未知的失败收尾以 ERROR 暂停表达，只能由显式 resume 解除。
+      await expectHttpError(
+        () =>
+          ctx.call('POST', `/api/issues/${issue.id}/pause`, {
+            expectedVersion: current.version,
+            requestKey: `e2e-pause-unknown-${cid()}`,
+            reason: 'UNKNOWN',
+            detail: 'outcome unknown is an ERROR pause, not a separate reason',
+          }),
+        { status: 400 },
+      )
+      const pauseDetail = 'Run stopped with in-flight side effects; outcome unknown'
       current = envelopeData(
         (
           await ctx.call('POST', `/api/issues/${issue.id}/pause`, {
             expectedVersion: current.version,
-            requestKey: `e2e-pause-unknown-${cid()}`,
-            reason: 'UNKNOWN',
-            detail: 'in-flight side effect needs manual verification',
+            requestKey: `e2e-pause-error-${cid()}`,
+            reason: 'ERROR',
+            detail: pauseDetail,
           })
         ).json,
       )
-      assert(current.pauseReason === 'UNKNOWN' && current.state === 'WORK', JSON.stringify(current))
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/resume`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resume-unknown-${cid()}`,
-          }),
-        { status: 400 },
+      assert(
+        current.pauseReason === 'ERROR'
+          && current.pauseDetail === pauseDetail
+          && current.state === 'WORK',
+        JSON.stringify(current),
       )
       await expectHttpError(
         () =>
@@ -643,48 +654,15 @@ registerCase({
           }),
         { status: 400 },
       )
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/archive`, { expectedVersion: current.version }),
-        { status: 400 },
-      )
+      // UNKNOWN 人工核查门禁已并入 FAILED + ERROR：旧的 resolve-unknown 端点整体移除。
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/resolve-unknown`, {
             expectedVersion: current.version,
-            requestKey: `e2e-resolve-invalid-${cid()}`,
-            verification: '   ',
+            requestKey: `e2e-resolve-removed-${cid()}`,
+            verification: 'checked the provider console: nothing was dispatched',
           }),
-        { status: 400 },
-      )
-      // 只有尚未解除的 UNKNOWN 门禁阻止删除；解除后 USER 门禁不阻止删除。
-      await expectHttpError(
-        () =>
-          ctx.call('DELETE', `/api/issues/${issue.id}?expectedVersion=${current.version}`),
-        { status: 400 },
-      )
-      const verification = 'checked the provider console: nothing was dispatched'
-      current = envelopeData(
-        (
-          await ctx.call('POST', `/api/issues/${issue.id}/resolve-unknown`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resolve-${cid()}`,
-            verification,
-          })
-        ).json,
-      )
-      assert(
-        current.pauseReason === 'USER' && current.pauseDetail === verification,
-        JSON.stringify(current),
-      )
-      await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/issues/${issue.id}/resolve-unknown`, {
-            expectedVersion: current.version,
-            requestKey: `e2e-resolve-again-${cid()}`,
-            verification: 'second verification',
-          }),
-        { status: 400 },
+        { status: 404 },
       )
       current = envelopeData(
         (
@@ -724,6 +702,7 @@ registerCase({
       assert(current.pauseReason === null, JSON.stringify(current))
 
       // Activity 事实流：STATE_CHANGE 由服务端生成，窗口分页不重不漏。
+      // CONTROL 依次是 BLOCK、RECOVER、PAUSE(ERROR)、RESUME、STOP、RESUME：UNKNOWN 核查事实已不存在。
       const facts = await readActivityPages(ctx, issue.id, 2)
       assert(
         facts.map((activity) => activity.kind).join(',')
@@ -733,7 +712,6 @@ registerCase({
             'STATE_CHANGE',
             'STATE_CHANGE',
             'STATE_CHANGE',
-            'CONTROL',
             'CONTROL',
             'CONTROL',
             'CONTROL',
@@ -757,10 +735,19 @@ registerCase({
           === 'INIT->WORK,WORK->DONE,DONE->INIT,INIT->WORK',
         JSON.stringify(transitions.map((activity) => activity.data)),
       )
-      const resolveFact = facts.find((activity) => activity.data?.action === 'RESOLVE_UNKNOWN')
+      // 失败暂停以 ERROR 原因留痕，且绝不出现已移除的 UNKNOWN 核查事实。
+      const controlFacts = facts.filter((activity) => activity.kind === 'CONTROL')
       assert(
-        resolveFact?.data?.verification === verification && resolveFact.actorType === 'HUMAN',
-        JSON.stringify(resolveFact),
+        controlFacts.map((activity) => activity.data?.action).join(',')
+          === 'BLOCK,RECOVER,PAUSE,RESUME,STOP,RESUME',
+        JSON.stringify(controlFacts.map((activity) => activity.data)),
+      )
+      const pauseFact = controlFacts.find((activity) => activity.data?.action === 'PAUSE')
+      assert(
+        pauseFact?.actorType === 'SYSTEM'
+          && pauseFact.data?.reason === 'ERROR'
+          && !facts.some((activity) => activity.data?.action === 'RESOLVE_UNKNOWN'),
+        JSON.stringify(pauseFact),
       )
       await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?limit=0`), { status: 400 })
       await expectHttpError(() => ctx.call('GET', `/api/issues/${issue.id}?afterSequence=-1`), {

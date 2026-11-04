@@ -36,10 +36,10 @@ function moduleOf(fqcn) {
     return 'web'
   }
   if (fqcn.startsWith('fun.fengwk.kkstudio.canvas.')) {
-    return 'apps/canvas/infra'
+    return 'apps/canvas/runtime'
   }
-  if (fqcn.startsWith('fun.fengwk.kkstudio.harness.')) {
-    return 'harness/infra'
+  if (fqcn.startsWith('fun.fengwk.kkstudio.platform.daemon.')) {
+    return 'platform/daemon-server'
   }
   if (fqcn.startsWith('fun.fengwk.kkstudio.platform.')) {
     return 'platform/runtime'

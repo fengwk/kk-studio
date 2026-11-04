@@ -16,7 +16,7 @@ import type { SystemSettingsDTO, SystemSettingsUpdateDTO } from '@/shared/api/ge
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
-vi.mock('@/shared/api/system-settings-service', () => ({
+vi.mock('@/features/settings/system-settings-service', () => ({
   systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
   createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))

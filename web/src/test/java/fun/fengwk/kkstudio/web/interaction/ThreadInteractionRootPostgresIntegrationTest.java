@@ -977,8 +977,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         1L,
         "issue-" + issueId);
     jdbc.update(
-        "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
-            + " values (?, ?, ?)",
+        "insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)"
+            + " select ?, ?, session_id, id from harness_thread where id = ?",
         issueId,
         AGENT,
         rootThreadId);

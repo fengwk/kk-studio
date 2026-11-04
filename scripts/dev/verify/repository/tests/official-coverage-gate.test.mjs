@@ -1,32 +1,15 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { indexMainSources, isExactClassName } from './support/jacoco-source-index.mjs'
 
 /**
  * 官方 JaCoCo 覆盖门禁守护：runtime 与 agent-builtin 各自用 native jacoco:check 校验自己的关键类。
  * 每个 include 必须是当前模块真实存在的精确类名（嵌套类型按 JaCoCo 的 `.` 归一命名），否则空匹配会让门禁静默失效。
  */
-
-function repositoryRoot() {
-  if (process.env.KK_STUDIO_REPO_ROOT) {
-    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-  }
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  for (;;) {
-    if (existsSync(path.join(directory, '.git'))) {
-      return directory
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error('cannot locate the kk-studio worktree root; set KK_STUDIO_REPO_ROOT')
-    }
-    directory = parent
-  }
-}
 
 const REPOSITORY_ROOT = repositoryRoot()
 const RUNTIME_MODULE = 'harness/runtime'
@@ -35,25 +18,25 @@ const BUILTIN_MODULE = 'harness/agent-builtin'
 /** 33 个关键类按物理源码归属拆分：runtime 28 项，builtin 5 项。 */
 const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl',
-  'fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot',
-  'fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState',
-  'fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics',
+  'fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot',
+  'fun.fengwk.kkstudio.harness.api.history.EntryCurrentState',
+  'fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics',
   'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory',
   'fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe',
-  'fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding',
-  'fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec',
+  'fun.fengwk.kkstudio.harness.api.tool.ToolBinding',
+  'fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec',
   'fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl',
   'fun.fengwk.kkstudio.harness.runtime.AgentSpawner',
-  'fun.fengwk.kkstudio.harness.runtime.SpawnRequest',
-  'fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Continuation',
-  'fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Budget',
+  'fun.fengwk.kkstudio.harness.api.SpawnRequest',
+  'fun.fengwk.kkstudio.harness.api.SpawnRequest.Continuation',
+  'fun.fengwk.kkstudio.harness.api.SpawnRequest.Budget',
   'fun.fengwk.kkstudio.harness.runtime.SpawnTickets',
   'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn',
-  'fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin',
-  'fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints',
-  'fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl',
-  'fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts',
-  'fun.fengwk.kkstudio.harness.runtime.thread.ThreadState',
+  'fun.fengwk.kkstudio.harness.api.join.ThreadJoin',
+  'fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints',
+  'fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl',
+  'fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts',
+  'fun.fengwk.kkstudio.harness.api.thread.ThreadState',
   'fun.fengwk.kkstudio.harness.tool.ToolCall',
   'fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec',
   'fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec',
@@ -65,11 +48,11 @@ const RUNTIME_CRITICAL_CLASSES = [
 ]
 
 const BUILTIN_CRITICAL_CLASSES = [
-  'fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation',
+  'fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation',
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution',
   'fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner',
   'fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator',
-  'fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec',
+  'fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec',
 ]
 
 function stripComments(xml) {
@@ -302,8 +285,8 @@ test('builtin native gate owns 5 builtin classes at 0.90', () => {
 test('SpawnRequest nested types use the dotted JaCoCo class names', () => {
   // JaCoCo 把 `SpawnRequest$Continuation` 归一为 `SpawnRequest.Continuation` 后才会命中。
   const { classes } = indexMainSources(path.join(REPOSITORY_ROOT, RUNTIME_MODULE))
-  assert.ok(classes.has('fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Continuation'))
-  assert.ok(classes.has('fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Budget'))
+  assert.ok(classes.has('fun.fengwk.kkstudio.harness.api.SpawnRequest.Continuation'))
+  assert.ok(classes.has('fun.fengwk.kkstudio.harness.api.SpawnRequest.Budget'))
 })
 
 test('runtime and builtin publish test-jars for distinct test support', () => {

@@ -6,6 +6,7 @@ import {
 } from '@/features/catalog/AgentModelView'
 import { translate, useI18n } from '@/shared/i18n'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
+import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * Agent 展示实际生效的 model + variant：显式 override 优先，否则使用 model 的 defaultVariant。model 未加载且没有
@@ -48,9 +49,12 @@ export function AgentResourceCard({
   deletePending: boolean
 }) {
   const { t } = useI18n()
-  const modelRefValue = (agent.model ?? '').trim()
+  const selection = getBuiltinModelSelection(agent.execution)
+  const modelRefValue = (selection?.modelName ?? '').trim()
   const model = models.find((item) => item.name === modelRefValue)
-  const effectiveModel = formatEffectiveModel(model, modelRefValue, agent.variant ?? null)
+  const effectiveModel = agent.execution && agent.execution.driver !== 'builtin'
+    ? agent.execution.driver
+    : formatEffectiveModel(model, modelRefValue, selection?.variant ?? null)
   const tools = agent.config.tools
   const skillTags = (agent.config.skills ?? []).map((s) => `${s.packageName} / ${s.name}`)
   const subagents = agent.config.subagents
@@ -68,7 +72,9 @@ export function AgentResourceCard({
         ) : undefined
       }
       rows={[
-        [t('ai.catalog.card.effectiveModel'), effectiveModel],
+        [t(agent.execution && agent.execution.driver !== 'builtin'
+          ? 'ai.catalog.form.executionDriver'
+          : 'ai.catalog.card.effectiveModel'), effectiveModel],
         { label: t('ai.catalog.card.tools'), tags: tools, limit: 2 },
         { label: t('ai.catalog.card.skills'), tags: skillTags, limit: 2 },
         { label: t('ai.catalog.card.subagents'), tags: subagents, limit: 2 },

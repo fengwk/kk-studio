@@ -148,7 +148,7 @@ class ComfyuiPluginTest {
     PluginInstance instance =
         plugin.configure(
             pluginConfig(false, ComfyuiWorkflowFixtures.h3WorkflowsArray()), context());
-    assertEquals(List.of(), instance.canvasAdapters());
+    assertEquals(List.of(), instance.contributions(CanvasFunctionAdapter.class));
     assertEquals(List.of(), instance.harnessContributors());
     instance.close();
     instance.close();
@@ -169,7 +169,8 @@ class ComfyuiPluginTest {
     PluginInstance instance =
         plugin.configure(new PluginConfig(1L, JsonValues.write(defaults)), context);
 
-    assertEquals(List.of(), instance.canvasAdapters());
+    assertEquals(List.of(), instance.contributions(CanvasFunctionAdapter.class));
+    assertEquals(List.of(), instance.harnessContributors());
     instance.close();
   }
 
@@ -196,7 +197,8 @@ class ComfyuiPluginTest {
   @Test
   void enabledConfigurationWithNoWorkflowsContributesNothing() {
     PluginInstance instance = plugin.configure(pluginConfig(true, "[]"), context());
-    assertEquals(List.of(), instance.canvasAdapters());
+    assertEquals(List.of(), instance.contributions(CanvasFunctionAdapter.class));
+    assertEquals(List.of(), instance.harnessContributors());
     instance.close();
   }
 
@@ -209,7 +211,7 @@ class ComfyuiPluginTest {
                 ComfyuiWorkflowFixtures.directWorkflow("direct-flow")));
     PluginInstance instance = plugin.configure(config, context());
 
-    List<CanvasFunctionAdapter> adapters = instance.canvasAdapters();
+    List<CanvasFunctionAdapter> adapters = instance.contributions(CanvasFunctionAdapter.class);
     assertEquals(1, adapters.size());
     assertEquals(
         List.of("direct-flow"), adapters.get(0).functions().stream().map(f -> f.name()).toList());
@@ -247,7 +249,7 @@ class ComfyuiPluginTest {
                 Optional.of(mock(PluginPromptTasks.class)),
                 Optional.of(mock(PluginPromptResources.class))));
 
-    List<CanvasFunctionAdapter> adapters = instance.canvasAdapters();
+    List<CanvasFunctionAdapter> adapters = instance.contributions(CanvasFunctionAdapter.class);
     assertEquals(1, adapters.size());
     assertEquals(
         List.of(H3WorkflowBuilder.WORKFLOW_ID),

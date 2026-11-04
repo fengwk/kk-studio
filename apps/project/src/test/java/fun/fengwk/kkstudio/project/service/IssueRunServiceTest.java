@@ -5,11 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,27 +19,24 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
@@ -52,22 +50,19 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 显式 Run 接受：每次 Run 先分配 runId 并作为 root Join ticket 的 invocationId，命令批按固定顺序显式设置
- * Agent/Model/Environment、冻结 {@code project/run} contributor state，最后以恰一条 CUSTOM_MESSAGE 启动任务。
+ * Agent/Execution/Environment，最后以恰一条 CUSTOM_MESSAGE 启动任务。
  *
- * <p>测试意图：断言接受方提交的 Harness 契约形状（命令类型与顺序、Join 身份、冻结快照的业务身份），不依赖真实 Runtime 执行；Run 记录、Join
- * 与上下文冻结的原子性由平台集成测试覆盖。
+ * <p>测试意图：断言接受方提交的 Harness 契约形状（只有通用命令与一条渲染好的 Markdown 任务消息、Join 身份、历史起点），并断言收尾不再写任何 Harness 状态；Run
+ * 记录、Join 与命令的原子性由平台集成测试覆盖。
  */
 class IssueRunServiceTest {
 
@@ -76,7 +71,7 @@ class IssueRunServiceTest {
   private static final String WORKFLOW =
       """
       {"states":[{"state":"INIT","name":"待开始","next":["DESIGN"]},\
-      {"state":"DESIGN","name":"设计","agent":"worker","environment":"stage-env","instructions":"完成可交付方案","maxRuns":3,\
+      {"state":"DESIGN","name":"设计","agent":"worker","environment":"stage-env","instructions":"完成 **可交付** 方案","maxRuns":3,\
       "next":["DONE"]},\
       {"state":"BLOCKED","name":"业务阻塞"},\
       {"state":"DONE","name":"完成"}]}""";
@@ -114,11 +109,10 @@ class IssueRunServiceTest {
           JsonMapper.builder().build());
 
   /**
-   * 新 Agent 接受 Run：五条命令按
-   * SET_AGENT→SET_EXECUTION→SET_ENVIRONMENT→SET_CONTRIBUTOR_STATE→CUSTOM_MESSAGE 提交。
+   * 新 Agent 接受 Run：四条命令按 SET_AGENT→SET_EXECUTION→SET_ENVIRONMENT→CUSTOM_MESSAGE 提交，任务消息是唯一业务上下文。
    */
   @Test
-  void acceptsExplicitRunCommandBatchFrozenToRunTicket() {
+  void acceptsGeneralCommandsAndRenderedTaskMessage() {
     Issue issue = issue();
     Project project = project();
     BranchSettings settings =
@@ -174,7 +168,6 @@ class IssueRunServiceTest {
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_EXECUTION,
             ThreadCommandType.SET_ENVIRONMENT,
-            ThreadCommandType.SET_CONTRIBUTOR_STATE,
             ThreadCommandType.CUSTOM_MESSAGE),
         commands.stream().map(command -> command.payload().type()).toList());
     assertInstanceOf(SetAgentCommandPayload.class, commands.get(0).payload());
@@ -183,37 +176,88 @@ class IssueRunServiceTest {
     SetEnvironmentCommandPayload environment =
         assertInstanceOf(SetEnvironmentCommandPayload.class, commands.get(2).payload());
     assertEquals("stage-env", environment.environmentName());
-    assertInstanceOf(CustomMessageCommandPayload.class, commands.get(4).payload());
+
+    CustomMessageCommandPayload taskCommand =
+        assertInstanceOf(CustomMessageCommandPayload.class, commands.get(3).payload());
+    String message = ((TextMessageContent) taskCommand.message().contents().get(0)).text();
+    assertTrue(message.contains("stage DESIGN"), message);
+    assertTrue(message.contains("完成 **可交付** 方案"), message);
+    assertTrue(message.contains("#7 修复登录"), message);
+    assertTrue(message.contains("登录偶发失败"), message);
+    assertTrue(message.contains("Allowed handoff targets: DONE"), message);
+    // 可信 Markdown 必须原样渲染，不能出现 XML/Markdown 转义。
+    assertFalse(message.contains("&quot;"), message);
+    assertFalse(message.contains("&#"), message);
 
     // runId 在接受源输入前分配，必须同时是 Run 主键与 root Join ticket 的 invocationId。
     assertEquals(inserted.get().getId(), run.getId());
     assertEquals(run.getId(), task.runId());
-    String taskRequestHash = commands.get(4).requestHash();
-    assertEquals(taskRequestHash, task.requestHash());
-
-    // 冻结快照必须携带本 Run 与 sourceThreadId 的业务身份，供上下文投影与工具授权共同使用。
-    SetContributorStateCommandPayload stateCommand =
-        assertInstanceOf(SetContributorStateCommandPayload.class, commands.get(3).payload());
-    CustomEntryPayload state = stateCommand.state();
-    assertEquals(ProjectRunScope.CONTRIBUTOR_ID, state.contributorId());
-    assertEquals(ProjectRunScope.CUSTOM_TYPE, state.customType());
-    ProjectRunScope scope = new ProjectRunScopeJsonCodec().decode(state.dataJson());
-    assertEquals(run.getId(), scope.runId());
-    assertEquals(ISSUE_ID, scope.issueId());
-    assertEquals(PROJECT_ID, scope.projectId());
-    assertEquals(task.threadId(), scope.sourceThreadId());
-    assertEquals("DESIGN", scope.stage());
-    assertEquals("worker", scope.agentName());
-    assertTrue(scope.active());
+    assertEquals(commands.get(3).requestHash(), task.requestHash());
     assertEquals(rootEntryId, run.getStartEntryId());
   }
 
-  /**
-   * 测试意图：Run 进入终态时必须在同一业务锁内闭合 branch scope——读取冻结的 SET_CONTRIBUTOR_STATE 源命令，翻成同一 runId 的
-   * active=false 副本，并以纯设置批次（单条、无用户消息）写回同一 Thread，不向模型发送伪用户输入。
-   */
+  /** 保留态不能启动 Run，也不能派发 Harness 命令。 */
   @Test
-  void completeRunClosesFrozenRunScopeWithoutUserMessage() {
+  void rejectsReservedStageBeforeDispatch() {
+    Issue issue = issue();
+    issue.setState("INIT");
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+
+    ProjectValidationException error =
+        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    assertTrue(error.getMessage().contains("not in an executable work stage"));
+    verify(threadExecutions, never()).submitRunTask(any());
+    verify(issueRunRepository, never()).insert(any());
+  }
+
+  /** 没有 Agent 的工作阶段不允许启动，也不能创建额度或派发命令。 */
+  @Test
+  void rejectsStageWithoutAgentBeforeAuthorizingBudget() {
+    Issue issue = issue();
+    Project project = project();
+    project.setWorkflowJson(
+        WORKFLOW
+            .replace("\"agent\":\"worker\",", "")
+            .replace("\"environment\":\"stage-env\",", "")
+            .replace("\"maxRuns\":3,", ""));
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+
+    ProjectValidationException error =
+        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    assertTrue(error.getMessage().contains("no enabled agent"));
+    verify(stageBudgetRepository, never()).insert(any());
+    verify(threadExecutions, never()).submitRunTask(any());
+  }
+
+  /** 归档后的项目和 Issue 均不能接受新的 Run。 */
+  @Test
+  void rejectsArchivedOwnersBeforeDispatch() {
+    Issue issue = issue();
+    Project project = project();
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+
+    project.setArchivedAt(Instant.now());
+    ProjectValidationException projectError =
+        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    assertTrue(projectError.getMessage().contains("archived project"));
+    project.setArchivedAt(null);
+    issue.setArchivedAt(Instant.now());
+    ProjectValidationException issueError =
+        assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
+    assertTrue(issueError.getMessage().contains("archived issue"));
+    verify(threadExecutions, never()).submitRunTask(any());
+    verify(issueRunRepository, never()).insert(any());
+  }
+
+  /** 测试意图：Run 收尾只收敛 Project 自己的行，不再向 Harness 接受任何状态写入（旧实现的 scope 闭合批次彻底消失）。 */
+  @Test
+  void completeRunWritesNoHarnessState() {
     UUID threadId = UUID.randomUUID();
     UUID runId = UUID.randomUUID();
     UUID startEntryId = UUID.randomUUID();
@@ -233,36 +277,6 @@ class IssueRunServiceTest {
             .activeSince(Instant.now())
             .version(3L)
             .build();
-    ProjectRunScope frozen =
-        new ProjectRunScope(
-            runId,
-            ISSUE_ID,
-            PROJECT_ID,
-            threadId,
-            7L,
-            "修复登录",
-            null,
-            "DESIGN",
-            "设计",
-            null,
-            List.of("DONE"),
-            "worker",
-            true);
-    ThreadCommand source =
-        new ThreadCommand(
-            threadId,
-            4L,
-            new SetContributorStateCommandPayload(
-                new CustomEntryPayload(
-                    ProjectRunScope.CONTRIBUTOR_ID,
-                    ProjectRunScope.CUSTOM_TYPE,
-                    new ProjectRunScopeJsonCodec().encode(frozen))),
-            UUID.randomUUID(),
-            "0".repeat(64),
-            startEntryId,
-            null,
-            null,
-            Instant.now());
     Entry startEntry = mock(Entry.class);
     when(startEntry.id()).thenReturn(startEntryId);
     Entry endEntry = mock(Entry.class);
@@ -287,28 +301,13 @@ class IssueRunServiceTest {
     when(issueRunRepository.updateById(any(), anyLong())).thenReturn(true);
     when(issueRepository.updateById(any(), anyLong())).thenReturn(true);
     when(executions.getIfAvailable()).thenReturn(threadExecutions);
-    when(threadExecutions.findThreadCommand(eq(threadId), any())).thenReturn(Optional.of(source));
     when(threadExecutions.readThread(threadId)).thenReturn(view);
-    when(threadExecutions.acceptCommands(any(), any())).thenReturn(mock(AcceptedCommands.class));
 
     service.completeRun(runId, 3L, "complete-1", endEntryId, null, null);
 
-    ArgumentCaptor<AcceptCommandsCommand> captor =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(threadExecutions).acceptCommands(captor.capture(), any());
-    AcceptCommandsTarget.Thread target =
-        assertInstanceOf(AcceptCommandsTarget.Thread.class, captor.getValue().target());
-    assertEquals(threadId, target.threadId());
-    assertEquals(endEntryId, target.expectedHeadEntryId());
-    assertEquals(5L, target.expectedNextCommandSequence());
-    List<NewThreadCommand> commands = captor.getValue().commands();
-    // 纯设置批次：单条 SET_CONTRIBUTOR_STATE，没有末尾用户消息，不唤醒模型。
-    assertEquals(1, commands.size());
-    SetContributorStateCommandPayload close =
-        assertInstanceOf(SetContributorStateCommandPayload.class, commands.get(0).payload());
-    ProjectRunScope closed = new ProjectRunScopeJsonCodec().decode(close.state().dataJson());
-    assertEquals(runId, closed.runId());
-    assertFalse(closed.active());
+    // 历史区间校验仍然读取权威路径，但整个收尾不产生任何 Harness 命令接受。
+    verify(threadExecutions).readThread(threadId);
+    verify(threadExecutions, never()).acceptCommands(any(), any());
     assertEquals(IssueRunStatus.COMPLETED, run.getStatus());
     assertEquals(endEntryId, run.getEndEntryId());
   }

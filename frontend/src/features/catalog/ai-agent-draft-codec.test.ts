@@ -94,8 +94,7 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
         inheritParentEnvironment: false,
         tools: [' read ', ''],
@@ -111,6 +110,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: '',
       systemPrompt: '',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       model: 'model',
       variant: 'quality',
       inheritParentEnvironment: false,
@@ -122,7 +122,7 @@ describe('ai-agent-draft-codec', () => {
     expect(
       toAgentDraft({
         ...agent,
-        variant: null,
+        execution: { driver: 'builtin', settings: { modelName: 'model', variant: null } },
       }),
     ).toMatchObject({ variant: '' })
   })
@@ -132,8 +132,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['read', 'bash'],
@@ -145,8 +144,7 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgentUpdate(draft())).toEqual({
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['read', 'bash'],
@@ -169,7 +167,14 @@ describe('ai-agent-draft-codec', () => {
         subagents: ['helper'],
       },
     })
-    expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
+    expect(toEditableAgent(draft({ variant: ' ' })).execution).toEqual({
+      driver: 'builtin', settings: { modelName: 'model', variant: null },
+    })
+  })
+
+  it('preserves unknown driver settings until explicitly changed', () => {
+    const execution = { driver: 'future', settings: { opaque: 'value' } }
+    expect(toEditableAgentUpdate(draft({ execution, model: '' })).execution).toEqual(execution)
   })
 
   it('preserves embedded newlines in multiline description payloads', () => {
@@ -215,8 +220,7 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'model',
-      variant: null,
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: null } },
       config: {
         inheritParentEnvironment: true,
         tools: [],
@@ -252,8 +256,7 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'BUILTIN',
-      model: null,
-      variant: null,
+      execution: null,
       config: {
         inheritParentEnvironment: true,
         tools: [],
@@ -271,7 +274,7 @@ describe('ai-agent-draft-codec', () => {
     // USER 路径仍要求模型：默认允许空模型导致抛错，且请求体从不包含 type。
     expect(() => toEditableAgentUpdate(toAgentDraft(builtin))).toThrow(/model/)
     const builtinUpdate = toEditableAgentUpdate(toAgentDraft(builtin), true)
-    expect(builtinUpdate.model).toBeNull()
+    expect(builtinUpdate.execution).toBeNull()
     expect(builtinUpdate).not.toHaveProperty('type')
   })
 })

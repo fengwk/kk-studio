@@ -2,9 +2,6 @@ package fun.fengwk.kkstudio.platform.pluginhost.catalog;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
@@ -25,8 +22,11 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * 一次 configure 出的 Plugin 两域快照：每个已安装 Plugin 的实例，加上与内置贡献合并后的完整 {@link HarnessCatalog} 与 {@link
- * CanvasFunctionCatalog}。
+ * 一次 configure 出的 Plugin 快照：每个已安装 Plugin 的实例、与内置贡献合并后的 {@link
+ * HarnessCatalog}，以及由注入的产品目录投影冻结的产品目录视图。
+ *
+ * <p>平台只拥有它自己解释的 Harness 目录；产品目录（例如 Canvas 的函数目录）由对应产品模块提供的 {@link Function} 构建并冻结，平台随后只用 {@link
+ * #productCatalog(Class)} 按类型读取，不 import 也不解释产品类型。因此每个产品只有一份已构建好的目录视图，租用快照的执行路径不会重复读取 adapter 定义。
  *
  * <p>快照是插件实例的唯一所有者：构建失败时回收已创建的实例，{@link #close()} 幂等且按逆序释放；单个实例关闭失败不阻断其它实例回收。
  */
@@ -35,18 +35,17 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
 
   private final List<ConfiguredPlugin> configuredPlugins;
   private final HarnessCatalog harnessCatalog;
-  private final CanvasFunctionCatalog canvasFunctionCatalog;
+
+  /** 构建期由产品目录投影一次性冻结，快照发布前完成赋值，此后只读。 */
+  private Object productCatalog;
 
   private final Object lifecycleLock = new Object();
   private boolean closed;
 
   private PluginCatalogSnapshot(
-      List<ConfiguredPlugin> configuredPlugins,
-      HarnessCatalog harnessCatalog,
-      CanvasFunctionCatalog canvasFunctionCatalog) {
+      List<ConfiguredPlugin> configuredPlugins, HarnessCatalog harnessCatalog) {
     this.configuredPlugins = configuredPlugins;
     this.harnessCatalog = harnessCatalog;
-    this.canvasFunctionCatalog = canvasFunctionCatalog;
   }
 
   /**
@@ -54,17 +53,18 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
    *
    * @param configurations 必须覆盖全部已安装 pluginId
    * @param contexts 按 pluginId 提供 scoped {@link PluginContext}
-   * @throws IllegalStateException 配置缺失、configure 失败或两域目录冲突时（只带 stage 与 pluginId）
+   * @param productCatalog 由产品模块提供的目录投影：输入是本次已配置好的快照，输出是该产品唯一冻结的目录视图
+   * @throws IllegalStateException 配置缺失、configure 失败或任一目录（含产品目录）校验失败时（只带 stage 与 pluginId）
    */
   public static PluginCatalogSnapshot build(
       StudioPluginRegistry registry,
       Map<String, PluginConfig> configurations,
       Function<String, PluginContext> contexts,
       List<HarnessContributor> builtins,
-      List<CanvasFunctionAdapter> builtinAdapters) {
+      Function<PluginCatalogSnapshot, ?> productCatalog) {
+    Objects.requireNonNull(productCatalog, "productCatalog");
     List<ConfiguredPlugin> configured = new ArrayList<>();
     List<HarnessContributor> contributors = new ArrayList<>(builtins);
-    List<CanvasFunctionAdapter> adapters = new ArrayList<>(builtinAdapters);
     String stage = "configure";
     String activeId = null;
     try {
@@ -87,14 +87,14 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
         configured.add(entry);
         stage = "collect-contributions";
         contributors.addAll(instance.harnessContributors());
-        adapters.addAll(instance.canvasAdapters());
       }
       stage = "catalog";
       activeId = null;
-      return new PluginCatalogSnapshot(
-          List.copyOf(configured),
-          HarnessCatalog.from(contributors),
-          CanvasFunctionCatalog.from(adapters));
+      PluginCatalogSnapshot candidate =
+          new PluginCatalogSnapshot(List.copyOf(configured), HarnessCatalog.from(contributors));
+      candidate.productCatalog =
+          Objects.requireNonNull(productCatalog.apply(candidate), "product catalog view");
+      return candidate;
     } catch (RuntimeException error) {
       log.warn(
           "Plugin catalog snapshot build failed at stage {} for plugin {}: {}",
@@ -126,9 +126,20 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
     return harnessCatalog;
   }
 
-  /** 插件 adapter 与内置 adapter 合并后的完整 Canvas Function 目录。 */
-  public CanvasFunctionCatalog canvasFunctionCatalog() {
-    return canvasFunctionCatalog;
+  /**
+   * 读取本次快照冻结的产品目录视图。
+   *
+   * @param type 产品目录视图类型
+   * @throws IllegalStateException 本次快照的产品目录视图不是该类型时（装配错误，不是运行期分支）
+   */
+  public <T> T productCatalog(Class<T> type) {
+    Objects.requireNonNull(type, "type");
+    Object view = productCatalog;
+    if (!type.isInstance(view)) {
+      throw new IllegalStateException(
+          "plugin catalog snapshot has no " + type.getSimpleName() + " product catalog");
+    }
+    return type.cast(view);
   }
 
   /** 每个 Plugin 当前应用的配置修订，用于判断是否需要重建。 */
@@ -191,17 +202,6 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
         ids.add(contributor.descriptor().id());
       }
       return ids;
-    }
-
-    /** 该实例贡献的 Canvas function 名。 */
-    public Set<String> functionNames() {
-      Set<String> names = new LinkedHashSet<>();
-      for (CanvasFunctionAdapter adapter : instance.canvasAdapters()) {
-        for (CanvasFunctionDefinition function : adapter.functions()) {
-          names.add(function.name());
-        }
-      }
-      return names;
     }
   }
 }

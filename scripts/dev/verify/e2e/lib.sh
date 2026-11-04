@@ -12,20 +12,9 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
+source "$SCRIPT_DIR/../../lib/http-wait.sh"
 WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
@@ -142,13 +131,7 @@ wait_http() {
   local url=$1
   local name=$2
   local attempts=${3:-90}
-  local _
-  for _ in $(seq 1 "$attempts"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
+  poll_http "$url" "$attempts" && return 0
   die "timed out waiting for $name: $url"
 }
 
@@ -158,22 +141,17 @@ wait_http_process() {
   local pid=$3
   local log_file=$4
   local attempts=${5:-90}
-  local _
-  for _ in $(seq 1 "$attempts"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    if ! kill -0 "$pid" >/dev/null 2>&1; then
-      echo "ERROR: $name process exited before readiness (pid=$pid)" >&2
-      if [ -f "$log_file" ]; then
-        echo "--- $name log tail ---" >&2
-        tail -n 120 "$log_file" >&2 || true
-      fi
-      exit 1
-    fi
-    sleep 1
-  done
-  echo "ERROR: timed out waiting for $name: $url" >&2
+  local status
+  if poll_http "$url" "$attempts" "$pid"; then
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 2 ]; then
+    echo "ERROR: $name process exited before readiness (pid=$pid)" >&2
+  else
+    echo "ERROR: timed out waiting for $name: $url" >&2
+  fi
   if [ -f "$log_file" ]; then
     echo "--- $name log tail ---" >&2
     tail -n 120 "$log_file" >&2 || true
@@ -326,22 +304,7 @@ start_backend() {
     120
 }
 
-# Synchronize provider credential pairs into the seeded providers after backend readiness.
-sync_e2e_provider_credentials() {
-  require_cmd node
-  step "Syncing provider E2E credentials from env (secrets not printed)"
-  env \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
-    TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
-    TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" \
-    TEST_OPENAI_RESPONSES_BASE_URL="${TEST_OPENAI_RESPONSES_BASE_URL-}" \
-    TEST_OPENAI_RESPONSES_API_KEY="${TEST_OPENAI_RESPONSES_API_KEY-}" \
-    TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
-    TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" \
-    TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
-    TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
-    node "$REPO_ROOT/scripts/dev/verify/e2e/sync-provider-credentials.mjs" --backend-url "$BACKEND_URL"
-}
+source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
 
 start_frontend() {
   mkdir -p "$WORK_DIR"

@@ -922,7 +922,7 @@ async function main(argv) {
           .waitFor({ state: 'visible', timeout: 30_000 })
       }
 
-      try {
+      {
         await goto('/canvas')
         await page.getByRole('button', { name: /^(Create a new canvas|Create new canvas|创建新画布)$/ }).click()
         await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
@@ -1071,10 +1071,6 @@ async function main(argv) {
         )
         await shot(caseArt, 'canvas-reference-run')
         expectNoFatal(pageErrors, consoleErrors)
-      } finally {
-        if (canvasId) {
-          await apiJson(args.backendUrl, 'DELETE', `/api/canvases/${canvasId}`)
-        }
       }
     },
     { requiresCanvasFunction: true },
@@ -1270,8 +1266,7 @@ async function main(argv) {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
-        model: REAL_UI_MODEL_ID,
-        variant: REAL_UI_MODEL.variant,
+        execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       assert(
@@ -1363,8 +1358,7 @@ async function main(argv) {
         name: realAgentName,
         description: 'Temporary real UI E2E agent.',
         systemPrompt: 'Reply concisely and never call tools.',
-        model: REAL_UI_MODEL_ID,
-        variant: REAL_UI_MODEL.variant,
+        execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       assert(

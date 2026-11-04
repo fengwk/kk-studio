@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,9 +16,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.tool.DatabaseProjectThreadOwnerResolver;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -46,9 +52,9 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
         write(
             () ->
                 issueAgentThreadRepository.insert(
-                    new IssueAgentThread(issueId, agentName, threadId))));
+                    new IssueAgentThread(issueId, agentName, sessionId, threadId))));
     assertEquals(
-        new IssueAgentThread(issueId, agentName, threadId),
+        new IssueAgentThread(issueId, agentName, sessionId, threadId),
         issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
     assertNull(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, "other-agent"));
 
@@ -68,7 +74,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     UUID sessionId = uuid();
     sessionRow(sessionId);
     UUID threadId = threadRow(sessionId);
-    IssueAgentThread binding = new IssueAgentThread(issueId, agentName, threadId);
+    IssueAgentThread binding = new IssueAgentThread(issueId, agentName, sessionId, threadId);
 
     assertThrows(IllegalStateException.class, () -> issueAgentThreadRepository.insert(binding));
     assertNull(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
@@ -96,7 +102,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             write(
                 () ->
                     issueAgentThreadRepository.insert(
-                        new IssueAgentThread(uuid(), agentName, threadId))),
+                        new IssueAgentThread(uuid(), agentName, sessionId, threadId))),
         "missing issue must fail the issue_id FK");
     assertThrows(
         DataIntegrityViolationException.class,
@@ -104,7 +110,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             write(
                 () ->
                     issueAgentThreadRepository.insert(
-                        new IssueAgentThread(issueId, "missing-agent", threadId))),
+                        new IssueAgentThread(issueId, "missing-agent", sessionId, threadId))),
         "missing agent definition must fail the agent_name FK");
     assertThrows(
         DataIntegrityViolationException.class,
@@ -112,8 +118,56 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             write(
                 () ->
                     issueAgentThreadRepository.insert(
-                        new IssueAgentThread(issueId, agentName, uuid()))),
+                        new IssueAgentThread(issueId, agentName, sessionId, uuid()))),
         "missing harness thread must fail the thread_id FK");
+    UUID otherSession = uuid();
+    sessionRow(otherSession);
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(issueId, agentName, otherSession, threadId))),
+        "the binding cannot claim a different existing session");
+  }
+
+  /** 无 Run 的稳定绑定也按 Session 覆盖兄弟分支，其他 Session 不受影响。 */
+  @Test
+  void sessionOwnershipExistsWithoutRuns() {
+    UUID issueId = issueRow(projectRow());
+    String agentName = agentDefinition();
+    UUID sessionId = uuid();
+    UUID otherSession = uuid();
+    sessionRow(sessionId);
+    sessionRow(otherSession);
+    UUID threadId = threadRow(sessionId);
+    UUID sibling = uuid();
+    jdbc.update(
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+            + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger,"
+            + " constraints, execution_control, input_through_sequence, next_command_sequence,"
+            + " version, created_at, updated_at)"
+            + " select ?, session_id, id, head_entry_id, creation_request_hash, 'sibling', id,"
+            + " false, 'MODEL_TOOL', constraints, execution_control, input_through_sequence,"
+            + " next_command_sequence, version, created_at, updated_at from harness_thread where id = ?",
+        sibling,
+        threadId);
+    UUID otherThread = threadRow(otherSession);
+    assertTrue(
+        write(
+            () ->
+                issueAgentThreadRepository.insert(
+                    new IssueAgentThread(issueId, agentName, sessionId, threadId))));
+    assertTrue(issueAgentThreadRepository.existsBySessionId(sessionId));
+    assertFalse(issueAgentThreadRepository.existsBySessionId(otherSession));
+    IssueThreadExecution execution = mock(IssueThreadExecution.class);
+    when(execution.findThreadSessionId(sibling)).thenReturn(Optional.of(sessionId));
+    when(execution.findThreadSessionId(otherThread)).thenReturn(Optional.of(otherSession));
+    DatabaseProjectThreadOwnerResolver resolver =
+        new DatabaseProjectThreadOwnerResolver(issueAgentThreadRepository, execution);
+    assertTrue(resolver.isIssueAgentBranch(sibling));
+    assertFalse(resolver.isIssueAgentBranch(otherThread));
   }
 
   /** 稳定身份不可重绑：同一 (issue, agent) 只有一条绑定，同一 Thread 也只能被一个 Agent/Issue 持有。 */
@@ -134,7 +188,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
         write(
             () ->
                 issueAgentThreadRepository.insert(
-                    new IssueAgentThread(issueId, firstAgent, firstThread))));
+                    new IssueAgentThread(issueId, firstAgent, firstSession, firstThread))));
 
     assertThrows(
         DataIntegrityViolationException.class,
@@ -142,7 +196,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             write(
                 () ->
                     issueAgentThreadRepository.insert(
-                        new IssueAgentThread(issueId, firstAgent, secondThread))),
+                        new IssueAgentThread(issueId, firstAgent, secondSession, secondThread))),
         "same (issue, agent) must not rebind to another thread");
     assertThrows(
         DataIntegrityViolationException.class,
@@ -150,10 +204,10 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
             write(
                 () ->
                     issueAgentThreadRepository.insert(
-                        new IssueAgentThread(issueId, secondAgent, firstThread))),
+                        new IssueAgentThread(issueId, secondAgent, firstSession, firstThread))),
         "same thread must not be shared by another agent");
     assertEquals(
-        new IssueAgentThread(issueId, firstAgent, firstThread),
+        new IssueAgentThread(issueId, firstAgent, firstSession, firstThread),
         issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, firstAgent));
   }
 
@@ -172,8 +226,8 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     try {
       List<Callable<Boolean>> races =
           List.of(
-              () -> tryBind(issueId, firstAgent, threadId),
-              () -> tryBind(issueId, secondAgent, threadId));
+              () -> tryBind(issueId, firstAgent, sessionId, threadId),
+              () -> tryBind(issueId, secondAgent, sessionId, threadId));
       List<Future<Boolean>> results = executor.invokeAll(races);
       long winners = 0;
       for (Future<Boolean> result : results) {
@@ -242,12 +296,12 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     assertEquals(1, jdbc.update("delete from harness_thread where id = ?", threadId));
   }
 
-  private boolean tryBind(UUID issueId, String agentName, UUID threadId) {
+  private boolean tryBind(UUID issueId, String agentName, UUID sessionId, UUID threadId) {
     try {
       return write(
           () ->
               issueAgentThreadRepository.insert(
-                  new IssueAgentThread(issueId, agentName, threadId)));
+                  new IssueAgentThread(issueId, agentName, sessionId, threadId)));
     } catch (DataIntegrityViolationException expected) {
       return false;
     }

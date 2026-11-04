@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -53,6 +55,87 @@ import java.util.concurrent.ScheduledExecutorService;
 
 /** 在真实 PostgreSQL 事务中验证带 replay state 的模型结果与兄弟 Tool batch 的完整交接。 */
 class PostgresqlThreadProcessorReplayTest {
+
+  @Test
+  void stopSettlesPendingToolResponseInPostgresql() {
+    // 真实 PostgreSQL Store 的父子删除约束要求 pending 响应生成的子行先于 Model 删除。
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    ModelRequestSpec request = succeededRequest();
+    var baseline = StoreTestSupport.seedTurnBaseline(store, request.toolBindings());
+    UUID modelId =
+        store.transaction(
+            tx -> {
+              var thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+              UUID userId = tx.nextId();
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          userId,
+                          baseline.sessionId(),
+                          baseline.turnStartEntryId(),
+                          StoreTestSupport.userMessagePayload(),
+                          T2));
+              tx.threads().update(thread.advanceHead(userId, T2));
+              UUID id = tx.nextId();
+              var model =
+                  new ModelInvocation(
+                      id,
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      userId,
+                      request,
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      T2,
+                      T2);
+              builtin(store, tx).insertModelInvocation(model);
+              var running = model.markRunning(T2);
+              builtin(store, tx).updateModelInvocation(running);
+              builtin(store, tx)
+                  .updateModelInvocation(
+                      running.succeed(StoreTestSupport.assistantResponse("call-0"), T2));
+              return id;
+            });
+    var before = store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
+    var runtime =
+        new HarnessRuntime(
+            store,
+            builtinRegistry(store, (id, path, preparation) -> null),
+            () -> new CompactionConfig(20_000));
+    var result =
+        runtime.stop(new StopCommand(baseline.threadId(), UUID.randomUUID(), before.version()));
+    assertEquals(1, result.stoppedThreads().size());
+    var path =
+        store.transaction(
+            tx ->
+                tx.entries()
+                    .loadPath(tx.threads().find(baseline.threadId()).orElseThrow().headEntryId()));
+    var metadata =
+        path.entries().stream()
+            .filter(e -> e.payload() instanceof MessagePayload p && p.toolResultMetadata() != null)
+            .map(e -> ((MessagePayload) e.payload()).toolResultMetadata())
+            .toList();
+    assertEquals(
+        List.of(ToolResultStatus.CANCELLED),
+        metadata.stream().map(ToolResultMetadata::status).toList());
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
+    assertTrue(store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.tools().loadByAssistantEntry(metadata.getFirst().assistantEntryId()))
+            .isEmpty());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "test", Duration.ofSeconds(30)))
+            .isEmpty());
+  }
 
   @Test
   void toolSiblingBatchWithTransferredReplayStateAdvancesAndWakesContinuation() {

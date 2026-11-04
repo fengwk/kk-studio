@@ -34,6 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -159,10 +161,11 @@ class ComfyuiPluginPostgresIntegrationTest {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
                 assertEquals(
                     List.of(COMFYUI), context.getBean(StudioPluginRegistry.class).pluginIds());
-                assertTrue(snapshot.configuredPlugins().get(0).functionNames().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(snapshot).functionNames(COMFYUI).isEmpty());
                 assertThrows(
                     IllegalArgumentException.class,
-                    () -> snapshot.canvasFunctionCatalog().require(FUNCTION));
+                    () -> PluginCanvasFunctionCatalog.of(snapshot).catalog().require(FUNCTION));
               }
               assertEquals(1L, repository.find(COMFYUI).orElseThrow().revision());
             });
@@ -214,7 +217,8 @@ class ComfyuiPluginPostgresIntegrationTest {
 
               assertEquals(1L, repository.find(COMFYUI).orElseThrow().revision());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
-                assertTrue(lease.snapshot().canvasFunctionCatalog().list().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
               }
             });
   }
@@ -235,8 +239,12 @@ class ComfyuiPluginPostgresIntegrationTest {
 
               configuration.configure(COMFYUI, 2L, disabledValues(), Map.of());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
-                assertTrue(lease.snapshot().configuredPlugins().get(0).functionNames().isEmpty());
-                assertTrue(lease.snapshot().canvasFunctionCatalog().list().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot())
+                        .functionNames(COMFYUI)
+                        .isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
               }
             });
   }
@@ -260,6 +268,7 @@ class ComfyuiPluginPostgresIntegrationTest {
                       repository,
                       new PluginCredentialRepository(JdbcClient.create(dataSource)),
                       configurationService(context, runtime),
+                      PluginCanvasFunctionCatalog::functionNames,
                       mock(PluginAuthAttemptRepository.class),
                       Duration.ofMinutes(5),
                       Clock.systemUTC());
@@ -365,10 +374,10 @@ class ComfyuiPluginPostgresIntegrationTest {
    * <p>桩 ComfyUI 按提交图里唯一的 SaveVideo 节点回输出，因此返回值就等于该配置定义侧 selector 的目标节点 id。
    */
   private int executeOnce(PluginCatalogRuntime.Lease lease) {
-    CanvasFunctionDefinition definition =
-        lease.snapshot().canvasFunctionCatalog().require(FUNCTION).function();
-    CanvasFunctionAdapter adapter =
-        lease.snapshot().canvasFunctionCatalog().require(FUNCTION).adapter();
+    CanvasFunctionCatalog.RegisteredFunction registered =
+        PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().require(FUNCTION);
+    CanvasFunctionDefinition definition = registered.function();
+    CanvasFunctionAdapter adapter = registered.adapter();
 
     Map<String, CanvasJson> args = new LinkedHashMap<>();
     args.put(ARGUMENT, new JsonText("injected"));

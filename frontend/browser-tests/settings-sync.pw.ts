@@ -38,7 +38,7 @@ test('export modal groups agents/models/providers together and defaults to the f
   ]) {
     await expect(dialog.getByRole('checkbox', { name: label, exact: true })).toBeChecked()
   }
-  await expect(dialog.getByText('共 7 类 · 10 项（含依赖）')).toBeVisible()
+  await expect(dialog.getByText('共 7 类 · 10 项，含依赖')).toBeVisible()
 })
 
 /** 共享 Checkbox 的 input 视觉隐藏；真实用户点击目标是与它同属一个 label 的方框与文案。 */
@@ -88,7 +88,7 @@ test('export sends only directly selected roots while the UI shows the full scop
   }
   await checkableTarget(dialog.getByRole('checkbox', { name: 'Agent: reviewer', exact: true })).click()
   // UI 展示完整闭包（reviewer + 4 个依赖，覆盖 5 个种类）。
-  await expect(dialog.getByText('共 5 类 · 5 项（含依赖）')).toBeVisible()
+  await expect(dialog.getByText('共 5 类 · 5 项，含依赖')).toBeVisible()
 
   const [download] = await Promise.all([
     page.waitForEvent('download'),

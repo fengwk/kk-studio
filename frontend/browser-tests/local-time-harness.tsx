@@ -2,8 +2,8 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { ChatCard } from '@/features/chat/ChatCard'
-import { SelectionPanel } from '@/features/chat/SelectionPanel'
-import { sessionSelectionItem, threadSelectionItem } from '@/features/chat/runtime/root-thread/session-selection-items'
+import { SelectionPanel } from '@/features/thread/SelectionPanel'
+import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { setLocale } from '@/shared/i18n'
 
 setLocale('zh-CN')

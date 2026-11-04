@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { toAgentModelViews, type AgentModelView } from '@/features/catalog/AgentModelView'
 

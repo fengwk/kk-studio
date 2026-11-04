@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO;
+import fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.generated.fixture.FixtureDTO;
 
@@ -44,6 +46,11 @@ class TsContractGeneratorTest {
     FixtureDTO.Priced priced() {
       throw new UnsupportedOperationException();
     }
+
+    @GetMapping("/canvas")
+    CanvasSnapshotDTO canvas() {
+      throw new UnsupportedOperationException();
+    }
   }
 
   static final class CustomSerializerController {
@@ -64,8 +71,28 @@ class TsContractGeneratorTest {
 
   private static String generate(Class<?> controller) {
     return new TsContractGenerator(
-            StrictHttpJsonMapperTestSupport.get(), FIXTURE_PACKAGE, List.of(controller), List.of())
+            StrictHttpJsonMapperTestSupport.get(),
+            List.of(FIXTURE_PACKAGE),
+            List.of(controller),
+            List.of())
         .generate();
+  }
+
+  /** 测试意图：控制器返回类型及嵌套字段可分别来自不同的契约包。 */
+  @Test
+  void discoversTypesFromMultipleContractPackages() {
+    String generated =
+        new TsContractGenerator(
+                StrictHttpJsonMapperTestSupport.get(),
+                List.of(FIXTURE_PACKAGE, "fun.fengwk.kkstudio.canvas.dto"),
+                List.of(ContractController.class),
+                List.of(CanvasConflictDTO.class))
+            .generate();
+
+    assertTrue(generated.contains("export interface FixtureView"));
+    assertTrue(generated.contains("export interface CanvasSnapshotDTO"));
+    assertTrue(generated.contains("export interface CanvasDocumentDTO"));
+    assertTrue(generated.contains("export type CanvasConflictDTO"));
   }
 
   /** 测试意图：未标 Nullable 必填非空；ALWAYS 可空必出现；其余可空可缺省；Long 写成字符串，Instant 写成 epoch 秒。 */
@@ -180,7 +207,7 @@ class TsContractGeneratorTest {
             () ->
                 new TsContractGenerator(
                     JsonMapper.builder().build(),
-                    FIXTURE_PACKAGE,
+                    List.of(FIXTURE_PACKAGE),
                     List.of(ContractController.class),
                     List.of()));
     assertTrue(drifted.getMessage().contains("wire profile drifted"), drifted.getMessage());

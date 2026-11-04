@@ -1,6 +1,9 @@
 import { assert, cid, expectHttpError } from '../lib/http.mjs'
 import { createEnvironmentFixture, deleteEnvironmentFixture } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /**
  * IDE 视图身份：固定规范小写 UUID。
