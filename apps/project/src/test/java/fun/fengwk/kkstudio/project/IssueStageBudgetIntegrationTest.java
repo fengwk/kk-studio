@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -68,6 +69,10 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_agent_thread where issue_id = ? and agent_name = ?",
             issue.getId(),
             agent));
+    // 详情与快照读路径按 run ordinal 升序列出该 Issue 的全部 Run。
+    assertEquals(
+        List.of(first.getId(), second.getId()),
+        issueRunService.listRuns(issue.getId()).stream().map(IssueRun::getId).toList());
   }
 
   /** 不同 Agent 使用不同稳定 Thread，但共享同一 {@code (issue,state)} 阶段额度。 */
