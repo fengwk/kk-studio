@@ -1,14 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -45,12 +42,10 @@ import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -106,19 +101,9 @@ final class StopControl {
         });
   }
 
-  static UUID deriveChildStopRequestId(UUID parentStopRequestId, UUID childThreadId) {
-    Objects.requireNonNull(parentStopRequestId, "parentStopRequestId");
-    Objects.requireNonNull(childThreadId, "childThreadId");
-    return UUID.nameUUIDFromBytes(
-        (parentStopRequestId + ":" + childThreadId).getBytes(StandardCharsets.UTF_8));
-  }
-
-  private record ThreadStopCandidate(ThreadState thread, UUID stopRequestId, boolean isTarget) {}
-
   private record ThreadStopContext(
       ThreadState thread,
       UUID stopRequestId,
-      boolean isTarget,
       EntryPath path,
       List<ThreadCommand> queued,
       LockedDriverState driverState,
@@ -137,73 +122,17 @@ final class StopControl {
     // 树锁必须在任何业务行锁之前获取
     ThreadTreeLocks.lockForThread(tx, command.threadId());
 
-    ThreadState targetThread =
-        tx.threads()
-            .find(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
-
-    // 收集目标线程及其所有永久后代线程，并派生确定的子 stopRequestId
-    List<ThreadStopCandidate> candidates = new ArrayList<>();
-    candidates.add(new ThreadStopCandidate(targetThread, command.stopRequestId(), true));
-    Map<UUID, UUID> stopRequestIds = new HashMap<>();
-    stopRequestIds.put(targetThread.id(), command.stopRequestId());
-
-    List<UUID> frontier = new ArrayList<>();
-    frontier.add(targetThread.id());
-    Set<UUID> visited = new HashSet<>();
-    visited.add(targetThread.id());
-
-    while (!frontier.isEmpty()) {
-      UUID parentId = frontier.remove(0);
-      UUID parentStopId = stopRequestIds.get(parentId);
-      List<ThreadState> children = tx.threads().listChildren(parentId);
-      for (ThreadState child : children) {
-        if (visited.add(child.id())) {
-          UUID childStopId = deriveChildStopRequestId(parentStopId, child.id());
-          stopRequestIds.put(child.id(), childStopId);
-          candidates.add(new ThreadStopCandidate(child, childStopId, false));
-          frontier.add(child.id());
-        }
-      }
-    }
-
-    // 子树内所有其它节点的直接父都在停止集合内；子 Join 只向直接父交付，因此外部只补目标的一个直接父。
-    List<UUID> parentThreadIds = new ArrayList<>();
-    List<UUID> parentSessionIds = new ArrayList<>();
-    UUID parentThreadId = targetThread.parentThreadId();
-    if (parentThreadId != null) {
-      ThreadState parent = tx.threads().find(parentThreadId).orElse(null);
-      if (parent != null) {
-        parentThreadIds.add(parent.id());
-        parentSessionIds.add(parent.sessionId());
-      }
-    }
+    StopTreeCollector.Tree tree = StopTreeCollector.collect(tx, command);
+    List<StopTreeCollector.Candidate> candidates = tree.candidates();
 
     // 规范锁序：Sessions (KEY SHARE) -> Threads (FOR UPDATE, UuidOrder) -> Commands -> Models -> Tools
-    // -> Work
-    List<UUID> sessionIdsList = new ArrayList<>();
-    for (ThreadStopCandidate c : candidates) {
-      sessionIdsList.add(c.thread().sessionId());
-    }
-    sessionIdsList.addAll(parentSessionIds);
-    List<UUID> sessionIds =
-        sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
-    for (UUID sessionId : sessionIds) {
+    // -> Work。收集器只给出排序后的集合，实际加锁仍由本编排按固定阶段执行。
+    for (UUID sessionId : tree.sessionIds()) {
       tx.sessions().lockForKeyShare(sessionId).orElseThrow();
     }
 
-    List<UUID> threadIdsToLock = new ArrayList<>();
-    for (ThreadStopCandidate c : candidates) {
-      threadIdsToLock.add(c.thread().id());
-    }
-    threadIdsToLock.addAll(parentThreadIds);
-    List<UUID> sortedThreadIds =
-        threadIdsToLock.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
-    for (UUID threadId : sortedThreadIds) {
+    for (UUID threadId : tree.threadIds()) {
       ThreadState locked =
           tx.threads()
               .lock(threadId)
@@ -221,7 +150,7 @@ final class StopControl {
     List<StoppedThreadReceipt> stored =
         tx.stops().loadByRootRequest(command.threadId(), command.stopRequestId());
     if (!stored.isEmpty()) {
-      return new Commit(new StopResult(true, lockedTarget, stored), List.of(), List.of());
+      return StopReceipts.replay(lockedTarget, stored);
     }
     // 单节点回执命中但没有该 root 对：该派生 stopRequestId 已被其它 root 使用，派生身份不得伪装成新的 root。
     if (tx.stops().findReceipt(command.threadId(), command.stopRequestId()).isPresent()) {
@@ -247,8 +176,8 @@ final class StopControl {
 
     // 首次 Stop：任何节点的身份都不能已被使用——若某节点的 (threadId, stopRequestId) 已存在（来自其它 root 或非 Stop
     // 关闭操作），必须明确冲突，绝不静默跳过部分集合。
-    List<ThreadStopCandidate> toStop = new ArrayList<>(candidates.size());
-    for (ThreadStopCandidate candidate : candidates) {
+    List<StopTreeCollector.Candidate> toStop = new ArrayList<>(candidates.size());
+    for (StopTreeCollector.Candidate candidate : candidates) {
       ThreadState locked = lockedThreads.get(candidate.thread().id());
       if (tx.stops().findReceipt(locked.id(), candidate.stopRequestId()).isPresent()) {
         throw conflict(
@@ -259,14 +188,14 @@ final class StopControl {
                 + candidate.stopRequestId()
                 + ") is already used by another stop root");
       }
-      toStop.add(new ThreadStopCandidate(locked, candidate.stopRequestId(), candidate.isTarget()));
+      toStop.add(new StopTreeCollector.Candidate(locked, candidate.stopRequestId()));
     }
 
     // Stage 4: Commands 锁（loadQueuedCommands）
     Map<UUID, List<ThreadCommand>> queuedByThread = new HashMap<>();
     Map<UUID, EntryPath> pathsByThread = new HashMap<>();
     Map<UUID, EntryCurrentState> statesByThread = new HashMap<>();
-    for (ThreadStopCandidate candidate : toStop) {
+    for (StopTreeCollector.Candidate candidate : toStop) {
       EntryPath path = tx.entries().loadPath(candidate.thread().headEntryId());
       pathsByThread.put(candidate.thread().id(), path);
       statesByThread.put(candidate.thread().id(), EntryCurrentState.from(path));
@@ -276,7 +205,7 @@ final class StopControl {
 
     // Stage 5: Driver 状态锁
     Map<UUID, LockedDriverState> driverStatesByThread = new HashMap<>();
-    for (ThreadStopCandidate candidate : toStop) {
+    for (StopTreeCollector.Candidate candidate : toStop) {
       EntryPath path = pathsByThread.get(candidate.thread().id());
       EntryCurrentState state = statesByThread.get(candidate.thread().id());
       AgentDriver driver = driverRegistry.of(path.baseSettings());
@@ -287,7 +216,7 @@ final class StopControl {
     // Stage 6: Tools 锁与 ThreadContext 分类（只读：不在遍历中 mutation；terminal 结果物化与收敛统一留到
     // Stage 8 全锁完成后再做）
     List<ThreadStopContext> contexts = new ArrayList<>();
-    for (ThreadStopCandidate candidate : toStop) {
+    for (StopTreeCollector.Candidate candidate : toStop) {
       EntryPath path = pathsByThread.get(candidate.thread().id());
       EntryCurrentState state = statesByThread.get(candidate.thread().id());
       List<ThreadCommand> queued = queuedByThread.get(candidate.thread().id());
@@ -299,7 +228,6 @@ final class StopControl {
           new ThreadStopContext(
               candidate.thread(),
               candidate.stopRequestId(),
-              candidate.isTarget(),
               path,
               queued,
               driverState,
@@ -384,7 +312,6 @@ final class StopControl {
       if (!cancelledCommands.isEmpty()) {
         tx.commands().update(cancelledCommands);
       }
-      List<CancelledThreadInput> cancelledInputs = cancelledInputs(cancelledCommands);
       List<ThreadCommand> queuedNotifications =
           queued.stream().filter(queuedCommand -> queuedCommand.type().isNotification()).toList();
 
@@ -429,17 +356,11 @@ final class StopControl {
       driver.completeStop(tx, stoppedThread, commit(tx));
       stoppedStates.add(stoppedThread);
       receipts.add(
-          new StoppedThreadReceipt(
-              stoppedThread.id(),
-              stopRequestId,
-              node.stoppedTurnEndEntryId(),
-              cancelledCommands.size(),
-              cancelledInputs));
+          StopReceipts.nodeReceipt(
+              stoppedThread, stopRequestId, node.stoppedTurnEndEntryId(), cancelledCommands));
     }
 
-    if (receipts.stream().noneMatch(r -> r.threadId().equals(command.threadId()))) {
-      throw new IllegalStateException("target thread receipt missing after Stop convergence");
-    }
+    StopReceipts.requireTargetReceipt(receipts, command.threadId());
 
     // Join 结算与父通知：所有节点已 STOPPED；父节点若在本集合内则通知直接固化到历史，否则投递为父命令并唤醒。
     // 已提交的最终结果先结算；延迟交付到全部节点关闭之后，避免父节点接到通知后又被本次 Stop 取消。
@@ -470,12 +391,8 @@ final class StopControl {
 
     tx.stops().insertReceipts(command.threadId(), command.stopRequestId(), receipts);
 
-    receipts.sort(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR));
     ThreadState target = tx.threads().find(command.threadId()).orElse(lockedTarget);
-    return new Commit(
-        new StopResult(false, target, receipts),
-        List.copyOf(driverExecutionIds),
-        List.copyOf(toolExecutionIds));
+    return StopReceipts.commit(target, receipts, driverExecutionIds, toolExecutionIds);
   }
 
   private static int workTypeRank(WorkTargetType type) {
@@ -837,20 +754,6 @@ final class StopControl {
             now);
     ThreadState.validateTransition(thread, next);
     return next;
-  }
-
-  /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE 与 GOAL）；CUSTOM_MESSAGE、NOTIFICATION 与 SET_* 不退草稿。 */
-  private static List<CancelledThreadInput> cancelledInputs(List<ThreadCommand> cancelled) {
-    List<CancelledThreadInput> inputs = new ArrayList<>();
-    for (ThreadCommand command : cancelled) {
-      if (command.payload() instanceof UserMessageCommandPayload
-          || command.payload() instanceof GoalCommandPayload) {
-        inputs.add(
-            new CancelledThreadInput(
-                command.sequence(), command.idempotencyKey(), command.payload()));
-      }
-    }
-    return List.copyOf(inputs);
   }
 
   /**
