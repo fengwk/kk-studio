@@ -181,7 +181,7 @@ describe('POSIX parent state machine with controlled ports', () => {
     expect(ports.verify).toHaveBeenCalledWith(join('virtual', 'scope-1', 'launch'))
     expect(ports.spawn).toHaveBeenCalledWith(process.execPath, [
       '--no-warnings', 'fixed-helper.js', join('virtual', 'scope-1'),
-    ], { env: spec.env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] })
+    ], { env: { ...spec.env, NO_PROXY: '' }, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] })
     expect(ports.publish).not.toHaveBeenCalled()
 
     put(join('virtual', 'scope-1'), 'scope', '501')
