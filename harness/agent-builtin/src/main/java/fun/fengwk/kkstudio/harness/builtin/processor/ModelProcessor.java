@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -64,7 +65,7 @@ import java.util.function.Function;
  * attempt + claim 校验同时充当陈旧启动围栏：Stop / 跨实例 recovery 已获胜时绝不发出请求。
  */
 @Slf4j
-public final class ModelProcessor implements AutoCloseable {
+public final class ModelProcessor implements ModelCheckpointRequester, AutoCloseable {
 
   private final HarnessStore store;
   private final BuiltinStore builtinStore;
@@ -161,6 +162,7 @@ public final class ModelProcessor implements AutoCloseable {
    * <p>不匹配（invocation 不在本进程执行、attempt 已被其它 attempt 接管、execution 已终态/取消/abandoned）返回 {@code false}
    * 且不触发任何持久化或发布；只有确实登记为 active 且 attempt 一致时返回 {@code true}。不阻塞调用方，可从实时通道的任意线程调用。
    */
+  @Override
   public boolean requestCheckpoint(UUID invocationId, int attempt) {
     Objects.requireNonNull(invocationId, "invocationId");
     if (attempt <= 0) {

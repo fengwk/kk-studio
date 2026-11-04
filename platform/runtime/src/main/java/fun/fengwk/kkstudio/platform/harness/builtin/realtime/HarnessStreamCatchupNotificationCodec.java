@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.realtime;
+package fun.fengwk.kkstudio.platform.harness.builtin.realtime;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
