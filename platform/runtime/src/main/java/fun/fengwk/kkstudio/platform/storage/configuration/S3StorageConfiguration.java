@@ -82,7 +82,8 @@ public class S3StorageConfiguration {
                           .build())
                   .httpRoutePlanner(new SystemDefaultRoutePlanner(proxySelector)))
           .build();
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException error) {
+      // SDK 异常可能包含 endpoint/凭据，只上抛稳定的不可恢复事实，不保留 cause。
       throw new IllegalStateException("S3 client configuration is invalid");
     }
   }
@@ -105,7 +106,8 @@ public class S3StorageConfiguration {
                   AwsBasicCredentials.create(properties.getAccessKey(), properties.getSecretKey())))
           .serviceConfiguration(newS3Configuration())
           .build();
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException error) {
+      // SDK 异常可能包含 endpoint/凭据，只上抛稳定的不可恢复事实，不保留 cause。
       throw new IllegalStateException("S3 presigner configuration is invalid");
     }
   }

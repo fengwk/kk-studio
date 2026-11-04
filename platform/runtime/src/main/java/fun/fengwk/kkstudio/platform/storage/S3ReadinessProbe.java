@@ -40,7 +40,8 @@ public class S3ReadinessProbe implements InitializingBean {
     validateProperties(properties);
     try {
       s3Client.headBucket(HeadBucketRequest.builder().bucket(properties.getBucket()).build());
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException error) {
+      // SDK 异常可能包含 endpoint/bucket/凭据，只上抛稳定的不可恢复事实，不保留 cause。
       throw new IllegalStateException(
           "S3 bucket readiness check failed: bucket is unreachable or does not exist");
     }

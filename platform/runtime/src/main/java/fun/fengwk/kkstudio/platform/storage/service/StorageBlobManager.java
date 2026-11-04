@@ -108,9 +108,12 @@ public class StorageBlobManager {
               try {
                 StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
                 wakeup.wake();
-              } catch (RuntimeException ignored) {
+              } catch (RuntimeException error) {
                 // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
-                log.warn("storage maintenance wake failed for deleting blob {}", blobId);
+                log.warn(
+                    "storage maintenance wake failed for deleting blob {}: {}",
+                    blobId,
+                    error.getClass().getSimpleName());
               }
             }
           });
@@ -153,8 +156,9 @@ public class StorageBlobManager {
         deleteObjects(blobId);
         blobRepository.deleteDeleting(blobId);
         swept++;
-      } catch (RuntimeException ignored) {
-        log.warn("storage blob sweep failed for blob {}", blobId);
+      } catch (RuntimeException error) {
+        log.warn(
+            "storage blob sweep failed for blob {}: {}", blobId, error.getClass().getSimpleName());
       }
     }
     return swept;
