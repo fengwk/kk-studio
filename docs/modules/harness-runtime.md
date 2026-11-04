@@ -339,9 +339,9 @@ Tool 的身份、定义、调用与结果是模型、配置、权限、目录与
 
 ## Contributor 与目录
 
-Contributor 是受信 Java 扩展的接入契约（[`contributor.api`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/) 包）：它声明工具、分支自定义状态与上下文投影，内置工具与插件走同一条装配路径。
+Contributor 是受信 Java 扩展的接入契约（[`contributor.api`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/) 包）：它声明工具与分支自定义状态，内置工具与插件走同一条装配路径。当前自定义状态仅用于内置 Goal 进度。
 
-[`HarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java) 只有 `descriptor()` 与 `contribute(registrar)`。[`ContributorDescriptor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorDescriptor.java) 给出 canonical id、展示名、版本与 `requires`；[`HarnessRegistrar`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 提供 `registerTool`、`registerCustomEntryType` 与 `registerContextProjector`，在 `contribute` 之外调用立即失败。
+[`HarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java) 只有 `descriptor()` 与 `contribute(registrar)`。[`ContributorDescriptor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorDescriptor.java) 给出 canonical id、展示名、版本与 `requires`；[`HarnessRegistrar`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 提供 `registerTool` 与 `registerCustomEntryType`，在 `contribute` 之外调用立即失败。
 
 [`HarnessCatalog.from`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java) 是唯一的冻结入口：先拒绝重复 id、缺失或成环的 `requires`，再按依赖拓扑与 id 字典序调用 `contribute`；注册时强制模型可见工具名全局唯一、自定义类型按 `(contributorId, customType)` 归属，冻结时要求每个工具声明的状态访问都命中本 Contributor 注册过的类型。平台在构建每个插件快照时冻结一次目录（见 [Platform](platform.md#构建期-plugin)）。
 
@@ -365,9 +365,9 @@ requiredEnvironmentId    精确要求的目标 Environment；非空时 support �
 stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 ```
 
-`REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。分支状态只经声明修改：[`BranchView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只读当前 Contributor 在当前分支上的自定义状态与用户 Goal；[`ToolOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带结果与有序的 [`AppendCustomEntry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)（错误结果不得携带），与 Tool 结果在同一事务追加。同一 Assistant 的工具共享冻结快照，因此某状态已被先前 sibling 声明 WRITE 时，后续访问在派发前被确定性拒绝。[`ContextProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数地投影为片段，平台按目录顺序把它们拼进本次请求唯一的系统指令。
+`REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。分支状态只经声明修改：[`BranchView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只读当前 Contributor 在当前分支上的自定义状态与用户 Goal；[`ToolOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带结果与有序的 [`AppendCustomEntry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)（错误结果不得携带），与 Tool 结果在同一事务追加。同一 Assistant 的工具共享冻结快照，因此某状态已被先前 sibling 声明 WRITE 时，后续访问在派发前被确定性拒绝。
 
-新增 Contributor：实现 `HarnessContributor`（常用 `HarnessContributor.of`），按实际执行面声明环境支持级别；维护分支状态时先注册自定义条目类型再声明访问；内置实现注册为 Spring bean，插件实现从配置实例返回（见 [Platform Plugin API](platform-plugin-api.md)）。
+新增 Contributor：实现 `HarnessContributor`（常用 `HarnessContributor.of`），按实际执行面声明环境支持级别；内置实现注册为 Spring bean，插件实现从配置实例返回（见 [Platform Plugin API](platform-plugin-api.md)）。
 
 ## 内置工具
 

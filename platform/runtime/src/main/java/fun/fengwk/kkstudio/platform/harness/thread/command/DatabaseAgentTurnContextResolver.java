@@ -3,11 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
-import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
@@ -18,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ScopedBranchView;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
@@ -125,9 +120,7 @@ public final class DatabaseAgentTurnContextResolver {
               agent.systemPrompt(),
               currentEnvironment,
               skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
-              subagentBindings,
-              path,
-              lease.harnessCatalog());
+              subagentBindings);
       return new AgentTurnContext(
           agent,
           agentConfig,
@@ -382,49 +375,18 @@ public final class DatabaseAgentTurnContextResolver {
     return List.copyOf(bindings);
   }
 
-  /**
-   * 本轮请求唯一的系统指令：Agent 正文 / Environment / Skills / Subagents 组合段，加上注册顺序稳定的 Contributor context
-   * projector 片段，用空行确定性拼接为一个字符串——不写入任何会话消息。
-   *
-   * <p>Issue 上下文由 {@code project/run} contributor 自己的 context projector 从本 branch 冻结的 custom state
-   * 投影，按贡献者注册顺序与其他片段拼接。
-   */
+  /** 本轮请求唯一的系统指令由 Agent 正文、Environment、Skills 与 Subagents 组合，不写入会话消息。 */
   private String systemInstruction(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<SkillPromptEntry> skills,
-      List<SubagentBinding> subagentBindings,
-      EntryPath path,
-      HarnessCatalog harnessCatalog) {
-    List<String> sections = new ArrayList<>();
-    addSection(
-        sections,
-        promptComposer.compose(systemPrompt, currentEnvironment, skills, subagentBindings));
-    for (ContextProjectorContribution contribution : harnessCatalog.contextProjectors()) {
-      String contributorId = contribution.id().contributorId().value();
-      BranchView branch =
-          new ScopedBranchView(path.entries(), contributorId, path.baseSettings().goal());
-      List<ContextFragment> projected =
-          Objects.requireNonNull(
-              contribution.projector().project(branch),
-              "contributor context projector returned null: " + contribution.id());
-      for (ContextFragment fragment : projected) {
-        Objects.requireNonNull(
-            fragment,
-            "contributor context projector returned a null fragment: " + contribution.id());
-        addSection(sections, fragment.text());
-      }
-    }
-    if (sections.isEmpty()) {
+      List<SubagentBinding> subagentBindings) {
+    String instruction =
+        promptComposer.compose(systemPrompt, currentEnvironment, skills, subagentBindings);
+    if (instruction == null || instruction.isBlank()) {
       throw rejection("system instruction must not be blank");
     }
-    return String.join("\n\n", sections);
-  }
-
-  private static void addSection(List<String> sections, String section) {
-    if (section != null && !section.isBlank()) {
-      sections.add(section);
-    }
+    return instruction;
   }
 
   private static <T> T require(T value, String message) {

@@ -59,7 +59,7 @@ class GoalFeatureTest {
 
   private final GoalProgressCodec codec = new GoalProgressCodec();
 
-  /** Catalog 冻结验证：只有只读读取与进度声明工具，Goal 没有创建工具、也不注册任何 SYSTEM context projector。 */
+  /** Catalog 冻结验证：只有只读读取与进度声明工具，Goal 没有创建工具。 */
   @Test
   void catalogFreezesGoalToolsProgressOwnershipAndAccessModes() {
     BuiltinHarnessContributor contributor =
@@ -93,8 +93,6 @@ class GoalFeatureTest {
         catalog
             .findCustomEntryType(BuiltinHarnessContributor.ID, GoalFeature.PROGRESS_TYPE)
             .isPresent());
-    // Goal 绝不提升为 systemInstruction。
-    assertTrue(catalog.contextProjectors().isEmpty());
   }
 
   /** 两个 Goal Tool 的模型可见 name、副作用与 schema 符合稳定声明。 */
