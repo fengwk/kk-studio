@@ -463,6 +463,36 @@ class ExecutionExitConfirmerGovernanceTest {
   }
 
   @Test
+  void mergedReplayConfirmsMemoryAndPersistedProofsInOneRound() {
+    // 测试意图：合并后的单一重放扫描同时覆盖本进程 proof 与磁盘记录，不遗漏也不重复。
+    Fixture fixture = Fixture.create();
+    ExecutionExitFact persisted =
+        register(fixture.store, fixture.baseline.threadId(), TestIds.id(2));
+    FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    journal.failWrites = 1;
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(fixture.store, journal, fixture.clock);
+
+    assertThrows(
+        ExecutionExitJournalException.class,
+        () -> confirmer.confirm(fixture.fact, ExecutionExitState.STUDIO_EXITED));
+    journal.write(recordFor(persisted));
+    fixture.clock.advance(Duration.ofSeconds(1));
+
+    confirmer.replayPending();
+
+    assertEquals(
+        ExecutionExitState.STUDIO_EXITED,
+        execution(fixture.store, fixture.fact.executionId()).state());
+    assertEquals(
+        ExecutionExitState.STUDIO_EXITED,
+        execution(fixture.store, persisted.executionId()).state());
+    assertEquals(T0, execution(fixture.store, fixture.fact.executionId()).confirmedAt());
+    assertEquals(T0, execution(fixture.store, persisted.executionId()).confirmedAt());
+    assertTrue(journal.delegate.loadAll().records().isEmpty());
+  }
+
+  @Test
   void badFileIsIsolatedAndLoggedWithoutItsNameOrMessage(@TempDir Path directory)
       throws IOException {
     Fixture fixture = Fixture.create();

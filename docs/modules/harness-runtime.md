@@ -176,7 +176,7 @@ Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`Cla
 
 ### 退出确认与放弃
 
-真实退出证据只有 `STUDIO_EXITED`、`REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED` 三种。确认入口在读取或提交数据库之前先把完整执行身份与证据时刻写入本机 write-ahead journal；只有确认与结算事务提交成功后才删除记录。同一 execution 的首次 canonical proof 在进程内按 identity、target 与观测时刻冻结，并发回调与内存重试复用该时刻，不因后一次重试刷新 `confirmedAt`。worker 每 1 秒调度一次待重放扫描，只尝试已到重试时刻的记录；读取 journal 时健康记录继续重放，无法解码、身份不符或类型异常的文件只进入逐文件失败快照，原文件保留且按文件身份去重告警；目录无法枚举、journal 已关闭或目录锁占用仍整体失败。journal 目录由单个 Studio 实例独占并持久化，文件锁在进程生命周期内持有；journal 写入只证明正向证据已落盘，不证明远端进程已经退出。
+真实退出证据只有 `STUDIO_EXITED`、`REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED` 三种。确认入口在读取或提交数据库之前先把完整执行身份与证据时刻写入本机 write-ahead journal；只有确认与结算事务提交成功后才删除记录。同一 execution 的首次 canonical proof 在进程内按 identity、target 与观测时刻冻结，并发回调与内存重试复用该时刻，不因后一次重试刷新 `confirmedAt`。worker 每 1 秒调度一次重放：每轮把本进程 proof 与磁盘 journal 记录按 execution 身份合并为同一待重放集合，每个 execution 每轮最多尝试一次，只尝试已到重试时刻的记录；目录枚举失败只跳过本轮磁盘记录，不阻断本进程 proof。读取 journal 时健康记录继续重放，无法解码、身份不符或类型异常的文件只进入逐文件失败快照，原文件保留且按文件身份去重告警；目录无法枚举、journal 已关闭或目录锁占用仍整体失败。journal 目录由单个 Studio 实例独占并持久化，文件锁在进程生命周期内持有；journal 写入只证明正向证据已落盘，不证明远端进程已经退出。
 
 同一 execution 的确认在 64 个稳定 stripe 上以 `ReentrantLock` 串行化，journal 的全局锁也使用 `ReentrantLock`，避免这两处 monitor 在阻塞时固定载体线程；文件 I/O 本身仍可能阻塞载体，不代表消除了全部阻塞来源。数据库或文件瞬态失败按 1/2/4/8/16/30 秒上限退避，持续故障只首轮告警，成功后重置；目录枚举失败也按该退避重试，但不阻断内存 proof。事实缺失以及 canonical proof 与 journal/数据库的真实 identity/target 冲突保留证明并按每 30 秒低频核对，同一原因只告警一次，不阻断其它记录；人工修复后可恢复确认。通过 journal 持久化与身份校验的证明，也能在观察到合法深删且核对事务提交后清理。被拒绝的新输入不改变原 proof 的退避状态，显式再次确认仍会立即重新核对。journal 删除失败不回滚已提交的确认事实，保留 proof 并按退避重试。首次 journal 写入失败时 proof 仅保存在本进程内等待重试，不能据此宣称跨进程 durable。
 
