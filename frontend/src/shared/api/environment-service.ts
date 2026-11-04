@@ -5,6 +5,7 @@ import type {
   EnvironmentEventDTO,
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
+  EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
@@ -82,6 +83,20 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
       client.put(
         `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/directory`,
         data,
+      ),
+
+    /**
+     * 目录选择器只列直接子目录；path 省略时服务端返回宿主主目录。
+     * 结果中的 path 是服务端规范化后的目录，调用方用它确认切换目标。
+     */
+    listIdeDirectories: (
+      environmentId: string,
+      path?: string | null,
+      signal?: AbortSignal,
+    ): Promise<EnvironmentIdeDirectoryListingDTO> =>
+      client.get(
+        `/environments/${encodeURIComponent(environmentId)}/ide/directories`,
+        path == null ? { signal } : { params: { path }, signal },
       ),
 
     openIdeViewTerminal: (

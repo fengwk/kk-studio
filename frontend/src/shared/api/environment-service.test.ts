@@ -213,6 +213,31 @@ describe('environmentService', () => {
     expect(result).toEqual(updated)
   })
 
+  it('lists ide directories with the encoded environment id and the requested path', async () => {
+    const client = createMockHttpClient()
+    const listing = {
+      path: '/home/dev/a b',
+      parentPath: '/home',
+      children: [{ name: 'project', path: '/home/dev/a b/project' }],
+      truncated: false,
+    }
+    client.get.mockResolvedValue(listing)
+    const service = createEnvironmentService(client)
+    const signal = new AbortController().signal
+
+    expect(await service.listIdeDirectories('env/1', '/home/dev/a b', signal)).toEqual(listing)
+    expect(client.get).toHaveBeenCalledWith('/environments/env%2F1/ide/directories', {
+      params: { path: '/home/dev/a b' },
+      signal,
+    })
+
+    // 省略 path 时服务端返回宿主主目录，请求不携带空查询参数。
+    await service.listIdeDirectories('env/1')
+    expect(client.get).toHaveBeenLastCalledWith('/environments/env%2F1/ide/directories', {
+      signal: undefined,
+    })
+  })
+
   it('opens an ide view terminal with the current binding identity', async () => {
     const binding = {
       documentId: 'd1000000-0000-4000-8000-000000000001',

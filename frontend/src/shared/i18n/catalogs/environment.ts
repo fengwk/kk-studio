@@ -118,13 +118,49 @@ export const environmentCatalog = {
     'en-US': 'Open Host Directory',
     'zh-CN': '打开宿主目录',
   },
-  'ai.ide.directoryPathLabel': {
-    'en-US': 'Host Directory Path',
-    'zh-CN': '宿主目录路径',
+  'ai.ide.parentDirectory': {
+    'en-US': 'Parent directory',
+    'zh-CN': '上级目录',
   },
-  'ai.ide.directoryPathPlaceholder': {
-    'en-US': 'e.g. /home/user/project',
-    'zh-CN': '例如 /home/user/project',
+  'ai.ide.recentDirectories': {
+    'en-US': 'Recently opened',
+    'zh-CN': '最近打开',
+  },
+  'ai.ide.directoryTree': {
+    'en-US': 'Directory tree',
+    'zh-CN': '目录树',
+  },
+  'ai.ide.expandDirectory': {
+    'en-US': 'Expand {{name}}',
+    'zh-CN': '展开 {{name}}',
+  },
+  'ai.ide.collapseDirectory': {
+    'en-US': 'Collapse {{name}}',
+    'zh-CN': '收起 {{name}}',
+  },
+  'ai.ide.directoryEmpty': {
+    'en-US': 'No subdirectories',
+    'zh-CN': '没有子目录',
+  },
+  'ai.ide.directoryTruncated': {
+    'en-US': 'Showing the first {{count}} entries',
+    'zh-CN': '仅显示前 {{count}} 项',
+  },
+  'ai.ide.directoryLoadFailed': {
+    'en-US': 'Failed to load the directory',
+    'zh-CN': '目录加载失败',
+  },
+  'ai.ide.directoryHelpLabel': {
+    'en-US': 'Directory picker help',
+    'zh-CN': '目录选择帮助',
+  },
+  'ai.ide.directoryHelp': {
+    'en-US': 'Folders list their subdirectories only when you expand them. Use Parent directory to walk back up to the root.',
+    'zh-CN': '只有展开目录时才读取它的直接子目录；用“上级目录”可以逐级返回到根目录。',
+  },
+  'ai.ide.selectedDirectory': {
+    'en-US': 'Switch to',
+    'zh-CN': '将切换到',
   },
   'ai.ide.confirm': {
     'en-US': 'Confirm',

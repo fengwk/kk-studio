@@ -61,6 +61,7 @@ interface TransportState {
   closeCalls: CloseCall[]
   terminalCalls: Array<{ environmentId: string; viewId: string; body: Record<string, unknown> }>
   directoryCalls: Array<{ environmentId: string; viewId: string; body: Record<string, unknown> }>
+  directoryListCalls: Array<{ environmentId: string; path: string | null }>
   usageFrames: UsageFrame[]
   iframeRequests: Record<string, number>
   eventConnectionIds: string[]
@@ -81,6 +82,49 @@ function daemonId(environmentId: string): string {
 
 function directory(environmentId: string): string {
   return environmentId === ENV_A ? DIRECTORY_A : DIRECTORY_B
+}
+
+interface DirectoryFixture {
+  parentPath: string | null
+  children: Array<{ name: string; path: string }>
+  truncated?: boolean
+  denied?: boolean
+}
+
+/** 只包含宿主真实会返回的直接子目录；logs 用于验证展开时的权限错误展示。 */
+const DIRECTORY_FIXTURES: Record<string, DirectoryFixture> = {
+  [DIRECTORY_A]: {
+    parentPath: '/workspace',
+    children: [
+      { name: 'projects', path: `${DIRECTORY_A}/projects` },
+      { name: 'logs', path: `${DIRECTORY_A}/logs` },
+    ],
+    truncated: true,
+  },
+  [`${DIRECTORY_A}/projects`]: {
+    parentPath: DIRECTORY_A,
+    children: [{ name: 'kk-studio', path: `${DIRECTORY_A}/projects/kk-studio` }],
+  },
+  [`${DIRECTORY_A}/logs`]: {
+    parentPath: DIRECTORY_A,
+    children: [],
+    denied: true,
+  },
+  '/workspace': {
+    parentPath: '/',
+    children: [
+      { name: 'a', path: DIRECTORY_A },
+      { name: 'b', path: DIRECTORY_B },
+    ],
+  },
+  '/': {
+    parentPath: null,
+    children: [{ name: 'workspace', path: '/workspace' }],
+  },
+  [DIRECTORY_B]: {
+    parentPath: '/workspace',
+    children: [{ name: 'reports', path: `${DIRECTORY_B}/reports` }],
+  },
 }
 
 async function installTransport(page: Page, state: TransportState): Promise<void> {
@@ -177,6 +221,38 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       return
     }
 
+    const directoryListMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/directories$/)
+    if (method === 'GET' && directoryListMatch != null) {
+      const environmentId = decodeURIComponent(directoryListMatch[1]!)
+      const requestedPath = parsed.searchParams.get('path')
+      state.directoryListCalls.push({ environmentId, path: requestedPath })
+      const targetPath = requestedPath ?? directory(environmentId)
+      const fixture = DIRECTORY_FIXTURES[targetPath]
+      if (fixture == null || fixture.denied === true) {
+        await route.fulfill({
+          status: 403,
+          json: {
+            status: 403,
+            code: 'environment',
+            message: `permission denied: ${targetPath}`,
+          },
+        })
+        return
+      }
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            path: targetPath,
+            parentPath: fixture.parentPath,
+            children: fixture.children,
+            truncated: fixture.truncated === true,
+          },
+        },
+      })
+      return
+    }
+
     const directoryMatch = path.match(/^\/api\/environments\/([^/]+)\/ide\/views\/([^/]+)\/directory$/)
     if (method === 'PUT' && directoryMatch != null) {
       const environmentId = decodeURIComponent(directoryMatch[1]!)
@@ -270,6 +346,7 @@ function createState(): TransportState {
     closeCalls: [],
     terminalCalls: [],
     directoryCalls: [],
+    directoryListCalls: [],
     usageFrames: [],
     iframeRequests: {},
     eventConnectionIds: [],
@@ -475,9 +552,24 @@ test.describe('tab-global IDE panel', () => {
     await page.screenshot({ path: testInfo.outputPath('ide-mobile.png') })
     await page.getByTestId('ide-open-directory-btn').click()
     const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
+    await expect(dialog.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
     const modalBox = (await dialog.boundingBox())!
     expect(modalBox.width).toBe(390)
     expect(modalBox.height).toBe(844)
+    // 目录弹窗在移动端全屏，行、展开、帮助与上级按钮都不小于 44px 触区。
+    const directoryTargets = [
+      dialog.getByTestId('ide-directory-up'),
+      dialog.getByTestId('ide-directory-help'),
+      dialog.getByTestId('ide-directory-toggle').first(),
+      dialog.getByTestId('ide-directory-entry').first(),
+    ]
+    for (const control of directoryTargets) {
+      const target = (await control.boundingBox())!
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+    }
+    await dialog.getByTestId('ide-directory-help').click()
+    await expect(dialog.getByRole('note')).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath('ide-mobile-directory.png') })
     await page.getByRole('button', { name: '取消' }).click()
     state.dirtyCloseOnce = true
@@ -498,6 +590,77 @@ test.describe('tab-global IDE panel', () => {
     await page.reload()
     await expect(frame).toHaveCount(1)
     expect((await panel.boundingBox())!.width).toBeCloseTo(chosenWidth, 0)
+  })
+
+  test('expands the host directory tree lazily and switches to the confirmed directory', async ({ page }, testInfo) => {
+    const state = createState()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await openHarness(page, state)
+    await openEnvironment(page, 'A')
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
+
+    await page.getByTestId('ide-open-directory-btn').click()
+    const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
+    await expect(dialog.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
+    // 首次只读取宿主主目录，展开前不请求任何子目录。
+    expect(state.directoryListCalls).toEqual([{ environmentId: ENV_A, path: null }])
+    await expect(dialog.getByTestId('ide-directory-truncated')).toBeVisible()
+
+    await dialog.getByRole('button', { name: '展开 projects' }).click()
+    await expect(dialog.getByText('kk-studio')).toBeVisible()
+    expect(state.directoryListCalls[1]).toEqual({
+      environmentId: ENV_A,
+      path: `${DIRECTORY_A}/projects`,
+    })
+
+    // 展开不可读目录时展示后端原因，而不是空列表。
+    await dialog.getByRole('button', { name: '展开 logs' }).click()
+    const nodeError = dialog.getByTestId('ide-directory-node-error')
+    await expect(nodeError).toContainText('目录加载失败')
+    await expect(nodeError).toContainText(`permission denied: ${DIRECTORY_A}/logs`)
+
+    // 逐级向上直到根目录，到根后上级动作不可用。
+    await dialog.getByTestId('ide-directory-up').click()
+    await expect(dialog.getByTestId('ide-directory-location')).toHaveText('/workspace')
+    await dialog.getByTestId('ide-directory-up').click()
+    await expect(dialog.getByTestId('ide-directory-location')).toHaveText('/')
+    await expect(dialog.getByTestId('ide-directory-up')).toBeDisabled()
+    expect(state.directoryListCalls.slice(-2)).toEqual([
+      { environmentId: ENV_A, path: '/workspace' },
+      { environmentId: ENV_A, path: '/' },
+    ])
+
+    // 从根逐层展开回到 projects，选中并确认切换。
+    await dialog.getByRole('button', { name: '展开 workspace' }).click()
+    await expect(dialog.getByText('a', { exact: true })).toBeVisible()
+    await dialog.getByRole('button', { name: '展开 a' }).click()
+    await expect(dialog.getByText('projects')).toBeVisible()
+    await dialog.getByRole('button', { name: '展开 projects' }).click()
+    await expect(dialog.getByText('kk-studio')).toBeVisible()
+    await dialog.getByTestId('ide-directory-entry').filter({ hasText: /^projects$/ }).click()
+    await expect(dialog.getByTestId('ide-directory-confirm')).toBeEnabled()
+    await dialog.getByTestId('ide-directory-confirm').click()
+    await expect(dialog).toBeHidden()
+    expect(state.directoryCalls.at(-1)).toMatchObject({
+      environmentId: ENV_A,
+      body: { directory: `${DIRECTORY_A}/projects` },
+    })
+    await expect(page.getByTestId('ide-directory-badge')).toContainText('projects')
+
+    // 只有确认成功后才写入最近目录，重新打开时展示它。
+    await page.getByTestId('ide-open-directory-btn').click()
+    const reopened = page.getByRole('dialog', { name: '打开宿主目录' })
+    await expect(reopened.getByTestId('ide-recent-directory').first()).toHaveText(
+      `${DIRECTORY_A}/projects`,
+    )
+    await expect(reopened.getByTestId('ide-directory-location')).toHaveText(DIRECTORY_A)
+    await reopened.getByTestId('ide-recent-directory').first().click()
+    await expect(reopened.getByTestId('ide-directory-location')).toHaveText(
+      `${DIRECTORY_A}/projects`,
+    )
+    await page.screenshot({ path: testInfo.outputPath('ide-directory-desktop.png') })
+    await reopened.getByRole('button', { name: '取消' }).click()
+    await expect(reopened).toBeHidden()
   })
 
   test('a duplicated tab cannot steal the original view and requires an explicit new view', async ({ page, context }) => {
