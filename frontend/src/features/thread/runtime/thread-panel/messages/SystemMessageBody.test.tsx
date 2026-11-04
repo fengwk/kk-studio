@@ -19,7 +19,7 @@ describe('SystemMessageBody', () => {
     const rawSpans = body?.querySelectorAll('.md-raw-text') ?? []
     expect(rawSpans).toHaveLength(2)
     expect(rawSpans[0].textContent).toContain(
-      '<read-files>\nsrc/features/chat/runtime/thread-timeline-builder.ts',
+      '<read-files>\nsrc/features/thread/runtime/thread-timeline-builder.ts',
     )
     expect(body?.querySelector('read-files')).toBeNull()
     expect(body?.querySelector('modified-files')).toBeNull()
