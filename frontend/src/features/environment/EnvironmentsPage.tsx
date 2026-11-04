@@ -426,6 +426,7 @@ export function EnvironmentsPage() {
 
       {createModalOpen && (
         <Dialog
+          className="modal-touch-target"
           title={t('ai.environment.create')}
           onClose={() => setCreateModalOpen(false)}
           pending={createMutation.isPending}
@@ -466,6 +467,7 @@ export function EnvironmentsPage() {
 
       {updateTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.update'),
             description: t('ai.environment.updateConfirm', { name: updateTarget.name }),
@@ -484,6 +486,7 @@ export function EnvironmentsPage() {
 
       {rotateTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.rotateToken'),
             description: t('ai.environment.rotateTokenConfirm', { name: rotateTarget.name }),
@@ -506,6 +509,7 @@ export function EnvironmentsPage() {
 
       {deleteTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.delete'),
             description: t('ai.environment.deleteConfirm', { name: deleteTarget.name }),
@@ -538,6 +542,7 @@ export function EnvironmentsPage() {
       )}
 
       <ConflictPresenter
+        className="modal-touch-target"
         conflict={conflict}
         onRefresh={() => {
           setConflict(null)

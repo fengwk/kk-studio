@@ -82,7 +82,7 @@ export function CreateChatModal({
 
   return (
     <Dialog
-      className="create-chat-modal-card"
+      className="create-chat-modal-card modal-touch-target"
       title={modalTitle}
       pending={pending}
       onClose={onClose}

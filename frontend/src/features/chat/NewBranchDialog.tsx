@@ -79,7 +79,7 @@ export function NewBranchDialog({
 
   return (
     <Dialog
-      className="new-branch-dialog"
+      className="new-branch-dialog modal-touch-target"
       title={t('ai.chat.branch.newBranch')}
       closeLabel={t('shared.close')}
       pending={pending}
