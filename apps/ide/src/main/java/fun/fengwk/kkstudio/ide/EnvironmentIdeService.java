@@ -32,9 +32,6 @@ public interface EnvironmentIdeService {
 
   void closeView(EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request);
 
-  /** 显式分离当前 epoch 的使用证明；视图资源保留在 Daemon 的恢复窗口内。 */
-  void detachView(EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
-
   /** owner 的当前视图快照；不创建视图，也不续租。 */
   EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId);
 }

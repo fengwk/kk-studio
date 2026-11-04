@@ -131,14 +131,6 @@ public class ClusterEnvironmentIdeInternalController {
     localEnvironmentIdeService.focusTerminal(environment, viewId, body);
   }
 
-  @PostMapping("/views/{viewId:" + VIEW_ID + "}/detach")
-  public void detachView(
-      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
-    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
-    EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
-    localEnvironmentIdeService.detachView(environment, viewId, body);
-  }
-
   @DeleteMapping("/views/{viewId:" + VIEW_ID + "}")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {

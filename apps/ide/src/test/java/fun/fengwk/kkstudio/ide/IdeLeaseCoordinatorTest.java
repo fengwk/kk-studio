@@ -263,12 +263,6 @@ class IdeLeaseCoordinatorTest {
         EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
       throw new AssertionError("unexpected close");
     }
-
-    @Override
-    public void detachView(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-      throw new AssertionError("unexpected detach");
-    }
   }
 
   private static final class FakeTransport implements IdeCommandTransport {

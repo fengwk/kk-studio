@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.BufferedReader;
@@ -75,8 +74,8 @@ import java.util.concurrent.TimeoutException;
  *   <li><b>浏览器入口用例</b>：走真实浏览器协议——事件通道 {@code /api/events} 登记打开意图、REST {@code
  *       /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换 view 级 cookie、view 基址取 workbench
  *       HTML 与静态/worker 资源、浏览器 WebSocket 升级。
- *   <li><b>生命周期用例</b>：REST 关闭；detach 冻结旧 epoch + resume 换代 + 旧 cookie/旧 epoch 失效；受管 code-server
- *       崩溃后旧绑定判为 VIEW_GONE，新视图在替代实例上恢复服务。
+ *   <li><b>生命周期用例</b>：REST 关闭；resume 换代后旧 cookie/旧 epoch 失效；受管 code-server 崩溃后旧绑定判为
+ *       VIEW_GONE，新视图在替代实例上恢复服务。
  *   <li><b>真实 Chromium 用例</b>：页面不拦截网络，经 Studio
  *       网关加载真实工作台；在工作台中打开终端，执行一条命令并看到输出；修改文件并保存，在宿主机上断言文件内容已落盘。
  * </ul>
@@ -274,10 +273,10 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
-  /** detach 冻结旧 epoch，resume 换代：旧 cookie / 旧 epoch 必须失效，新 epoch 必须可服务。 */
+  /** 同文档恢复换代：旧 cookie / 旧 epoch 必须失效，新 epoch 必须可服务。 */
   @Test
   @Order(3)
-  void detachFreezesTheOldEpochAndResumeIssuesANewBinding() throws Exception {
+  void resumeIssuesANewBindingAndInvalidatesTheOldEpoch() throws Exception {
     String environmentId = startEnvironmentAndDaemon();
     UUID documentId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
@@ -293,10 +292,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertTrue(
           fetchView(environmentId, viewId, firstCookie, "/").toLowerCase().contains("<html"),
           "the freshly opened view must serve the workbench");
-
-      detachView(environmentId, viewId, documentId, firstEpoch);
-      assertViewRejected(
-          environmentId, viewId, firstCookie, "a detached epoch must stop authorizing its cookie");
 
       UUID secondClaim = UUID.randomUUID();
       events.registerUsage(
@@ -314,10 +309,10 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
       Response staleClose = deleteView(environmentId, viewId, documentId, firstEpoch);
       try (staleClose) {
-        assertEquals(409, staleClose.code(), "closing with the detached epoch must be rejected");
+        assertEquals(409, staleClose.code(), "closing with the old epoch must be rejected");
       }
       assertViewRejected(
-          environmentId, viewId, firstCookie, "the detached epoch cookie must stay rejected");
+          environmentId, viewId, firstCookie, "the old epoch cookie must be rejected");
 
       closeView(environmentId, viewId, documentId, secondEpoch);
       assertViewRejected(
@@ -791,13 +786,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                 .delete(RequestBody.create(body, JSON))
                 .build())
         .execute();
-  }
-
-  private void detachView(String environmentId, UUID viewId, UUID documentId, long bindingEpoch) {
-    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
-    binding.setDocumentId(documentId.toString());
-    binding.setBindingEpoch(Long.toString(bindingEpoch));
-    localIdeService.detachView(EnvironmentId.parse(environmentId), viewId.toString(), binding);
   }
 
   private void awaitViewReleased(String environmentId, UUID viewId) throws Exception {

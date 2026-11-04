@@ -326,35 +326,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   @Override
-  public void detachView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(request, "request");
-    UUID parsedViewId = parseViewId(viewId);
-    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
-    long bindingEpoch = parseEpoch(request.getBindingEpoch());
-    IdeViewBindingRegistry.Binding binding =
-        requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
-    IdeCommand command =
-        IdeCommand.newBuilder()
-            .setAction(IdeAction.DETACH_VIEW)
-            .setViewId(parsedViewId.toString())
-            .setDocumentId(documentId.toString())
-            .setBindingEpoch(bindingEpoch)
-            .build();
-    IdeCall result = call(environmentId, command);
-    if (!result.reply().getOk()) {
-      if (isViewGone(result.reply())) {
-        revokeLocal(binding);
-      }
-      throw rejection(result.reply());
-    }
-    requireReplyView(result.reply(), parsedViewId);
-    // detach 冻结该 epoch 的使用证明：本地不得再允许旧 cookie/旧请求进入；视图资源在 Daemon 恢复窗口内保留。
-    revokeLocal(binding);
-  }
-
-  @Override
   public EnvironmentIdeDirectoryListingDTO listDirectories(
       EnvironmentId environmentId, String path) {
     Objects.requireNonNull(environmentId, "environmentId");
