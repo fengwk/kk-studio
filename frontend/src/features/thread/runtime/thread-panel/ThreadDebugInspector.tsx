@@ -45,14 +45,14 @@ function formatFilterReason(
 }
 
 function formatEnvSupport(
-  support: 'NONE' | 'OPTIONAL' | 'REQUIRED',
+  support: ThreadModelRequestDebugTool['environmentSupport'],
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (support) {
     case 'NONE':
       return t('ai.runtime.debug.envSupport.none')
-    case 'OPTIONAL':
-      return t('ai.runtime.debug.envSupport.optional')
+    case 'ROUTED':
+      return t('ai.runtime.debug.envSupport.routed')
     case 'REQUIRED':
       return t('ai.runtime.debug.envSupport.required')
     default:
@@ -170,9 +170,6 @@ export function ThreadDebugInspector({
                 ) : null}
               </KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.environmentSupport')}><Mono>{formatEnvSupport(selection.tool.environmentSupport, t)}</Mono></KeyValueRow>
-            {selection.tool.requiredEnvironmentId ? (
-              <KeyValueRow label={t('ai.runtime.debug.inspector.requiredEnvId')}><Mono>{selection.tool.requiredEnvironmentId}</Mono></KeyValueRow>
-            ) : null}
             <KeyValueRow label={t('ai.runtime.debug.inspector.provenance')}><Mono>{selection.tool.provenance}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.tool.description}</KeyValueRow>
           </KeyValue>

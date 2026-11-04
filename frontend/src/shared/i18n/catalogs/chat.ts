@@ -1561,9 +1561,9 @@ export const chatCatalog = {
     'en-US': 'Platform only · NONE',
     'zh-CN': '平台独立 · NONE',
   },
-  'ai.runtime.debug.envSupport.optional': {
-    'en-US': 'Optional environment · OPTIONAL',
-    'zh-CN': '可选环境 · OPTIONAL',
+  'ai.runtime.debug.envSupport.routed': {
+    'en-US': 'Routed by path · ROUTED',
+    'zh-CN': '按路径路由 · ROUTED',
   },
   'ai.runtime.debug.envSupport.required': {
     'en-US': 'Environment required · REQUIRED',
@@ -1624,10 +1624,6 @@ export const chatCatalog = {
   'ai.runtime.debug.inspector.environmentSupport': {
     'en-US': 'Environment Support',
     'zh-CN': '环境支持',
-  },
-  'ai.runtime.debug.inspector.requiredEnvId': {
-    'en-US': 'Required Environment ID',
-    'zh-CN': '所需环境 ID',
   },
   'ai.runtime.debug.inspector.provenance': {
     'en-US': 'Contributor',
