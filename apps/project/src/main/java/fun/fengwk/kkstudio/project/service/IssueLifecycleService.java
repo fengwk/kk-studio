@@ -8,7 +8,6 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -327,7 +326,8 @@ public class IssueLifecycleService {
     stageBudgetRepository.deleteByIssueId(issueId);
     List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issueId);
     for (IssueAgentThread binding : bindings) {
-      sessionDeletion.deleteSessionsByOwner(new OwnerRef.IssueAgent(issueId, binding.agentName()));
+      sessionDeletion.deleteSessionsByOwner(
+          ProjectSessionOwnership.owner(issueId, binding.agentName()));
     }
     if (!issueRepository.deleteById(issueId, expectedVersion)) {
       throw new ProjectVersionConflictException(

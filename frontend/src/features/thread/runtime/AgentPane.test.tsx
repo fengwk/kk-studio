@@ -36,7 +36,7 @@ import { useRootThreadControl, type UseRootThreadControlOptions } from '@/featur
 import { branchDraftFromEntry, branchDraftFromEntryPath } from '@/features/thread/runtime/root-thread/branch-draft-replay'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { usePaneTarget } from '@/features/thread/runtime/usePaneTarget'
-import { isBoundTarget, isPaneTarget, savePendingAcceptance, type PaneTarget, type PendingAcceptance } from '@/features/thread/runtime/agent-pane'
+import { isBoundTarget, isPaneTarget, ownerIdentity, savePendingAcceptance, type PaneTarget, type PendingAcceptance } from '@/features/thread/runtime/agent-pane'
 import { useThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import { createTextPart, partsToText } from '@/features/thread/composer/composer-parts'
@@ -89,10 +89,7 @@ function loadChatSessions() {
 }
 
 function testTargetKey(owner: NonNullable<ComponentProps<typeof AgentPane>['owner']>, paneId: string): string {
-  const identity = owner.type === 'CHAT'
-    ? `CHAT:${owner.chatId}`
-    : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
-  return `${TEST_TARGET_PREFIX}${identity}:${paneId}`
+  return `${TEST_TARGET_PREFIX}${ownerIdentity(owner)}:${paneId}`
 }
 
 function readTestTarget(
@@ -596,15 +593,7 @@ function approvalInteraction(threadId: string): InteractionDTO {
     threadId,
     rootThreadId: THREAD_ID,
     sessionId: 'session-1',
-    owner: {
-      type: 'CHAT',
-      chatId: CHAT_ID,
-      chatTitle: null,
-      issueId: null,
-      issueTitle: null,
-      agentName: null,
-      rootThreadName: null,
-    },
+    owner: { kind: 'CHAT', id: CHAT_ID, title: null, link: `/chats/${CHAT_ID}` },
     toolCallId: 'call-bash-1',
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
@@ -648,7 +637,7 @@ describe('AgentPane orchestration', () => {
   it('renders the complete selected prefix, including Debug events, without any command writes', async () => {
     const user = userEvent.setup()
     seedHistoryDraft()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByText('Selected ancestor text')).toBeInTheDocument()
     expect(screen.queryByText('Future hidden text')).not.toBeInTheDocument()
     expect(screen.queryByText('Sibling hidden text')).not.toBeInTheDocument()
@@ -665,7 +654,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     seedHistoryDraft('draft-root')
     vi.mocked(harnessService.listSessionEntries).mockRejectedValueOnce(new Error('offline'))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await screen.findByRole('alert')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '重试' }))
@@ -675,7 +664,7 @@ describe('AgentPane orchestration', () => {
 
   it('rejects an invalid prefix rather than allowing first send or preview', async () => {
     seedHistoryDraft('missing')
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByRole('alert')).toHaveTextContent('所选历史不完整，请重新加载后再发送。')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     expect(screen.queryByText('已打开 thread 草稿，发送消息开始此 thread。')).not.toBeInTheDocument()
@@ -690,7 +679,7 @@ describe('AgentPane orchestration', () => {
     } else {
       loadSessionsMock.mockResolvedValueOnce([])
     }
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await screen.findByText('Selected ancestor text')
     const composer = screen.getByLabelText('给 AI 发送消息')
     await user.click(composer)
@@ -714,7 +703,7 @@ describe('AgentPane orchestration', () => {
       createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
       execution: thread().branchSettings.execution, headMessagePreview: null,
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -736,7 +725,7 @@ describe('AgentPane orchestration', () => {
       sessionId: 'session-1', name: 'Parent Session', createdAt: 0, lastActivityAt: 0,
       firstMessagePreview: null, threadCount: 1,
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const editor = await screen.findByLabelText('给 AI 发送消息')
     await user.click(editor)
     await user.keyboard('/rename-session{Enter}')
@@ -750,7 +739,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     seedHistoryDraft()
     let resolve!: (error: string | null) => void
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID }, [], scenario === 'missing-host'
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID }, [], scenario === 'missing-host'
       ? null : () => new Promise((done) => { resolve = done }))
     await screen.findByText('Selected ancestor text')
     const editor = screen.getByLabelText('给 AI 发送消息')
@@ -779,7 +768,7 @@ describe('AgentPane orchestration', () => {
       .mockResolvedValueOnce(acceptedResponse())
     // Keep the newly bound snapshot in flight: the accepted local prefix must not flash empty.
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(() => new Promise(() => undefined))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await screen.findByText('Selected ancestor text')
     const composer = screen.getByLabelText('给 AI 发送消息')
     await user.click(composer)
@@ -809,7 +798,7 @@ describe('AgentPane orchestration', () => {
 
   it('sends NEW_SESSION as one atomic command-batches request', async () => {
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -838,7 +827,7 @@ describe('AgentPane orchestration', () => {
         threadName: 'branch-1',
       }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'branch message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -854,7 +843,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.acceptCommandBatch)
       .mockRejectedValueOnce(new Error('connection lost'))
       .mockResolvedValueOnce(acceptedResponse())
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'retry me')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -870,7 +859,7 @@ describe('AgentPane orchestration', () => {
   it('restores an unknown pending acceptance after remount with the same frozen request', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
-    const firstRender = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const firstRender = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'persist me')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -878,7 +867,7 @@ describe('AgentPane orchestration', () => {
     const firstRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
     firstRender.unmount()
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const retry = await screen.findByRole('button', { name: '重试' })
     await user.click(retry)
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
@@ -888,7 +877,7 @@ describe('AgentPane orchestration', () => {
   it('abandons an unknown outcome by restoring the frozen composer parts', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('timeout'))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'frozen draft')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -903,7 +892,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('entry changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'restore after conflict')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -921,7 +910,7 @@ describe('AgentPane orchestration', () => {
         resolve = complete
       }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'late response')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -942,7 +931,7 @@ describe('AgentPane orchestration', () => {
         reject = fail
       }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'late rejection')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -956,7 +945,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
       new ApiError('locked', 400, 'BAD_REQUEST'),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'locked request')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -973,7 +962,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
       new ApiError('state changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'stale')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -995,7 +984,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new ApiError('yolo state changed', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/yolo{Enter}')
@@ -1015,7 +1004,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new ApiError('yolo locked', 400, 'BAD_REQUEST'),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/yolo{Enter}')
@@ -1041,7 +1030,7 @@ describe('AgentPane orchestration', () => {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <TestAgentPane
-            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            owner={{ kind: 'CHAT', id: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
             focused
@@ -1083,7 +1072,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/debug{Enter}')
@@ -1098,7 +1087,7 @@ describe('AgentPane orchestration', () => {
   it('dismisses a non-conflict action error through the shared panel callback', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(new Error('network lost'))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'network error')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -1125,7 +1114,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread(), { entries: [rootEntry] }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/debug{Enter}')
@@ -1138,7 +1127,7 @@ describe('AgentPane orchestration', () => {
 
   it('renders the Agent, Environment, and Shortcuts interactions from the shared command menu', async () => {
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID }, [{
+    renderPane({ kind: 'CHAT', id: CHAT_ID }, [{
       id: 'env-local-1',
       name: 'local',
       userName: null,
@@ -1166,7 +1155,7 @@ describe('AgentPane orchestration', () => {
 
   it('applies unbound YOLO and agent selections locally before first send', async () => {
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/yolo{Enter}')
@@ -1197,7 +1186,7 @@ describe('AgentPane orchestration', () => {
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: 'thread preview',
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -1255,7 +1244,7 @@ describe('AgentPane orchestration', () => {
       },
     ])
     const before = localStorage.getItem(targetKey)
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/history{Enter}')
@@ -1292,7 +1281,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/history{Enter}')
@@ -1339,7 +1328,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/new{Enter}')
@@ -1398,7 +1387,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: threadA }),
     )
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -1414,7 +1403,7 @@ describe('AgentPane orchestration', () => {
     view.rerender(
       <QueryClientProvider client={replacementClient}>
         <MemoryRouter>
-          <TestAgentPane owner={{ type: 'CHAT', chatId: CHAT_ID }} paneId="pane-1" agents={agents} focused />
+          <TestAgentPane owner={{ kind: 'CHAT', id: CHAT_ID }} paneId="pane-1" agents={agents} focused />
         </MemoryRouter>
       </QueryClientProvider>,
     )
@@ -1542,7 +1531,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('keeps a foreign pending request in its slot and reconciles only after returning to its target', async () => {
-    const owner = { type: 'CHAT' as const, chatId: CHAT_ID }
+    const owner = { kind: 'CHAT' as const, id: CHAT_ID }
     const pending = pendingNewSessionAcceptanceFor(owner)
     expect(savePendingAcceptance(owner, 'probe', pending)).toBe(true)
     localStorage.setItem(testTargetKey(owner, 'probe'), JSON.stringify({
@@ -1593,7 +1582,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('renders a visible reconciliation block for a pending request from another target', async () => {
-    const owner = { type: 'CHAT' as const, chatId: CHAT_ID }
+    const owner = { kind: 'CHAT' as const, id: CHAT_ID }
     const pending = pendingAcceptanceFor(owner)
     expect(savePendingAcceptance(owner, 'pane-1', pending)).toBe(true)
     const key = `kk-studio.agent-pane-acceptance.CHAT:${CHAT_ID}:pane-1`
@@ -1653,7 +1642,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('keeps Chat thread navigation available', async () => {
-    const hook = renderController({ owner: { type: 'CHAT', chatId: CHAT_ID } })
+    const hook = renderController({ owner: { kind: 'CHAT', id: CHAT_ID } })
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBe('thread-sessions')
@@ -1662,7 +1651,7 @@ describe('AgentPane orchestration', () => {
   it('shows required names as primary selection titles and falls back previews only', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce({})
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'unknown error')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -1709,7 +1698,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     loadSessionsMock.mockResolvedValue([])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
-    const emptyPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const emptyPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const emptyComposer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(emptyComposer)
     await user.keyboard('/thread{Enter}')
@@ -1730,7 +1719,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -1759,7 +1748,7 @@ describe('AgentPane orchestration', () => {
         ? thread({ name: 'renamed thread', version: '1' })
         : thread())
     })
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     // 面板不再自渲染执行根身份与铅笔入口；重命名保留在 /rename-thread 命令中。
     expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
@@ -1814,7 +1803,7 @@ describe('AgentPane orchestration', () => {
         updateTime: 1774958400,
       },
     ])
-    const bound = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const bound = renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
     await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
     expect(await screen.findByRole('region', { name: '活跃子代理' })).toBeInTheDocument()
@@ -1837,12 +1826,12 @@ describe('AgentPane orchestration', () => {
         updateTime: 1774958400,
       },
     ])
-    const idle = renderPane({ type: 'CHAT', chatId: 'chat-idle' })
+    const idle = renderPane({ kind: 'CHAT', id: 'chat-idle' })
     await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
     expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
     idle.unmount()
 
-    const draft = renderPane({ type: 'CHAT', chatId: 'chat-draft' })
+    const draft = renderPane({ kind: 'CHAT', id: 'chat-draft' })
     await screen.findByLabelText('给 AI 发送消息')
     expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
     draft.unmount()
@@ -1905,7 +1894,7 @@ describe('AgentPane orchestration', () => {
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByRole('link', { name: /active A/ })).toBeInTheDocument()
 
     const composer = screen.getByRole('textbox', { name: '给 AI 发送消息' })
@@ -1929,7 +1918,7 @@ describe('AgentPane orchestration', () => {
       thread({ threadId, name: data.name, version: '1' }),
     )
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({ name: 'old name' })))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
@@ -1954,7 +1943,7 @@ describe('AgentPane orchestration', () => {
     )
     vi.mocked(harnessService.renameThread).mockRejectedValueOnce(new Error('rename rejected'))
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/rename-thread{Enter}')
@@ -1996,7 +1985,7 @@ describe('AgentPane orchestration', () => {
       firstMessagePreview: 'entry-1',
       threadCount: 1,
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/rename-session{Enter}')
@@ -2037,7 +2026,7 @@ describe('AgentPane orchestration', () => {
         createdAt: 0,
       }
     })
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -2080,7 +2069,7 @@ describe('AgentPane orchestration', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async () =>
       snapshot(thread({ name: canonicalName })))
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     const cachedName = () => view.client.getQueryData<HarnessThreadSnapshotDTO>(
       queryKeys.threads.snapshot(THREAD_ID),
@@ -2128,7 +2117,7 @@ describe('AgentPane orchestration', () => {
         resolveRename = (session) => resolve(session)
       }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -2177,7 +2166,7 @@ describe('AgentPane orchestration', () => {
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
       headMessagePreview: null,
     }])
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
@@ -2297,7 +2286,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/new{Enter}')
@@ -2375,7 +2364,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
 
@@ -2421,7 +2410,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
     expect(screen.getByText('类型 MODEL')).toBeInTheDocument()
@@ -2486,7 +2475,7 @@ describe('AgentPane orchestration', () => {
         unconfirmedExecutions: [execution],
       }),
     )
-    const runnable = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const runnable = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
     runnable.unmount()
@@ -2496,7 +2485,7 @@ describe('AgentPane orchestration', () => {
         unconfirmedExecutions: [],
       }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(2))
     expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
   })
@@ -2521,7 +2510,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await user.click(await screen.findByRole('button', {
       name: '放弃等待 REMOTE 第 3 次尝试',
@@ -2561,7 +2550,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await user.click(await screen.findByRole('button', {
       name: '放弃等待 MODEL 第 1 次尝试',
@@ -2619,7 +2608,7 @@ describe('AgentPane orchestration', () => {
       value: createMockIDBFactory({ shouldFailTransaction: true }),
     })
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/stop{Enter}')
@@ -2653,7 +2642,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'WAITING', executionControl: 'RUNNABLE' })),
     )
-    const { unmount } = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const { unmount } = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('等待异步结果')
@@ -2666,7 +2655,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'RUNNABLE' })),
     )
-    const runningPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const runningPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('运行中')
@@ -2689,7 +2678,7 @@ describe('AgentPane orchestration', () => {
         },
       ),
     )
-    const stoppedPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const stoppedPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('执行中')
@@ -2704,7 +2693,7 @@ describe('AgentPane orchestration', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' })),
     )
-    const unconfirmedPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const unconfirmedPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('已请求停止，退出尚未确认')
@@ -2722,7 +2711,7 @@ describe('AgentPane orchestration', () => {
         { toolInvocations: [pendingInvocation()] },
       ),
     )
-    const residualPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const residualPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('已请求停止，退出尚未确认')
@@ -2754,7 +2743,7 @@ describe('AgentPane orchestration', () => {
         },
       ),
     )
-    const modelPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const modelPane = renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('执行中')
@@ -2769,9 +2758,8 @@ describe('AgentPane orchestration', () => {
     // 测试意图：验证当 owner 为 ISSUE_AGENT 时，其生命周期与无 owner 的子线程路由或 CHAT owner 完全隔离，
     // 不会向 CHAT 存储命名空间写入 target，也不会调用 chat 专有服务，两套架构 owner 语义不混淆。
     const issueOwner: AgentRuntimeOwnerDTO = {
-      type: 'ISSUE_AGENT',
-      issueId: 'issue-42',
-      agentName: 'architect',
+      kind: 'ISSUE_AGENT',
+      id: 'issue-42:architect',
     }
     const issueThreadId = '00000000-0000-0000-0000-000000000042'
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
@@ -2813,7 +2801,7 @@ function threadFixture(
 }
 
 function renderPane(
-  owner: { type: 'CHAT'; chatId: string },
+  owner: { kind: 'CHAT'; id: string },
   environments: EnvironmentCardDTO[] = [],
   validateDraftName: ((target: PaneTarget, name: string) => Promise<string | null>) | null = async () => null,
 ) {
@@ -2865,11 +2853,11 @@ function useRootControlProbe(
 
 function renderController({
   agents: controllerAgents = agents,
-  owner = { type: 'CHAT' as const, chatId: CHAT_ID },
+  owner = { kind: 'CHAT' as const, id: CHAT_ID },
   onRequestBranch,
 }: {
   agents?: typeof agents
-  owner?: { type: 'CHAT'; chatId: string }
+  owner?: { kind: 'CHAT'; id: string }
   onRequestBranch?: (request: { sessionId: string; startEntryId: string; sourceLabel: string | null }) => void
 } = {}) {
   const client = new QueryClient({
@@ -2938,7 +2926,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <TestAgentPane
-            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            owner={{ kind: 'CHAT', id: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
             environments={environments}
@@ -3074,7 +3062,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     const retryButton = await screen.findByRole('button', { name: '重试' })
     expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
     const firstRequest = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
-    expect(firstRequest?.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
+    expect(firstRequest?.owner).toEqual({ kind: 'CHAT', id: CHAT_ID })
     expect(firstRequest?.target).toMatchObject({
       type: 'NEW_FORKED_SESSION',
       sourceThreadId: THREAD_ID,
@@ -3230,7 +3218,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     const { result: unboundResult } = renderHook(
       () =>
         useRootControlProbe({
-          owner: { type: 'CHAT', chatId: CHAT_ID },
+          owner: { kind: 'CHAT', id: CHAT_ID },
           paneId: 'p1',
           initialTarget: { kind: 'NEW_SESSION_DRAFT' },
           agents,
@@ -3389,7 +3377,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     /** 用真实的 /debug 斜杠命令进入本地分支草稿的 Debug 视图。 */
     async function openBranchDraftDebugView(user: ReturnType<typeof userEvent.setup>) {
       vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
       const composer = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer)
       await user.keyboard('/debug{Enter}')
@@ -3427,7 +3415,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       return {
         setTarget,
         control: useRootThreadControl({
-          owner: { type: 'CHAT', chatId: CHAT_ID },
+          owner: { kind: 'CHAT', id: CHAT_ID },
           paneId: 'probe',
           target,
           setTarget,
@@ -3552,7 +3540,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
     }
 
     it('defaults to a bound thread target without an owner and becomes fully interactive', async () => {
-      // 测试意图：owner 未传时不访问 owner.type 也不崩溃，目标默认绑定 paneId 的 Thread；
+      // 测试意图：owner 未传时不访问 owner.kind 也不崩溃，目标默认绑定 paneId 的 Thread；
       // 快照就绪后 composer 与 settings 可用，不依赖 owner。
       const { result } = renderOwnerlessController()
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
@@ -3748,7 +3736,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const { result: chatResult } = renderHook(
         () =>
           useRootControlProbe({
-            owner: { type: 'CHAT', chatId: CHAT_ID },
+            owner: { kind: 'CHAT', id: CHAT_ID },
             paneId: 'p-chat',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
             agents,
@@ -3765,7 +3753,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const { result: issueResult } = renderHook(
         () =>
           useRootControlProbe({
-            owner: { type: 'ISSUE_AGENT', issueId: 'issue-99', agentName: 'coder' },
+            owner: { kind: 'ISSUE_AGENT', id: 'issue-99:coder' },
             paneId: 'p-issue',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
             agents,
@@ -3809,7 +3797,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         .mockRejectedValueOnce(new Error('Network disconnected'))
         .mockResolvedValueOnce(acceptedResponse())
 
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
 
       const composer = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer)
@@ -3863,7 +3851,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       vi.mocked(harnessService.acceptThreadCommandBatch)
         .mockRejectedValueOnce(new Error('Gateway timeout'))
 
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
 
       const composer = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer)
@@ -3903,7 +3891,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       })
 
       try {
-        renderPane({ type: 'CHAT', chatId: CHAT_ID })
+        renderPane({ kind: 'CHAT', id: CHAT_ID })
 
         const composer = await screen.findByLabelText('给 AI 发送消息')
         await user.click(composer)
@@ -3957,7 +3945,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       )
       vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValueOnce(acceptedResponse())
 
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
 
       // 验证刷新挂载后自动恢复 unknownOutcome = true，并展示 controls
       const controls = await screen.findByTestId('bound-pending-controls')
@@ -4002,7 +3990,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
         .mockRejectedValueOnce(new Error('Network disconnected'))
         .mockReturnValueOnce(retryPromise)
 
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
 
       const composer = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer)
@@ -4043,7 +4031,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const { result } = renderHook(
         () =>
           useRootControlProbe({
-            owner: { type: 'CHAT', chatId: CHAT_ID },
+            owner: { kind: 'CHAT', id: CHAT_ID },
             paneId: 'pane-draft',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
             agents,
@@ -4106,7 +4094,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       const { result: controller2 } = renderHook(
         () =>
           useRootControlProbe({
-            owner: { type: 'CHAT', chatId: CHAT_ID },
+            owner: { kind: 'CHAT', id: CHAT_ID },
             paneId: 'pane-2',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
             agents,
@@ -4138,7 +4126,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       await waitFor(() => expect(controller2.current.pendingMessage).toBeNull())
       expect(localStorage.getItem(pendingKey)).toBeNull()
 
-      const pane1 = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const pane1 = renderPane({ kind: 'CHAT', id: CHAT_ID })
       const composer1 = await screen.findByLabelText('给 AI 发送消息')
       await user.click(composer1)
       await user.type(composer1, 'pane 1 message')
@@ -4394,7 +4382,7 @@ describe('AgentPane root control and child observation', () => {
       interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
     )
     bindPaneToRoot()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     const source = await screen.findByRole('link', { name: /worker/ })
     expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
@@ -4458,7 +4446,7 @@ describe('AgentPane root control and child observation', () => {
       interactionPage([approvalInteraction(THREAD_ID)]),
     )
     bindPaneToRoot()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     const source = await screen.findByRole('link', { name: 'root thread' })
     expect(source).toHaveAttribute('title', '查看来源')
@@ -4480,7 +4468,7 @@ describe('AgentPane root control and child observation', () => {
       interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
     )
     bindPaneToRoot()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     const source = await screen.findByRole('link', { name: /worker/ })
     await screen.findByLabelText('给 AI 发送消息')
@@ -4512,7 +4500,7 @@ describe('AgentPane root control and child observation', () => {
       stoppedThreads: [],
     })
     bindPaneToRoot()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
@@ -4544,7 +4532,7 @@ describe('AgentPane root control and child observation', () => {
       interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
     )
     bindPaneToRoot()
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await screen.findByRole('button', { name: '允许' })
 
@@ -4600,7 +4588,7 @@ describe('AgentPane root control mounting', () => {
         requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
       }] },
     ))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent(label))
     expect(document.querySelector('.thread-working')).toHaveAttribute('data-animated', 'false')
     expect(document.querySelector('.thread-working')).not.toHaveTextContent('执行中')
@@ -4617,7 +4605,7 @@ describe('AgentPane root control mounting', () => {
         { ...pendingInvocation(), id: 'running-sibling', status: 'RUNNING' },
       ] },
     ))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent('执行中'))
     expect(document.querySelector('.thread-working')).toHaveAttribute('data-animated', 'true')
   })
@@ -4627,7 +4615,7 @@ describe('AgentPane root control mounting', () => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(new Promise(() => {}))
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await waitFor(() =>
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything()))
@@ -4648,7 +4636,7 @@ describe('AgentPane root control mounting', () => {
       }),
     )
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     await waitFor(() =>
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything()))
 
@@ -4669,7 +4657,7 @@ describe('AgentPane root control mounting', () => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
     expect(controlMounts.mount).toHaveBeenCalledTimes(1)
@@ -4692,7 +4680,7 @@ describe('AgentPane root control mounting', () => {
       return snapshot()
     })
 
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, '第一句')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -4739,7 +4727,7 @@ describe('AgentPane root control mounting', () => {
       snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
     )
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const draftEditor = await screen.findByLabelText('给 AI 发送消息')
     await user.type(draftEditor, '第一句')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
@@ -4765,7 +4753,7 @@ describe('AgentPane root control mounting', () => {
       snapshot(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
     )
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const draftEditor = await screen.findByLabelText('给 AI 发送消息')
     await user.type(draftEditor, '回车发送')
     await user.keyboard('{Enter}')
@@ -4803,7 +4791,7 @@ describe('AgentPane root control mounting', () => {
           <MemoryRouter>
             <button type="button">outside button</button>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               focused={focused}
@@ -4857,7 +4845,7 @@ describe('AgentPane root control mounting', () => {
         <QueryClientProvider client={client}>
           <MemoryRouter>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               focused
@@ -4937,7 +4925,7 @@ describe('AgentPane root control mounting', () => {
     ))
 
     try {
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      renderPane({ kind: 'CHAT', id: CHAT_ID })
 
       // 完整资源解析成可预览图片；解析失败的资源退化为无预览，不冒泡错误。
       expect(await screen.findByRole('img', { name: 'blob-1.png' })).toHaveAttribute(
@@ -4974,7 +4962,7 @@ describe('AgentPane root control mounting', () => {
     }))
 
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('{ArrowUp}')
@@ -4994,7 +4982,7 @@ describe('AgentPane root control mounting', () => {
       interactionPage([approvalInteraction(unknownSourceId)]),
     )
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     const label = `查看 subagent ${unknownSourceId} 的执行`
     const source = await screen.findByRole('link', { name: label })
@@ -5020,7 +5008,7 @@ describe('AgentPane root control mounting', () => {
       )
 
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await screen.findByRole('link', { name: /second worker/ })
     await user.click(screen.getByRole('button', { name: '加载更多' }))
@@ -5045,7 +5033,7 @@ describe('AgentPane root control mounting', () => {
       .mockRejectedValueOnce(new Error('page two down'))
 
     const user = userEvent.setup()
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await screen.findByRole('button', { name: '允许' })
     await user.click(screen.getByRole('button', { name: '加载更多' }))
@@ -5082,7 +5070,7 @@ describe('AgentPane root control mounting', () => {
         ? snapshot(threadFixture(NEW_ROOT_ID, { name: '新分支根' }))
         : snapshot())
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/goal{Enter}')
@@ -5111,7 +5099,7 @@ describe('AgentPane root control mounting', () => {
       stoppedThreads: [],
     })
 
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
     await user.click(composer)
@@ -5141,7 +5129,7 @@ describe('AgentPane root control mounting', () => {
       return snapshot()
     })
 
-    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const cached = snapshot(threadFixture(NEW_ROOT_ID, { name: '已缓存根' }), {
       entries: [{
         entryId: 'cached-entry-1',
@@ -5179,7 +5167,7 @@ describe('AgentPane root control mounting', () => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
 
-    const first = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const first = renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'root draft stays')
     await waitFor(async () =>
@@ -5193,7 +5181,7 @@ describe('AgentPane root control mounting', () => {
 
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(childSnapshot())
-    const second = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const second = renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(await screen.findByText('只读查看')).toBeInTheDocument()
     expect(controlMounts.mount).not.toHaveBeenCalled()
     expect(controlMounts.unmount).not.toHaveBeenCalled()
@@ -5206,7 +5194,7 @@ describe('AgentPane root control mounting', () => {
 
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    renderPane({ kind: 'CHAT', id: CHAT_ID })
     const restored = await screen.findByLabelText('给 AI 发送消息')
     // 回到根：草稿从既有持久记录恢复，不需要任何额外接线。
     await waitFor(() => expect(restored).toHaveTextContent('root draft stays'))
@@ -5235,7 +5223,7 @@ describe('AgentPane root control mounting', () => {
         <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
           <MemoryRouter>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               environments={[envCard]}
@@ -5299,7 +5287,7 @@ describe('AgentPane root control mounting', () => {
         <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
           <MemoryRouter>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               environments={[envCard, secondEnvCard]}
@@ -5327,7 +5315,7 @@ describe('AgentPane root control mounting', () => {
         <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
           <MemoryRouter>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               environments={[envCard, secondEnvCard]}
@@ -5362,7 +5350,7 @@ describe('AgentPane root control mounting', () => {
         <IdePanelContext.Provider value={{ openEnvironment, togglePanel: vi.fn(), panelVisible: false }}>
           <MemoryRouter>
             <TestAgentPane
-              owner={{ type: 'CHAT', chatId: CHAT_ID }}
+              owner={{ kind: 'CHAT', id: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
               environments={[]}

@@ -12,13 +12,10 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSession;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -41,8 +38,7 @@ import java.util.UUID;
  * 所需环境无有效 READY 连接租约」聚合（环境等待）。两者都不复制待办台账、不落地持久等待状态。
  *
  * <p>产品 owner 与根由服务端按来源 Thread 不可变的执行根解析：人工等待用 {@link HarnessRuntime#findRootThreadId}
- * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后读取根的 Session（Chat）或根 Thread
- * 绑定（Issue+Agent）；两者都没有时，控制器或插件发起的独立执行根作为 Agent 任务暴露（无产品页面，只在交互中心处理）。其余无法解析的根不对外暴露， 绝不信任客户端传入归属。
+ * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后通过产品 SPI 解析根归属。没有产品归属时，控制器或插件发起的独立执行根作为 Agent 任务暴露。
  *
  * <p>两种来源共享同一 {@code (createdAt, id)} 排序键域：人工等待用调用自身坐标，环境等待用组内最早调用的坐标。本用例对两条升序流做 k 路归并，因此可以跨来源、
  * 跨页稳定分页且不重复分组，{@code limit} 只截断可见项；{@code total} 在同过滤条件下分类计数两条流，绝不把首页长度当总数。
@@ -57,22 +53,15 @@ public class InteractionQueryService {
   private static final String TYPE_APPROVAL = "APPROVAL";
   private static final String TYPE_ENVIRONMENT_WAIT = "ENVIRONMENT_WAIT";
 
-  private final ChatSessionRepository chatSessionRepository;
-  private final ChatRepository chatRepository;
-  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
+  private final List<SessionOwnership> ownerships;
   private final EnvironmentRepository environmentRepository;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
-      ChatSessionRepository chatSessionRepository,
-      ChatRepository chatRepository,
-      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
+      List<SessionOwnership> ownerships,
       EnvironmentRepository environmentRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
-    this.chatSessionRepository =
-        Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
+    this.ownerships = List.copyOf(ownerships);
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.rootResolver = new InteractionRootResolver(runtimes);
@@ -286,7 +275,6 @@ public class InteractionQueryService {
     private final Map<UUID, UUID> rootBySourceThread = new HashMap<>();
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
     private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
-    private final Map<UUID, String> chatTitleById = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
 
     private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
@@ -321,10 +309,7 @@ public class InteractionQueryService {
       return owner.map(value -> new ResolvedRoot(rootThreadId, value)).orElse(null);
     }
 
-    /**
-     * 产品 owner 只按根解析：根 Session 命中 {@code chat_session} 即为 Chat；根 Thread 命中 {@code
-     * project_issue_agent_thread} 即为 Issue+Agent。来源自身即根时直接复用行内 Session，后代来源才回读根快照取得根 Session。
-     */
+    /** 来源自身即根时复用行内 Session，后代来源回读根快照取得根 Session。 */
     private Optional<InteractionOwnerDTO> resolveOwnerForManual(
         UUID rootThreadId, PendingInteraction row) {
       UUID rootSessionId =
@@ -346,58 +331,38 @@ public class InteractionQueryService {
       return rootSnapshotByRootThread.computeIfAbsent(rootThreadId, runtime::getThreadSnapshot);
     }
 
-    private String rootThreadName(UUID rootThreadId) {
-      return rootSnapshot(rootThreadId).thread().name();
-    }
-
     private Optional<InteractionOwnerDTO> ownerForRootSession(
         UUID rootThreadId, UUID rootSessionId) {
-      ChatSession chatSession = chatSessionRepository.findBySessionId(rootSessionId);
-      if (chatSession != null) {
-        InteractionOwnerDTO owner = new InteractionOwnerDTO();
-        owner.setType("CHAT");
-        owner.setChatId(chatSession.chatId().toString());
-        owner.setChatTitle(chatTitle(chatSession.chatId()));
-        owner.setRootThreadName(rootThreadName(rootThreadId));
-        return Optional.of(owner);
+      SessionOwnerDisplay display = null;
+      for (SessionOwnership ownership : ownerships) {
+        Optional<SessionOwnerDisplay> candidate = ownership.findOwner(rootThreadId, rootSessionId);
+        if (candidate.isPresent()) {
+          if (display != null) {
+            throw new IllegalStateException("multiple owners for execution root: " + rootThreadId);
+          }
+          display = candidate.get();
+        }
       }
-      // 没有 Project 应用就没有 Issue+Agent 归属的执行根。
-      Optional<IssueAgentOwnership.BoundRoot> issueRoot =
-          Optional.ofNullable(issueAgentOwnership.getIfAvailable())
-              .flatMap(ownership -> ownership.findBoundRoot(rootThreadId));
-      if (issueRoot.isPresent()) {
+      if (display != null) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
-        owner.setType("ISSUE_AGENT");
-        owner.setIssueId(issueRoot.get().issueId().toString());
-        owner.setIssueTitle(issueRoot.get().issueTitle());
-        owner.setAgentName(issueRoot.get().agentName());
-        owner.setRootThreadName(rootThreadName(rootThreadId));
+        owner.setKind(Objects.requireNonNull(display.kind(), "owner kind"));
+        owner.setId(Objects.requireNonNull(display.id(), "owner id"));
+        owner.setTitle(display.title());
+        owner.setLink(display.link());
         return Optional.of(owner);
       }
       ThreadSnapshot root = rootSnapshot(rootThreadId);
       SpawnTrigger trigger = root.thread().spawnTrigger();
       if (trigger == SpawnTrigger.CONTROLLER || trigger == SpawnTrigger.PLUGIN) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
-        owner.setType("AGENT_TASK");
-        owner.setAgentName(root.entryState().baseSettings().agentName());
-        owner.setRootThreadName(root.thread().name());
+        owner.setKind("AGENT_TASK");
+        owner.setId(rootThreadId.toString());
+        String agentName = root.entryState().baseSettings().agentName();
+        owner.setTitle(agentName != null ? agentName : root.thread().name());
+        owner.setLink(null);
         return Optional.of(owner);
       }
       return Optional.empty();
-    }
-
-    /** 展示名只按产品身份从原仓储补齐一次（按请求缓存），绝不逐卡回读。 */
-    private String chatTitle(UUID chatId) {
-      String cached = chatTitleById.get(chatId);
-      if (cached != null) {
-        return cached;
-      }
-      Chat chat = chatRepository.getById(chatId);
-      String title = chat == null ? null : chat.getTitle();
-      if (title != null) {
-        chatTitleById.put(chatId, title);
-      }
-      return title;
     }
 
     /** 环境展示名只按环境 id 从注册表补齐一次（按页去重），绝不按当前 composer 环境猜测，也不逐卡快照。 */

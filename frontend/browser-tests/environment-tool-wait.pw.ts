@@ -70,8 +70,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
         data = { items: [{
           type: 'APPROVAL', interactionId: 'original-approval', status: 'WAITING_APPROVAL',
           threadId: CHILD, rootThreadId: ROOT, sessionId: 'session-wait',
-          owner: { type: 'CHAT', chatId: 'chat-wait', chatTitle: null,
-            issueId: null, issueTitle: null, agentName: null, rootThreadName: '等待工具 Thread' },
+          owner: { kind: 'CHAT', id: 'chat-wait', title: null, link: '/chats/chat-wait' },
           toolCallId: 'approval-call', toolName: 'bash',
           argumentsJson: '{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}',
           approvalJson: '{"required":true,"reason":"Permission rules require approval"}',

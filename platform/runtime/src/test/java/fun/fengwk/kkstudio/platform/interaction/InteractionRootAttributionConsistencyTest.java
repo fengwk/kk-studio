@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.interaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -14,17 +16,19 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
@@ -46,8 +50,7 @@ class InteractionRootAttributionConsistencyTest {
     return new UUID(0L, value);
   }
 
-  private ChatSessionRepository chatSessionRepository;
-  private IssueAgentOwnership issueAgentOwnership;
+  private SessionOwnership sessionOwnership;
   private EnvironmentRepository environmentRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -57,10 +60,7 @@ class InteractionRootAttributionConsistencyTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    chatSessionRepository = mock(ChatSessionRepository.class);
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
+    sessionOwnership = mock(SessionOwnership.class);
     environmentRepository = mock(EnvironmentRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
@@ -69,13 +69,8 @@ class InteractionRootAttributionConsistencyTest {
     when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     queryService =
-        new InteractionQueryService(
-            chatSessionRepository,
-            mock(ChatRepository.class),
-            issueAgentOwnerships,
-            environmentRepository,
-            runtimes);
-    interactionService = new InteractionService(issueAgentOwnerships, runtimes);
+        new InteractionQueryService(List.of(sessionOwnership), environmentRepository, runtimes);
+    interactionService = new InteractionService(List.of(sessionOwnership), runtimes);
   }
 
   /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 Issue 绑定投影 owner，提交按同一根的绑定加产品锁，两个入口对同一后代各调用一次同源根解析。 */
@@ -87,8 +82,9 @@ class InteractionRootAttributionConsistencyTest {
     UUID issueId = id(200);
 
     when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
-    when(issueAgentOwnership.findBoundRoot(rootThreadId))
-        .thenReturn(Optional.of(new IssueAgentOwnership.BoundRoot(issueId, "coder", "issue")));
+    when(sessionOwnership.findOwner(rootThreadId, rootSessionId))
+        .thenReturn(
+            Optional.of(new SessionOwnerDisplay("ISSUE_AGENT", issueId.toString(), "issue", null)));
 
     // 查询：后代行先按根定位，再经根快照取得根 Session，最后按根 Thread 绑定解析 owner。
     ThreadState rootThread = mock(ThreadState.class);
@@ -96,7 +92,6 @@ class InteractionRootAttributionConsistencyTest {
     ThreadSnapshot rootSnapshot = mock(ThreadSnapshot.class);
     when(rootSnapshot.thread()).thenReturn(rootThread);
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(rootSnapshot);
-    when(chatSessionRepository.findBySessionId(rootSessionId)).thenReturn(null);
     PendingInteraction row =
         new PendingInteraction(
             id(900),
@@ -120,7 +115,9 @@ class InteractionRootAttributionConsistencyTest {
     InteractionDTO dto = page.getItems().get(0);
     assertEquals(childThreadId.toString(), dto.getThreadId());
     assertEquals(rootThreadId.toString(), dto.getRootThreadId());
-    assertEquals(issueId.toString(), dto.getOwner().getIssueId());
+    assertEquals(issueId.toString(), dto.getOwner().getId());
+    assertEquals("ISSUE_AGENT", dto.getOwner().getKind());
+    assertEquals("issue", dto.getOwner().getTitle());
 
     // 提交：同一点代来源的产品锁同样按根解析。
     ToolInputSubmissionCommand command =
@@ -133,7 +130,72 @@ class InteractionRootAttributionConsistencyTest {
 
     // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
     verify(runtime, times(2)).findRootThreadId(childThreadId);
-    verify(issueAgentOwnership).findBoundRoot(rootThreadId);
-    verify(issueAgentOwnership).lockRootForInteraction(rootThreadId);
+    verify(sessionOwnership).findOwner(rootThreadId, rootSessionId);
+    verify(sessionOwnership).lockForInteraction(rootThreadId, rootSessionId);
+  }
+
+  /** 两个产品同时声明同一执行根时不能按注册顺序选择归属。 */
+  @Test
+  void conflictingProductsFailClosed() {
+    UUID root = id(1);
+    UUID session = id(2);
+    SessionOwnership other = mock(SessionOwnership.class);
+    queryService =
+        new InteractionQueryService(
+            List.of(sessionOwnership, other), environmentRepository, runtimes);
+    when(sessionOwnership.findOwner(root, session))
+        .thenReturn(Optional.of(new SessionOwnerDisplay("A", "1", null, null)));
+    when(other.findOwner(root, session))
+        .thenReturn(Optional.of(new SessionOwnerDisplay("B", "2", null, null)));
+    stubSingleRoot(root, session);
+
+    assertThrows(IllegalStateException.class, () -> queryService.listInteractions(null, null, 10));
+    verify(sessionOwnership).findOwner(root, session);
+    verify(other).findOwner(root, session);
+  }
+
+  /** 无产品归属时独立任务使用 agent 名；缺失 agent 名时使用根名称。 */
+  @Test
+  void standaloneTaskFallsBackToRootName() {
+    UUID root = id(1);
+    UUID session = id(2);
+    stubSingleRoot(root, session);
+    ThreadState thread = mock(ThreadState.class);
+    when(thread.spawnTrigger()).thenReturn(SpawnTrigger.PLUGIN);
+    when(thread.name()).thenReturn("root name");
+    BranchSettings settings = mock(BranchSettings.class);
+    EntryCurrentState entry = mock(EntryCurrentState.class);
+    when(entry.baseSettings()).thenReturn(settings);
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread);
+    when(snapshot.entryState()).thenReturn(entry);
+    when(runtime.getThreadSnapshot(root)).thenReturn(snapshot);
+
+    InteractionDTO dto = queryService.listInteractions(null, null, 10).getItems().get(0);
+    assertEquals("AGENT_TASK", dto.getOwner().getKind());
+    assertEquals(root.toString(), dto.getOwner().getId());
+    assertEquals("root name", dto.getOwner().getTitle());
+    assertNull(dto.getOwner().getLink());
+    verify(sessionOwnership).findOwner(root, session);
+  }
+
+  private void stubSingleRoot(UUID root, UUID session) {
+    when(runtime.findRootThreadId(root)).thenReturn(Optional.of(root));
+    PendingInteraction row =
+        new PendingInteraction(
+            id(9),
+            root,
+            session,
+            ToolInvocationStatus.WAITING_INPUT,
+            "call",
+            "ask",
+            "{}",
+            null,
+            Instant.parse("2026-03-01T10:00:00Z"));
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
+    when(runtime.listPendingInteractions(
+            Instant.EPOCH, ZERO_UUID, InteractionQueryService.COUNT_PAGE_SIZE))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
   }
 }

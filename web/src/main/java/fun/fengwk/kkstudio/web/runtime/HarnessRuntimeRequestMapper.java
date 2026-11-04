@@ -32,7 +32,7 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
@@ -62,18 +62,11 @@ public final class HarnessRuntimeRequestMapper {
 
   private HarnessRuntimeRequestMapper() {}
 
-  /** 映射 owner，只允许 CHAT 与 ISSUE_AGENT：Canvas 不持有 Harness Session，公共 batch 端点不接受 Issue+Agent。 */
-  public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
+  /** 映射不透明身份，不信任客户端提供的展示字段。 */
+  public static SessionOwner toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
-    String type = requireText(dto.getType(), "owner.type");
-    return switch (type) {
-      case "CHAT" -> new OwnerRef.Chat(Uuids.parseCanonical(dto.getChatId(), "owner.chatId"));
-      case "ISSUE_AGENT" -> new OwnerRef.IssueAgent(
-          Uuids.parseCanonical(dto.getIssueId(), "owner.issueId"),
-          requireText(dto.getAgentName(), "owner.agentName"));
-      default -> throw new IllegalArgumentException(
-          "owner.type must be CHAT or ISSUE_AGENT: " + type);
-    };
+    return new SessionOwner(
+        requireText(dto.getKind(), "owner.kind"), requireText(dto.getId(), "owner.id"));
   }
 
   /** 将唯一产品 HTTP 写请求映射为 sealed target 与有序 commands。 */

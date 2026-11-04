@@ -128,7 +128,8 @@ final class ConfigSyncFixtures {
           mock(AgentDefinitionConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
-          mock(PluginAgentDependencies.class));
+          mock(PluginAgentDependencies.class),
+          List.of());
 
   private static DriverRegistry builtinDrivers() {
     AgentDriver driver = mock(AgentDriver.class);

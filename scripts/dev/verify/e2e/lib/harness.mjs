@@ -240,7 +240,7 @@ export function branchSettingsOf(agent, executionOrModel, environmentName = null
 
 /** Chat owner 引用（canonical chatId）。 */
 export function chatOwner(chatId) {
-  return { type: 'CHAT', chatId: canonicalUuid(chatId, 'chatId') }
+  return { kind: 'CHAT', id: canonicalUuid(chatId, 'chatId') }
 }
 
 /** NEW_SESSION target：预分配 sessionId/threadId，携带 root settings 与 initial yolo。 */
@@ -365,13 +365,13 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   }
 
   assert(
-    owner?.type === 'CHAT',
-    `owner.type must be CHAT: ${JSON.stringify(owner)}`,
+    owner?.kind === 'CHAT',
+    `owner.kind must be CHAT: ${JSON.stringify(owner)}`,
   )
-  canonicalUuid(owner.chatId, 'owner.chatId')
+  canonicalUuid(owner.id, 'owner.id')
   assert(
-    Object.keys(owner).sort().join(',') === 'chatId,type',
-    `owner must contain only type and chatId: ${JSON.stringify(owner)}`,
+    Object.keys(owner).sort().join(',') === 'id,kind',
+    `owner must contain only kind and id: ${JSON.stringify(owner)}`,
   )
   const { status, json } = await ctx.call('POST', '/api/command-batches', {
     owner,

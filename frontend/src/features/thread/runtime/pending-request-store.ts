@@ -114,8 +114,7 @@ export function samePendingAcceptanceIdentity(
   left: PendingAcceptance,
   right: PendingAcceptance,
 ): boolean {
-  return left.owner.type === right.owner.type
-    && ownerIdentity(left.owner) === ownerIdentity(right.owner)
+  return ownerIdentity(left.owner) === ownerIdentity(right.owner)
     && ownerIdentity(left.request.owner) === ownerIdentity(right.request.owner)
     && samePaneTarget(left.target, right.target)
     && sameBatchRequestIdentity(left.request, right.request)
@@ -162,7 +161,6 @@ export function inspectPendingAcceptanceSlot(
     }
     if (
       !isPendingAcceptanceValue(parsed)
-      || parsed.owner.type !== owner.type
       || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
       || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
     ) {

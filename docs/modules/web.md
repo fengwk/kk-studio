@@ -102,7 +102,7 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 Session 的 `GET /api/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
-`/api/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
+`/api/command-batches` 只服务允许通用命令直写的创建型产品 owner（当前为 `CHAT`；`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
 `ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/threads/{threadId}/command-batches`
 服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。

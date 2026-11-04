@@ -68,7 +68,7 @@ function PaneControlRoutes() {
           element={(
             <div className="pane-harness-frame" data-testid="pane-harness-frame">
               <AgentPane
-                owner={{ type: 'CHAT', chatId: 'chat-pane-harness' }}
+                owner={{ kind: 'CHAT', id: 'chat-pane-harness' }}
                 paneId="pane-harness"
                 focused
                 agents={[HARNESS_AGENT]}

@@ -70,6 +70,8 @@ class AgentDefinitionServiceUnitTest {
   private AgentModelRepository modelRepository;
   private AgentModelDefaultVariantResolver variants;
   private PluginAgentDependencies pluginAgentDependencies;
+  private AgentReferenceCheck productReference;
+  private AgentReferenceCheck otherProductReference;
   private AgentDefinitionService service;
 
   @BeforeEach
@@ -79,6 +81,8 @@ class AgentDefinitionServiceUnitTest {
     modelRepository = mock(AgentModelRepository.class);
     variants = mock(AgentModelDefaultVariantResolver.class);
     pluginAgentDependencies = mock(PluginAgentDependencies.class);
+    productReference = mock(AgentReferenceCheck.class);
+    otherProductReference = mock(AgentReferenceCheck.class);
     when(modelRepository.getByNameForUpdate(any()))
         .thenAnswer(invocation -> model(invocation.getArgument(0), AgentModelKind.MODEL));
     AgentDriver builtin = mock(AgentDriver.class);
@@ -111,7 +115,8 @@ class AgentDefinitionServiceUnitTest {
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentDefinitionConfigCodec(objectMapper),
             new AgentEditableSupport(objectMapper),
-            pluginAgentDependencies);
+            pluginAgentDependencies,
+            List.of(productReference, otherProductReference));
   }
 
   /** 创建持久化规范化的能力列表与全局 model 名；更新保持名称身份并改写模型与 variant。 */
@@ -334,7 +339,7 @@ class AgentDefinitionServiceUnitTest {
     verify(repository, never()).deleteByName("agent", 0L);
   }
 
-  /** 被 Project 工作流或插件配置引用的 Agent 拒绝删除，绝不触达真实删除。 */
+  /** 任一产品或插件配置引用 Agent 时拒绝删除，绝不触达真实删除。 */
   @Test
   void deleteRejectsReferencedAgents() {
     when(resolver.requireAgentForUpdate("agent")).thenReturn(definition());
@@ -343,10 +348,12 @@ class AgentDefinitionServiceUnitTest {
         assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
     assertTrue(plugin.getMessage().contains("referenced by plugin configuration"));
 
-    when(repository.existsReferencingProjectWorkflow("agent")).thenReturn(true);
-    AiInUseException workflow =
+    when(otherProductReference.isReferenced("agent")).thenReturn(true);
+    AiInUseException product =
         assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
-    assertTrue(workflow.getMessage().contains("project workflow stage"));
+    assertTrue(product.getMessage().contains("referenced by a product"));
+    verify(productReference, atLeastOnce()).isReferenced("agent");
+    verify(otherProductReference, atLeastOnce()).isReferenced("agent");
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 

@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -44,6 +43,7 @@ import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
@@ -189,7 +189,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     jdbc.update("delete from project_issue_run where id = ?", run.getId());
 
     sessionDeletionOrchestrator.deleteSessionsByOwner(
-        new OwnerRef.IssueAgent(fixture.issueId(), executor));
+        ProjectSessionOwnership.owner(fixture.issueId(), executor));
 
     // Session 侧引用随 Session 消失，Issue 证据与 Issue 持有的引用保留，Blob 仍可用
     assertEquals(0, support.count("session_blob_ref", "session_id", run.getSessionId()));

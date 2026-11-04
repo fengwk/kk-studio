@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.platform.chat.ChatIds;
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
@@ -72,7 +73,9 @@ public class StudioChatController {
   public ApiResponse<List<HarnessSessionSummaryDTO>> listChatSessions(
       @PathVariable("chatId") String chatId) {
     UUID id = ChatIds.parseUuid(chatId, "chatId");
-    return ApiResponse.ok(withRuntimeTranslation(() -> harnessQueryService.listChatSessions(id)));
+    return ApiResponse.ok(
+        withRuntimeTranslation(
+            () -> harnessQueryService.listSessions(new SessionOwner("CHAT", id.toString()))));
   }
 
   /** 将 Harness Runtime 异常翻译为统一 HTTP 错误响应。 */

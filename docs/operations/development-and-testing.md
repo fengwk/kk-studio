@@ -339,7 +339,7 @@ COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/t
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
 `compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
 变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
-Chat command batch 使用 `owner.type=CHAT` 与 `owner.chatId`；画布使用 `CREATE_NODE`、
+Chat command batch 使用 `owner.kind=CHAT` 与 `owner.id`；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
