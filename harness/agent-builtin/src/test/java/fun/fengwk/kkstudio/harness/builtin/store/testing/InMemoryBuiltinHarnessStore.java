@@ -7,14 +7,13 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransact
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryState;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Builtin 测试 Store：组合 runtime 的唯一通用内存 Store，把 ModelInvocation 与 group cooldown 放进核心事务快照。
+ * Builtin 测试 Store：组合 runtime 的唯一通用内存 Store，把 ModelInvocation 放进核心事务快照。
  *
  * <p>本类只做两件事：继承 runtime 内存 Store / 事务核心，并在自己的事务子类上暴露 {@link BuiltinStore.Transaction}。Model 行与属性
  * 存放在 runtime 核心事务快照的 driver row 区域，因此与核心 Store 共享同一 copy-on-write 快照、rollback、driver 级锁与按 Thread
@@ -83,22 +82,6 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     @Override
     public void updateModelInvocation(ModelInvocation invocation) {
       models.update(invocation);
-    }
-
-    @Override
-    public boolean isGroupMemberCooling(
-        String groupName, long groupVersion, String memberModelName, String memberVariant) {
-      return models.isCooling(groupName, groupVersion, memberModelName, memberVariant);
-    }
-
-    @Override
-    public void freezeGroupMember(
-        String groupName,
-        long groupVersion,
-        String memberModelName,
-        String memberVariant,
-        Instant cooldownUntil) {
-      models.freeze(groupName, groupVersion, memberModelName, memberVariant, cooldownUntil);
     }
 
     @Override

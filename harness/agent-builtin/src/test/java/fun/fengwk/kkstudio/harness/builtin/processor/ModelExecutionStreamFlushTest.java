@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -929,6 +930,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -997,6 +1002,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -1054,6 +1063,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -1262,6 +1275,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),

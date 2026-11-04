@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -352,6 +353,10 @@ class ExecutionConcurrentDeletionTest {
       this.execution =
           new ModelExecution(
               store,
+              SingleModelGateway.of(
+                  execution -> {
+                    throw new AssertionError("unused admission");
+                  }),
               events::add,
               claim,
               threadId,

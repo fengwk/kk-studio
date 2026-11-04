@@ -12,9 +12,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.model.GroupCooldownRepository;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -33,8 +36,7 @@ import java.util.function.Supplier;
  * ModelProvider#stream}，本类不拥有任何线程池或回调桥： 增量同步转交 Runtime sink，分类过的 {@link ProviderException} 连同 kind
  * 以 {@link Failed} 返回；null 的 provider payload 与 adapter 装配错误是确定性 {@code INVALID_REQUEST} 失败；未分类异常（含
  * sink 抛出的异常）或 Provider 在没有终态时返回，以 {@link Unknown} 返回，因为结果无法确认。线程被中断即取消：Provider 关闭连接并无终态返回，此时返回
- * {@code CANCELLED} 失败，调用方通常已 abandon 并忽略它。名额在 {@code run} 返回或 {@code close} 时释放。gateway 绝不读写
- * HarnessStore。
+ * {@code CANCELLED} 失败，调用方通常已 abandon 并忽略它。名额在 {@code run} 返回或 {@code close} 时释放。
  *
  * <p>每次 {@link #admit} 按实际模型名读取当前 pricing 并冻结独立的 request-body 条件计划；Provider 在真实发送路径上回调最终编码 body
  * 后，本类立即把计划求值为只含指纹与布尔值的快照，并随成功 completion 返回。请求体字节只在回调栈内存在，不写日志或存储。
@@ -45,6 +47,7 @@ public final class PlatformModelGateway implements ModelGateway {
   private final Supplier<Duration> busyRetryDelay;
   private final ConcurrencyAdmission admission;
   private final ModelPricingPlanSource pricingPlans;
+  private final GroupCooldownRepository cooldowns = new GroupCooldownRepository();
 
   /**
    * 生产与测试共用的唯一构造器。{@code busyRetryDelay} 在每次 {@code Busy} 判定时现读，由装配方决定来源——生产装配传入
@@ -60,6 +63,27 @@ public final class PlatformModelGateway implements ModelGateway {
     this.busyRetryDelay = Objects.requireNonNull(busyRetryDelay, "busyRetryDelay");
     this.admission = Objects.requireNonNull(admission, "admission");
     this.pricingPlans = Objects.requireNonNull(pricingPlans, "pricingPlans");
+  }
+
+  @Override
+  public boolean isGroupMemberCooling(
+      HarnessStore.Transaction tx,
+      String groupName,
+      long groupVersion,
+      String memberModelName,
+      String memberVariant) {
+    return cooldowns.isCooling(tx, groupName, groupVersion, memberModelName, memberVariant);
+  }
+
+  @Override
+  public void freezeGroupMember(
+      HarnessStore.Transaction tx,
+      String groupName,
+      long groupVersion,
+      String memberModelName,
+      String memberVariant,
+      Instant cooldownUntil) {
+    cooldowns.freeze(tx, groupName, groupVersion, memberModelName, memberVariant, cooldownUntil);
   }
 
   @Override

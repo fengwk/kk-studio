@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -205,7 +206,22 @@ final class DispatcherTestSupport {
           UUID toolId = tx.nextId();
           tx.sessions().insert(session(sessionId));
           tx.entries().insert(rootEntry(rootEntryId, sessionId));
-          tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null,
+                          new TurnCapabilities(List.of(toolRequest().binding()), List.of())),
+                      NOW));
           tx.entries().insert(userEntry(userEntryId, sessionId, turnStartEntryId));
           // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
           // binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。

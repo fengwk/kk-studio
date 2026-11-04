@@ -72,7 +72,7 @@ groupExecution?
 
 模型组在逻辑调用开始时把组名、组版本、有序成员执行快照、降级状态码与冷却秒数冻结进 [`ModelGroupExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupExecution.java)。成员切换只使用冻结快照，绝不重新读取 Catalog 混入新配置。当前成员与成员内普通尝试次数由 [`ModelGroupProgress`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupProgress.java) 推进；全局 `ModelInvocation.attempt` 仍是所有真实上游 attempt 的审计序号。
 
-[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `OVERFLOW` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes` 或普通重试预算耗尽时推进到下一成员；否则重试当前成员。成员冷却状态在每次候选选择时读取并写入 `BuiltinStore`，不进入请求 Spec。
+[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `OVERFLOW` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes` 或普通重试预算耗尽时推进到下一成员；否则重试当前成员。成员冷却属于平台模型目录，经 `ModelGateway` 在调用方已有的事务内读写，不进入请求 Spec。候选读取与游标更新共同提交；冷却写入与 invocation、work 更新共同提交或回滚。平台用事务数据库时间判断冷却，写入时锁定组版本，拒绝旧版本结果且仅延长截止时间。
 
 ## 自动压缩
 
@@ -92,7 +92,7 @@ groupExecution?
 | `fun.fengwk.kkstudio.harness.builtin.driver` | `BuiltinAgentDriver`：Turn 解析、generation 锁定、响应物化、ToolBatch 收尾与 Stop |
 | `fun.fengwk.kkstudio.harness.builtin.history` | Builtin 响应到公共历史的投影 |
 | `fun.fengwk.kkstudio.harness.builtin.model` | 从冻结请求与 EntryPath 重建 Provider 请求 |
-| `fun.fengwk.kkstudio.harness.builtin.port` | `TurnResolver` 在调用方事务内同步解析，`ModelGateway` 在事务外执行 Provider I/O |
+| `fun.fengwk.kkstudio.harness.builtin.port` | `TurnResolver` 在调用方事务内同步解析，`ModelGateway` 在调用方事务内访问模型冷却，在事务外执行 Provider I/O |
 | `fun.fengwk.kkstudio.harness.builtin.processor` | MODEL Work 的 Processor / Execution、流式节奏、响应校验与规划、结果物化与模型组决策 |
 | `fun.fengwk.kkstudio.harness.builtin.query` | 当前 open Turn 冻结请求的只读 debug 投影 |
 | `fun.fengwk.kkstudio.harness.builtin.request` | Provider 消息投影与解析结果契约校验，都是纯函数 |

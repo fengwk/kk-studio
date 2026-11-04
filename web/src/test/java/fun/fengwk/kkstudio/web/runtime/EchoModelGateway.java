@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -23,7 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 匹配与父消息交付），但真实模型是非确定性外部付费依赖。回显规则让测试既能固定每个 turn 的产出，又能证明"结果沿执行树传递"—— 子执行收到父级交付的 receipt
  * 后，它的报告里必然再次出现下一级的报告与 Thread 身份。
  */
-public final class EchoModelGateway implements ModelGateway {
+public final class EchoModelGateway extends SingleModelGateway {
 
   private static final String ECHO_PREFIX = "ACK:";
 

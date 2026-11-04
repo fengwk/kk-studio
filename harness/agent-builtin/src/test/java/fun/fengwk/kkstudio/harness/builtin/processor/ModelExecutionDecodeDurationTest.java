@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -317,6 +318,10 @@ class ModelExecutionDecodeDurationTest {
       this.execution =
           new ModelExecution(
               store,
+              SingleModelGateway.of(
+                  execution -> {
+                    throw new AssertionError("unused admission");
+                  }),
               event -> {},
               claim,
               turn.threadId(),

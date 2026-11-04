@@ -49,8 +49,6 @@ class HarnessStoreContractTest {
               "findModelInvocationByTurn",
               "insertModelInvocation",
               "updateModelInvocation",
-              "isGroupMemberCooling",
-              "freezeGroupMember",
               "deleteModelInvocation"));
 
   private static final Set<String> ALLOWED_PRIMITIVES =
@@ -100,11 +98,11 @@ class HarnessStoreContractTest {
   }
 
   /**
-   * 测试意图：模型状态 CRUD 与 group cooldown 原语只存在于 Builtin 私有窄视图 {@link BuiltinStore.Transaction}；该窄视图必须
+   * 测试意图：模型状态 CRUD 原语只存在于 Builtin 私有窄视图 {@link BuiltinStore.Transaction}；该窄视图必须
    * 精确等于这组原语（既不多也不少），并且与 Runtime 公共 {@link HarnessStore.Transaction} 契约互斥。
    */
   @Test
-  void builtinStoreTransactionExposesExactlyTheModelAndGroupCooldownPrimitives() {
+  void builtinStoreTransactionExposesExactlyTheModelPrimitives() {
     Set<String> actual =
         Arrays.stream(BuiltinStore.Transaction.class.getDeclaredMethods())
             .filter(method -> !method.isSynthetic())

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -347,7 +348,7 @@ class PostgresqlModelLeaseRecoveryTest {
   }
 
   /** 恢复路径唯一允许出现的 Gateway 交互是 0 次：任何 replay 都会让计数断言失败。 */
-  private static final class CountingModelGateway implements ModelGateway {
+  private static final class CountingModelGateway extends SingleModelGateway {
 
     private final AtomicInteger startCalls = new AtomicInteger();
 

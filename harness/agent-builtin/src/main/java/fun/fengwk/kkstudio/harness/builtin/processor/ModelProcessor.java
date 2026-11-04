@@ -134,7 +134,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       return ProcessResult.LOST_OWNERSHIP;
     }
     try (ticket) {
-      Prepare prepare = inTransaction(tx -> prepareLocked(tx, claim, tx.now()));
+      Prepare prepare =
+          store.transaction(core -> prepareLocked(core, builtinStore.in(core), claim, core.now()));
       return switch (prepare) {
         case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
         case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
@@ -194,6 +195,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     ModelExecution execution =
         new ModelExecution(
             store,
+            gateway,
             realtimeEventSink,
             claim,
             dispatched.threadId(),
@@ -393,7 +395,8 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
   }
 
   /** 在事务内按 own Thread -> Model -> Work 锁序锁定并校验状态，不取树锁/祖先锁，依据 durable status 路由准备结果。 */
-  private Prepare prepareLocked(BuiltinStore.Transaction tx, ClaimedWork claim, Instant now) {
+  private Prepare prepareLocked(
+      HarnessStore.Transaction core, BuiltinStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
@@ -408,13 +411,14 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       return new Prepare.Lost();
     }
     return switch (model.status()) {
-      case READY -> prepareReady(tx, claim, thread, model, now);
+      case READY -> prepareReady(core, tx, claim, thread, model, now);
       case RUNNING -> recoverRunning(tx, claim, thread, model, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, model, now);
     };
   }
 
   private Prepare prepareReady(
+      HarnessStore.Transaction core,
       BuiltinStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -427,7 +431,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       if (progress == null || progress.groupVersion() != group.groupVersion()) {
         throw new IllegalStateException("group invocation is missing matching durable progress");
       }
-      memberIndex = firstAvailableMember(tx, group, progress.memberIndex());
+      memberIndex = firstAvailableMember(core, group, progress.memberIndex());
       if (memberIndex >= group.members().size()) {
         // 全是本地候选选择失败：不伪装成上游调用错误，也不进入普通重试预算。THREAD Work 先于 MODEL Work 加锁。
         tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
@@ -488,11 +492,12 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
   }
 
   /** 从 {@code fromIndex} 起第一个当前不在冷却的成员下标；全部冷却时返回成员数。 */
-  private static int firstAvailableMember(
-      BuiltinStore.Transaction tx, ModelGroupExecution group, int fromIndex) {
+  private int firstAvailableMember(
+      HarnessStore.Transaction tx, ModelGroupExecution group, int fromIndex) {
     int index = fromIndex;
     while (index < group.members().size()
-        && tx.isGroupMemberCooling(
+        && gateway.isGroupMemberCooling(
+            tx,
             group.groupName(),
             group.groupVersion(),
             group.members().get(index).model().modelName(),

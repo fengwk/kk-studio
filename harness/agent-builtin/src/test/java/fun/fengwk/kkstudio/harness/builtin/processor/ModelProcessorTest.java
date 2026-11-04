@@ -76,6 +76,7 @@ import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ExecutionExitFailur
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ExitLogCapture;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryModelGateway;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -4221,6 +4222,16 @@ class ModelProcessorTest {
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
+      if (requestSpec.groupExecution() != null) {
+        store.transaction(
+            tx -> {
+              gateway.setGroupVersion(
+                  tx,
+                  requestSpec.groupExecution().groupName(),
+                  requestSpec.groupExecution().groupVersion());
+              return null;
+            });
+      }
       this.baseline = seedBaseline(store, NOW, constraints);
       if (ownerSettledSummary) {
         seedOwnerSettledTicket(
@@ -4783,7 +4794,7 @@ class ModelProcessorTest {
   private static void freezeGroupMember(Fixture fixture, String member, Instant until) {
     fixture.store.transaction(
         tx -> {
-          builtin(fixture.store, tx).freezeGroupMember("group", 7L, member, "v1", until);
+          fixture.gateway.freezeGroupMember(tx, "group", 7L, member, "v1", until);
           return null;
         });
   }
@@ -4791,7 +4802,7 @@ class ModelProcessorTest {
   /** 在 fixture 当前时钟下该成员是否仍处于组冷却。 */
   private static boolean cooling(Fixture fixture, String member) {
     return fixture.store.transaction(
-        tx -> builtin(fixture.store, tx).isGroupMemberCooling("group", 7L, member, "v1"));
+        tx -> fixture.gateway.isGroupMemberCooling(tx, "group", 7L, member, "v1"));
   }
 
   private static ModelGroupProgress groupProgress(ModelInvocation invocation) {
@@ -5041,7 +5052,7 @@ class ModelProcessorTest {
    * 可编排的 fake Gateway：每次 admit 取队列头的一个结果。{@link #queueControlled} 排入一次受测试线程控制的阻塞运行——测试通过 {@link
    * ControlledRun} 逐个推送增量并给出终态，运行线程在 {@code run} 内阻塞等待。
    */
-  static final class FakeGateway implements ModelGateway {
+  static final class FakeGateway extends InMemoryModelGateway {
     final LinkedList<Object> results = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
     final List<Thread> executionThreads = new CopyOnWriteArrayList<>();

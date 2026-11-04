@@ -78,6 +78,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
@@ -1516,7 +1517,7 @@ class PostgresqlCompactionChildTest {
   }
 
   /** body 进入后保持显式 gate；Stop 的 interrupt 只计数，不释放 gate，也不重置清理超时。 */
-  private static final class HoldingModelGateway implements ModelGateway {
+  private static final class HoldingModelGateway extends SingleModelGateway {
     private final CountDownLatch entered = new CountDownLatch(1);
     private final CountDownLatch interrupted = new CountDownLatch(1);
     private final CountDownLatch release = new CountDownLatch(1);
@@ -1563,7 +1564,7 @@ class PostgresqlCompactionChildTest {
   }
 
   /** 脚本化子压缩 model gateway：按序返回排入的终态，覆盖截断 / 超限的真实 processor 路径（执行线程内联运行）。 */
-  private static final class ScriptedChildGateway implements ModelGateway {
+  private static final class ScriptedChildGateway extends SingleModelGateway {
     private final Deque<Outcome> outcomes = new ArrayDeque<>();
 
     void queue(Outcome outcome) {

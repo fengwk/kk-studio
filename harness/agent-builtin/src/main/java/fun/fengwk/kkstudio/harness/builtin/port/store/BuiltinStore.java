@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.builtin.port.store;
 
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
-import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,16 +29,6 @@ public interface BuiltinStore {
     void insertModelInvocation(ModelInvocation invocation);
 
     void updateModelInvocation(ModelInvocation invocation);
-
-    boolean isGroupMemberCooling(
-        String groupName, long groupVersion, String memberModelName, String memberVariant);
-
-    void freezeGroupMember(
-        String groupName,
-        long groupVersion,
-        String memberModelName,
-        String memberVariant,
-        Instant cooldownUntil);
 
     boolean deleteModelInvocation(UUID modelInvocationId);
   }

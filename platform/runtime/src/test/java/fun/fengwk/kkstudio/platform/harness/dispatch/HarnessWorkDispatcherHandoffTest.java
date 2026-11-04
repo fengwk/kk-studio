@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -869,7 +870,7 @@ class HarnessWorkDispatcherHandoffTest {
     return token.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
   }
 
-  private static final class FakeModelGateway implements ModelGateway {
+  private static final class FakeModelGateway extends SingleModelGateway {
 
     private final List<UUID> started = new CopyOnWriteArrayList<>();
 

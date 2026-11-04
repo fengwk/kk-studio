@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -124,6 +125,10 @@ class ExecutionTreeLockRegressionTest {
     ModelExecution execution =
         new ModelExecution(
             recordingStore,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             event -> {},
             claim,
             openTurn.threadId(),
@@ -224,6 +229,10 @@ class ExecutionTreeLockRegressionTest {
     ModelExecution execution =
         new ModelExecution(
             recordingStore,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             event -> {},
             claim,
             openTurn.threadId(),

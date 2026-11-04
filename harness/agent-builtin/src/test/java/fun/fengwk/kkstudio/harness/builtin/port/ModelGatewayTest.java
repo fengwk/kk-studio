@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -103,30 +104,31 @@ class ModelGatewayTest {
   void admittedRunsSynchronouslyAndDeliversEventsToTheSink() {
     List<ProviderStreamEvent> received = new ArrayList<>();
     ModelGateway gateway =
-        execution ->
-            new ModelGateway.Admitted() {
-              @Override
-              public ModelGateway.Outcome run(ModelGateway.Sink sink) {
-                sink.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-                return new ModelGateway.Succeeded(
-                    new ProviderCompletion(
-                        new ProviderResponse(
-                            "hello",
-                            null,
-                            List.of(),
-                            GenerationStopReason.COMPLETE,
-                            new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L),
-                            null,
-                            null,
-                            null),
-                        null));
-              }
+        SingleModelGateway.of(
+            execution ->
+                new ModelGateway.Admitted() {
+                  @Override
+                  public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+                    sink.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+                    return new ModelGateway.Succeeded(
+                        new ProviderCompletion(
+                            new ProviderResponse(
+                                "hello",
+                                null,
+                                List.of(),
+                                GenerationStopReason.COMPLETE,
+                                new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L),
+                                null,
+                                null,
+                                null),
+                            null));
+                  }
 
-              @Override
-              public void close() {
-                // 名额释放幂等
-              }
-            };
+                  @Override
+                  public void close() {
+                    // 名额释放幂等
+                  }
+                });
     ModelGateway.Admission admission =
         gateway.admit(
             new ModelGateway.Execution(

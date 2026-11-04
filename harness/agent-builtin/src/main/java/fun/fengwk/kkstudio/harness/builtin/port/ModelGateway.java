@@ -6,8 +6,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -28,6 +30,23 @@ public interface ModelGateway {
 
   /** 纯本地准入检查；{@link Admitted} 持有一个本地执行名额，调用方必须 {@link Admitted#run} 或 {@link Admitted#close} 之一。 */
   Admission admit(Execution execution);
+
+  /** 在调用方的事务中读取组成员冷却，使用该事务的数据库时间。 */
+  boolean isGroupMemberCooling(
+      HarnessStore.Transaction tx,
+      String groupName,
+      long groupVersion,
+      String memberModelName,
+      String memberVariant);
+
+  /** 在调用方的事务中延长指定版本组成员的冷却。 */
+  void freezeGroupMember(
+      HarnessStore.Transaction tx,
+      String groupName,
+      long groupVersion,
+      String memberModelName,
+      String memberVariant,
+      Instant cooldownUntil);
 
   /**
    * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型、Provider
