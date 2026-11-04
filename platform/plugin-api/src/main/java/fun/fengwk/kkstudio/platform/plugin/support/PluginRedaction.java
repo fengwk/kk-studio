@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.plugin.minimaxmavis;
+package fun.fengwk.kkstudio.platform.plugin.support;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -8,21 +8,20 @@ import java.util.regex.Pattern;
 /**
  * 诊断信息去敏。
  *
- * <p>Mavis 的请求 URL（renewal query）、header（{@code token}、{@code Authorization}）与响应 body 都可能直接携带凭据，
- * 因此任何进入错误消息、日志或响应的文本都必须先经过本类：替换已知秘密，并把内嵌 URL 退化为 {@code scheme://host[:port]/path}（丢弃
- * userinfo、query 与 fragment）。
+ * <p>请求 URL、header 与响应 body 都可能直接携带凭据， 因此任何进入错误消息、日志或响应的文本都必须先经过本类：替换已知秘密，并把内嵌 URL 退化为 {@code
+ * scheme://host[:port]/path}（丢弃 userinfo、query 与 fragment）。
  */
-public final class MavisRedaction {
+public final class PluginRedaction {
 
   /** 被替换秘密的占位文本。 */
   public static final String REDACTED = "[REDACTED]";
 
   private static final Pattern EMBEDDED_URL =
-      Pattern.compile("(?:https?|minimax(?:-cn)?)://[^\\s'\"<>]+", Pattern.CASE_INSENSITIVE);
+      Pattern.compile("[a-z][a-z0-9+.-]*://[^\\s'\"<>]+", Pattern.CASE_INSENSITIVE);
 
   private static final String INVALID_URL = "<invalid URL>";
 
-  private MavisRedaction() {}
+  private PluginRedaction() {}
 
   /** 用占位文本替换全部非空秘密。 */
   public static String redact(String text, String... secrets) {

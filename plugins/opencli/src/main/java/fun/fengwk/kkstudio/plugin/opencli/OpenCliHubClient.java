@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.plugin.opencli;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -14,9 +12,11 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport.ResponseTooLargeException;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubException.Kind;
 
-import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -32,7 +32,6 @@ import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.time.Duration;
@@ -41,14 +40,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
  * OpenCLI Hub 的 HTTP 协议客户端。
  *
- * <p>负责资源上传、作业提交与查询、尽力取消以及产物下载。上传使用定长分块发布者，下载将响应流交给调用方关闭；JSON 和错误响应始终按配置上限读取。
+ * <p>负责资源上传、作业提交与查询、尽力取消以及产物下载。上传使用定长流，下载将响应流交给调用方关闭；JSON 和错误响应始终有界读取。
  *
  * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
  * envelope、输出长度和截断标记，避免把不完整结果交给下游。
@@ -70,13 +68,13 @@ public class OpenCliHubClient implements AutoCloseable {
       List.of("SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED");
   private static final int MAX_UPLOAD_BASENAME_LENGTH = 128;
   private static final int MAX_UPLOAD_EXTENSION_LENGTH = 16;
+  static final int MAX_JSON_RESPONSE_BYTES = 512 * 1024;
+  static final int MAX_ERROR_RESPONSE_BYTES = 4096;
+  static final int MAX_OUTPUT_CHARS = 65_535;
   private static final String AUTH_REJECTED_ERROR = "OpenCLI Hub authentication rejected";
 
   private static final ObjectMapper CREDENTIAL_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+      PluginHttpSupport.strictJson(JsonMapper.builder().build());
 
   private final OpenCliSettings settings;
   private final ObjectMapper mapper;
@@ -117,7 +115,7 @@ public class OpenCliHubClient implements AutoCloseable {
       HttpClient httpClient,
       boolean ownedClient) {
     this.settings = Objects.requireNonNull(settings, "settings");
-    this.mapper = Objects.requireNonNull(mapper, "mapper").rebuild().build();
+    this.mapper = PluginHttpSupport.strictJson(mapper);
     this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
     this.ownedClient = ownedClient;
@@ -157,10 +155,16 @@ public class OpenCliHubClient implements AutoCloseable {
                 + "\r\n\r\n")
             .getBytes(StandardCharsets.UTF_8);
     byte[] suffix = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+    AtomicBoolean subscribed = new AtomicBoolean();
     HttpRequest.BodyPublisher media =
         HttpRequest.BodyPublishers.fromPublisher(
-            new FixedInputStreamPublisher(
-                content, size, settings.streamBufferBytes(), "multipart upload"),
+            HttpRequest.BodyPublishers.ofInputStream(
+                () -> {
+                  if (!subscribed.compareAndSet(false, true)) {
+                    throw new IllegalStateException("multipart upload body cannot be replayed");
+                  }
+                  return new FixedLengthInputStream(content, size);
+                }),
             size);
     HttpRequest.BodyPublisher body =
         HttpRequest.BodyPublishers.concat(
@@ -310,7 +314,7 @@ public class OpenCliHubClient implements AutoCloseable {
           requestFactory
               .build(credential)
               .copy()
-              .header("Authorization", "Bearer " + credential.apiKey())
+              .header("Authorization", PluginHttpSupport.bearer(credential.apiKey()))
               .timeout(timeout)
               .build();
     } catch (IllegalArgumentException exception) {
@@ -335,7 +339,7 @@ public class OpenCliHubClient implements AutoCloseable {
     InputStream stream = response.body();
     DeadlineResponseBody body = null;
     try {
-      if (response.statusCode() == 401 || response.statusCode() == 403) {
+      if (PluginHttpSupport.isAuthRejected(response.statusCode())) {
         rejectUsed(snapshot);
       }
       body = new DeadlineResponseBody(stream, deadline);
@@ -364,7 +368,7 @@ public class OpenCliHubClient implements AutoCloseable {
       if (!contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
         throw malformed("success response Content-Type must be application/json");
       }
-      byte[] bytes = readBounded(body, settings.maxJsonResponseBytes(), "JSON response");
+      byte[] bytes = readBounded(body, MAX_JSON_RESPONSE_BYTES, "JSON response");
       JsonNode root = mapper.readTree(bytes);
       if (root == null || !root.isObject()) {
         throw malformed("Result envelope must be an object");
@@ -468,27 +472,16 @@ public class OpenCliHubClient implements AutoCloseable {
   }
 
   private String validateApiKey(String apiKey) {
-    if (apiKey == null || apiKey.isEmpty()) {
+    try {
+      PluginHttpSupport.bearer(apiKey);
+      return apiKey;
+    } catch (IllegalArgumentException error) {
       throw invalidCredential();
     }
-    for (int i = 0; i < apiKey.length(); i++) {
-      char c = apiKey.charAt(i);
-      // HTTP header field-value 必须是 ASCII 可打印字符 (0x21 - 0x7E)，严禁换行、空格与控制符
-      if (c <= 0x20 || c >= 0x7F) {
-        throw invalidCredential();
-      }
-    }
-    return apiKey;
   }
 
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    try {
-      credentials.rejectUsed(snapshot, AUTH_REJECTED_ERROR);
-    } catch (RuntimeException exception) {
-      log.debug(
-          "failed to reject used OpenCLI Hub credential type={}",
-          exception.getClass().getSimpleName());
-    }
+    PluginHttpSupport.rejectUsed(credentials, snapshot, AUTH_REJECTED_ERROR);
   }
 
   private Execution parseExecution(JsonNode data) {
@@ -505,8 +498,7 @@ public class OpenCliHubClient implements AutoCloseable {
     }
     String stdout = optionalText(data, "stdout");
     String stderr = optionalText(data, "stderr");
-    if (stdout.length() > settings.maxOutputChars()
-        || stderr.length() > settings.maxOutputChars()) {
+    if (stdout.length() > MAX_OUTPUT_CHARS || stderr.length() > MAX_OUTPUT_CHARS) {
       throw malformed("OpenCLI Hub execution output exceeds local limit");
     }
     List<ExecutionResource> resources = new ArrayList<>();
@@ -541,10 +533,10 @@ public class OpenCliHubClient implements AutoCloseable {
 
   private OpenCliHubException httpError(int status, InputStream body) {
     // 已确认收到 HTTP 响应：401/403 是远端确定性拒绝凭据，其它状态码不得被当作认证结论。
-    Kind kind = status == 401 || status == 403 ? Kind.AUTH_REJECTED : Kind.HTTP_STATUS;
+    Kind kind = PluginHttpSupport.isAuthRejected(status) ? Kind.AUTH_REJECTED : Kind.HTTP_STATUS;
     String message = "OpenCLI Hub HTTP " + status;
     try {
-      drainErrorBody(body, settings.maxErrorResponseBytes());
+      drainErrorBody(body, MAX_ERROR_RESPONSE_BYTES);
     } catch (IOException exception) {
       return hubFailure(kind, message + " error response read failed", exception);
     }
@@ -552,7 +544,7 @@ public class OpenCliHubClient implements AutoCloseable {
   }
 
   private void drainErrorBody(InputStream input, int limit) throws IOException {
-    byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
+    byte[] buffer = new byte[8192];
     int remaining = limit;
     while (remaining > 0) {
       int read = input.read(buffer, 0, Math.min(buffer.length, remaining));
@@ -568,19 +560,10 @@ public class OpenCliHubClient implements AutoCloseable {
 
   private byte[] readBounded(InputStream input, int limit, String description) {
     try {
-      ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
-      byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
-      int total = 0;
-      int read;
-      while ((read = input.read(buffer)) != -1) {
-        if (total > limit - read) {
-          throw new OpenCliHubException(
-              Kind.PROTOCOL, "OpenCLI Hub " + description + " exceeds local limit");
-        }
-        output.write(buffer, 0, read);
-        total += read;
-      }
-      return output.toByteArray();
+      return PluginHttpSupport.readBounded(input, limit);
+    } catch (ResponseTooLargeException exception) {
+      throw new OpenCliHubException(
+          Kind.PROTOCOL, "OpenCLI Hub " + description + " exceeds local limit");
     } catch (IOException exception) {
       throw hubFailure(Kind.PROTOCOL, "failed to read OpenCLI Hub " + description, exception);
     }
@@ -881,14 +864,6 @@ public class OpenCliHubClient implements AutoCloseable {
     return null;
   }
 
-  private static void closeQuietly(InputStream input) {
-    try {
-      input.close();
-    } catch (IOException ignored) {
-      log.debug("OpenCLI Hub stream close failed type={}", ignored.getClass().getSimpleName());
-    }
-  }
-
   /**
    * 已取得 response 后的唯一清理：释放正文流并保留原 primary。
    *
@@ -994,112 +969,36 @@ public class OpenCliHubClient implements AutoCloseable {
     }
   }
 
-  private static final class FixedInputStreamPublisher implements Flow.Publisher<ByteBuffer> {
+  /** 上传流不可越过声明长度，提前 EOF 必须使 JDK publisher 失败。 */
+  private static final class FixedLengthInputStream extends FilterInputStream {
+    private long remaining;
 
-    private final InputStream input;
-    private final long length;
-    private final int bufferSize;
-    private final String description;
-    private final AtomicBoolean subscribed = new AtomicBoolean();
-
-    private FixedInputStreamPublisher(
-        InputStream input, long length, int bufferSize, String description) {
-      this.input = input;
-      this.length = length;
-      this.bufferSize = bufferSize;
-      this.description = description;
+    private FixedLengthInputStream(InputStream input, long length) {
+      super(input);
+      remaining = length;
     }
 
     @Override
-    public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
-      Objects.requireNonNull(subscriber, "subscriber");
-      if (!subscribed.compareAndSet(false, true)) {
-        subscriber.onSubscribe(
-            new Flow.Subscription() {
-              @Override
-              public void request(long count) {}
-
-              @Override
-              public void cancel() {}
-            });
-        subscriber.onError(new IllegalStateException(description + " body cannot be replayed"));
-        return;
-      }
-      subscriber.onSubscribe(new InputSubscription(subscriber));
+    public int read() throws IOException {
+      byte[] one = new byte[1];
+      return read(one, 0, 1) == -1 ? -1 : one[0] & 0xff;
     }
 
-    private final class InputSubscription implements Flow.Subscription {
-
-      private final Flow.Subscriber<? super ByteBuffer> subscriber;
-      private long remaining = length;
-      private long demand;
-      private boolean draining;
-      private boolean done;
-
-      private InputSubscription(Flow.Subscriber<? super ByteBuffer> subscriber) {
-        this.subscriber = subscriber;
+    @Override
+    public int read(byte[] bytes, int offset, int length) throws IOException {
+      Objects.checkFromIndexSize(offset, length, bytes.length);
+      if (length == 0) {
+        return 0;
       }
-
-      @Override
-      public synchronized void request(long count) {
-        if (done) {
-          return;
-        }
-        if (count <= 0L) {
-          fail(new IllegalArgumentException("non-positive subscription demand"));
-          return;
-        }
-        demand = demand > Long.MAX_VALUE - count ? Long.MAX_VALUE : demand + count;
-        if (draining) {
-          return;
-        }
-        draining = true;
-        try {
-          while (!done && demand > 0L) {
-            if (remaining == 0L) {
-              complete();
-              return;
-            }
-            int chunkSize = (int) Math.min(bufferSize, remaining);
-            byte[] bytes = input.readNBytes(chunkSize);
-            if (bytes.length != chunkSize) {
-              fail(new IOException(description + " ended before declared Content-Length"));
-              return;
-            }
-            remaining -= bytes.length;
-            demand--;
-            subscriber.onNext(ByteBuffer.wrap(bytes));
-            if (!done && remaining == 0L) {
-              complete();
-              return;
-            }
-          }
-        } catch (Throwable error) {
-          fail(error);
-        } finally {
-          draining = false;
-        }
+      if (remaining == 0) {
+        return -1;
       }
-
-      @Override
-      public synchronized void cancel() {
-        if (!done) {
-          done = true;
-          closeQuietly(input);
-        }
+      int count = in.read(bytes, offset, (int) Math.min(length, remaining));
+      if (count == -1) {
+        throw new IOException("multipart upload ended before declared Content-Length");
       }
-
-      private void complete() {
-        done = true;
-        closeQuietly(input);
-        subscriber.onComplete();
-      }
-
-      private void fail(Throwable error) {
-        done = true;
-        closeQuietly(input);
-        subscriber.onError(error);
-      }
+      remaining -= count;
+      return count;
     }
   }
 }

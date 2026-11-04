@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -60,7 +62,7 @@ public record MavisCredential(
         + ", clientUuid="
         + clientUuid
         + ", token="
-        + MavisRedaction.REDACTED
+        + PluginRedaction.REDACTED
         + "]";
   }
 }

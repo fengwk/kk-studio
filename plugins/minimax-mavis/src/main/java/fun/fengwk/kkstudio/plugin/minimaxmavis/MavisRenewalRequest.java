@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -104,7 +106,7 @@ public record MavisRenewalRequest(String url, Map<String, String> headers) {
 
   @Override
   public String toString() {
-    return "MavisRenewalRequest[url=" + MavisRedaction.safeUrl(url) + "]";
+    return "MavisRenewalRequest[url=" + PluginRedaction.safeUrl(url) + "]";
   }
 
   /** {@code URLSearchParams} 风格编码：空格为 {@code +}，{@code ~} 为 {@code %7E}。 */

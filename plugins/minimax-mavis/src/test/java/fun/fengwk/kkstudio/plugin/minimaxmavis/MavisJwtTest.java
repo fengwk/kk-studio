@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.time.Instant;
 
 /** JWT 数值 exp 的宽松解析与凭据本地时限规则。 */
@@ -86,7 +88,7 @@ class MavisJwtTest {
     MavisCredential credential = MavisTestTokens.credential(MavisRegion.EN, 1_800_000_000L);
 
     assertFalse(credential.toString().contains(credential.token()));
-    assertTrue(credential.toString().contains(MavisRedaction.REDACTED));
+    assertTrue(credential.toString().contains(PluginRedaction.REDACTED));
     assertThrows(
         MavisValidationException.class,
         () -> new MavisCredential(" ", MavisRegion.CN, Instant.EPOCH, MavisTestTokens.CLIENT_UUID));

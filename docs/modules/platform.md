@@ -578,7 +578,7 @@ Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每�
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。
 lease 只保证互斥，无法证明外部 exactly-once；不确定 renewal 保留停止自动重放的边界。
-调用期作废仅按本次快照 CAS，保护并发重新登录；普通 403 权限错误保持独立分类。
+插件 HTTP 调用收到 401/403 时仅按本次快照 CAS 作废，保护并发重新登录；网络失败不作废凭据。
 
 ### Plugin 资源端口
 

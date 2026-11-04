@@ -36,7 +36,7 @@ import java.util.Map;
  * 不会被自动跟随、传输失败一律映射为不含凭据的 {@link MavisTransportException}。
  */
 @ResourceLock("jvm-proxy-selector")
-class JdkMavisHttpTransportTest {
+class MavisHttpTransportTest {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
@@ -58,7 +58,7 @@ class JdkMavisHttpTransportTest {
     try {
       ProxySelector.setDefault(selector);
       MavisHttpResponse response =
-          new JdkMavisHttpTransport()
+          new MavisHttpTransport()
               .send(
                   new MavisHttpRequest(
                       "GET", "http://unresolvable.invalid/echo", Map.of(), null, TIMEOUT));
@@ -103,7 +103,7 @@ class JdkMavisHttpTransportTest {
     headers.put("Authorization", "Bearer token-value");
     headers.put("Content-Type", "application/json");
     MavisHttpResponse response =
-        new JdkMavisHttpTransport()
+        new MavisHttpTransport()
             .send(
                 new MavisHttpRequest(
                     "POST", origin + "/echo", headers, "{\"query\":\"mavis\"}", TIMEOUT));
@@ -121,12 +121,28 @@ class JdkMavisHttpTransportTest {
   @Test
   void doesNotFollowRedirects() {
     MavisHttpResponse response =
-        new JdkMavisHttpTransport()
+        new MavisHttpTransport()
             .send(new MavisHttpRequest("GET", origin + "/redirect", Map.of(), null, TIMEOUT));
 
     assertEquals(302, response.statusCode());
     assertEquals(1, recorded.size());
     assertEquals("/redirect", recorded.get(0).path());
+  }
+
+  /** 网关响应超过内部上限时中止读取，错误及原因不暴露正文。 */
+  @Test
+  void rejectsOversizedBody() {
+    server.createContext(
+        "/large",
+        exchange -> finish(exchange, 200, "x".repeat(MavisHttpTransport.MAX_RESPONSE_BYTES + 1)));
+    MavisTransportException error =
+        assertThrows(
+            MavisTransportException.class,
+            () ->
+                new MavisHttpTransport()
+                    .send(new MavisHttpRequest("GET", origin + "/large", Map.of(), null, TIMEOUT)));
+    assertEquals("ResponseTooLargeException", error.getMessage());
+    assertEquals(null, error.getCause());
   }
 
   /** 超时映射为传输错误，消息只包含 JDK 异常类型名。 */
@@ -136,7 +152,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET", origin + "/slow", Map.of(), null, Duration.ofMillis(200))));
@@ -156,7 +172,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET",
@@ -175,7 +191,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET", "http://127.0.0.1/bad path", Map.of(), null, TIMEOUT)));

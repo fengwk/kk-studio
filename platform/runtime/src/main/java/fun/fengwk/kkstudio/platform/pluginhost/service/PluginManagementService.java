@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Authenticati
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.BrowserSession;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Reachability;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 
 import java.time.Clock;
@@ -122,10 +123,48 @@ public final class PluginManagementService {
       String pluginId,
       long expectedRevision,
       String valuesJson,
-      Map<String, PluginSecretPatch> secretPatch) {
+      Map<String, PluginSecretPatchDTO> secretPatch) {
     StudioPlugin plugin = requirePlugin(pluginId);
-    configurationService.configure(pluginId, expectedRevision, valuesJson, secretPatch);
+    configurationService.configure(
+        pluginId, expectedRevision, valuesJson, toSecretPatch(secretPatch));
     return describe(plugin);
+  }
+
+  /** 校验秘密补丁并转为领域操作；错误不得包含请求字段名或秘密值。 */
+  private static Map<String, PluginSecretPatch> toSecretPatch(
+      Map<String, PluginSecretPatchDTO> secretPatch) {
+    Map<String, PluginSecretPatch> mapped = new LinkedHashMap<>();
+    if (secretPatch == null) {
+      return mapped;
+    }
+    for (Map.Entry<String, PluginSecretPatchDTO> entry : secretPatch.entrySet()) {
+      String field = entry.getKey();
+      if (field == null || field.isBlank() || !field.equals(field.strip())) {
+        throw new AiValidationException(RESOURCE, "secretPatch must use canonical field names");
+      }
+      PluginSecretPatchDTO dto = entry.getValue();
+      if (dto == null || dto.getOperation() == null) {
+        throw new AiValidationException(RESOURCE, "secretPatch must declare an operation");
+      }
+      String operation = dto.getOperation();
+      if (("KEEP".equals(operation) || "CLEAR".equals(operation)) && dto.getValue() != null) {
+        throw new AiValidationException(RESOURCE, operation + " must not carry a value");
+      }
+      try {
+        mapped.put(
+            field,
+            switch (operation) {
+              case "KEEP" -> PluginSecretPatch.keep();
+              case "SET" -> PluginSecretPatch.set(dto.getValue());
+              case "CLEAR" -> PluginSecretPatch.clear();
+              default -> throw new AiValidationException(
+                  RESOURCE, "secretPatch operation must be KEEP, SET or CLEAR");
+            });
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(RESOURCE, "secretPatch value is invalid");
+      }
+    }
+    return mapped;
   }
 
   /** 校验 region、取官方登录地址，再写入本次唯一的 pending attempt。返回值只有 attemptId 与登录地址。 */

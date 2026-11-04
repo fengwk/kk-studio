@@ -50,10 +50,6 @@ public final class OpenCliPlugin implements StudioPlugin {
           + "\"connectTimeoutMillis\":5000,"
           + "\"requestTimeoutMillis\":120000,"
           + "\"longPollTimeoutMillis\":130000,"
-          + "\"streamBufferBytes\":16384,"
-          + "\"maxJsonResponseBytes\":524288,"
-          + "\"maxErrorResponseBytes\":4096,"
-          + "\"maxOutputChars\":65535,"
           + "\"gptImage2\":{\"paidEnabled\":false,\"askTimeoutSeconds\":900,\"hubExecutionTimeoutMillis\":960000,\"maxWaitMillis\":1200000},"
           + "\"seedance\":{\"enabled\":false,\"retry\":0,\"hubExecutionTimeoutMillis\":600000,\"statusPollIntervalMillis\":30000,\"maxWaitMillis\":1800000}}";
 
@@ -88,11 +84,6 @@ public final class OpenCliPlugin implements StudioPlugin {
                 "requestTimeoutMillis", new IntegerSchema("HTTP request timeout in milliseconds")),
             Map.entry(
                 "longPollTimeoutMillis", new IntegerSchema("long polling timeout in milliseconds")),
-            Map.entry(
-                "streamBufferBytes", new IntegerSchema("streaming response buffer size in bytes")),
-            Map.entry("maxJsonResponseBytes", new IntegerSchema("maximum JSON response bytes")),
-            Map.entry("maxErrorResponseBytes", new IntegerSchema("maximum error response bytes")),
-            Map.entry("maxOutputChars", new IntegerSchema("maximum execution output characters")),
             Map.entry("gptImage2", gptImage2Schema()),
             Map.entry("seedance", seedanceSchema())),
         Set.of(
@@ -100,10 +91,6 @@ public final class OpenCliPlugin implements StudioPlugin {
             "connectTimeoutMillis",
             "requestTimeoutMillis",
             "longPollTimeoutMillis",
-            "streamBufferBytes",
-            "maxJsonResponseBytes",
-            "maxErrorResponseBytes",
-            "maxOutputChars",
             "gptImage2",
             "seedance"),
         false);
