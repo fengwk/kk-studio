@@ -7,13 +7,13 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
+import fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO;
+import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO;
-import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
 import java.util.ArrayList;
 import java.util.Comparator;

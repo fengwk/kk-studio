@@ -12,6 +12,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.project.dto.IssueDetailDTO;
+import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
@@ -19,8 +21,6 @@ import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
-import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
-import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.util.List;

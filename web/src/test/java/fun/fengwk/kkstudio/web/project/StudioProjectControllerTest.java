@@ -22,20 +22,20 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
+import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
+import fun.fengwk.kkstudio.project.dto.ProjectVersionRequestDTO;
+import fun.fengwk.kkstudio.project.dto.ProjectWorkflowDTO;
+import fun.fengwk.kkstudio.project.dto.ProjectWorkflowStateDTO;
+import fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO;
+import fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO;
+import fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
-import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
-import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
-import fun.fengwk.kkstudio.share.project.ProjectVersionRequestDTO;
-import fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO;
-import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
-import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
-import fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO;
-import fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 

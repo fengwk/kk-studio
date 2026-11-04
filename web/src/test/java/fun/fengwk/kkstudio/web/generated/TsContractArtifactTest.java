@@ -35,7 +35,7 @@ class TsContractArtifactTest {
   /** 生成产物相对仓库根的位置。 */
   static final String ARTIFACT_RELATIVE_PATH = "frontend/src/shared/api/generated/contracts.ts";
 
-  private static final String CONTRACT_PACKAGE = "fun.fengwk.kkstudio.share";
+  private static final String CONTRACT_PACKAGE = "fun.fengwk.kkstudio";
 
   /** 嵌在错误响应 {@code errors} 上下文里、无法从处理方法签名发现的结构化载荷。 */
   private static final List<Class<?>> ERROR_PAYLOAD_TYPES = List.of(CanvasConflictDTO.class);
@@ -102,7 +102,7 @@ class TsContractArtifactTest {
     scanner.addIncludeFilter(new AnnotationTypeFilter(RestController.class));
     List<Class<?>> controllers = new ArrayList<>();
     ClassLoader loader = TsContractArtifactTest.class.getClassLoader();
-    for (BeanDefinition candidate : scanner.findCandidateComponents("fun.fengwk.kkstudio.web")) {
+    for (BeanDefinition candidate : scanner.findCandidateComponents("fun.fengwk.kkstudio")) {
       Class<?> type = ClassUtils.resolveClassName(candidate.getBeanClassName(), loader);
       String location = type.getProtectionDomain().getCodeSource().getLocation().getPath();
       if (!location.contains("test-classes")) {
