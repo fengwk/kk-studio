@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
+import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.dropNonTextualValue;
+import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.nonBlank;
+import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.nonBlankText;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -809,7 +813,8 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     if (canReplay) {
       ArrayNode replayOutputArray = buildReplayOutputArray();
       // 只含空 reasoning 占位符的 replay 不承载任何原生推理，冻结它没有语义价值，交由下一轮语义编码。
-      if (!replayOutputArray.isEmpty() && !replayIsEmptyPlaceholderOnly(replayOutputArray)) {
+      if (!replayOutputArray.isEmpty()
+          && !OpenAiResponsesReplayItems.isEmptyPlaceholderOnly(replayOutputArray)) {
         ObjectNode payload = NODES.objectNode();
         payload.set("output", replayOutputArray);
         replayState =
@@ -866,8 +871,8 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
       }
       String type = item.path("type").asString("");
       switch (type) {
-        case "message" -> array.add(normalizeReplayMessageItem(item));
-        case "reasoning" -> array.add(normalizeReplayReasoningItem(item));
+        case "message" -> array.add(OpenAiResponsesReplayItems.normalizeMessage(item));
+        case "reasoning" -> array.add(OpenAiResponsesReplayItems.normalizeReasoning(item));
         case "function_call" -> array.add(normalizeReplayFunctionCallItem(item));
         default -> {
           // 未知但可信的官方 output item（web_search_call / file_search_call / image_generation_call /
@@ -929,88 +934,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
   }
 
   /**
-   * 归一化 replay 中的 message item：整体深拷贝权威 item，只把 role 与可读 content 文本修成 durable 语义的载体形态。
-   *
-   * <p>官方响应事实（{@code id}/{@code status}/{@code phase}/content 块自身的 {@code annotations}/{@code
-   * logprobs} 及未来新增成员）一律原样保留。无法通过下一轮结构校验的空白 {@code id}/{@code phase} 不承载任何事实，剔除以免毒化冻结 replay。
-   */
-  private static ObjectNode normalizeReplayMessageItem(JsonNode item) {
-    ObjectNode msg = (ObjectNode) item.deepCopy();
-    msg.put("type", "message");
-    msg.put("role", "assistant");
-    dropNonTextualValue(msg, "id");
-    dropNonTextualValue(msg, "phase");
-
-    ArrayNode contentArr = NODES.arrayNode();
-    JsonNode srcContent = item.get("content");
-    if (srcContent != null && srcContent.isArray()) {
-      for (JsonNode c : srcContent) {
-        if (!c.isObject()) {
-          continue;
-        }
-        String blockType = c.path("type").asString("");
-        if ("output_text".equals(blockType)) {
-          ObjectNode textNode = (ObjectNode) c.deepCopy();
-          textNode.put("text", c.path("text").asString(""));
-          contentArr.add(textNode);
-        } else if ("refusal".equals(blockType)) {
-          ObjectNode refusalNode = (ObjectNode) c.deepCopy();
-          refusalNode.put("refusal", c.path("refusal").asString(""));
-          contentArr.add(refusalNode);
-        }
-      }
-    } else if (srcContent != null && srcContent.isString()) {
-      ObjectNode textNode = contentArr.addObject();
-      textNode.put("type", "output_text");
-      textNode.put("text", srcContent.asString(""));
-    }
-    msg.set("content", contentArr);
-    return msg;
-  }
-
-  /**
-   * 归一化 replay 中的 reasoning item：深拷贝权威 item，仅把 summary 归一为可校验的 {@code summary_text} 数组形态。
-   *
-   * <p>{@code encrypted_content} 的合并保留（见 {@link #retainStreamedReasoningEncryptedContent}）保持原有语义；仅当
-   * 密文不是非空白字符串时才剔除，因为它不承载任何原生推理且会让下一轮校验必然失败。其余 {@code id}/{@code status} 与未来成员原样保留。
-   */
-  private static ObjectNode normalizeReplayReasoningItem(JsonNode item) {
-    ObjectNode reasoning = (ObjectNode) item.deepCopy();
-    reasoning.put("type", "reasoning");
-    dropNonTextualValue(reasoning, "id");
-    dropNonTextualValue(reasoning, "encrypted_content");
-
-    JsonNode summary = item.get("summary");
-    if (summary == null) {
-      return reasoning;
-    }
-    if (summary.isArray()) {
-      ArrayNode sumArr = NODES.arrayNode();
-      for (JsonNode s : summary) {
-        if (!s.isObject() || !"summary_text".equals(s.path("type").asString(""))) {
-          continue;
-        }
-        ObjectNode sNode = (ObjectNode) s.deepCopy();
-        sNode.put("text", s.path("text").asString(""));
-        sumArr.add(sNode);
-      }
-      reasoning.set("summary", sumArr);
-      return reasoning;
-    }
-    if (summary.isString()) {
-      ArrayNode sumArr = NODES.arrayNode();
-      ObjectNode sNode = sumArr.addObject();
-      sNode.put("type", "summary_text");
-      sNode.put("text", summary.asString(""));
-      reasoning.set("summary", sumArr);
-      return reasoning;
-    }
-    // 非数组且非文本的 summary 无法构成任何合法摘要，属于无摘要事实
-    reasoning.remove("summary");
-    return reasoning;
-  }
-
-  /**
    * 归一化 replay 中的 function_call item：深拷贝权威 item，只用流式工具状态补齐 durable 语义必需的 {@code call_id}/{@code
    * name}/{@code arguments}，其余 {@code id}/{@code status} 与未来成员原样保留。
    *
@@ -1059,25 +982,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     return fc;
   }
 
-  /** 只保留非空白字符串形态的字段值；空白、null 与非文本值都不承载协议事实，剔除它们避免冻结出必然失败的 replay。 */
-  private static void dropNonTextualValue(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value != null && nonBlankText(value) == null) {
-      node.remove(field);
-    }
-  }
-
-  private static String nonBlankText(JsonNode node) {
-    if (node == null || !node.isString()) {
-      return null;
-    }
-    return nonBlank(node.stringValue());
-  }
-
-  private static String nonBlank(String value) {
-    return value == null || value.isBlank() ? null : value;
-  }
-
   private void appendMessageContent(JsonNode content) {
     if (content == null || content.isNull()) {
       return;
@@ -1122,37 +1026,5 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
   private static boolean isOpaqueReplayItem(JsonNode item) {
     JsonNode typeNode = item.get("type");
     return typeNode != null && typeNode.isString() && !typeNode.stringValue().isBlank();
-  }
-
-  /**
-   * 判断 replay output 是否只由“无法承载 semantic thinking 的空 reasoning 占位符”构成。
-   *
-   * <p>占位符指既无 {@code encrypted_content}、也无任何非空摘要文本的 reasoning item。至少要有一个 reasoning item
-   * 才构成该形态；含密文的 opaque reasoning（必须原样保留，绝不剥离）或含非空摘要的 reasoning 都不属于此形态。
-   */
-  private static boolean replayIsEmptyPlaceholderOnly(ArrayNode replayOutputArray) {
-    boolean reasoningItemSeen = false;
-    for (JsonNode item : replayOutputArray) {
-      if (!"reasoning".equals(item.path("type").asString(""))) {
-        continue;
-      }
-      reasoningItemSeen = true;
-      // content 是独立原生事实，即使无可读文本也不是空 reasoning 占位符。
-      if (item.has("content")) {
-        return false;
-      }
-      if (!item.path("encrypted_content").asString("").isBlank()) {
-        return false;
-      }
-      JsonNode summary = item.get("summary");
-      if (summary != null) {
-        for (JsonNode s : summary) {
-          if (!s.path("text").asString("").isBlank()) {
-            return false;
-          }
-        }
-      }
-    }
-    return reasoningItemSeen;
   }
 }
