@@ -28,8 +28,9 @@ class SkillNamesTest {
   void trimsDescriptionsAndCountsUnicodeCharacters() {
     // frontmatter 的换行和首尾空白归一后写入 manifest；长度按字符而非 UTF-16 单元计算。
     assertEquals("first\nsecond", SkillNames.canonicalDescription(" \nfirst\nsecond \n"));
+    assertEquals("first\r\nsecond\tline", SkillNames.canonicalDescription("first\r\nsecond\tline"));
     assertEquals("😀".repeat(1024), SkillNames.canonicalDescription("😀".repeat(1024)));
-    for (String invalid : List.of("", " \n ", "a".repeat(1025), "a\u0000b", "a\rb")) {
+    for (String invalid : List.of("", " \n ", "a".repeat(1025), "a\u0000b")) {
       assertThrows(IllegalArgumentException.class, () -> SkillNames.canonicalDescription(invalid));
     }
     assertThrows(IllegalArgumentException.class, () -> SkillNames.canonicalDescription(null));

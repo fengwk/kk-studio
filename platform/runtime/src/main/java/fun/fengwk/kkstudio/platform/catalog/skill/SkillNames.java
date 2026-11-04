@@ -34,7 +34,7 @@ public final class SkillNames {
     return canonicalSkillName(value);
   }
 
-  /** 去掉环绕空白并校验 Skill 描述：非空、只允许 LF 换行、≤{@value #MAX_DESCRIPTION_CHARS}。 */
+  /** 去掉环绕空白并校验 Skill 描述：非空、≤{@value #MAX_DESCRIPTION_CHARS} 字符。 */
   public static String canonicalDescription(String value) {
     if (value == null) {
       throw new IllegalArgumentException("description must not be null");
@@ -45,19 +45,9 @@ public final class SkillNames {
       throw new IllegalArgumentException(
           "description must be between 1 and " + MAX_DESCRIPTION_CHARS + " characters");
     }
-    if (description
-        .codePoints()
-        .anyMatch(codePoint -> codePoint != '\n' && isLineOrControl(codePoint))) {
-      throw new IllegalArgumentException(
-          "description must not contain control characters other than line feeds");
+    if (description.indexOf('\0') >= 0) {
+      throw new IllegalArgumentException("description must not contain NUL");
     }
     return description;
-  }
-
-  private static boolean isLineOrControl(int codePoint) {
-    int type = Character.getType(codePoint);
-    return Character.isISOControl(codePoint)
-        || type == Character.LINE_SEPARATOR
-        || type == Character.PARAGRAPH_SEPARATOR;
   }
 }

@@ -614,7 +614,7 @@ public class SkillCatalogServiceTest {
       assertThrows(AiValidationException.class, () -> fixture.service.createPackage(request));
     }
     SkillPackageCreateDTO invalidDescription = create("pkg");
-    invalidDescription.setDescription("invalid\u0001description");
+    invalidDescription.setDescription("invalid\u0000description");
     assertThrows(
         AiValidationException.class, () -> fixture.service.createPackage(invalidDescription));
     for (String commit : new String[] {null, "not-a-commit"}) {
