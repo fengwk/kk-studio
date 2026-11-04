@@ -21,6 +21,7 @@ import {
   type ManagedViewCloseMode,
 } from './codeServer.js'
 import { IdeError, failureReply } from './errors.js'
+import type { ActiveStream, ClaimRecord, ViewRecord } from './serviceTypes.js'
 import {
   LONG_MAX,
   RecoveryQuotaError,
@@ -43,7 +44,7 @@ import {
  * a per-view lock. A claim reservation counts toward the fixed view quota before any process or
  * filesystem work starts, so concurrent opens cannot oversubscribe one Environment. Usage proof
  * never creates or extends a view beyond its own epoch: Runtime supplies the local monotonic time
- * at which the lease round was sent, and DETACH freezes that epoch against late proofs.
+ * at which the lease round was sent; old binding epochs cannot be renewed.
  */
 
 export const IDE_MAX_VIEWS = 64
@@ -99,46 +100,6 @@ export interface IdeServiceOptions {
   onEvent?: (event: IdeServiceEvent) => void
   recoveryQuotaBytes?: number
   maxViews?: number
-}
-
-interface ActiveStream {
-  viewId: string
-  bindingEpoch: string
-  controller: AbortController
-  closed: Promise<void>
-  resolveClosed: () => void
-  released: boolean
-}
-
-interface ViewRecord {
-  viewId: string
-  documentId: string
-  eventNodeId: string
-  connectionId: string
-  claimId: string
-  bindingEpoch: string
-  directory: string
-  workspacePath: string
-  workspaceOwned: boolean
-  state: 'OPEN' | 'CLOSING'
-  cleanupFailed: boolean
-  createdAt: number
-  lastProofAt: number | null
-  detachedAt: number | null
-  expiresAt: number
-  expiryTimer?: unknown
-  streams: Set<ActiveStream>
-  closePromise?: Promise<IdeReply>
-  forceAllowed?: boolean
-  nativeClosePending?: boolean
-  sessionGeneration: number
-}
-
-interface ClaimRecord {
-  shape: string
-  reply: IdeReply
-  viewId: string
-  bindingEpoch: string
 }
 
 const systemScheduler: IdeScheduler = {
@@ -386,7 +347,7 @@ export async function createIdeService(
     if (view.state !== 'OPEN' || view.nativeClosePending || closed) {
       return
     }
-    const base = view.detachedAt ?? view.lastProofAt ?? view.createdAt
+    const base = view.lastProofAt ?? view.createdAt
     view.expiresAt = Math.max(base + IDE_VIEW_EXPIRY_MILLIS, notBefore)
     const delay = Math.max(0, view.expiresAt - scheduler.now())
     view.expiryTimer = scheduler.setTimeout(() => {
@@ -774,7 +735,6 @@ export async function createIdeService(
         cleanupFailed: false,
         createdAt: scheduler.now(),
         lastProofAt: null,
-        detachedAt: null,
         expiresAt: 0,
         streams: new Set(),
         sessionGeneration: session.generation,
@@ -817,7 +777,6 @@ export async function createIdeService(
             cleanupFailed: true,
             createdAt: scheduler.now(),
             lastProofAt: null,
-            detachedAt: null,
             expiresAt: 0,
             streams: new Set(),
             sessionGeneration: sessionGeneration ?? 0,
@@ -854,8 +813,8 @@ export async function createIdeService(
       throw new IdeError('resume must not change the workspace directory', 'VIEW_IN_USE')
     }
     if (view.documentId !== documentId) {
-      const occupiedUntil = (view.detachedAt ?? view.lastProofAt ?? view.createdAt) + IDE_PROOF_EXCLUSIVITY_MILLIS
-      if (view.detachedAt === null && scheduler.now() < occupiedUntil) {
+      const occupiedUntil = (view.lastProofAt ?? view.createdAt) + IDE_PROOF_EXCLUSIVITY_MILLIS
+      if (scheduler.now() < occupiedUntil) {
         throw new IdeError('view is in use by another document', 'VIEW_IN_USE')
       }
     }
@@ -885,7 +844,6 @@ export async function createIdeService(
     view.cleanupFailed = false
     view.forceAllowed = false
     view.lastProofAt = null
-    view.detachedAt = null
     view.createdAt = scheduler.now()
     view.sessionGeneration = sessionGeneration
     dropClaimsForView(view.viewId)
@@ -1106,19 +1064,6 @@ export async function createIdeService(
     })
   }
 
-  const detachView = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    return withViewLock(viewId, async () => {
-      const view = requireBoundView(command, { requireOpen: true })
-      if (view.detachedAt !== null && view.bindingEpoch === command.bindingEpoch) {
-        return { ok: true, viewId: view.viewId }
-      }
-      view.detachedAt = scheduler.now()
-      scheduleExpiry(view)
-      return { ok: true, viewId: view.viewId }
-    })
-  }
-
   const listViews = (): IdeReply => {
     const values = [...views.values()].map(mergeSummary)
     return { ok: true, views: values }
@@ -1178,8 +1123,6 @@ export async function createIdeService(
           return await focusTerminal(command, signal)
         case 'CLOSE_VIEW':
           return await closeView(command, signal)
-        case 'DETACH_VIEW':
-          return await detachView(command, signal)
         case 'LIST_VIEWS':
           return listViews()
         case 'LIST_DIRECTORIES':
@@ -1203,7 +1146,6 @@ export async function createIdeService(
       if (
         view === undefined ||
         view.state !== 'OPEN' ||
-        view.detachedAt !== null ||
         view.documentId !== binding.documentId ||
         view.bindingEpoch !== binding.bindingEpoch!.toString()
       ) {

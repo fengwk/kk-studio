@@ -340,7 +340,7 @@ function open(
 }
 
 function boundCommand(
-  action: 'CHANGE_DIRECTORY' | 'FOCUS_TERMINAL' | 'CLOSE_VIEW' | 'DETACH_VIEW',
+  action: 'CHANGE_DIRECTORY' | 'FOCUS_TERMINAL' | 'CLOSE_VIEW',
   state: { viewId: string; documentId: string; bindingEpoch: string },
   extra: Partial<IdeCommand> = {},
 ): IdeCommand {
@@ -479,7 +479,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(service.getViewState(viewId)?.directory).toBe(confirmed)
   })
 
-  it.each(['FOCUS_TERMINAL', 'DETACH_VIEW', 'CLOSE_VIEW'] as const)(
+  it.each(['FOCUS_TERMINAL', 'CLOSE_VIEW'] as const)(
     'round-trips the actual %s service command acknowledgement',
     async (action) => {
       const { service, project } = await setup()
@@ -566,17 +566,19 @@ describe('managed IDE claim and tenant lifecycle', () => {
     await service.handle(open(viewId, documentA, randomUUID(), undefined, 'resume'), signal())
   })
 
-  it('detach freezes the old epoch and late proof cannot revive it', async () => {
-    const { service, scheduler, project, manager } = await setup()
+  it('rejects the retired detach action without altering the view or its lease', async () => {
+    const { service, scheduler, project } = await setup()
     const viewId = randomUUID()
     const documentId = randomUUID()
     const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
     const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-    expect((await service.handle(boundCommand('DETACH_VIEW', state), signal())).ok).toBe(true)
+    expect(await service.handle({ action: 'DETACH_VIEW', ...state }, signal())).toMatchObject({
+      ok: false, code: 'UNAVAILABLE', message: 'unknown ide action',
+    })
+    await scheduler.advance(1_000)
     service.apply({ round: '9', bindings: [state] }, scheduler.now())
-    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS)
-    await waitFor(() => service.getViewState(viewId) === null)
-    expect(manager.closes).toHaveLength(1)
+    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS - 1_000)
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
   })
 
   it('retains CLOSING and quota after cleanup failure, then permits an explicit retry', async () => {
