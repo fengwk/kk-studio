@@ -24,6 +24,16 @@ class AnthropicErrorMapperTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
+  /** 原生认证、上下文和请求大小信号按既定顺序覆盖冲突状态码。 */
+  @Test
+  void preservesClassificationPrecedence() {
+    assertMappedStatus(429, "{\"error\":{\"type\":\"auth\"}}", ProviderErrorKind.AUTHENTICATION);
+    assertMappedStatus(
+        413, "{\"error\":{\"type\":\"context_overflow\"}}", ProviderErrorKind.OVERFLOW);
+    assertMappedStatus(
+        503, "{\"error\":{\"type\":\"request_too_large\"}}", ProviderErrorKind.INVALID_REQUEST);
+  }
+
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
   @Test
   void propagatesStructuredHttpStatusMetadata() {

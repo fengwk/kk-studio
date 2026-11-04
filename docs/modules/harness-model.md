@@ -27,7 +27,7 @@
 
 ## 上游错误原样透传
 
-四个协议的 [`AnthropicErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicErrorMapper.java)、[`GeminiErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiErrorMapper.java)、[`OpenAiChatErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/chat/OpenAiChatErrorMapper.java)、[`OpenAiResponsesErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesErrorMapper.java) 共用 [`ProviderErrorHelper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderErrorHelper.java) 的格式化规则、传输异常分类骨架、SSE envelope 映射与各状态码的回退文案载体，只做错误**分类**，不做正文过滤：
+四个协议的 [`AnthropicErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicErrorMapper.java)、[`GeminiErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiErrorMapper.java)、[`OpenAiChatErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/chat/OpenAiChatErrorMapper.java)、[`OpenAiResponsesErrorMapper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesErrorMapper.java) 各自识别原生错误信号，共用 [`ProviderErrorHelper`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderErrorHelper.java) 的分类优先级、格式化规则、传输异常映射、SSE envelope 映射与回退文案，只做错误**分类**，不做正文过滤：
 
 - HTTP 错误消息是 `HTTP <status>\n<原始 UTF-8 响应正文>`，保留空白、非 JSON 正文、厂商扩展字段、请求 ID 与上游给出的全部错误详情，不做字段白名单过滤。
 - 正文受 `maxErrorBodyBytes` 限制；一旦传输层截断，消息末尾明确追加 ` [TRUNCATED]`。正文为空时才回退到 `HTTP <status>: <fallback>` 或纯 fallback 文案。

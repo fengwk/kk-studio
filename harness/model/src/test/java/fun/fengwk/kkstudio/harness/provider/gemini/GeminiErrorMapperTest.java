@@ -32,6 +32,20 @@ class GeminiErrorMapperTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
+  /** Gemini 的瞬态信号先于无效请求，600+ 只在没有更高优先级信号时拒绝。 */
+  @Test
+  void preservesClassificationPrecedence() {
+    assertEquals(
+        ProviderErrorKind.TRANSIENT,
+        GeminiErrorMapper.fromHttp(413, "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}").kind());
+    assertEquals(
+        ProviderErrorKind.TRANSIENT,
+        GeminiErrorMapper.fromHttp(600, "{\"error\":{\"status\":\"INTERNAL\"}}").kind());
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        GeminiErrorMapper.fromHttp(600, "{\"error\":{\"status\":\"INVALID_ARGUMENT\"}}").kind());
+  }
+
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
   @Test
   void propagatesStructuredHttpStatusMetadata() {

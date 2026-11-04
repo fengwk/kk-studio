@@ -73,36 +73,23 @@ final class OpenAiChatErrorMapper {
     String typeLower = rawType != null ? rawType.toLowerCase(Locale.ROOT) : "";
     String codeLower = rawCode != null ? rawCode.toLowerCase(Locale.ROOT) : "";
 
-    if (matchesAny(typeLower, codeLower, "auth", "permission") || status == 401 || status == 403) {
-      return ProviderErrorKind.AUTHENTICATION;
-    }
-    if (matchesAny(typeLower, codeLower, "billing", "insufficient_quota", "quota", "credit")
-        || status == 402) {
-      return ProviderErrorKind.BILLING;
-    }
-    if (matchesAny(typeLower, codeLower, "context_length_exceeded", "model_context_window_exceeded")
-        || matchesContextOverflow(typeLower, codeLower)) {
-      return ProviderErrorKind.OVERFLOW;
-    }
-    if (matchesAny(typeLower, codeLower, "request_too_large") || status == 413) {
-      return ProviderErrorKind.INVALID_REQUEST;
-    }
-    if (matchesAny(
+    return ProviderErrorHelper.classify(
+        status,
+        matchesAny(typeLower, codeLower, "auth", "permission"),
+        matchesAny(typeLower, codeLower, "billing", "insufficient_quota", "quota", "credit"),
+        matchesAny(typeLower, codeLower, "context_length_exceeded", "model_context_window_exceeded")
+            || matchesContextOverflow(typeLower, codeLower),
+        matchesAny(typeLower, codeLower, "request_too_large") || status == 413,
+        matchesAny(
             typeLower,
             codeLower,
             "overloaded",
             "rate_limit",
             "rate_limit_exceeded",
             "server_error",
-            "transient")
-        || status == 429
-        || (status >= 500 && status <= 599)) {
-      return ProviderErrorKind.TRANSIENT;
-    }
-    if (matchesAny(typeLower, codeLower, "invalid_request")) {
-      return ProviderErrorKind.INVALID_REQUEST;
-    }
-    return ProviderErrorHelper.classifyHttpStatus(status);
+            "transient"),
+        matchesAny(typeLower, codeLower, "invalid_request"),
+        false);
   }
 
   private static boolean matchesAny(String typeLower, String codeLower, String... patterns) {

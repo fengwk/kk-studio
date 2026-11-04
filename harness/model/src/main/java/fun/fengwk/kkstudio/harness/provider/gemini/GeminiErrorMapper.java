@@ -101,33 +101,20 @@ final class GeminiErrorMapper {
   private static ProviderErrorKind classify(int statusCode, String errorStatus) {
     String statusUpper = errorStatus != null ? errorStatus.toUpperCase(Locale.ROOT) : "";
 
-    if (statusUpper.contains("UNAUTHENTICATED")
-        || statusUpper.contains("PERMISSION_DENIED")
-        || statusCode == 401
-        || statusCode == 403) {
-      return ProviderErrorKind.AUTHENTICATION;
-    }
-    if (statusCode == 402) {
-      return ProviderErrorKind.BILLING;
-    }
-    if (statusUpper.contains("RESOURCE_EXHAUSTED")
-        || statusUpper.contains("UNAVAILABLE")
-        || statusUpper.contains("INTERNAL")
-        || statusUpper.contains("OVERLOADED")
-        || statusCode == 429
-        || (statusCode >= 500 && statusCode <= 599)) {
-      return ProviderErrorKind.TRANSIENT;
-    }
-    if (statusUpper.contains("INVALID_ARGUMENT")
-        || statusUpper.contains("NOT_FOUND")
-        || statusUpper.contains("FAILED_PRECONDITION")) {
-      return ProviderErrorKind.INVALID_REQUEST;
-    }
-    // Gemini 只把标准 5xx（500-599）视为可重试；范围外状态沿用原 fallback，避免未知状态被重试。
-    if (statusCode >= 600) {
-      return ProviderErrorKind.INVALID_RESPONSE;
-    }
-    return ProviderErrorHelper.classifyHttpStatus(statusCode);
+    return ProviderErrorHelper.classify(
+        statusCode,
+        statusUpper.contains("UNAUTHENTICATED") || statusUpper.contains("PERMISSION_DENIED"),
+        false,
+        false,
+        false,
+        statusUpper.contains("RESOURCE_EXHAUSTED")
+            || statusUpper.contains("UNAVAILABLE")
+            || statusUpper.contains("INTERNAL")
+            || statusUpper.contains("OVERLOADED"),
+        statusUpper.contains("INVALID_ARGUMENT")
+            || statusUpper.contains("NOT_FOUND")
+            || statusUpper.contains("FAILED_PRECONDITION"),
+        true);
   }
 
   private static int extractStatusCode(JsonNode errorEventNode) {

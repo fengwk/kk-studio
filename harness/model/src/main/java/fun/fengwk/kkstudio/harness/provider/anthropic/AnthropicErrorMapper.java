@@ -67,31 +67,19 @@ final class AnthropicErrorMapper {
   private static ProviderErrorKind classify(int status, String errorType) {
     String typeLower = errorType != null ? errorType.toLowerCase(Locale.ROOT) : "";
 
-    if (typeLower.contains("auth")
-        || typeLower.contains("permission")
-        || status == 401
-        || status == 403) {
-      return ProviderErrorKind.AUTHENTICATION;
-    }
-    if (typeLower.contains("billing") || typeLower.contains("credit") || status == 402) {
-      return ProviderErrorKind.BILLING;
-    }
-    if (typeLower.contains("context_length_exceeded")
-        || typeLower.contains("model_context_window_exceeded")
-        || (typeLower.contains("context") && typeLower.contains("overflow"))) {
-      return ProviderErrorKind.OVERFLOW;
-    }
-    if (typeLower.contains("request_too_large") || status == 413) {
-      return ProviderErrorKind.INVALID_REQUEST;
-    }
-    if (typeLower.contains("overloaded")
-        || typeLower.contains("rate_limit")
-        || typeLower.contains("api_error")
-        || status == 429
-        || (status >= 500 && status <= 599)) {
-      return ProviderErrorKind.TRANSIENT;
-    }
-    return ProviderErrorHelper.classifyHttpStatus(status);
+    return ProviderErrorHelper.classify(
+        status,
+        typeLower.contains("auth") || typeLower.contains("permission"),
+        typeLower.contains("billing") || typeLower.contains("credit"),
+        typeLower.contains("context_length_exceeded")
+            || typeLower.contains("model_context_window_exceeded")
+            || (typeLower.contains("context") && typeLower.contains("overflow")),
+        typeLower.contains("request_too_large") || status == 413,
+        typeLower.contains("overloaded")
+            || typeLower.contains("rate_limit")
+            || typeLower.contains("api_error"),
+        false,
+        false);
   }
 
   private static String extractErrorType(byte[] bodyBytes) {

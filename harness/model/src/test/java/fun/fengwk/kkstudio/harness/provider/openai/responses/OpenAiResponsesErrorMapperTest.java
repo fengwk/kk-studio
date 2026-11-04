@@ -24,6 +24,26 @@ class OpenAiResponsesErrorMapperTest {
 
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
+  /** Responses 的无效请求先于瞬态错误，溢出与认证先于这两者。 */
+  @Test
+  void preservesClassificationPrecedence() {
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        OpenAiResponsesErrorMapper.mapTransportException(
+                httpStatus(400, "{\"error\":{\"code\":\"rate_limit\"}}"))
+            .kind());
+    assertEquals(
+        ProviderErrorKind.OVERFLOW,
+        OpenAiResponsesErrorMapper.mapTransportException(
+                httpStatus(413, "{\"error\":{\"code\":\"tokens exceeded\"}}"))
+            .kind());
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION,
+        OpenAiResponsesErrorMapper.mapTransportException(
+                httpStatus(402, "{\"error\":{\"code\":\"api_key\"}}"))
+            .kind());
+  }
+
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
   @Test
   void propagatesStructuredHttpStatusMetadata() {

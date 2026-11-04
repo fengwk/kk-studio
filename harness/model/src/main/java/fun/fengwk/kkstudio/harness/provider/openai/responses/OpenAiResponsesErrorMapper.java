@@ -67,41 +67,25 @@ final class OpenAiResponsesErrorMapper {
   private static ProviderErrorKind classify(int status, String codeOrType) {
     String lower = codeOrType != null ? codeOrType.toLowerCase(Locale.ROOT) : "";
 
-    if (lower.contains("auth")
-        || lower.contains("permission")
-        || lower.contains("api_key")
-        || status == 401
-        || status == 403) {
-      return ProviderErrorKind.AUTHENTICATION;
-    }
-    if (lower.contains("billing")
-        || lower.contains("credit")
-        || lower.contains("quota")
-        || status == 402) {
-      return ProviderErrorKind.BILLING;
-    }
-    if (lower.contains("context_length_exceeded")
-        || lower.contains("model_context_window_exceeded")
-        || lower.contains("tokens exceeded")
-        || (lower.contains("context") && lower.contains("overflow"))) {
-      return ProviderErrorKind.OVERFLOW;
-    }
-    if (lower.contains("request_too_large")
-        || lower.contains("invalid_request")
-        || status == 400
-        || status == 413
-        || status == 422) {
-      return ProviderErrorKind.INVALID_REQUEST;
-    }
-    if (lower.contains("overloaded")
-        || lower.contains("rate_limit")
-        || lower.contains("server_error")
-        || lower.contains("tokens exceeded")
-        || status == 429
-        || (status >= 500 && status <= 599)) {
-      return ProviderErrorKind.TRANSIENT;
-    }
-    return ProviderErrorHelper.classifyHttpStatus(status);
+    return ProviderErrorHelper.classify(
+        status,
+        lower.contains("auth") || lower.contains("permission") || lower.contains("api_key"),
+        lower.contains("billing") || lower.contains("credit") || lower.contains("quota"),
+        lower.contains("context_length_exceeded")
+            || lower.contains("model_context_window_exceeded")
+            || lower.contains("tokens exceeded")
+            || (lower.contains("context") && lower.contains("overflow")),
+        lower.contains("request_too_large")
+            || lower.contains("invalid_request")
+            || status == 400
+            || status == 413
+            || status == 422,
+        lower.contains("overloaded")
+            || lower.contains("rate_limit")
+            || lower.contains("server_error")
+            || lower.contains("tokens exceeded"),
+        false,
+        false);
   }
 
   private static String extractErrorCodeOrType(byte[] bodyBytes) {

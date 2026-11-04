@@ -26,6 +26,26 @@ class OpenAiChatErrorMapperTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
+  /** Chat 的认证、账单、超限和瞬态错误维持原有冲突优先级。 */
+  @Test
+  void preservesClassificationPrecedence() {
+    assertEquals(
+        ProviderErrorKind.AUTHENTICATION,
+        OpenAiChatErrorMapper.mapTransportException(
+                httpStatus(402, "{\"error\":{\"type\":\"auth\"}}"))
+            .kind());
+    assertEquals(
+        ProviderErrorKind.BILLING,
+        OpenAiChatErrorMapper.mapTransportException(
+                httpStatus(429, "{\"error\":{\"type\":\"quota\"}}"))
+            .kind());
+    assertEquals(
+        ProviderErrorKind.TRANSIENT,
+        OpenAiChatErrorMapper.mapTransportException(
+                httpStatus(503, "{\"error\":{\"type\":\"invalid_request\"}}"))
+            .kind());
+  }
+
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
   @Test
   void propagatesStructuredHttpStatusMetadata() {

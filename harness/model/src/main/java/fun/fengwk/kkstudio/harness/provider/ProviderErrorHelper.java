@@ -115,6 +115,40 @@ public final class ProviderErrorHelper {
     return ProviderErrorKind.INVALID_RESPONSE;
   }
 
+  /** 四种协议共同的分类优先级。协议负责识别其原生错误信号，并决定无效请求是在瞬态错误之前还是之后判断。 Gemini 对非标准 600+ 状态使用不同的回退分类。 */
+  public static ProviderErrorKind classify(
+      int status,
+      boolean authentication,
+      boolean billing,
+      boolean overflow,
+      boolean invalidBeforeTransient,
+      boolean transientError,
+      boolean invalidAfterTransient,
+      boolean rejectOutOfRangeStatus) {
+    if (authentication || status == 401 || status == 403) {
+      return ProviderErrorKind.AUTHENTICATION;
+    }
+    if (billing || status == 402) {
+      return ProviderErrorKind.BILLING;
+    }
+    if (overflow) {
+      return ProviderErrorKind.OVERFLOW;
+    }
+    if (invalidBeforeTransient) {
+      return ProviderErrorKind.INVALID_REQUEST;
+    }
+    if (transientError || status == 429 || (status >= 500 && status <= 599)) {
+      return ProviderErrorKind.TRANSIENT;
+    }
+    if (invalidAfterTransient) {
+      return ProviderErrorKind.INVALID_REQUEST;
+    }
+    if (rejectOutOfRangeStatus && status >= 600) {
+      return ProviderErrorKind.INVALID_RESPONSE;
+    }
+    return classifyHttpStatus(status);
+  }
+
   /** 各协议 ErrorMapper 的回退错误文案载体。 */
   public record FallbackMessages(
       String authMessage,
