@@ -201,7 +201,7 @@ class ToolGatewayTest {
     ToolGateway gateway =
         new ToolGateway() {
           @Override
-          public PreflightResult preflight(ToolInvocationRequest request) {
+          public PreflightResult preflight(ToolInvocationRequest request, ExecutionScope scope) {
             return new ToolGateway.Allow();
           }
 
@@ -215,7 +215,11 @@ class ToolGatewayTest {
             return noopRun();
           }
         };
-    assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest()));
+    assertEquals(
+        new ToolGateway.Allow(),
+        gateway.preflight(
+            PortTestData.toolRequest(),
+            scope(UUID.fromString("00000000-0000-0000-0000-000000000005"))));
     ToolGateway.Admission result =
         gateway.admit(
             new ToolGateway.Execution(

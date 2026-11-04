@@ -497,7 +497,7 @@ public final class ToolProcessor implements AutoCloseable {
       }
       ToolGateway.PreflightResult result;
       try {
-        result = gateway.preflight(preflight.request());
+        result = gateway.preflight(preflight.request(), preflight.scope());
       } catch (RuntimeException failure) {
         // 契约：抛异常表示 preflight 确定无副作用（listener / Gateway start 尚未发生）。
         log.warn(

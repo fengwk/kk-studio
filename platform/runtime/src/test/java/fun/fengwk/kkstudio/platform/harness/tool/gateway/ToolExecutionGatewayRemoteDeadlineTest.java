@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.VfsEditReviewSourceStub;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
@@ -586,6 +587,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
         transport,
+        VfsEditReviewSourceStub.INSTANCE,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new ToolGatewayTestSupport.FixedToolSettingsProvider(
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),

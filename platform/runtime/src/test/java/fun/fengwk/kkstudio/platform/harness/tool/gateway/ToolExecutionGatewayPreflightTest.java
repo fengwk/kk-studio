@@ -17,15 +17,18 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
@@ -35,10 +38,13 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.VfsEditReviewSourceStub;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
+import fun.fengwk.kkstudio.platform.vfs.VfsEditRejectedException;
 
 import java.time.Duration;
 import java.util.List;
@@ -48,6 +54,9 @@ import java.util.Set;
 
 /** {@link ToolExecutionGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。 */
 class ToolExecutionGatewayPreflightTest {
+
+  private static final ToolGateway.ExecutionScope SCOPE =
+      ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW);
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
   private static final ToolDescriptor PREFLIGHT_DESCRIPTOR = preflightDescriptor();
@@ -120,6 +129,7 @@ class ToolExecutionGatewayPreflightTest {
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
             new ToolGatewayTestSupport.FakeTransport(),
+            VfsEditReviewSourceStub.INSTANCE,
             evaluator,
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
@@ -141,7 +151,8 @@ class ToolExecutionGatewayPreflightTest {
                         new ContributorBinding("test", "missing", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null))));
+                        null)),
+                SCOPE));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertTrue(
         unknownDeny.error().message().contains("Tool missing is no longer available"),
@@ -162,7 +173,8 @@ class ToolExecutionGatewayPreflightTest {
                         new ContributorBinding("test", "host-tool", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null))));
+                        null)),
+                SCOPE));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertTrue(
         mismatchDeny.error().message().contains("Tool demo changed after this call was planned"),
@@ -187,6 +199,7 @@ class ToolExecutionGatewayPreflightTest {
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
             new ToolGatewayTestSupport.FakeTransport(),
+            VfsEditReviewSourceStub.INSTANCE,
             evaluator,
             settingsProvider,
             stager,
@@ -196,7 +209,7 @@ class ToolExecutionGatewayPreflightTest {
             new ConcurrencyAdmission(Integer.MAX_VALUE));
 
     ToolGateway.PreflightResult result =
-        gateway.preflight(ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1"));
+        gateway.preflight(ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1"), SCOPE);
 
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("ENVIRONMENT_NOT_SELECTED", deny.error().kind());
@@ -232,7 +245,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeResourceStager(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
 
-    ToolGateway.PreflightResult result = gateway.preflight(request);
+    ToolGateway.PreflightResult result = gateway.preflight(request, SCOPE);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertEquals("Permission rules require approval", ask.reason());
     assertEquals(original, arguments);
@@ -252,7 +265,7 @@ class ToolExecutionGatewayPreflightTest {
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog(tool);
     ToolExecutionGateway gateway = ToolGatewayTestSupport.gateway(catalog, transport, store);
     ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
-    gateway.preflight(request);
+    gateway.preflight(request, SCOPE);
     assertTrue(transport.invocations.isEmpty());
     assertTrue(store.puts.isEmpty());
     assertTrue(tool.requests.isEmpty(), "preflight must never execute the tool");
@@ -289,9 +302,67 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeResourceStager(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
     ToolGateway.PreflightResult result =
-        gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR));
+        gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR), SCOPE);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertEquals("Permission rules require approval", ask.reason());
+  }
+
+  /** vfs: edit 的审批由 VFS 生成编辑预览：Ask 携带同一份审查事实。 */
+  @Test
+  void vfsEditApprovalCarriesTheVfsPreview() {
+    ToolGatewayTestSupport.FakeVfsEditReviewSource source =
+        new ToolGatewayTestSupport.FakeVfsEditReviewSource();
+    source.review =
+        new ToolEditReview(
+            new ExpectedFile("vfs:/sessions/s/a.txt", "b".repeat(64)), "--- a\n+++ b\n-old\n+new");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gatewayWith(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new PermissionEvaluator(new BashSurfaceAnalyzer()),
+            new ToolGatewayTestSupport.FixedToolSettingsProvider(
+                ToolGatewayTestSupport.settings(PermissionAction.ASK)),
+            source);
+
+    ToolGateway.PreflightResult result =
+        gateway.preflight(
+            ToolGatewayTestSupport.vfsEditRequest(
+                "call-vfs-edit",
+                "vfs:/sessions/" + ToolGatewayTestSupport.ROOT_SESSION_ID + "/a.txt"),
+            SCOPE);
+    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
+    assertSame(source.review, ask.editReview());
+    assertEquals("Permission rules require approval", ask.reason());
+  }
+
+  /** vfs: 编辑预览失败是确定性拒绝：既不弹审批，也不返回无审查的 Ask。 */
+  @Test
+  void vfsEditPreviewFailureIsDenied() {
+    ToolGatewayTestSupport.FakeVfsEditReviewSource source =
+        new ToolGatewayTestSupport.FakeVfsEditReviewSource();
+    source.prepareFailure =
+        new VfsEditRejectedException(
+            ToolErrorGuidance.message(
+                "edit old_string was not found in vfs:/sessions/s/a.txt",
+                ToolErrorGuidance.ExecutionFact.NOT_EXECUTED,
+                "Read the file and pass text that matches exactly"));
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gatewayWith(
+            ToolGatewayTestSupport.defaultCatalog(),
+            new PermissionEvaluator(new BashSurfaceAnalyzer()),
+            new ToolGatewayTestSupport.FixedToolSettingsProvider(
+                ToolGatewayTestSupport.settings(PermissionAction.ASK)),
+            source);
+
+    ToolGateway.PreflightResult result =
+        gateway.preflight(
+            ToolGatewayTestSupport.vfsEditRequest(
+                "call-vfs-edit",
+                "vfs:/sessions/" + ToolGatewayTestSupport.ROOT_SESSION_ID + "/a.txt"),
+            SCOPE);
+    ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
+    assertEquals(EditReviewPreflight.FAILED_KIND, deny.error().kind());
+    assertTrue(deny.error().message().contains("old_string was not found"));
+    assertTrue(deny.error().message().contains("The tool was not executed."));
   }
 
   /** path 规则以 filesystem root 为坐标系：命中绝对路径对应规则，不同路径分支不命中。 */
@@ -344,7 +415,7 @@ class ToolExecutionGatewayPreflightTest {
                 EnvironmentSupport.ROUTED,
                 environmentId,
                 "test-env"));
-    return gateway.preflight(request);
+    return gateway.preflight(request, SCOPE);
   }
 
   private static ToolGateway.PreflightResult preflight(PermissionAction action) {
@@ -371,7 +442,7 @@ class ToolExecutionGatewayPreflightTest {
                 EnvironmentSupport.NONE,
                 null,
                 null));
-    return gateway.preflight(request);
+    return gateway.preflight(request, SCOPE);
   }
 
   @Test
@@ -430,7 +501,7 @@ class ToolExecutionGatewayPreflightTest {
                 null,
                 null));
 
-    ToolGateway.PreflightResult result = gateway.preflight(request);
+    ToolGateway.PreflightResult result = gateway.preflight(request, SCOPE);
     assertInstanceOf(ToolGateway.Allow.class, result);
   }
 

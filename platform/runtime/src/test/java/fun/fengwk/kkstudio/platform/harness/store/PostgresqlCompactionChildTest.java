@@ -284,7 +284,8 @@ class PostgresqlCompactionChildTest {
     ToolGateway gateway =
         new ToolGateway() {
           @Override
-          public ToolGateway.PreflightResult preflight(ToolInvocationRequest request) {
+          public ToolGateway.PreflightResult preflight(
+              ToolInvocationRequest request, ExecutionScope scope) {
             throw new UnsupportedOperationException("no tools in this test");
           }
 

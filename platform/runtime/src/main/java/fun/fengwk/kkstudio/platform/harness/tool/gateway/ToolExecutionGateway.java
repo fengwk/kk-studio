@@ -56,6 +56,8 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluation
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.platform.vfs.VfsEditRejectedException;
+import fun.fengwk.kkstudio.platform.vfs.VfsEditReviewSource;
 import fun.fengwk.kkstudio.platform.vfs.VfsWriteGuard;
 
 import java.time.Clock;
@@ -140,6 +142,7 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentCapabilityTransport capabilityTransport;
+  private final VfsEditReviewSource vfsEditReviewSource;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ToolResultFinalizer finalizer;
@@ -150,6 +153,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   public ToolExecutionGateway(
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentCapabilityTransport capabilityTransport,
+      VfsEditReviewSource vfsEditReviewSource,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ToolResourceStager resourceStager,
@@ -159,6 +163,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       ConcurrencyAdmission admission) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
+    this.vfsEditReviewSource = Objects.requireNonNull(vfsEditReviewSource, "vfsEditReviewSource");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
@@ -254,7 +259,7 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
   @Override
-  public PreflightResult preflight(ToolInvocationRequest request) {
+  public PreflightResult preflight(ToolInvocationRequest request, ExecutionScope scope) {
     Objects.requireNonNull(request, "request");
     // 校验全程持有一次目录租用：工具定义、权限身份与 state access 都来自同一份快照。
     try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
@@ -285,14 +290,40 @@ public final class ToolExecutionGateway implements ToolGateway {
         case ALLOW -> new ToolGateway.Allow();
         case ASK -> {
           String reason = "Permission rules require approval";
-          yield resolved.contribution().tool() instanceof EnvironmentCapabilityTool environmentTool
-                  && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
-              ? EditReviewPreflight.prepare(capabilityTransport, request, reason)
-              : new ToolGateway.Ask(reason);
+          if (resolved.contribution().tool() instanceof EnvironmentCapabilityTool environmentTool
+              && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())) {
+            yield EditReviewPreflight.prepare(capabilityTransport, request, reason);
+          }
+          // vfs: 编辑由 VFS 读取当前会话文件生成审查；无法预览时拒绝，绝不进入盲批。
+          if (isVfsPath(request.call().argumentsJson())) {
+            yield vfsEditReview(request, scope, reason);
+          }
+          yield new ToolGateway.Ask(reason);
         }
         case DENY -> new ToolGateway.Deny(
             new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
       };
+    }
+  }
+
+  /** vfs: 编辑的审批必须携带真实会话文件审查；预览失败是确定性拒绝而非允许盲批。 */
+  private PreflightResult vfsEditReview(
+      ToolInvocationRequest request, ExecutionScope scope, String reason) {
+    try {
+      return new ToolGateway.Ask(
+          reason,
+          vfsEditReviewSource.prepare(request, scope.rootSessionId(), scope.rootThreadId()));
+    } catch (VfsEditRejectedException rejected) {
+      return new ToolGateway.Deny(
+          new ToolInvocationError(EditReviewPreflight.FAILED_KIND, rejected.getMessage()));
+    } catch (RuntimeException failure) {
+      return new ToolGateway.Deny(
+          new ToolInvocationError(
+              EditReviewPreflight.FAILED_KIND,
+              ToolErrorGuidance.message(
+                  "Edit preview failed: " + failure.getClass().getSimpleName(),
+                  ExecutionFact.NOT_EXECUTED,
+                  "Retry the edit; if it keeps failing, ask the user")));
     }
   }
 
@@ -343,11 +374,8 @@ public final class ToolExecutionGateway implements ToolGateway {
         return reject(catalogLease, lease, readOnlyRejection);
       }
 
-      // 环境编辑的审批必须携带真实文件审查；vfs: 编辑由 revision 条件更新保护并发，不要求文件审查。
-      if (isEditTool(tool)
-          && !isVfsPath(execution.request().call().argumentsJson())
-          && execution.approval().required()
-          && execution.expectedFile() == null) {
+      // 编辑的审批必须携带真实文件审查：环境编辑来自 Daemon，vfs: 编辑来自会话文件存储。
+      if (isEditTool(tool) && execution.approval().required() && execution.expectedFile() == null) {
         return reject(
             catalogLease,
             lease,
@@ -357,6 +385,33 @@ public final class ToolExecutionGateway implements ToolGateway {
                     "Required edit approval must include a valid edit review",
                     ExecutionFact.NOT_EXECUTED,
                     EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
+      }
+
+      // 审批后、执行前校验预览时的 vfs: 文件快照未变化：用户批准的是特定 diff，不是「任意编辑」。
+      if (execution.approval().required()
+          && execution.expectedFile() != null
+          && isVfsPath(execution.request().call().argumentsJson())) {
+        try {
+          vfsEditReviewSource.verifySnapshot(
+              execution.scope().rootSessionId(),
+              execution.scope().rootThreadId(),
+              execution.expectedFile());
+        } catch (VfsEditRejectedException rejected) {
+          return reject(
+              catalogLease,
+              lease,
+              new ToolInvocationError(EditReviewPreflight.FAILED_KIND, rejected.getMessage()));
+        } catch (RuntimeException failure) {
+          return reject(
+              catalogLease,
+              lease,
+              new ToolInvocationError(
+                  EditReviewPreflight.FAILED_KIND,
+                  ToolErrorGuidance.message(
+                      "Edit review verification failed: " + failure.getClass().getSimpleName(),
+                      ExecutionFact.NOT_EXECUTED,
+                      "Retry the edit; if it keeps failing, ask the user")));
+        }
       }
 
       BoundEnvironment boundEnvironment =

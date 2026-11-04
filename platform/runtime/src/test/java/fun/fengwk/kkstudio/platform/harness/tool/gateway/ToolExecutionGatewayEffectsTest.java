@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.VfsEditReviewSourceStub;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
@@ -81,7 +82,9 @@ class ToolExecutionGatewayEffectsTest {
     Fixture fixture = fixture(statefulTool(ToolOutcome.withoutEffects(result(List.of()))));
 
     ToolGateway.PreflightResult result =
-        fixture.gateway.preflight(fixture.execution("write", StateAccess.WRITE).request());
+        fixture.gateway.preflight(
+            fixture.execution("write", StateAccess.WRITE).request(),
+            ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW));
 
     assertInstanceOf(ToolGateway.Allow.class, result);
   }
@@ -265,6 +268,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
             new ToolGatewayTestSupport.FakeTransport(),
+            VfsEditReviewSourceStub.INSTANCE,
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
