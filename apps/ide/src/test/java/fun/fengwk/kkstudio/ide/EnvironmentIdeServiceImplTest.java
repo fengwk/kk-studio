@@ -294,11 +294,26 @@ class EnvironmentIdeServiceImplTest {
             .setViewId(VIEW.toString())
             .setDirectory("/daemon/next")
             .build());
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    7L,
+                    "/daemon/next",
+                    "/daemon/ws",
+                    IdeViewState.CLOSING))));
 
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
-    assertEquals("/daemon/next", bindings.find(ENV, VIEW).orElseThrow().directory());
-    assertEquals("/client/link/.", transport.commands.getLast().getDirectory());
+    assertEquals("CLOSING", changed.getState());
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertEquals("/client/link/.", transport.commands.get(1).getDirectory());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
 
     transport.replies.add(
         viewsReply(
@@ -369,7 +384,7 @@ class EnvironmentIdeServiceImplTest {
               () -> service.changeDirectory(ENV, VIEW.toString(), request));
       assertFalse(error.getMessage().contains(request.getDirectory()));
       assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-      assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
+      assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     }
     // No directory in reply fails validation.
     transport.replies.add(IdeResult.newBuilder().setOk(true).setViewId(VIEW.toString()).build());
@@ -380,7 +395,41 @@ class EnvironmentIdeServiceImplTest {
             () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertFalse(error.getMessage().contains(request.getDirectory()));
     assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-    assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+  }
+
+  /** 目录回执后若视图已换代，不得以旧 epoch 构造成功响应。 */
+  @Test
+  void changeDirectoryRejectsReplyWhenAuthoritativeBindingChanged() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/next");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(true)
+            .setViewId(VIEW.toString())
+            .setDirectory("/next")
+            .build());
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    8L,
+                    "/next",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 8L));
   }
 
   @Test
