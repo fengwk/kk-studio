@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
-import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeLifecycle;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
@@ -81,8 +80,7 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean(IdeCommandTransport.class, () -> mock(IdeCommandTransport.class));
             context.registerBean(
                 IdeBrowserUseGateway.class, () -> mock(IdeBrowserUseGateway.class));
-            context.registerBean(
-                IdeBootstrapTicketService.class, () -> new InMemoryIdeBootstrapTicketService());
+            context.registerBean(IdeBootstrapTicketService.class, IdeBootstrapTicketService::new);
             context.registerBean(Clock.class, () -> Clock.systemUTC());
             context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
             context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());

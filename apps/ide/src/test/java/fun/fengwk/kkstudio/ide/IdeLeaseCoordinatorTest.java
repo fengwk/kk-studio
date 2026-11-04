@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
@@ -33,6 +36,7 @@ import java.util.UUID;
  * 意图：heartbeat 只提供 round，续租必须经 LIST_VIEWS 后按 eventNode/connection/document 查询事件节点，并且只写入
  * view+doc+epoch 全匹配的 证明；查询失败、身份换代或无轮次都不能凭心跳本身续租。
  */
+@ExtendWith(OutputCaptureExtension.class)
 class IdeLeaseCoordinatorTest {
 
   private static final EnvironmentId ENV =
@@ -152,6 +156,20 @@ class IdeLeaseCoordinatorTest {
     assertTrue(transport.leases.isEmpty());
   }
 
+  /** 发送失败必须可观测且不能重放旧轮次。 */
+  @Test
+  void failedLeaseSendIsLoggedWithoutRetry(CapturedOutput output) {
+    views.response = views();
+    transport.failSend = true;
+
+    coordinator.onHeartbeat(ENV, IDENTITY, 48L);
+
+    assertEquals(1, transport.sendAttempts);
+    assertTrue(transport.leases.isEmpty());
+    assertTrue(output.getOut().contains("IDE lease send failed"));
+    assertTrue(output.getOut().contains("48"));
+  }
+
   @Test
   void concurrentHeartbeatIsCoalesced() {
     Deque<Runnable> pending = new ArrayDeque<>();
@@ -258,6 +276,8 @@ class IdeLeaseCoordinatorTest {
     private final List<DaemonIdeLease> leases = new ArrayList<>();
     private final List<DaemonConnectionIdentity> expectedIdentities = new ArrayList<>();
     private DaemonConnectionIdentity identity = IDENTITY;
+    private boolean failSend;
+    private int sendAttempts;
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
@@ -274,6 +294,10 @@ class IdeLeaseCoordinatorTest {
         EnvironmentId environmentId,
         DaemonConnectionIdentity expectedIdentity,
         DaemonIdeLease lease) {
+      sendAttempts++;
+      if (failSend) {
+        throw new IllegalStateException("send failed");
+      }
       expectedIdentities.add(expectedIdentity);
       leases.add(lease);
     }

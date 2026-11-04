@@ -57,7 +57,7 @@ class EnvironmentIdeServiceImplTest {
   private FakeTransport transport;
   private FakeBrowserUse browserUse;
   private FakeAuthorization authorization;
-  private InMemoryIdeBootstrapTicketService tickets;
+  private IdeBootstrapTicketService tickets;
   private IdeViewBindingRegistry bindings;
   private EnvironmentIdeServiceImpl service;
 
@@ -66,7 +66,7 @@ class EnvironmentIdeServiceImplTest {
     transport = new FakeTransport();
     browserUse = new FakeBrowserUse();
     authorization = new FakeAuthorization();
-    tickets = new InMemoryIdeBootstrapTicketService();
+    tickets = new IdeBootstrapTicketService();
     bindings = new IdeViewBindingRegistry();
     service =
         new EnvironmentIdeServiceImpl(

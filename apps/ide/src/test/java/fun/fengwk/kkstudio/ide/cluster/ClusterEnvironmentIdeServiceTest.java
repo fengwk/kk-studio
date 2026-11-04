@@ -11,12 +11,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
-import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -71,7 +71,7 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeServiceImpl local =
         new EnvironmentIdeServiceImpl(
             localTransport,
-            new InMemoryIdeBootstrapTicketService(),
+            new IdeBootstrapTicketService(),
             new AllowGateway(),
             new IdeViewBindingRegistry(),
             Duration.ofSeconds(1),

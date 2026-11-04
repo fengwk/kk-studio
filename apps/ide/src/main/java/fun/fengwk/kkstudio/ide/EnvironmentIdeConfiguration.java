@@ -25,7 +25,7 @@ public class EnvironmentIdeConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public IdeBootstrapTicketService ideBootstrapTicketService() {
-    return new InMemoryIdeBootstrapTicketService();
+    return new IdeBootstrapTicketService();
   }
 
   @Bean

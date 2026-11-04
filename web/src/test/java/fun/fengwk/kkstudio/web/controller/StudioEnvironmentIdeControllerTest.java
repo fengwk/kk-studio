@@ -32,11 +32,11 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
-import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
@@ -325,7 +325,7 @@ class StudioEnvironmentIdeControllerTest {
     EnvironmentIdeService service =
         new EnvironmentIdeServiceImpl(
             transport,
-            new InMemoryIdeBootstrapTicketService(),
+            new IdeBootstrapTicketService(),
             mock(IdeBrowserUseGateway.class),
             new IdeViewBindingRegistry(),
             Duration.ofSeconds(5),

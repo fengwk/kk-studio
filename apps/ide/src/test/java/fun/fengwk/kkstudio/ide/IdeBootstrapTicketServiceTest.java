@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 /** 意图：bootstrap 票据绑定 Daemon 实例 + view + epoch + workspace，且按实例或视图精确撤销，不误伤其它代际/视图。 */
-class InMemoryIdeBootstrapTicketServiceTest {
+class IdeBootstrapTicketServiceTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
@@ -22,7 +22,7 @@ class InMemoryIdeBootstrapTicketServiceTest {
 
   @Test
   void revokeClearsOnlyMatchingGeneration() {
-    InMemoryIdeBootstrapTicketService service = new InMemoryIdeBootstrapTicketService();
+    IdeBootstrapTicketService service = new IdeBootstrapTicketService();
     String oldTicket = service.issue(REPLACED, VIEW_1, 1L, "/ws/1");
     String newTicket = service.issue(CURRENT, VIEW_2, 2L, "/ws/2");
 
@@ -38,7 +38,7 @@ class InMemoryIdeBootstrapTicketServiceTest {
 
   @Test
   void revokeViewClearsOnlyThatViewForTheEnvironment() {
-    InMemoryIdeBootstrapTicketService service = new InMemoryIdeBootstrapTicketService();
+    IdeBootstrapTicketService service = new IdeBootstrapTicketService();
     String first = service.issue(CURRENT, VIEW_1, 1L, "/ws/1");
     String second = service.issue(CURRENT, VIEW_2, 2L, "/ws/2");
 
