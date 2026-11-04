@@ -3,6 +3,11 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
@@ -18,23 +23,18 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.processor.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.runtime.processor.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.runtime.processor.ClaimedExecutionSupport;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.Work;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -531,7 +531,7 @@ public final class ModelProcessor implements AutoCloseable {
 
   /**
    * 旧 lease 过期恢复：执行持有者已失效，但 RUNNING 已持久化，请求可能已经发出，不把它当成确定未执行。接入既有 {@link
-   * fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy} 与持久 attempt/retryAt。
+   * fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy} 与持久 attempt/retryAt。
    *
    * <p>RUNNING 的 attempt 已被消耗。允许重试时记录一条 retryable failed attempt 后回到 READY，并按策略延迟重排 MODEL Work（不
    * request THREAD wake，旧 partial 只作为尝试审计，绝不与新 attempt 的文本或 tool-call 拼接）；预算耗尽时以 FAILED 明确终止并唤醒

@@ -3,6 +3,15 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
@@ -16,18 +25,9 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
@@ -65,6 +65,9 @@ import java.util.UUID;
  * 快照上解析模型组、variant、压缩、缓存与输出预算。目录快照的确定性拒绝在本边界投影为 {@link Result.Rejected}（稳定 error code {@value
  * #REJECTION_CODE}），SQL 访问异常统一以 {@link TurnResolveTransientException} 上抛，由 ThreadProcessor 回滚事务后
  * reschedule；其它编程 / 契约异常仍向上传播并按确定性失败处理。YOLO 不进入 spec。
+ *
+ * <p>请求输入 token 估算只经内核端口 {@link RequestTokenEstimator} 注入；实现由组合根绑定到正式发送所用的同一估算算法，本类不复制算法、 不 import
+ * 内核实现类型，也不依赖 {@code HarnessRuntime} 门面，因此 Resolver 在 platform 独立测试上下文里始终可以装配。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -80,6 +83,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ProviderFactories providerFactories;
   private final CompactionConfigProvider compactionConfigProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
+  private final RequestTokenEstimator requestTokenEstimator;
   private final Clock clock;
 
   public DatabaseTurnResolver(
@@ -91,6 +95,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ProviderFactories providerFactories,
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
+      RequestTokenEstimator requestTokenEstimator,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -102,6 +107,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.contextResolver = Objects.requireNonNull(contextResolver, "contextResolver");
+    this.requestTokenEstimator =
+        Objects.requireNonNull(requestTokenEstimator, "requestTokenEstimator");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -215,7 +222,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
     String systemInstruction = context.systemInstruction();
     int contextWindow = resolved.contextWindow();
-    long estimatedInputTokens = CompactionPlanner.estimateRequestTokens(path, systemInstruction);
+    long estimatedInputTokens =
+        requestTokenEstimator.estimateRequestTokens(path, systemInstruction);
     // 组内每个成员都必须容纳这次请求：输出预算取所有成员可提供预算的最小值。
     int outputTokens =
         resolved.members().stream()

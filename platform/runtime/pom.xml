@@ -81,6 +81,7 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-common</artifactId>
         </dependency>
+        <!-- JGit：Git Skill Package 的仓库访问，以及 tool/permission 的 gitignore pattern 语义。 -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
@@ -207,6 +208,7 @@
                                         <include>fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService</include>
                                         <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
+                                        <include>fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut</include>
                                         <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseAgentTurnContextResolver</include>

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.chat;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;

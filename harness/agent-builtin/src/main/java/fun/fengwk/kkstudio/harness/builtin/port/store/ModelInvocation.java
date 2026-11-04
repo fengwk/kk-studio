@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.harness.builtin.port.store;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 
 import java.time.Instant;
 import java.util.ArrayList;

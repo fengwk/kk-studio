@@ -2,52 +2,74 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.api.RenameSessionCommand;
+import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
+import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
+import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.interaction.EnvironmentToolWait;
+import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
+import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
+import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
+import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
-import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
-import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
-import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
-import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
-import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.spi.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -73,6 +95,9 @@ import java.util.function.Consumer;
  * #renameSession}、{@link #getSession}、{@link #manualCompactionAvailability}、{@link
  * #compactThread}、{@link #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link
  * #getSessionEntries}。
+ *
+ * <p>只读规划事实与上述入口同源并从本门面暴露，调用方无需接触实现类：{@link #previewInputCandidatePath}（未落库命令 batch 的 candidate
+ * 路径）与 {@link #findCompactionTurnStart}（已关闭压缩 turn 的冻结元数据）。
  *
  * <p>Thread 控制请求值类型位于 {@code harness.api.thread}。
  */
@@ -161,14 +186,15 @@ public final class HarnessRuntime {
 
   /**
    * 在一个事务内创建（或续用）Agent Thread、接受首批输入并登记任务票据：{@link AgentSpawner} 的事务入口，加入调用方已有的外层事务。 锁序与准入由 {@link
-   * AgentSpawner} 与 {@link SpawnTickets} 承担。
+   * AgentSpawner} 与 {@link SpawnTickets} 承担；{@code preflight} 是调用方提供的同事务命令物化端口，只对全新 batch 调用。
    */
-  public AcceptedCommands spawn(SpawnRequest request) {
+  public AcceptedCommands spawn(SpawnRequest request, AcceptancePreflight preflight) {
     Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(preflight, "preflight");
     return store.transaction(
         tx -> {
           AgentSpawner.lockForSpawn(tx, request);
-          return AgentSpawner.spawn(tx, request);
+          return AgentSpawner.spawn(tx, request, preflight);
         });
   }
 
@@ -292,7 +318,7 @@ public final class HarnessRuntime {
             ThreadRuntimeStatus status =
                 ThreadSnapshot.evaluateRuntimeStatus(
                     thread.executionControl(),
-                    ThreadSnapshot.liveStateOf(context),
+                    ThreadContext.liveStateOf(context),
                     state,
                     thread.id(),
                     queued,
@@ -779,7 +805,7 @@ public final class HarnessRuntime {
       }
     }
     List<ToolInvocation> toolSiblings = toolSiblingsOf(locked.context());
-    ThreadLiveState liveState = ThreadSnapshot.liveStateOf(locked.context());
+    ThreadLiveState liveState = ThreadContext.liveStateOf(locked.context());
     int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
     boolean unconsumedAppliedNotifications =
         ThreadInputDemand.hasUnconsumedNotification(tx, thread);
@@ -838,6 +864,41 @@ public final class HarnessRuntime {
           }
           return tx.threads().listBySession(sessionId);
         });
+  }
+
+  /**
+   * 只读 Turn 计划预览：把尚未持久化的命令 batch 用与正式规划相同的纯 {@link TurnPlanPreview} 装配为 INPUT candidate 路径。
+   *
+   * <p>命中事实边界与正式规划一致：candidate Entry id 只是本次调用分配的内存 UUID，不接触 Store、不写 durable 状态、不分配 store id、不消费
+   * upload；草稿尚未落库时 {@code threadId} 可以是本次内存 UUID。
+   *
+   * @param threadId candidate 路径所属 Thread
+   * @param sourcePath 草稿起点 Entry 的 root-to-head 路径
+   * @param nextCommandSequence batch 第一条命令使用的 sequence
+   * @param commands 命令 batch，顺序即产品顺序
+   * @param now 规划时间
+   */
+  public EntryPath previewInputCandidatePath(
+      UUID threadId,
+      EntryPath sourcePath,
+      long nextCommandSequence,
+      List<NewThreadCommand> commands,
+      Instant now) {
+    return TurnPlanPreview.inputCandidatePath(
+        threadId, sourcePath, nextCommandSequence, commands, now);
+  }
+
+  /**
+   * 只读压缩事实：返回 {@code path} 上以 {@code resultEntryId} 关闭的 COMPACTION turn 在 TURN_START 冻结的压缩元数据
+   * （执行模型、预算、切分锚点与子执行身份的权威来源）。
+   *
+   * <p>结果 Entry 不在该路径上，或其 enclosing COMPACTION turn 关联已损坏时抛 {@link IllegalStateException}（fail
+   * closed）；不返回空事实，也不回退到 Thread 当前 head。
+   */
+  public CompactionStart findCompactionTurnStart(EntryPath path, UUID resultEntryId) {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(resultEntryId, "resultEntryId");
+    return CompactionTurns.ofResult(path, resultEntryId).freezing();
   }
 
   /**

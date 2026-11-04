@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 
 import java.util.List;
 import java.util.Optional;

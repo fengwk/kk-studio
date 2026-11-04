@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
 import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
 import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
