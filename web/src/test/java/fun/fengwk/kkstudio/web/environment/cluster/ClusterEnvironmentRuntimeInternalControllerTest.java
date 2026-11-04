@@ -84,7 +84,8 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     mockMvc
         .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("unauthorized"));
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+        .andExpect(jsonPath("$.errors.detail").value("internal authentication failed"));
   }
 
   @Test
@@ -97,7 +98,8 @@ class ClusterEnvironmentRuntimeInternalControllerTest {
     mockMvc
         .perform(get("/internal/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("environment_unavailable"));
+        .andExpect(jsonPath("$.code").value("environment_unavailable"))
+        .andExpect(jsonPath("$.errors.resource").value("environment"));
   }
 
   private static EnvironmentRuntimeStatusDTO runtimeStatus(String revision) {

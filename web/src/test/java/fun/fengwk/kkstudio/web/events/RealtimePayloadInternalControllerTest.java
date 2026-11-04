@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.events;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +71,7 @@ class RealtimePayloadInternalControllerTest {
         mockMvc
             .perform(get(ClusterInternalPaths.realtimePayloadPath(payloadId)))
             .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
             .andReturn()
             .getResponse()
             .getContentAsString();

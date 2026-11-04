@@ -352,15 +352,19 @@ class ControlProtocolCodecTest {
                     .setDocumentId(open.getDocumentId())
                     .setBindingEpoch(1))
             .build());
-    ControlProtocolCodec.encodeBinary(
-        command.toBuilder()
-            .setIdeCommand(
-                IdeCommand.newBuilder()
-                    .setAction(IdeAction.DETACH_VIEW)
-                    .setViewId(open.getViewId())
-                    .setDocumentId(open.getDocumentId())
-                    .setBindingEpoch(1))
-            .build());
+    // DETACH_VIEW 已无生产调用方：控制平面不再接受该动作，即使字段形状与其它 bound 动作一致。
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        IdeCommand.newBuilder()
+                            .setAction(IdeAction.DETACH_VIEW)
+                            .setViewId(open.getViewId())
+                            .setDocumentId(open.getDocumentId())
+                            .setBindingEpoch(1))
+                    .build()));
     ControlProtocolCodec.encodeBinary(
         command.toBuilder()
             .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))

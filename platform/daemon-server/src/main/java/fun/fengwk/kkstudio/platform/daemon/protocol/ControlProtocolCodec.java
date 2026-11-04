@@ -789,7 +789,7 @@ public final class ControlProtocolCodec {
         requireIdePath(command.getDirectory(), "ideCommand.directory");
         rejectOpenFields(command);
       }
-      case FOCUS_TERMINAL, DETACH_VIEW, COLLAPSE_MOBILE -> {
+      case FOCUS_TERMINAL, COLLAPSE_MOBILE -> {
         requireBoundView(command, false);
         if (command.hasDirectory()) {
           throw new ControlProtocolException("ideCommand.directory is not valid for this action");

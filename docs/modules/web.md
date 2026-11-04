@@ -171,7 +171,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 同源 IDE 网关在 Studio 同源下固定 `/environment-ide/{environmentId}/{viewId}/` 路由：
 按路径严格解析 canonical UUID 的 `environmentId` 与 `viewId`。跨节点控制命令经由
-[`ClusterEnvironmentIdeInternalController`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/cluster/ClusterEnvironmentIdeInternalController.java)
+[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalController.java)
 进行 HMAC 认证与 owner 转发。
 
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
@@ -189,6 +189,12 @@ JSON API 显式返回共享的
 下载、HTML 与字节流保留原始响应，不参与信封包装。
 信封本身属于 Platform 的共享 HTTP 模型，拥有 HTTP 边界的应用模块（例如 Canvas）与控制器的归属包无关，
 都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
+
+集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封和同一张领域错误到状态映射
+（[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）：
+认证失败固定 401 且 `code` 为 `UNAUTHORIZED`、不回显原因；领域失败保留 `code` 与 `errors.resource`/`errors.detail`；
+请求体超限为 413。内部端点没有请求 locale，`message` 与 `errors.detail` 使用固定的英文去敏文案，
+不把用户输入渲染进错误响应。
 
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：

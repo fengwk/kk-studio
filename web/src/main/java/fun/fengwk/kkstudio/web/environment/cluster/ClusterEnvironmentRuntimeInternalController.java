@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.environment.cluster;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,20 +13,18 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
-
-import java.util.Map;
 
 /**
  * 跨节点 Environment runtime/update 的内部 REST 入口。
@@ -82,35 +79,14 @@ public class ClusterEnvironmentRuntimeInternalController {
   }
 
   @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<Map<String, String>> handleAuthentication(
+  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
       ClusterInternalAuthenticationException error) {
     log.debug("rejected internal environment request: {}", error.getMessage());
-    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-        .body(Map.of("code", "unauthorized", "message", "internal authentication failed"));
+    return ClusterInternalErrors.unauthorized();
   }
 
   @ExceptionHandler(AiDomainException.class)
-  public ResponseEntity<Map<String, String>> handleDomain(AiDomainException error) {
-    HttpStatus status = status(error);
-    return ResponseEntity.status(status)
-        .body(Map.of("code", error.code().code(), "message", message(error)));
-  }
-
-  private static HttpStatus status(AiDomainException error) {
-    if (error instanceof AiValidationException) {
-      return HttpStatus.BAD_REQUEST;
-    }
-    if (error instanceof AiResourceNotFoundException) {
-      return HttpStatus.NOT_FOUND;
-    }
-    if (error instanceof AiInUseException || error instanceof AiEnvironmentUnavailableException) {
-      return HttpStatus.CONFLICT;
-    }
-    return HttpStatus.INTERNAL_SERVER_ERROR;
-  }
-
-  private static String message(AiDomainException error) {
-    String text = error.getMessage();
-    return text == null || text.isBlank() ? "internal environment request failed" : text;
+  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+    return ClusterInternalErrors.domain(error);
   }
 }
