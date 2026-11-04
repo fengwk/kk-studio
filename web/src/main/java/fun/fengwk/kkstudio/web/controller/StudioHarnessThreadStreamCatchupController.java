@@ -33,7 +33,7 @@ public class StudioHarnessThreadStreamCatchupController {
   public ApiResponse<Void> catchUp(
       @PathVariable String threadId, @RequestBody HarnessThreadStreamCatchupDTO request) {
     return ApiResponse.accepted(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               if (request == null) {
                 throw new IllegalArgumentException("stream catchup request body is required");

@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.harness.AgentTaskSubmissionService;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Optional;
@@ -66,7 +67,9 @@ class StudioAgentTaskControllerTest {
               return request.threadId();
             });
     mockMvc =
-        MockMvcBuilders.standaloneSetup(new StudioAgentTaskController(agentTasks, materializer))
+        MockMvcBuilders.standaloneSetup(
+                new StudioAgentTaskController(
+                    new AgentTaskSubmissionService(agentTasks, materializer)))
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ApiResponseStatusAdvice())

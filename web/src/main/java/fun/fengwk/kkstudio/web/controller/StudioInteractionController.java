@@ -17,11 +17,11 @@ import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
+import fun.fengwk.kkstudio.web.api.OperatorResolver;
 import fun.fengwk.kkstudio.web.api.RequestParameters;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
-import java.security.Principal;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -34,9 +34,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/interactions")
 public class StudioInteractionController {
-
-  /** 单用户部署边界下没有认证主体时使用的固定操作者，保证回执 actor 始终由服务端产生。 */
-  private static final String LOCAL_OPERATOR = "local-user";
 
   private static final int DEFAULT_LIMIT = 50;
   private static final int MAX_LIMIT = 100;
@@ -64,7 +61,7 @@ public class StudioInteractionController {
       @RequestParam(name = "cursor", required = false) String cursor,
       @RequestParam(name = "limit", required = false) String limit) {
     return ApiResponse.ok(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               UUID root =
                   rootThreadId == null ? null : Uuids.parseCanonical(rootThreadId, "rootThreadId");
@@ -85,9 +82,9 @@ public class StudioInteractionController {
       @PathVariable String interactionId,
       @RequestBody HarnessToolInputDTO request,
       HttpServletRequest httpRequest) {
-    String operator = resolveOperator(httpRequest);
+    String operator = OperatorResolver.resolve(httpRequest);
     return ApiResponse.ok(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               ToolInputSubmissionCommand command =
                   HarnessRuntimeRequestMapper.toToolInputSubmissionCommand(
@@ -95,17 +92,5 @@ public class StudioInteractionController {
               return HarnessRuntimeResponseMapper.toToolInputResultDto(
                   interactionService.submitInput(command));
             }));
-  }
-
-  /** 操作者只取自部署边界建立的认证主体；没有主体时回退到单用户边界的固定操作者，绝不信任客户端传入的身份。 */
-  private static String resolveOperator(HttpServletRequest request) {
-    Principal principal = request.getUserPrincipal();
-    if (principal != null) {
-      String name = principal.getName();
-      if (name != null && !name.isBlank()) {
-        return name.strip();
-      }
-    }
-    return LOCAL_OPERATOR;
   }
 }

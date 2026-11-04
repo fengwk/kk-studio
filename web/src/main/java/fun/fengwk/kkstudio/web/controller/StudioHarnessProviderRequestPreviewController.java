@@ -45,7 +45,7 @@ public class StudioHarnessProviderRequestPreviewController {
       @PathVariable String threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
     try {
       return ApiResponse.ok(
-          StudioHarnessThreadController.withRuntimeTranslation(
+          RuntimeErrors.translate(
               () -> {
                 UUID id = Uuids.parseCanonical(threadId, "threadId");
                 AcceptCommandsCommand command =

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -10,23 +9,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
-import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
-import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
@@ -43,17 +33,14 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
+import fun.fengwk.kkstudio.web.api.OperatorResolver;
+import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
-import java.security.Principal;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 基于根 {@link HarnessRuntime} 控制/查询平面的 Thread API。
@@ -66,31 +53,22 @@ import java.util.function.Supplier;
 @RequestMapping("/api/threads")
 public class StudioHarnessThreadController {
 
-  /** 单用户部署边界下没有认证主体时使用的固定操作者，与问卷输入使用同一服务端身份来源。 */
-  private static final String LOCAL_OPERATOR = "local-user";
-
   private final HarnessRuntime runtime;
+  private final HarnessThreadService threadService;
   private final ModelRequestDebugService modelRequestDebugService;
   private final InteractionService interactionService;
-  private final UsageCostProjectionService usageCostProjectionService;
-  private final EnvironmentWaitProjectionService environmentWaitProjectionService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
+      HarnessThreadService threadService,
       ModelRequestDebugService modelRequestDebugService,
-      InteractionService interactionService,
-      UsageCostProjectionService usageCostProjectionService,
-      EnvironmentWaitProjectionService environmentWaitProjectionService) {
+      InteractionService interactionService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
+    this.threadService = Objects.requireNonNull(threadService, "threadService");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
-    this.usageCostProjectionService =
-        Objects.requireNonNull(usageCostProjectionService, "usageCostProjectionService");
-    this.environmentWaitProjectionService =
-        Objects.requireNonNull(
-            environmentWaitProjectionService, "environmentWaitProjectionService");
   }
 
   /**
@@ -101,7 +79,7 @@ public class StudioHarnessThreadController {
   @GetMapping("/{threadId}/tree")
   public ApiResponse<List<HarnessThreadTreeNodeDTO>> getTree(@PathVariable String threadId) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () ->
                 HarnessRuntimeResponseMapper.toThreadTreeDtos(
                     runtime.getThreadTree(Uuids.parseCanonical(threadId, "threadId")))));
@@ -117,14 +95,13 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessThreadSnapshotDTO> getSnapshot(
       @PathVariable String threadId, @RequestParam(required = false) String afterEntryId) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () ->
-                snapshotResponse(
+                threadService.getSnapshot(
+                    Uuids.parseCanonical(threadId, "threadId"),
                     afterEntryId == null
-                        ? runtime.getThreadSnapshot(Uuids.parseCanonical(threadId, "threadId"))
-                        : runtime.getThreadSnapshot(
-                            Uuids.parseCanonical(threadId, "threadId"),
-                            Uuids.parseCanonical(afterEntryId, "afterEntryId")))));
+                        ? null
+                        : Uuids.parseCanonical(afterEntryId, "afterEntryId"))));
   }
 
   /**
@@ -136,7 +113,7 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessManualCompactionDTO> getCompactionAvailability(
       @PathVariable String threadId) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () ->
                 HarnessRuntimeResponseMapper.toManualCompactionDto(
                     runtime.manualCompactionAvailability(
@@ -155,23 +132,14 @@ public class StudioHarnessThreadController {
       @PathVariable String executionId,
       @RequestBody HarnessExecutionAbandonDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               HarnessRuntimeRequestMapper.AbandonExecutionTarget target =
                   HarnessRuntimeRequestMapper.toAbandonExecutionTarget(
                       threadId, executionId, request);
-              return snapshotResponse(
-                  runtime.abandonExecution(
-                      target.threadId(), target.executionId(), target.expectedVersion()));
+              return threadService.abandonExecution(
+                  target.threadId(), target.executionId(), target.expectedVersion());
             }));
-  }
-
-  private HarnessThreadSnapshotDTO snapshotResponse(ThreadSnapshot snapshot) {
-    Map<UUID, HarnessUsageCostDTO> usageCosts =
-        usageCostProjectionService.project(snapshot.entrySlice().entries());
-    HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
-    environmentWaitProjectionService.project(dto);
-    return dto;
   }
 
   /**
@@ -185,7 +153,7 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessModelRequestDebugDTO> previewModelRequest(
       @PathVariable String threadId, @RequestBody HarnessModelRequestDebugRequestDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
                   HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
@@ -205,14 +173,11 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessThreadDTO> rename(
       @PathVariable String threadId, @RequestBody HarnessNameUpdateDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               RenameThreadCommand command =
                   HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request);
-              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
-              ThreadState updated = runtime.renameThread(command);
-              return HarnessRuntimeResponseMapper.toThreadDto(
-                  runtime.getThreadSnapshot(updated.id()));
+              return threadService.rename(command);
             }));
   }
 
@@ -225,14 +190,11 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
     return ApiResponse.accepted(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               CompactThreadCommand command =
                   HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request);
-              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
-              CompactThreadResult result = runtime.compactThread(command);
-              return HarnessRuntimeResponseMapper.toCompactResultDto(
-                  result, runtime.getThreadSnapshot(result.thread().id()));
+              return threadService.compact(command);
             }));
   }
 
@@ -247,14 +209,11 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessThreadDTO> updateYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloUpdateDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               SetThreadYoloCommand command =
                   HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request);
-              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
-              ThreadState updated = runtime.setThreadYolo(command);
-              return HarnessRuntimeResponseMapper.toThreadDto(
-                  runtime.getThreadSnapshot(updated.id()));
+              return threadService.updateYolo(command);
             }));
   }
 
@@ -263,13 +222,10 @@ public class StudioHarnessThreadController {
   public ApiResponse<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId, request);
-              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
-              StopResult result = runtime.stop(command);
-              return HarnessRuntimeResponseMapper.toStopResultDto(
-                  result, runtime.getThreadSnapshot(result.thread().id()));
+              return threadService.stop(command);
             }));
   }
 
@@ -284,38 +240,13 @@ public class StudioHarnessThreadController {
       @PathVariable String toolInvocationId,
       @RequestBody HarnessToolApprovalDTO request,
       HttpServletRequest httpRequest) {
-    String operator = resolveOperator(httpRequest);
+    String operator = OperatorResolver.resolve(httpRequest);
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () ->
                 HarnessRuntimeResponseMapper.toToolInvocationDto(
                     interactionService.decideApproval(
                         HarnessRuntimeRequestMapper.toToolApprovalCommand(
                             threadId, toolInvocationId, request, operator)))));
-  }
-
-  /** 操作者只取自部署边界建立的认证主体；没有主体时回退到单用户边界的固定操作者，绝不信任客户端传入的身份。 */
-  private static String resolveOperator(HttpServletRequest request) {
-    Principal principal = request.getUserPrincipal();
-    if (principal != null) {
-      String name = principal.getName();
-      if (name != null && !name.isBlank()) {
-        return name.strip();
-      }
-    }
-    return LOCAL_OPERATOR;
-  }
-
-  /** 将 Harness Runtime 异常翻译为统一 HTTP 错误响应。 */
-  static <T> T withRuntimeTranslation(Supplier<T> operation) {
-    try {
-      return operation.get();
-    } catch (HarnessRuntimeNotFoundException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (HarnessRuntimeConflictException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
-    } catch (IllegalArgumentException error) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
-    }
   }
 }

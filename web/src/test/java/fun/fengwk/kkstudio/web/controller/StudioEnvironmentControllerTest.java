@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.environment.EnvironmentRuntimeRoutingService;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -71,7 +72,9 @@ class StudioEnvironmentControllerTest {
 
     StudioEnvironmentController controller =
         new StudioEnvironmentController(
-            environmentService, environmentUpdateService, clusterNodeRegistry, runtimeOwnerClient);
+            environmentService,
+            new EnvironmentRuntimeRoutingService(
+                environmentUpdateService, clusterNodeRegistry, runtimeOwnerClient));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(

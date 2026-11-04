@@ -7,16 +7,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.Objects;
 
@@ -31,13 +26,10 @@ import java.util.Objects;
 @RequestMapping("/api/threads")
 public class StudioHarnessThreadCommandBatchController {
 
-  private final HarnessCommandAcceptanceOrchestrator acceptanceService;
-  private final HarnessRuntime runtime;
+  private final HarnessCommandBatchService commandBatchService;
 
-  public StudioHarnessThreadCommandBatchController(
-      HarnessCommandAcceptanceOrchestrator acceptanceService, HarnessRuntime runtime) {
-    this.acceptanceService = Objects.requireNonNull(acceptanceService, "acceptanceService");
-    this.runtime = Objects.requireNonNull(runtime, "runtime");
+  public StudioHarnessThreadCommandBatchController(HarnessCommandBatchService commandBatchService) {
+    this.commandBatchService = Objects.requireNonNull(commandBatchService, "commandBatchService");
   }
 
   /** 接受一个既有 Thread 的用户命令批；202 仅表示 durable acceptance 已提交。 */
@@ -45,16 +37,11 @@ public class StudioHarnessThreadCommandBatchController {
   public ApiResponse<HarnessAcceptedCommandsDTO> accept(
       @PathVariable String threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
     return ApiResponse.accepted(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(threadId, request);
-              if (command.target() instanceof AcceptCommandsTarget.Thread thread) {
-                ManualThreadControlGuard.requireExecutionRoot(runtime, thread.threadId());
-              }
-              AcceptedCommands accepted = acceptanceService.acceptOnThread(command);
-              ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
-              return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
+              return commandBatchService.acceptOnThread(command);
             }));
   }
 }

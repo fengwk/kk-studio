@@ -56,7 +56,7 @@ public class StudioHarnessSessionProviderRequestPreviewController {
       @PathVariable String sessionId, @RequestBody HarnessDraftPreviewRequestDTO request) {
     try {
       return ApiResponse.ok(
-          StudioHarnessSessionController.withRuntimeTranslation(
+          RuntimeErrors.translate(
               () -> {
                 UUID id = Uuids.parseCanonical(sessionId, "sessionId");
                 UUID startEntryId = Uuids.parseCanonical(request.getStartEntryId(), "startEntryId");
@@ -76,7 +76,7 @@ public class StudioHarnessSessionProviderRequestPreviewController {
       @PathVariable String sessionId, @PathVariable String entryId) {
     try {
       return ApiResponse.ok(
-          StudioHarnessSessionController.withRuntimeTranslation(
+          RuntimeErrors.translate(
               () -> {
                 UUID id = Uuids.parseCanonical(sessionId, "sessionId");
                 UUID entry = Uuids.parseCanonical(entryId, "entryId");

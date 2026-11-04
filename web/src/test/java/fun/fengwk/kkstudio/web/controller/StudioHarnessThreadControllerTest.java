@@ -71,6 +71,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
@@ -114,10 +115,12 @@ class StudioHarnessThreadControllerTest {
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
             runtime,
+            new HarnessThreadService(
+                runtime,
+                usageCostProjectionService,
+                new EnvironmentWaitProjectionService(runtime, environmentService)),
             modelRequestDebugService,
-            interactionService,
-            usageCostProjectionService,
-            new EnvironmentWaitProjectionService(runtime, environmentService));
+            interactionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(

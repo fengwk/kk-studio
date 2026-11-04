@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -31,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /** Runtime Session 的 Thread 摘要 / Entry tree 查询与 Session 名称重命名。 */
 @RestController
@@ -57,7 +52,7 @@ public class StudioHarnessSessionController {
   public ApiResponse<HarnessSessionDTO> rename(
       @PathVariable String sessionId, @RequestBody HarnessNameUpdateDTO request) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               Session renamed =
                   runtime.renameSession(
@@ -70,7 +65,7 @@ public class StudioHarnessSessionController {
   @GetMapping("/{sessionId}/threads")
   public ApiResponse<List<HarnessThreadSummaryDTO>> listThreads(@PathVariable String sessionId) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               UUID id = Uuids.parseCanonical(sessionId, "sessionId");
               return harnessQueryService.listThreadSummaries(id);
@@ -81,7 +76,7 @@ public class StudioHarnessSessionController {
   @GetMapping("/{sessionId}/entries")
   public ApiResponse<List<HarnessSessionEntryDTO>> listEntries(@PathVariable String sessionId) {
     return ApiResponse.ok(
-        withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               UUID id = Uuids.parseCanonical(sessionId, "sessionId");
               List<Entry> entries = harnessQueryService.listSessionEntries(id);
@@ -94,18 +89,5 @@ public class StudioHarnessSessionController {
               }
               return List.copyOf(mapped);
             }));
-  }
-
-  /** 将 Runtime 查询异常翻译为统一 HTTP 错误响应；同包 controller 复用同一套 404/409/400 语义。 */
-  static <T> T withRuntimeTranslation(Supplier<T> operation) {
-    try {
-      return operation.get();
-    } catch (HarnessRuntimeNotFoundException error) {
-      throw new ResponseStatusException(HttpStatus.NOT_FOUND, error.getMessage(), error);
-    } catch (HarnessRuntimeConflictException error) {
-      throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
-    } catch (IllegalArgumentException error) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, error.getMessage(), error);
-    }
   }
 }

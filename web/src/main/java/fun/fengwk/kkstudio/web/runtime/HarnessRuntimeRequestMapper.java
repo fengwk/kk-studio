@@ -72,16 +72,8 @@ public final class HarnessRuntimeRequestMapper {
   /** 将唯一产品 HTTP 写请求映射为 sealed target 与有序 commands。 */
   public static AcceptCommandsCommand toAcceptCommandsCommand(HarnessCommandBatchDTO dto) {
     requireNonNull(dto, "commandBatchDTO");
-    List<HarnessCommandCreateDTO> requestCommands = requireList(dto.getCommands(), "commands");
-    if (requestCommands.isEmpty()) {
-      throw new IllegalArgumentException("commands must not be empty");
-    }
-    List<NewThreadCommand> commands = new ArrayList<>(requestCommands.size());
-    for (HarnessCommandCreateDTO command : requestCommands) {
-      commands.add(toNewHttpCommand(command));
-    }
     // 创建型 target 必须携带恰一条末尾 user-like 输入；纯设置批次只对既有 Thread 开放。
-    validateHttpCommandShape(commands, true);
+    List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands", true);
     return new AcceptCommandsCommand(toTarget(dto.getTarget()), commands);
   }
 
@@ -266,16 +258,8 @@ public final class HarnessRuntimeRequestMapper {
   private static AcceptCommandsCommand toThreadCommandsCommand(
       String threadId, HarnessThreadCommandBatchDTO dto, boolean requireCursor) {
     requireNonNull(dto, "threadCommandBatchDTO");
-    List<HarnessCommandCreateDTO> requestCommands = requireList(dto.getCommands(), "commands");
-    if (requestCommands.isEmpty()) {
-      throw new IllegalArgumentException("commands must not be empty");
-    }
-    List<NewThreadCommand> commands = new ArrayList<>(requestCommands.size());
-    for (HarnessCommandCreateDTO command : requestCommands) {
-      commands.add(toNewHttpCommand(command));
-    }
     // 既有 Thread 允许纯设置批次（0 条 user-like）；最多一条且必须位于末尾，由 Core 在应用边界保证。
-    validateHttpCommandShape(commands, false);
+    List<NewThreadCommand> commands = toHttpCommands(dto.getCommands(), "commands", false);
     boolean cursorRequired =
         requireCursor || !AcceptCommandsCommand.isPureUserMessageBatch(commands);
     String headEntryId = dto.getExpectedHeadEntryId();
@@ -305,16 +289,7 @@ public final class HarnessRuntimeRequestMapper {
    */
   public static List<NewThreadCommand> toNewThreadCommands(
       List<HarnessCommandCreateDTO> commands, String field) {
-    List<HarnessCommandCreateDTO> requestCommands = requireList(commands, field);
-    if (requestCommands.isEmpty()) {
-      throw new IllegalArgumentException("commands must not be empty");
-    }
-    List<NewThreadCommand> mapped = new ArrayList<>(requestCommands.size());
-    for (HarnessCommandCreateDTO command : requestCommands) {
-      mapped.add(toNewHttpCommand(command));
-    }
-    validateHttpCommandShape(mapped, true);
-    return List.copyOf(mapped);
+    return toHttpCommands(commands, field, true);
   }
 
   /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
@@ -427,6 +402,25 @@ public final class HarnessRuntimeRequestMapper {
           "NOTIFICATION is internal-only and not allowed on the product HTTP surface");
       default -> throw new IllegalArgumentException("unknown command type: " + type);
     };
+  }
+
+  /**
+   * 产品 HTTP 命令批的唯一映射入口：null/空列表与逐项类型校验一致，随后按创建型或有 Thread 的 shape 规则准入。
+   *
+   * <p>返回不可变副本，调用方不再重复遍历或包装。
+   */
+  private static List<NewThreadCommand> toHttpCommands(
+      List<HarnessCommandCreateDTO> requestCommands, String field, boolean requireUserLike) {
+    List<HarnessCommandCreateDTO> required = requireList(requestCommands, field);
+    if (required.isEmpty()) {
+      throw new IllegalArgumentException("commands must not be empty");
+    }
+    List<NewThreadCommand> commands = new ArrayList<>(required.size());
+    for (HarnessCommandCreateDTO command : required) {
+      commands.add(toNewHttpCommand(command));
+    }
+    validateHttpCommandShape(commands, requireUserLike);
+    return List.copyOf(commands);
   }
 
   /**

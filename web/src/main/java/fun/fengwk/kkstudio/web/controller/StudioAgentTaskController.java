@@ -8,25 +8,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.api.SpawnRequest;
-import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
-import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
-import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
-import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
-import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO;
+import fun.fengwk.kkstudio.web.harness.AgentTaskSubmissionService;
 
-import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -39,14 +25,10 @@ import java.util.UUID;
 @RequestMapping("/api/agent-tasks")
 public class StudioAgentTaskController {
 
-  private final AgentTaskService agentTasks;
-  private final AgentBranchSettingsMaterializer settingsMaterializer;
+  private final AgentTaskSubmissionService agentTaskService;
 
-  public StudioAgentTaskController(
-      AgentTaskService agentTasks, AgentBranchSettingsMaterializer settingsMaterializer) {
-    this.agentTasks = Objects.requireNonNull(agentTasks, "agentTasks");
-    this.settingsMaterializer =
-        Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
+  public StudioAgentTaskController(AgentTaskSubmissionService agentTaskService) {
+    this.agentTaskService = Objects.requireNonNull(agentTaskService, "agentTaskService");
   }
 
   /**
@@ -56,7 +38,7 @@ public class StudioAgentTaskController {
   @PostMapping
   public ApiResponse<AgentTaskDTO> submit(@RequestBody AgentTaskSubmitDTO request) {
     return ApiResponse.accepted(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               UUID ticketId = Uuids.parseCanonical(request.getTicketId(), "ticketId");
               String agent = requireText(request.getAgent(), "agent");
@@ -65,32 +47,7 @@ public class StudioAgentTaskController {
               if (maxTurns != null && maxTurns <= 0) {
                 throw new IllegalArgumentException("maxTurns must be positive");
               }
-              String requestHash = AgentTaskRequest.requestHash(ticketId, agent, prompt, maxTurns);
-              agentTasks.submitExternal(
-                  ticketId,
-                  requestHash,
-                  () -> {
-                    BranchSettings settings = settingsMaterializer.materialize(agent);
-                    NewThreadCommand command =
-                        new NewThreadCommand(
-                            new CustomMessageCommandPayload(AgentMessage.user(prompt)),
-                            derivedId(ticketId, "command"));
-                    return new AgentTaskRequest(
-                        ticketId,
-                        derivedId(ticketId, "thread"),
-                        derivedId(ticketId, "session"),
-                        settings,
-                        List.of(command),
-                        AcceptancePreflight.IDENTITY,
-                        SpawnTrigger.CONTROLLER,
-                        null,
-                        null,
-                        null,
-                        false,
-                        new SpawnRequest.Budget(maxTurns, 1, 1, Integer.MAX_VALUE),
-                        requestHash);
-                  });
-              return status(ticketId);
+              return agentTaskService.submit(ticketId, agent, prompt, maxTurns);
             }));
   }
 
@@ -98,48 +55,16 @@ public class StudioAgentTaskController {
   @GetMapping("/{ticketId}")
   public ApiResponse<AgentTaskDTO> get(@PathVariable String ticketId) {
     return ApiResponse.ok(
-        StudioHarnessThreadController.withRuntimeTranslation(
-            () -> status(Uuids.parseCanonical(ticketId, "ticketId"))));
+        RuntimeErrors.translate(
+            () -> agentTaskService.get(Uuids.parseCanonical(ticketId, "ticketId"))));
   }
 
   /** 停止任务（含其子树）并返回停止后的状态；已结束的任务按原样返回。 */
   @PostMapping("/{ticketId}/stop")
   public ApiResponse<AgentTaskDTO> stop(@PathVariable String ticketId) {
     return ApiResponse.ok(
-        StudioHarnessThreadController.withRuntimeTranslation(
-            () -> {
-              UUID id = Uuids.parseCanonical(ticketId, "ticketId");
-              agentTasks.stop(id);
-              return status(id);
-            }));
-  }
-
-  private AgentTaskDTO status(UUID ticketId) {
-    AgentTaskStatus status =
-        agentTasks
-            .observe(ticketId)
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "agent task " + ticketId + " does not exist"));
-    AgentTaskDTO dto = new AgentTaskDTO();
-    dto.setTicketId(status.ticketId().toString());
-    dto.setThreadId(status.threadId().toString());
-    dto.setAgent(status.agent());
-    dto.setState(status.state().name());
-    ThreadJoinReceipt receipt = status.receipt();
-    if (receipt != null) {
-      dto.setReport(receipt.report());
-      dto.setPartialResult(receipt.partialResult());
-      dto.setError(receipt.error());
-    }
-    return dto;
-  }
-
-  /** 由票据确定性派生的 id：同一票据的重放得到同一组 Thread / Session / 命令 id。 */
-  private static UUID derivedId(UUID ticketId, String role) {
-    return UUID.nameUUIDFromBytes(
-        ("agent-task:" + role + ":" + ticketId).getBytes(StandardCharsets.UTF_8));
+        RuntimeErrors.translate(
+            () -> agentTaskService.stop(Uuids.parseCanonical(ticketId, "ticketId"))));
   }
 
   private static String requireText(String value, String field) {
