@@ -101,7 +101,7 @@ export function ResourceDeleteDialog() {
   }
   return (
     <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingConfirmDialog')}</div>}>
-      <ConfirmActionModal {...controller.resourceDeleteConfirmModal} />
+      <ConfirmActionModal {...controller.resourceDeleteConfirmModal} className="modal-touch-target" />
     </Suspense>
   )
 }

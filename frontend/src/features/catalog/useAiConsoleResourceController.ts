@@ -1,45 +1,120 @@
 import { useEffect, useState, type FormEventHandler } from 'react'
+import {
+  createAgentEditorPlan,
+  createModelEditorPlan,
+  createProviderEditorPlan,
+  editAgentEditorPlan,
+  editModelEditorPlan,
+  editProviderEditorPlan,
+} from '@/features/catalog/ai-resource-editor-open-plans'
+import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
+import type {
+  AgentDraft,
+  ModelDraft,
+  ModelGroupDraft,
+  ProviderDraft,
+  ResourceModal,
+} from '@/features/catalog/ai-console-types'
+import {
+  normalizeAgentDraftDefaultVariant,
+  normalizeCreateAgentDraftSelection,
+  normalizeCreateModelDraftProvider,
+  normalizeEditModelDraftProvider,
+  normalizeModelDraftDefaultVariant,
+} from '@/features/catalog/ai-draft-normalizers'
 import { buildResourceSubmitPlan } from '@/features/catalog/ai-resource-editor-submit-plans'
-import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
-import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import {
   validateResourceDraft,
   type ResourceFieldKey,
 } from '@/features/catalog/ai-resource-form-validation'
-import { useAiConsoleResourceEditorState } from '@/features/catalog/useAiConsoleResourceEditorState'
 import { useAiConsoleResourceMutations } from '@/features/catalog/useAiConsoleResourceMutations'
 import {
   useAiConsoleResourceQueries,
   type AiConsoleResourceQueryEnabled,
 } from '@/features/catalog/useAiConsoleResourceQueries'
+import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
+import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { useI18n } from '@/shared/i18n'
 
+/**
+ * Catalog 资源编辑器控制器：资源查询、编辑器草稿与打开计划、保存校验、
+ * 删除确认和 Dialog props 都收敛在这里；页面控制器只负责搜索与面板装配。
+ */
 export function useAiConsoleResourceController(
   enabled: AiConsoleResourceQueryEnabled,
 ) {
   const { t, locale } = useI18n()
+  const { queries, resources } = useAiConsoleResourceQueries(enabled)
+  const { providers, models, agents, toolCatalog, skills } = resources
+  const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
+  const [providerDraft, setProviderDraft] = useState<ProviderDraft>(
+    () => createProviderEditorPlan().providerDraft,
+  )
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(
+    () => createModelEditorPlan([]).modelDraft,
+  )
+  const [modelGroupDraft, setModelGroupDraft] = useState<ModelGroupDraft>(
+    () => createModelEditorPlan([]).modelGroupDraft,
+  )
+  const [agentDraft, setAgentDraft] = useState<AgentDraft>(
+    () => createAgentEditorPlan([]).agentDraft,
+  )
   const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
   const [formError, setFormError] = useState<string>('')
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<ResourceFieldKey, string>>>({})
-  const {
-    providersQuery,
-    modelsQuery,
-    agentsQuery,
-    toolsQuery,
-    skillsQuery,
-    environmentsQuery,
-    providers,
-    models,
-    agents,
-    toolCatalog,
-    skills,
-    environments,
-  } = useAiConsoleResourceQueries(enabled)
-  const editorState = useAiConsoleResourceEditorState({ providers, models, agents })
 
-  const closeDeleteConfirm = () => setDeleteConfirm(null)
+  useEffect(() => {
+    if (!resourceModal) {
+      return
+    }
+
+    if (resourceModal.kind === 'model') {
+      setModelDraft((currentDraft) => {
+        const normalizedProvider =
+          resourceModal.mode === 'edit'
+            ? normalizeEditModelDraftProvider(currentDraft, currentDraft.providerName)
+            : normalizeCreateModelDraftProvider(currentDraft, providers)
+        return normalizeModelDraftDefaultVariant(normalizedProvider)
+      })
+      return
+    }
+
+    if (resourceModal.kind === 'agent') {
+      setAgentDraft((currentDraft) =>
+        resourceModal.mode === 'edit'
+          ? normalizeAgentDraftDefaultVariant(currentDraft, models)
+          : normalizeCreateAgentDraftSelection(currentDraft, models),
+      )
+    }
+  }, [models, providers, resourceModal])
+
+  function closeResourceModal() {
+    setResourceModal(null)
+  }
+
+  function applyResourceEditorPlan(plan: ResourceEditorPlan | null) {
+    if (!plan) {
+      return
+    }
+    setResourceModal(plan.modal)
+    if (plan.kind === 'provider') {
+      setProviderDraft(plan.providerDraft)
+      return
+    }
+    if (plan.kind === 'model') {
+      setModelDraft(plan.modelDraft)
+      setModelGroupDraft(plan.modelGroupDraft)
+      return
+    }
+    setAgentDraft(plan.agentDraft)
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirm(null)
+  }
+
   const mutations = useAiConsoleResourceMutations({
-    onResourceSaved: editorState.closeResourceModal,
+    onResourceSaved: closeResourceModal,
     onDeleteCompleted: closeDeleteConfirm,
   })
 
@@ -77,11 +152,11 @@ export function useAiConsoleResourceController(
   useEffect(() => {
     setFormError('')
     setFieldErrors({})
-  }, [editorState.resourceModal])
+  }, [resourceModal])
 
   // API 错误：转成用户可读文案，只显示在模态内
   useEffect(() => {
-    if (!editorState.resourceModal || !mutations.resourceMutationError) {
+    if (!resourceModal || !mutations.resourceMutationError) {
       return
     }
     const message = toUserFacingErrorMessage(mutations.resourceMutationError)
@@ -89,21 +164,21 @@ export function useAiConsoleResourceController(
     setFieldErrors((current) =>
       Object.keys(current).length > 0 ? current : { general: message },
     )
-  }, [editorState.resourceModal, mutations.resourceMutationError, locale])
+  }, [resourceModal, mutations.resourceMutationError, locale])
 
   const submitResource: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
-    if (!editorState.resourceModal) {
+    if (!resourceModal) {
       return
     }
 
     const drafts = {
-      providerDraft: editorState.providerDraft,
-      modelDraft: editorState.modelDraft,
-      modelGroupDraft: editorState.modelGroupDraft,
-      agentDraft: editorState.agentDraft,
+      providerDraft,
+      modelDraft,
+      modelGroupDraft,
+      agentDraft,
     }
-    const validation = validateResourceDraft(editorState.resourceModal, drafts)
+    const validation = validateResourceDraft(resourceModal, drafts)
     if (!validation.ok) {
       setFormError(validation.message)
       setFieldErrors(validation.fields)
@@ -123,7 +198,7 @@ export function useAiConsoleResourceController(
     setFormError('')
     setFieldErrors({})
 
-    const plan = buildResourceSubmitPlan(editorState.resourceModal, drafts)
+    const plan = buildResourceSubmitPlan(resourceModal, drafts)
 
     if (plan.kind === 'provider') {
       if (plan.mode === 'edit') {
@@ -151,59 +226,57 @@ export function useAiConsoleResourceController(
   }
 
   return {
-    providersQuery,
-    modelsQuery,
-    agentsQuery,
-    toolsQuery,
-    skillsQuery,
-    environmentsQuery,
-    providers,
-    models,
-    agents,
-    toolCatalog,
-    skills,
-    environments,
+    queries,
+    resources,
     resourceMutationError: mutations.resourceMutationError,
-    providerDeletePending: mutations.providerDeletePending,
-    modelDeletePending: mutations.modelDeletePending,
-    agentDeletePending: mutations.agentDeletePending,
+    deletePending: {
+      provider: mutations.providerDeletePending,
+      model: mutations.modelDeletePending,
+      agent: mutations.agentDeletePending,
+    },
     resourceEditorModal: {
-      modal: editorState.resourceModal,
+      modal: resourceModal,
       providers,
       models,
       agents,
       toolCatalog,
       skills,
-      skillsLoading: skillsQuery.isLoading,
-      skillsError: skillsQuery.error,
-      providerDraft: editorState.providerDraft,
-      modelDraft: editorState.modelDraft,
-      modelGroupDraft: editorState.modelGroupDraft,
-      agentDraft: editorState.agentDraft,
+      skillsLoading: queries.skills.isLoading,
+      skillsError: queries.skills.error,
+      providerDraft,
+      modelDraft,
+      modelGroupDraft,
+      agentDraft,
       pending: mutations.resourceEditorPending,
       formError,
       fieldErrors,
-      onClose: editorState.closeResourceModal,
-      onProviderDraftChange: (draft: typeof editorState.providerDraft) => {
+      onClose: closeResourceModal,
+      onProviderDraftChange: (draft: ProviderDraft) => {
         setFormError('')
         setFieldErrors({})
-        editorState.onProviderDraftChange(draft)
+        setProviderDraft(draft)
       },
-      onModelDraftChange: (draft: typeof editorState.modelDraft) => {
+      onModelDraftChange: (draft: ModelDraft) => {
         setFormError('')
         setFieldErrors({})
-        editorState.onModelDraftChange(draft)
+        setModelDraft(draft)
       },
-      onModelGroupDraftChange: (draft: typeof editorState.modelGroupDraft) => {
+      onModelGroupDraftChange: (draft: ModelGroupDraft) => {
         setFormError('')
         setFieldErrors({})
-        editorState.onModelGroupDraftChange(draft)
+        setModelGroupDraft(draft)
       },
-      onModelCreateKindChange: editorState.selectModelCreateKind,
-      onAgentDraftChange: (draft: typeof editorState.agentDraft) => {
+      /** 仅创建态切换 Tab；两份草稿都保留在 state 中。 */
+      onModelCreateKindChange: (resourceKind: 'MODEL' | 'GROUP') =>
+        setResourceModal((current) =>
+          current && current.kind === 'model' && current.mode === 'create'
+            ? { ...current, resourceKind }
+            : current,
+        ),
+      onAgentDraftChange: (draft: AgentDraft) => {
         setFormError('')
         setFieldErrors({})
-        editorState.onAgentDraftChange(draft)
+        setAgentDraft(draft)
       },
       onSubmit: submitResource,
     },
@@ -212,14 +285,21 @@ export function useAiConsoleResourceController(
       pending: mutations.deleteConfirmPending,
       onClose: closeDeleteConfirm,
     },
-    openCreateProvider: editorState.openCreateProvider,
-    openEditProvider: editorState.openEditProvider,
-    deleteProvider,
-    openCreateModel: editorState.openCreateModel,
-    openEditModel: editorState.openEditModel,
-    deleteModel,
-    openCreateAgent: editorState.openCreateAgent,
-    openEditAgent: editorState.openEditAgent,
-    deleteAgent,
+    editorActions: {
+      createProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
+      editProvider: (providerName: string) =>
+        applyResourceEditorPlan(editProviderEditorPlan(providers, providerName)),
+      createModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
+      editModel: (modelName: string) =>
+        applyResourceEditorPlan(editModelEditorPlan(models, modelName)),
+      createAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
+      editAgent: (agentName: string) =>
+        applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentName)),
+    },
+    deleteResource: {
+      provider: deleteProvider,
+      model: deleteModel,
+      agent: deleteAgent,
+    },
   }
 }

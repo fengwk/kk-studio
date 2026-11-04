@@ -1,7 +1,10 @@
 import type { FormEventHandler } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { AgentForm, ModelForm, ModelGroupForm, ProviderForm } from '@/features/catalog/AiResourceForms'
+import { AgentForm } from '@/features/catalog/AiAgentResourceForm'
+import { ModelForm } from '@/features/catalog/AiModelResourceForm'
+import { ModelGroupForm } from '@/features/catalog/AiModelGroupResourceForm'
+import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { resourceTitle } from '@/features/catalog/catalog-utils'
@@ -69,7 +72,7 @@ export function ResourceEditorModal({
   const title = resourceTitle(modal)
   return (
     <Dialog
-      className="resource-modal-card"
+      className="resource-modal-card modal-touch-target"
       title={title}
       pending={pending}
       onClose={onClose}
