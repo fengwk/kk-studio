@@ -302,8 +302,8 @@ export const canvasCatalog = {
     'zh-CN': '不可用',
   },
   'canvas.generation.modelUnavailableOption': {
-    'en-US': '{{label}} ({{reason}})',
-    'zh-CN': '{{label}}（{{reason}}）',
+    'en-US': '{{label}} — {{reason}}',
+    'zh-CN': '{{label}} — {{reason}}',
   },
   'canvas.generation.runFailed': {
     'en-US': 'Generation failed; previous resources are kept',
@@ -314,8 +314,8 @@ export const canvasCatalog = {
     'zh-CN': '待核查确认',
   },
   'canvas.generation.unknownTitle': {
-    'en-US': 'Manual verification required (UNKNOWN)',
-    'zh-CN': '待人工核查确认 (UNKNOWN)',
+    'en-US': 'Manual verification required',
+    'zh-CN': '待人工核查确认',
   },
   'canvas.generation.unknownStage': {
     'en-US': 'Pending verification',
@@ -330,24 +330,24 @@ export const canvasCatalog = {
     'zh-CN': '核查说明',
   },
   'canvas.generation.verifyNotePlaceholder': {
-    'en-US': 'Enter the verification record (required)',
-    'zh-CN': '输入核查记录文本（必填）',
+    'en-US': 'Enter the verification record',
+    'zh-CN': '输入核查记录文本',
   },
   'canvas.generation.verifySubmit': {
     'en-US': 'Submit verification',
     'zh-CN': '提交核查',
   },
   'canvas.generation.resolution.resume': {
-    'en-US': 'RESUME (continue the run)',
-    'zh-CN': 'RESUME（继续运行）',
+    'en-US': 'Resume run',
+    'zh-CN': '继续运行',
   },
   'canvas.generation.resolution.failed': {
-    'en-US': 'FAILED (mark as failed)',
-    'zh-CN': 'FAILED（标记失败）',
+    'en-US': 'Mark as failed',
+    'zh-CN': '标记失败',
   },
   'canvas.generation.resolution.cancelled': {
-    'en-US': 'CANCELLED (cancel the run)',
-    'zh-CN': 'CANCELLED（取消运行）',
+    'en-US': 'Cancel run',
+    'zh-CN': '取消运行',
   },
   'canvas.generation.jsonConfiguration': {
     'en-US': 'Full JSON configuration',

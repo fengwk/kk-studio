@@ -1,5 +1,8 @@
 import { assert, envelopeData, expectHttpError, HttpError, cid } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /** Canonical non-trivial install settings shared by environment/configsync matrix cases. */
 export function linuxInstallConfig() {

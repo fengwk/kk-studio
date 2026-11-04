@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+
 /**
  * {@link ToolCallMessageContent} 的 durable 边界：调用身份与 arguments 必填，冻结的 {@code historyAction} / {@code
  * environmentName} 可空但不得为空白。

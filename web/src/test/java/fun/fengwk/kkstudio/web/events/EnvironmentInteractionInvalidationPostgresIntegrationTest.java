@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
@@ -24,6 +25,7 @@ import java.util.function.BooleanSupplier;
 class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ApplicationEventHub hub;
+  @Autowired private HarnessChangeNotifications harnessNotifications;
   @Autowired private JdbcTemplate jdbc;
 
   @Test
@@ -41,7 +43,8 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
       UUID rootThreadId = UUID.randomUUID();
       assertNotEquals(rootThreadId, environmentId);
       jdbc.update(
-          "insert into environment (id, name, registration_token_hash) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'))",
+          "insert into environment (id, name, registration_token_hash) values (?, ?,"
+              + " encode(sha256(convert_to(?, 'UTF8')), 'hex'))",
           environmentId,
           "notification-routing",
           "test-token-" + environmentId);
@@ -62,7 +65,7 @@ class EnvironmentInteractionInvalidationPostgresIntegrationTest extends WebPostg
                       signal ->
                           signal instanceof Signal.InteractionsChanged changed
                               && rootThreadId.equals(changed.rootThreadId())),
-          InteractionChangeHub.CHANNEL,
+          harnessNotifications.interactionsNotification().channel(),
           rootThreadId.toString());
       assertFalse(
           interactionSignals.stream()

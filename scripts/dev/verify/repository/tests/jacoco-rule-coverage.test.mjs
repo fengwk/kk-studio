@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import {
   indexMainSources,
   isQualifiedNamePattern,
@@ -18,23 +18,6 @@ import {
  * 因此 CLASS/PACKAGE 必须写能命中真实主源码的合法限定名，BUNDLE 必须写能命中 bundle 名的模式；
  * 否则规则永不命中、门禁被静默跳过。本测试沿 Maven `<modules>` 递归发现模块 POM 并逐条校验。
  */
-
-function repositoryRoot() {
-  if (process.env.KK_STUDIO_REPO_ROOT) {
-    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-  }
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  for (;;) {
-    if (existsSync(path.join(directory, '.git'))) {
-      return directory
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error('cannot locate the kk-studio worktree root; set KK_STUDIO_REPO_ROOT')
-    }
-    directory = parent
-  }
-}
 
 const REPOSITORY_ROOT = repositoryRoot()
 

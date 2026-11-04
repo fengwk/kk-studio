@@ -9,7 +9,7 @@ vi.mock('@/features/chat/CreateChatModal', () => ({
   CreateChatModal: () => <div>lazy create chat modal</div>,
 }))
 
-vi.mock('@/features/chat/runtime/thread-panel/messages/TaskToolRenderer', () => ({
+vi.mock('@/features/thread/runtime/thread-panel/messages/TaskToolRenderer', () => ({
   TaskToolRenderer: () => <div>lazy task renderer</div>,
 }))
 

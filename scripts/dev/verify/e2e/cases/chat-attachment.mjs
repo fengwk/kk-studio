@@ -19,7 +19,12 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { getCase, registerCase } from '../lib/registry.mjs'
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
+import { cases as seedCases } from './seed-and-harness.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(seedCases, id)
 
 /**
  * USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约（L1，需 backend 启用 S3）。

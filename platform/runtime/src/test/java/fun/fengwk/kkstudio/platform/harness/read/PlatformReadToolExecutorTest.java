@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
@@ -172,15 +173,15 @@ class PlatformReadToolExecutorTest {
   /** kkstudio Resource URI 使用规范 UUID 成功读取并格式化 */
   @Test
   void kkstudioResourceUriSucceedsWithCanonicalUuid() throws Exception {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
-    when(context.threadId()).thenReturn(threadId);
+    when(context.sessionId()).thenReturn(sessionId);
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
 
     when(resourceReader.readResource(
-            eq(threadId),
-            eq(null),
-            eq("call-1"),
+            eq(sessionId),
+            eq(TurnMediaCapabilities.NONE),
             eq(blobId),
             eq(null),
             eq(null),
@@ -202,10 +203,11 @@ class PlatformReadToolExecutorTest {
   /** kkstudio Resource URI 指向支持的媒体时返回 durable ResourceResultContent，而不是把字节塞进结果。 */
   @Test
   void kkstudioMediaResourceUriReturnsDurableResourceResult() throws Exception {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
-    when(context.threadId()).thenReturn(threadId);
+    when(context.sessionId()).thenReturn(sessionId);
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
     ResourceRef ref =
         new ResourceRef(
             ResourceRef.sessionResourceUri(blobId),
@@ -214,9 +216,8 @@ class PlatformReadToolExecutorTest {
             3L,
             "0".repeat(64));
     when(resourceReader.readResource(
-            eq(threadId),
-            eq(null),
-            eq("call-1"),
+            eq(sessionId),
+            eq(TurnMediaCapabilities.NONE),
             eq(blobId),
             eq(null),
             eq(null),
@@ -255,7 +256,7 @@ class PlatformReadToolExecutorTest {
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
-    assertTrue(firstText(result).contains("execution context with threadId is required"));
+    assertTrue(firstText(result).contains("execution context is required"));
   }
 
   /** 不支持的 kkstudio URI 形式返回错误结果 */
@@ -395,24 +396,23 @@ class PlatformReadToolExecutorTest {
     verifyNoInteractions(skillReader, resourceReader, progress);
   }
 
-  /** Resource 缺失 threadId 时不得读取；授权错误应原样映射为一次失败回调。 */
+  /** Resource 缺失执行上下文时不得读取；授权错误应原样映射为一次失败回调。 */
   @Test
   void resourceContextAndAuthorizationArePreserved() throws Exception {
     ToolExecutionContext context = mock(ToolExecutionContext.class);
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.fromString("12345678-1234-1234-1234-123456789abc");
     String uri = "kkstudio:/resources/" + blobId;
-    ToolResult missing =
-        executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), progress);
+    ToolResult missing = executor.read(mockRequest("{\"path\":\"" + uri + "\"}", null), progress);
     verifyNoInteractions(resourceReader);
     assertTrue(missing.error());
-    assertTrue(firstText(missing).contains("execution context with threadId is required"));
+    assertTrue(firstText(missing).contains("execution context is required"));
 
-    UUID threadId = UUID.randomUUID();
-    when(context.threadId()).thenReturn(threadId);
+    when(context.sessionId()).thenReturn(sessionId);
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
     when(resourceReader.readResource(
-            eq(threadId),
-            eq(null),
-            eq("call-1"),
+            eq(sessionId),
+            eq(TurnMediaCapabilities.NONE),
             eq(blobId),
             eq(null),
             eq(null),
@@ -425,9 +425,8 @@ class PlatformReadToolExecutorTest {
     assertTrue(firstText(denied).contains("resource not authorized"));
     verify(resourceReader)
         .readResource(
-            eq(threadId),
-            eq(null),
-            eq("call-1"),
+            eq(sessionId),
+            eq(TurnMediaCapabilities.NONE),
             eq(blobId),
             eq(null),
             eq(null),
@@ -498,19 +497,19 @@ class PlatformReadToolExecutorTest {
   /** Resource 的意外异常同样映射失败，保留有消息和无消息两种反馈。 */
   @Test
   void resourceUnexpectedFailuresCompleteOnce() throws Exception {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     String uri = "kkstudio:/resources/" + blobId;
     ToolExecutionContext context = mock(ToolExecutionContext.class);
-    when(context.threadId()).thenReturn(threadId);
+    when(context.sessionId()).thenReturn(sessionId);
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
     for (RuntimeException failure :
         List.of(new IllegalStateException("blob failure"), new IllegalStateException())) {
       doThrow(failure)
           .when(resourceReader)
           .readResource(
-              eq(threadId),
-              eq(null),
-              eq("call-1"),
+              eq(sessionId),
+              eq(TurnMediaCapabilities.NONE),
               eq(blobId),
               eq(null),
               eq(null),
@@ -530,16 +529,16 @@ class PlatformReadToolExecutorTest {
   /** 测试意图：受管资源读取以 request.timeout 构造 ReadDeadline 并完整传递给下游。 */
   @Test
   void kkstudioResourcePassesConfiguredDeadline() throws Exception {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
-    when(context.threadId()).thenReturn(threadId);
+    when(context.sessionId()).thenReturn(sessionId);
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
 
     ArgumentCaptor<ReadDeadline> deadlineCaptor = ArgumentCaptor.forClass(ReadDeadline.class);
     when(resourceReader.readResource(
-            eq(threadId),
-            eq(null),
-            eq("call-1"),
+            eq(sessionId),
+            eq(TurnMediaCapabilities.NONE),
             eq(blobId),
             eq(null),
             eq(null),
@@ -586,7 +585,8 @@ class PlatformReadToolExecutorTest {
   void zeroTimeoutRejectsAccordingToExistingReadDeadlineCapability() throws Exception {
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
-    when(context.threadId()).thenReturn(UUID.randomUUID());
+    when(context.sessionId()).thenReturn(UUID.randomUUID());
+    when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
 
     ToolExecutionRequest request =
         mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context, Duration.ZERO);

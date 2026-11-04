@@ -32,6 +32,15 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-canvas-spi</artifactId>
+        </dependency>
+        <!-- 实例直接声明 Harness 域贡献（本插件为空列表）。 -->
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>

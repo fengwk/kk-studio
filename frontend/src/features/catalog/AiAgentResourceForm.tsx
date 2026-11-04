@@ -74,7 +74,7 @@ export function AgentForm({
       ? [
           {
             value: draft.model,
-            label: `${draft.model} (${t('ai.catalog.form.unavailable')})`,
+            label: `${draft.model} · ${t('ai.catalog.form.unavailable')}`,
             disabled: true,
           },
         ]
@@ -87,7 +87,7 @@ export function AgentForm({
       ? [
           {
             value: selectedVariant,
-            label: `${selectedVariant} (${t('ai.catalog.form.unavailable')})`,
+            label: `${selectedVariant} · ${t('ai.catalog.form.unavailable')}`,
             disabled: true,
           },
         ]

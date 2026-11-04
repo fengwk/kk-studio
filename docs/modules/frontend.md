@@ -53,12 +53,14 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 （`mvn verify` 内执行同一测试）拦截，更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
-[`contracts`](../../frontend/src/shared/api/contracts) 只保留前端细化：Java 侧带 `type` 字段的扁平类
-（Harness 命令、交互、上传）写成同名判别联合，前端依赖的封闭取值集合写成常量与类型守卫；
-service 按 Agent、Chat、Harness、Environment、MCP Server、Interaction、Plugins、Studio、Storage、System Settings 与配置同步分组，
-Project codec 在 [Projects feature](../../frontend/src/features/projects) 就近维护。
+[`contracts`](../../frontend/src/shared/api/contracts) 只保留生成契约无法表达的封闭取值与前端细化
+（Harness 命令、上传与技能等），不再为 Interaction、Plugin 或 Project 手写运行时 decoder；
+这些 HTTP 响应直接消费生成契约，在真正使用点做 `type` / `status` 分支。
+service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
+`shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
+[Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
+[Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 与 wire codec 由 Canvas feature 持有。
 HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
-codec 校验 canonical UUID、十进字符串、枚举、可空性和嵌套结构；
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
 ## Snapshot、realtime 与恢复
@@ -76,7 +78,7 @@ Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 
 没有 EventSource，也不用固定轮询兜底。
 
 Thread Snapshot 只有一份 query 缓存，所有读取都经
-[`thread-snapshot-cache.ts`](../../frontend/src/features/chat/runtime/thread-snapshot-cache.ts) 的同一 fetcher。
+[`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/thread-snapshot-cache.ts) 的同一 fetcher。
 缓存始终是完整的 root-to-head 历史；只有末 Entry 确为当前 head 时才以它为 `afterEntryId` 请求增量。
 响应到达时按当时的缓存合并：完整响应替换缓存，增量保留到 `baseEntryId` 的前缀再按 Entry id 幂等接上，
 较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
@@ -106,7 +108,7 @@ TOOL_PARTIAL 按 thread/invocation/attempt 内 eventId 精确去重，process.ou
 Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
-[`thread-events.ts`](../../frontend/src/features/chat/runtime/thread-events.ts) 将 Entry、活动
+[`thread-events.ts`](../../frontend/src/features/thread/runtime/thread-events.ts) 将 Entry、活动
 Invocation 与 attempt failure 投影为时间线记录。Thread 活动只有 `RUNNING`、`WAITING`、`IDLE`：
 RUNNING 表示本地流程未结束（包括审批、问卷及环境阻塞），WAITING 仅表示本地已让出执行，
 等待直接异步 system-reminder 结果，IDLE 表示本地已收敛。
@@ -391,7 +393,7 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
-Issue Agent Pane 复用 Harness 时间线；UNKNOWN 核查与阶段状态分别展示。
+Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
 ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
 Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
@@ -453,7 +455,9 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 ### Token 分层与门禁
 
-样式只有一个事实源：[`styles.css`](../../frontend/src/styles.css) 的 `:root`，分三层，组件只消费后两层。
+样式 token 只有一个事实源：[`styles.css`](../../frontend/src/styles.css) 的 `:root`，分三层，组件只消费后两层。
+功能布局样式跟随各自 feature（如 `features/thread` 的对话/调试、`features/chat` 的工作区、`features/settings`、
+`features/thread/runtime/interactions` 的待办），`styles.css` 只保留 reset、通用控件与跨功能共享样式。
 
 1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。
 2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。
@@ -495,6 +499,7 @@ Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操
 ### 文案与维护
 
 用户操作围绕 thread、项目、Issue、画布、Agent 和环境，不暴露独立 branch 实体或内部绑定路径。名称、配置标识和用户正文原样保留；系统文案通过 i18n，中英文的语义、单位和占位符一致。不重复展示“中文标题 + 英文标题”，不以裸 UUID 代替可读名称。
+按钮、标题和菜单只描述操作，不用括号重复英文名称或补充解释；会影响判断的说明使用统一的 `?` 帮助提示（键盘可展开、读屏可获取），链接标签与 aria 名称同样不写括号旁白。单位、范围、计数、快捷键和真实数据对（如 `名称 (状态)`、模型与变体）保留括号，其余解释性括号改为自然语句或帮助提示。
 按钮描述结果，例如“创建并进入”“保存工作流”“返回项目”；错误说明当前阻塞与可采取的动作。诊断严格区分当前草稿预览、冻结调用输入与历史重建，不把重建内容称为实际 HTTP 原文。
 
 ## 共享 UI 与测试
@@ -516,7 +521,7 @@ ConflictPresenter 统一展示 409；modal/lightbox 优先消费快捷键。
 
 Vitest/jsdom 测试与实现就近组织，Canvas 集成用例在 feature 的测试目录。
 [`test-setup.ts`](../../frontend/src/test-setup.ts) 清理 localStorage、固定 locale、
-提供浏览器几何与媒体 stub。测试覆盖 route/extension、严格 codec、草稿恢复、
+提供浏览器几何与媒体 stub。测试覆盖 route/extension、生成契约直接消费、草稿恢复、
 命令队列、Snapshot/realtime、上传、控制与可访问交互。
 构建、lint、coverage 和 E2E 的命令与分类见 [开发与测试](../operations/development-and-testing.md)。
 

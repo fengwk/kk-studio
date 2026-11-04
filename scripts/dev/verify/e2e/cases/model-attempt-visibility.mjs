@@ -17,7 +17,10 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const PARTIAL_TEXT = 'E2E_FAILED_ATTEMPT_PARTIAL'
 const RECOVERED_TEXT = 'E2E_RECOVERED_ASSISTANT'

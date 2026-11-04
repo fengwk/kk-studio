@@ -11,8 +11,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.ExecutionSelectionJsonCodec;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.codec.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 

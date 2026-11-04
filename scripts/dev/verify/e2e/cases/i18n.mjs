@@ -1,5 +1,8 @@
 import { assert, expectHttpError, httpJson } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 function errorEnvelope(error) {
   const body = JSON.parse(error.body)

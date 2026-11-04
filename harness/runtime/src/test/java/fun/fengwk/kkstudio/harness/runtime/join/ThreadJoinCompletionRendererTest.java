@@ -13,6 +13,10 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinCompletionRenderer;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import java.io.StringReader;

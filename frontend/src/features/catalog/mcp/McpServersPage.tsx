@@ -18,7 +18,7 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { mcpServerService } from '@/shared/api/mcp-server-service'
+import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
@@ -510,7 +510,7 @@ export function McpServersPage() {
                     autoFocus
                   />
                   <span className="inline-hint">
-                    Lowercase letters, numbers, and underscores (^[a-z][a-z0-9_]*$)
+                    Lowercase letters, numbers, and underscores. Pattern: ^[a-z][a-z0-9_]*$
                   </span>
                 </label>
 
@@ -527,7 +527,7 @@ export function McpServersPage() {
                     required
                   />
                   <span className="inline-hint">
-                    Streamable HTTP endpoint URL (http:// or https://)
+                    Streamable HTTP endpoint URL. Use http:// or https://.
                   </span>
                 </label>
 

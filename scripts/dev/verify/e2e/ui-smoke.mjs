@@ -922,7 +922,7 @@ async function main(argv) {
           .waitFor({ state: 'visible', timeout: 30_000 })
       }
 
-      try {
+      {
         await goto('/canvas')
         await page.getByRole('button', { name: /^(Create a new canvas|Create new canvas|创建新画布)$/ }).click()
         await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
@@ -1071,10 +1071,6 @@ async function main(argv) {
         )
         await shot(caseArt, 'canvas-reference-run')
         expectNoFatal(pageErrors, consoleErrors)
-      } finally {
-        if (canvasId) {
-          await apiJson(args.backendUrl, 'DELETE', `/api/canvases/${canvasId}`)
-        }
       }
     },
     { requiresCanvasFunction: true },

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+
 /** ModelSelection 的全局名称、可选 variant、canonical 和长度边界。 */
 class ModelSelectionTest {
 

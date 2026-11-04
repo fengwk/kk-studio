@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
@@ -12,10 +13,12 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnEndEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -26,36 +29,50 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
-import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
-import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
-import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.generation.FailureProjection;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver.FakeLockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -582,6 +599,272 @@ class ThreadSnapshotTest {
     assertThrows(UnsupportedOperationException.class, () -> snapshot.generationFailures().clear());
   }
 
+  @Test
+  void generationFailuresAreEmptyWithoutDriverGeneration() {
+    // 测试意图：没有 generation 的快照不携带任何尝试诊断，公开投影返回空列表而不是 null。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
+    assertNull(snapshot.generation());
+    assertEquals(List.of(), snapshot.generationFailures());
+  }
+
+  @Test
+  void evaluateRuntimeStatusValidatesInputsAndIsControlSensitive() {
+    // 测试意图：三态纯值投影对 null 控制与非负子 Join 计数 fail-fast；输入需求只在 RUNNABLE 下表达为 RUNNING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ThreadSnapshot.evaluateRuntimeStatus(
+                null,
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                base.entryState(),
+                baseline.threadId(),
+                List.of(),
+                false,
+                0,
+                false,
+                false));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadSnapshot.evaluateRuntimeStatus(
+                ThreadExecutionControl.RUNNABLE,
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                base.entryState(),
+                baseline.threadId(),
+                List.of(),
+                false,
+                -1,
+                false,
+                false));
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadSnapshot.evaluateRuntimeStatus(
+            ThreadExecutionControl.RUNNABLE,
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            base.entryState(),
+            baseline.threadId(),
+            List.of(),
+            true,
+            0,
+            false,
+            false));
+    assertEquals(
+        ThreadRuntimeStatus.IDLE,
+        ThreadSnapshot.evaluateRuntimeStatus(
+            ThreadExecutionControl.STOPPED,
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            base.entryState(),
+            baseline.threadId(),
+            List.of(),
+            true,
+            0,
+            false,
+            false));
+  }
+
+  @Test
+  void evaluateRuntimeStatusTreatsEveryLiveStateExceptIdleAsRunning() {
+    // 测试意图：live state 只有 IDLE_OR_HISTORICAL 非 live；其余活跃阶段一律投影为 RUNNING，不回退为 IDLE/WAITING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    for (ThreadLiveState liveState : ThreadLiveState.values()) {
+      ThreadRuntimeStatus expected =
+          liveState == ThreadLiveState.IDLE_OR_HISTORICAL
+              ? ThreadRuntimeStatus.IDLE
+              : ThreadRuntimeStatus.RUNNING;
+      assertEquals(
+          expected,
+          ThreadSnapshot.evaluateRuntimeStatus(
+              ThreadExecutionControl.RUNNABLE,
+              liveState,
+              base.entryState(),
+              baseline.threadId(),
+              List.of(),
+              false,
+              0,
+              false,
+              false),
+          liveState.name());
+    }
+  }
+
+  @Test
+  void runtimeStatusValuesAreExactlyTheThreePublicStates() {
+    // 测试意图：对外运行时状态只有 RUNNING / WAITING / IDLE 三态，与 executionControl 正交。
+    assertEquals(
+        Set.of(ThreadRuntimeStatus.RUNNING, ThreadRuntimeStatus.WAITING, ThreadRuntimeStatus.IDLE),
+        Set.of(ThreadRuntimeStatus.values()));
+  }
+
+  @Test
+  void stoppedThreadWithQueuedDemandAndIncompleteChildJoinsMapsToWaiting() {
+    // 测试意图：STOPPED 只是执行控制；仍有未返回的直接子任务时不得因输入需求不自启就降级为 IDLE，投影为 WAITING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadCommand queuedUserMessage =
+        new ThreadCommand(
+            baseline.threadId(),
+            1L,
+            userMessagePayload("queued"),
+            TestIds.id(1),
+            "0".repeat(64),
+            null,
+            null,
+            null,
+            T5);
+    ThreadSnapshot waiting =
+        new ThreadSnapshot(
+            base.thread(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
+            List.of(queuedUserMessage),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            1,
+            false,
+            List.of(),
+            false);
+    assertEquals(1, waiting.queuedCommands().size());
+    assertEquals(ThreadRuntimeStatus.WAITING, waiting.runtimeStatus());
+
+    // 对照：同一 STOPPED 输入需求下没有未完成子任务时不自启，仍是 IDLE。
+    ThreadSnapshot idleWithoutIncompleteChild =
+        new ThreadSnapshot(
+            base.thread(),
+            EntryCurrentState.from(base.requireFullPath()),
+            new EntrySlice(null, base.requireFullPath().entries()),
+            List.of(queuedUserMessage),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    assertEquals(ThreadRuntimeStatus.IDLE, idleWithoutIncompleteChild.runtimeStatus());
+  }
+
+  @Test
+  void unconfirmedExecutionKeepsStoppedThreadRunning() {
+    // 测试意图：已登记但尚未确认退出的具体代次不因 STOPPED 虚构外部退出事实，快照投影保持 RUNNING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
+    registerUnconfirmedExecution(baseline.threadId(), TestIds.id(1));
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
+    assertEquals(1, snapshot.unconfirmedExecutions().size());
+    assertTrue(snapshot.hasUnconfirmedExecution());
+    assertEquals(ThreadRuntimeStatus.RUNNING, snapshot.runtimeStatus());
+  }
+
+  @Test
+  void openOwnerCompactionTurnKeepsThreadRunning() {
+    // 测试意图：自身 open owner compaction 属于本地未结束流程：RUNNABLE 下投影 RUNNING，STOPPED 下同样不虚构外部退出。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    UUID compactionStartId = UUID.randomUUID();
+    Entry compactionStart =
+        new Entry(
+            compactionStartId,
+            baseline.sessionId(),
+            base.thread().headEntryId(),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION,
+                settings(),
+                baseline.threadId(),
+                100_000,
+                16_384,
+                CompactionStart.pending(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    base.thread().headEntryId(),
+                    null,
+                    null),
+                null),
+            T5);
+    EntryPath compactionPath =
+        new EntryPath(List.of(base.requireFullPath().head(), compactionStart));
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadSnapshot.evaluateRuntimeStatus(
+            ThreadExecutionControl.RUNNABLE,
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            EntryCurrentState.from(compactionPath),
+            baseline.threadId(),
+            List.of(),
+            false,
+            0,
+            false,
+            false));
+    ThreadSnapshot compactionSnapshot =
+        new ThreadSnapshot(
+            base.thread().advanceHead(compactionStartId, T5),
+            EntryCurrentState.from(compactionPath),
+            new EntrySlice(null, compactionPath.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    assertEquals(ThreadRuntimeStatus.RUNNING, compactionSnapshot.runtimeStatus());
+  }
+
+  @Test
+  void foreignOwnerCompactionTurnIsNotALocalObligation() {
+    // 测试意图：只有本 Thread 发起的 open COMPACTION 才是本地义务；fork 复制来的他 Thread compaction turn 不得把空闲线程投影为
+    // RUNNING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    UUID compactionStartId = UUID.randomUUID();
+    Entry foreignOwnedCompactionStart =
+        new Entry(
+            compactionStartId,
+            baseline.sessionId(),
+            base.thread().headEntryId(),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION,
+                settings(),
+                UUID.randomUUID(),
+                100_000,
+                16_384,
+                CompactionStart.pending(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    base.thread().headEntryId(),
+                    null,
+                    null),
+                null),
+            T5);
+    EntryPath path =
+        new EntryPath(List.of(base.requireFullPath().head(), foreignOwnedCompactionStart));
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            base.thread().advanceHead(compactionStartId, T5),
+            EntryCurrentState.from(path),
+            new EntrySlice(null, path.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    assertEquals(ThreadRuntimeStatus.IDLE, snapshot.runtimeStatus());
+  }
+
   /** 以固定 Driver 活动投影读取当前 open turn。 */
   private HarnessRuntime runtimeWithActivity(
       HarnessRuntimeTestSupport.TurnBaseline baseline, DriverActivity activity) {
@@ -868,6 +1151,75 @@ class ThreadSnapshotTest {
                 false,
                 List.of(),
                 false));
+  }
+
+  @Test
+  void incrementalSliceNotEndingAtHeadIsRejected() {
+    // 测试意图：非空增量 slice 必须止于当前 head；止于更早祖先的 slice 不得冒充当前读取位置。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    UUID turnStartId = UUID.randomUUID();
+    UUID userMsgId = UUID.randomUUID();
+    UUID assistantMsgId = UUID.randomUUID();
+    Entry turnStart =
+        turnStartEntry(
+            turnStartId, baseline.sessionId(), baseline.rootEntryId(), T5, baseline.threadId());
+    Entry userMsg = userMessageEntry(userMsgId, baseline.sessionId(), turnStartId, T5);
+    Entry assistantMsg = assistantEntry(assistantMsgId, baseline.sessionId(), userMsgId, T5);
+    EntryPath path =
+        new EntryPath(List.of(base.requireFullPath().head(), turnStart, userMsg, assistantMsg));
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new ThreadSnapshot(
+                    base.thread().advanceHead(assistantMsgId, T5),
+                    EntryCurrentState.from(path),
+                    new EntrySlice(turnStartId, List.of(userMsg)),
+                    List.of(),
+                    null,
+                    List.of(),
+                    ThreadLiveState.IDLE_OR_HISTORICAL,
+                    List.of(),
+                    0,
+                    false,
+                    List.of(),
+                    false));
+    assertTrue(error.getMessage().contains("entry slice must end at the current head"));
+  }
+
+  /** Thread version 窄查询只返回 durable version，未知 Thread 返回空而不抛异常。 */
+  @Test
+  void findThreadVersionReadsOnlyTheDurableVersion() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    long version = runtime.getThreadSnapshot(baseline.threadId()).thread().version();
+
+    assertEquals(Optional.of(version), runtime.findThreadVersion(baseline.threadId()));
+    assertEquals(Optional.empty(), runtime.findThreadVersion(new UUID(0L, 0xdeadbeefL)));
+  }
+
+  /** 为 Thread 登记一个尚未确认退出的具体执行代次（真实退出证据尚未到达）。 */
+  private void registerUnconfirmedExecution(UUID threadId, UUID invocationId) {
+    ExecutionExitFact fact =
+        new ExecutionExitFact(
+            UUID.randomUUID(),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.TOOL,
+            null,
+            null,
+            ExecutionExitState.UNCONFIRMED,
+            T0,
+            null,
+            null);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(threadId).orElseThrow();
+          tx.exits().register(fact);
+          return null;
+        });
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */

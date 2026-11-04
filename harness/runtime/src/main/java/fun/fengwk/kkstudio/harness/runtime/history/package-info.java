@@ -7,9 +7,9 @@
  * turn grammar、默认不投影），TURN_END 保存关闭结果与 continuation obligation。EntryPath 校验 root-to-head 链的同
  * Session、parent 连续、turn open/close 与 createdAt 不变量。EntrySlice 是同一条链的读取视图：base 为空时复用完整
  * EntryPath，base 非空时只含其后的连续增量，不得冒充 EntryPath。baseSettings 沿 path 推导最近的 ROOT/TURN_START 完整
- * snapshot。类型引用优先复用已存在的 {@link fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason}、{@link
- * fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome}、{@link
- * fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings} 与 {@link
- * fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection}，避免同义重复。
+ * snapshot。类型引用优先复用已存在的 {@link fun.fengwk.kkstudio.harness.api.entry.TurnStartReason}、{@link
+ * fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome}、{@link
+ * fun.fengwk.kkstudio.harness.api.entry.BranchSettings} 与 {@link
+ * fun.fengwk.kkstudio.harness.api.entry.ModelSelection}，避免同义重复。
  */
 package fun.fengwk.kkstudio.harness.runtime.history;

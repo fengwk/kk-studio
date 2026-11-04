@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

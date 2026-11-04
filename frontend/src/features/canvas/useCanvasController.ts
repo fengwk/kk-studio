@@ -35,7 +35,7 @@ import { useCanvasTextEditor } from '@/features/canvas/useCanvasTextEditor'
 import {
   getCanvas,
   listCanvasFunctions,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 

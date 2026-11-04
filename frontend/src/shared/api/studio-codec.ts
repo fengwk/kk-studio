@@ -29,7 +29,7 @@ import type {
  * 非 nullable 字段缺失一律拒绝；枚举只接受精确值；非法/超 safe integer
  * 一律 fail closed（ApiError），绝不静默降级为 0/null。本模块无传输语义，
  * 只负责把 envelope.data 解码为类型化 DTO；HTTP/信封/错误映射由
- * studio-service 负责。
+ * Canvas 产品客户端 `features/canvas/canvas-api.ts` 负责。
  */
 
 function invalidPayload(detail: string): ApiError {

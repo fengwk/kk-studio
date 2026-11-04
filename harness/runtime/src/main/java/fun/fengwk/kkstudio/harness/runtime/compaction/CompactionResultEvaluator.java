@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.util.Objects;
 
@@ -43,7 +45,7 @@ public final class CompactionResultEvaluator {
               "Compaction did not reduce the projected context size");
     }
     if (error == null) {
-      long estimatedTokens = CompactionPlanner.estimateTextTokens(payload.summaryText());
+      long estimatedTokens = TokenEstimator.estimateTextTokens(payload.summaryText());
       if (estimatedTokens > outputBudget) {
         error =
             new AssistantError(

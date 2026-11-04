@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 
-// 导入即注册 real.* case；本测试直接运行注册项，只替换 HTTP/事件边界。
-import '../cases/real.mjs'
-import { getCase } from '../lib/registry.mjs'
+// 直接运行 case，只替换 HTTP/事件边界。
+import { getCase } from '../run-matrix.mjs'
 
 const CASE_ID = 'real.stop_partial_continue'
 const MODEL = {

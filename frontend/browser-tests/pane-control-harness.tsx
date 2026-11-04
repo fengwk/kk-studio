@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { AgentPane } from '@/features/chat/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 

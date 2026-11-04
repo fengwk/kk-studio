@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+
 /** {@link ExecutionSelection} 的 driver 格式、JSON 校验与规范化排序契约。 */
 class ExecutionSelectionTest {
 

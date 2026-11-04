@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.project.platform;
 
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 
 import java.util.Objects;
 import java.util.UUID;
