@@ -173,7 +173,6 @@ export function RootAgentPane({
               composer={composer}
               messages={pane.controller.timeline.messages}
               queuedMessages={pane.controller.timeline.queuedMessages}
-              tree={tree}
               hidden={debugActive}
             />
           )}

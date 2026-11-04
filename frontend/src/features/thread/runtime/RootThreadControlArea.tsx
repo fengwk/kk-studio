@@ -1,10 +1,8 @@
 import { useMemo } from 'react'
-import { GitBranch } from 'lucide-react'
 import { ThreadComposer } from '@/features/thread/runtime/thread-panel/ThreadComposer'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
-import type { useActiveThreadTree } from '@/features/thread/runtime/useActiveThreadTree'
 import type { ThreadPanelComposerInput } from '@/features/thread/runtime/thread-panel/ThreadPanel'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
+import { InteractionOwnerSource } from '@/features/thread/runtime/interactions/InteractionOwnerSource'
 import { useInteractionsController } from '@/features/thread/runtime/interactions/useInteractionsController'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
@@ -28,7 +26,6 @@ export function RootThreadControlArea({
   composer,
   messages,
   queuedMessages,
-  tree,
   hidden = false,
 }: {
   /** 执行根；null 表示尚未绑定根面板（新建草稿），不查询也不渲染交互卡片。 */
@@ -36,8 +33,6 @@ export function RootThreadControlArea({
   composer: ThreadPanelComposerInput
   messages: DialogueMessage[]
   queuedMessages: QueuedThreadMessage[]
-  /** 执行树（同一份查询）：交互来源的 Thread 名称与代理身份从这里解析。 */
-  tree?: ReturnType<typeof useActiveThreadTree>
   /**
    * Debug 主视图激活时为真：整个输入/审批/分支控制区保持挂载但完全隐藏且惰性
    * （草稿、上传注册表与绑定原地保留，退出 Debug 立即恢复，不重新初始化）。
@@ -82,7 +77,7 @@ export function RootThreadControlArea({
     >
       {rootThreadId == null
         ? null
-        : <RootInteractionList rootThreadId={rootThreadId} tree={tree} />}
+        : <RootInteractionList rootThreadId={rootThreadId} />}
       <ThreadComposer
         ref={composerRef}
         parts={parts}
@@ -109,21 +104,15 @@ export function RootThreadControlArea({
 }
 
 /**
- * 根交互列表：只渲染可操作的人工等待（问卷/审批），来源标识来自执行树（Thread 名称 + 代理），
- * 写回始终使用原始 `threadId`/`interactionId`；完整分页保留，刷新失败即使已有旧数据也照常显示，
- * 不把失败伪装成“已无待决交互”。
+ * 根交互列表：只渲染可操作的人工等待（问卷/审批），归属来自会话归属 SPI，显示与全局待处理页
+ * 一致；写回始终使用原始 `threadId`/`interactionId`，完整分页保留，刷新失败即使已有旧数据
+ * 也照常显示，不把失败伪装成“已无待决交互”。
  *
  * <p>环境等待不在这里重复呈现第二张提醒卡：它是 `(真实执行根, 所需环境)` 聚合，没有可回写的调用，
  * 只在全局待处理页与工具状态行（W3 切片）呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
  * 把后续页的人工等待一并藏起来。
  */
-function RootInteractionList({
-  rootThreadId,
-  tree,
-}: {
-  rootThreadId: string
-  tree?: ReturnType<typeof useActiveThreadTree>
-}) {
+function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
   const { t } = useI18n()
   const {
     items,
@@ -154,40 +143,18 @@ function RootInteractionList({
           </Button>
         </div>
       ) : null}
-      {manualItems.map((item) => {
-        const threadId = item.threadId!
-        const source = tree?.nodesById.get(threadId) ?? null
-        return (
-          <div key={interactionIdentity(item)} className="interaction-feed-item">
-            <header className="interaction-item-header">
-              <div className="interaction-item-meta">
-                <ThreadLink
-                  threadId={threadId}
-                  className="interaction-source-link"
-                  title={threadId === rootThreadId
-                    ? t('ai.interaction.viewSource')
-                    : t('ai.runtime.notification.entry.viewSubagentExecution', { threadId })}
-                >
-                  <GitBranch size={14} aria-hidden="true" />
-                  <span className="interaction-source-name">
-                    {threadId === rootThreadId
-                      ? source?.name ?? t('ai.interaction.viewSource')
-                      : t('ai.runtime.notification.entry.viewSubagentExecution', { threadId })}
-                  </span>
-                  {threadId !== rootThreadId && source?.name
-                    ? <span>{source.name}</span> : null}
-                </ThreadLink>
-                {source ? (
-                  <span className="interaction-agent-badge">{source.agentName}</span>
-                ) : null}
-              </div>
-            </header>
-            <div className="interaction-item-body">
-              <InteractionCardBody item={item} onSuccess={() => removeItem(item.interactionId!)} />
+      {manualItems.map((item) => (
+        <div key={interactionIdentity(item)} className="interaction-feed-item">
+          <header className="interaction-item-header">
+            <div className="interaction-item-meta">
+              <InteractionOwnerSource item={item} />
             </div>
+          </header>
+          <div className="interaction-item-body">
+            <InteractionCardBody item={item} onSuccess={() => removeItem(item.interactionId!)} />
           </div>
-        )
-      })}
+        </div>
+      ))}
       {hasMore ? (
         <Button
           variant="ghost"

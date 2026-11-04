@@ -2089,15 +2089,15 @@ export const chatCatalog = {
     'en-US': 'Load More',
     'zh-CN': '加载更多',
   },
-  'ai.interaction.openChatSource': {
-    'en-US': 'Open chat',
-    'zh-CN': '打开对话',
+  'ai.interaction.ownerKind.CHAT': {
+    'en-US': 'Chat',
+    'zh-CN': 'Chat',
   },
-  'ai.interaction.openIssueSource': {
-    'en-US': 'Open task chat',
-    'zh-CN': '打开任务对话',
+  'ai.interaction.ownerKind.ISSUE_AGENT': {
+    'en-US': 'Issue',
+    'zh-CN': 'Issue',
   },
-  'ai.interaction.sourceAgentTask': {
+  'ai.interaction.ownerKind.AGENT_TASK': {
     'en-US': 'Agent task',
     'zh-CN': 'Agent 任务',
   },

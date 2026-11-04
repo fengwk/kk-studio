@@ -466,7 +466,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
-    await expect(card.getByRole('button', { name: '等待迁移环境' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Chat · 等待迁移环境' })).toBeVisible()
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
       new URL(response.url()).pathname === '/api/interactions'
@@ -486,8 +486,9 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').first().getByRole('button', { name: '迁移审批' })
-    await expect(source).toContainText('迁移审批')
+    const source = page.locator('.interaction-feed-item').first()
+      .getByRole('button', { name: 'Chat · 迁移审批' })
+    await expect(source).toContainText('Chat · 迁移审批')
     await source.click()
     await expect(page).toHaveURL(new RegExp(`/chats/chat-pending\\?thread=${APPROVAL_ROOT_ID}$`))
     expect(approvals).toEqual([])
@@ -500,8 +501,9 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').nth(1).getByRole('button', { name: '迁移策略' })
-    await expect(source).toContainText('迁移策略')
+    const source = page.locator('.interaction-feed-item').nth(1)
+      .getByRole('button', { name: 'Issue · 迁移策略' })
+    await expect(source).toContainText('Issue · 迁移策略')
     await source.click()
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}\\?issue=${ISSUE_ID}&thread=${QUESTIONNAIRE_ROOT_ID}$`))
     expect(approvals).toEqual([])
@@ -523,7 +525,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     // 只移除本卡，其余待处理项与目标 thread 均不受影响。
     await expect(toolName).toHaveCount(0)
-    await expect(page.getByText('迁移策略')).toBeVisible()
+    await expect(page.getByText('Issue · 迁移策略')).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
@@ -545,7 +547,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await page.locator('.interaction-feed-item').first().locator('.interaction-deny-btn').click()
 
     await expect(page.locator('.interaction-approval-tool-name')).toHaveCount(0)
-    await expect(page.getByText('迁移策略')).toBeVisible()
+    await expect(page.getByText('Issue · 迁移策略')).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(

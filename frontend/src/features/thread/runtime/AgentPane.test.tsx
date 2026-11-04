@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ComponentProps, ty
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider } from 'react-router'
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   IdePanelContext,
@@ -4367,10 +4367,16 @@ describe('AgentPane root control and child observation', () => {
     }))
   }
 
-  it('navigates to the interaction source in the same pane and keeps the hidden root mounted', async () => {
-    // 根面板聚合后代审批：来源标识与代理名来自执行树；点击来源在当前 pane 查看子代理，
-    // 根层隐藏为 inert 但保持挂载，草稿随返回原地保留。
+  it('navigates the ownership source to its product page with the execution root', async () => {
+    // 归属显示来自会话归属 SPI：只显示“类型 · 标题”，点击打开产品页面并携带执行根 thread。
+    // 审批身份仍写在原始调用上：来源导航不提交任何决策，也不改写 pane 绑定目标。
     const user = userEvent.setup()
+    const locations: string[] = []
+    function LocationProbe() {
+      const location = useLocation()
+      locations.push(`${location.pathname}${location.search}`)
+      return null
+    }
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
       treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', false),
@@ -4382,62 +4388,42 @@ describe('AgentPane root control and child observation', () => {
       interactionPage([approvalInteraction(CHILD_THREAD_ID)]),
     )
     bindPaneToRoot()
-    renderPane({ kind: 'CHAT', id: CHAT_ID })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <LocationProbe />
+          <TestAgentPane
+            owner={{ kind: 'CHAT', id: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            focused
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
 
-    const source = await screen.findByRole('link', { name: /worker/ })
-    expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
-    expect(source).toHaveAttribute('title', `查看 subagent ${CHILD_THREAD_ID} 的执行`)
-    expect(source).toHaveTextContent(`查看 subagent ${CHILD_THREAD_ID} 的执行`)
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'root draft kept')
-    const unmountsBeforeObservation = controlMounts.unmount.mock.calls.length
-    const targetBeforeObservation = localStorage.getItem(
+    const targetBeforeNavigation = localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )
+    const source = await screen.findByRole('button', { name: 'Chat' })
 
     await user.click(source)
 
-    const back = await screen.findByRole('button', { name: '回到父 agent' })
-    expect(screen.getByText('只读查看')).toBeInTheDocument()
-    // 返回入口在查看层顶部标题区（名称/只读标识旁），不是 transcript 与 widget 之后的底部控制区。
-    expect(back.closest('.agent-pane-thread-heading')).not.toBeNull()
-    const paneSection = back.closest('.chat-pane') as HTMLElement
-    const childLayer = paneSection.querySelector('.chat-pane-layer:not([hidden])') as HTMLElement
-    const childTranscript = childLayer.querySelector('[role="log"]') as HTMLElement
-    // 标题区是主列的首个元素（顶部非滚动区），transcript 在其之后。
-    expect(paneSection.firstElementChild)
-      .toBe(back.closest('.agent-pane-thread-heading'))
-    expect(
-      back.compareDocumentPosition(childTranscript) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
-    expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
-    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID, expect.anything())
-
-    const layers = document.querySelectorAll('.chat-pane-layer')
-    expect(layers).toHaveLength(2)
-    expect(layers[0]).toHaveAttribute('hidden')
-    expect(layers[0]).toHaveAttribute('inert')
-    // 意图 B（只观察）：pane 绑定目标不变、根控制面不卸载，只是同一 pane 内多了一层。
-    expect(controlMounts.unmount).toHaveBeenCalledTimes(unmountsBeforeObservation)
+    await waitFor(() => expect(locations.at(-1)).toBe(`/chats/${CHAT_ID}?thread=${THREAD_ID}`))
+    expect(harnessService.decideApproval).not.toHaveBeenCalled()
     expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`))
-      .toBe(targetBeforeObservation)
-    // 隐藏的根层仍是同一个挂载实例：草稿没有被重建或丢弃。
-    expect(composer.isConnected).toBe(true)
-    // 隐藏的根层不持有焦点（也不被其他层抢走）：停止加载后焦点不在隐藏子树内。
-    expect(document.activeElement).toBe(document.body)
-
-    await user.click(back)
-
-    expect(layers[0]).not.toHaveAttribute('hidden')
+      .toBe(targetBeforeNavigation)
+    // 产品页导航不影响 pane 自身挂载：草稿仍在同一 Composer 里。
     expect(composer).toHaveTextContent('root draft kept')
-    // 返回后焦点落在重新激活的根层内（根 Composer 激活时会主动恢复自身焦点，
-    // 优先级高于触发点恢复），不停留在隐藏层，也不丢到 body。
-    expect(layers[0].contains(document.activeElement)).toBe(true)
-    expect(document.activeElement).not.toBe(document.body)
   })
 
-  it('keeps the root interaction source label unchanged', async () => {
-    // 根自身的交互仍用查看来源，而非子代理执行链接文案。
+  it('shows the ownership label on the root interaction source', async () => {
+    // 根交互的来源同样只显示归属“类型 · 标题”，不再用来源 Thread 名称作为跳转文案。
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
     ])
@@ -4448,9 +4434,9 @@ describe('AgentPane root control and child observation', () => {
     bindPaneToRoot()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    const source = await screen.findByRole('link', { name: 'root thread' })
+    const source = await screen.findByRole('button', { name: 'Chat' })
     expect(source).toHaveAttribute('title', '查看来源')
-    expect(source).toHaveAttribute('href', `/threads/${THREAD_ID}`)
+    expect(screen.queryByRole('link', { name: 'root thread' })).toBeNull()
   })
 
   it('keeps the covered root composer inert, unfocusable and out of global shortcuts', async () => {
@@ -4459,7 +4445,7 @@ describe('AgentPane root control and child observation', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
-      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
     ])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
       async (threadId: string) => snapshotForThread(threadId),
@@ -4470,6 +4456,7 @@ describe('AgentPane root control and child observation', () => {
     bindPaneToRoot()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
+    // 观察入口是活跃执行树行；交互来源只承担产品归属导航。
     const source = await screen.findByRole('link', { name: /worker/ })
     await screen.findByLabelText('给 AI 发送消息')
     await user.click(source)
@@ -4554,6 +4541,7 @@ describe('AgentPane root control and child observation', () => {
       .toBeGreaterThan(callsBeforeRetry))
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
+
 })
 
 describe('AgentPane root control mounting', () => {
@@ -4970,8 +4958,8 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(composer).toHaveTextContent('排队中的输入'))
   })
 
-  it('shows the original source UUID when its tree name is missing', async () => {
-    // 无来源名称仍展示原始跳转身份，标签与 href 一致且不借用根名称。
+  it('never falls back to the source thread identity for the ownership label', async () => {
+    // 归属缺失标题时只显示类型；来源 Thread 的 UUID 与名称都不冒充归属。
     const unknownSourceId = '44444444-5555-4666-8777-888888888888'
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
@@ -4984,11 +4972,10 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    const label = `查看 subagent ${unknownSourceId} 的执行`
-    const source = await screen.findByRole('link', { name: label })
-    expect(source).toHaveAttribute('title', label)
-    expect(source).toHaveTextContent(label)
-    expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
+    const source = await screen.findByRole('button', { name: 'Chat' })
+    expect(source).toHaveTextContent('Chat')
+    expect(screen.queryByText(unknownSourceId)).toBeNull()
+    expect(document.querySelector(`a[href="/threads/${unknownSourceId}"]`)).toBeNull()
   })
 
   it('keeps the full root interaction pagination reachable through load more', async () => {
@@ -5010,10 +4997,11 @@ describe('AgentPane root control mounting', () => {
     const user = userEvent.setup()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    await screen.findByRole('link', { name: /second worker/ })
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Chat' })).toHaveLength(1))
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
     // 第二页追加而不是替换，翻页入口随之消失。
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Chat' })).toHaveLength(2))
     await waitFor(() => expect(screen.getAllByRole('button', { name: '允许' })).toHaveLength(2))
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
     expect(vi.mocked(interactionService.listInteractions).mock.calls[1]?.[1]).toBe('cursor-2')

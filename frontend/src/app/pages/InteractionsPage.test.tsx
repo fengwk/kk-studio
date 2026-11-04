@@ -115,8 +115,9 @@ describe('InteractionsPage', () => {
 
     render(<InteractionsPage />, { wrapper })
 
-    expect(await screen.findByText('reporter')).toBeInTheDocument()
-    expect(screen.getByText('reporter').closest('button')).toBeNull()
+    // 归属固定为“类型 · 标题”；AGENT_TASK 没有产品页面，只显示文本。
+    expect(await screen.findByText('Agent 任务 · reporter')).toBeInTheDocument()
+    expect(screen.getByText('Agent 任务 · reporter').closest('button')).toBeNull()
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(mockedNavigate).not.toHaveBeenCalled()
   })
@@ -211,12 +212,12 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('写代码')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
-    const chatSourceBtn = screen.getByRole('button', { name: '产品对话' })
+    const chatSourceBtn = screen.getByRole('button', { name: 'Chat · 产品对话' })
     fireEvent.click(chatSourceBtn)
     expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=root-th-1')
 
     // 服务器提供的查询参数与片段必须保留，旧 thread 则替换为执行根。
-    const issueSourceBtn = screen.getByRole('button', { name: '修复缺陷' })
+    const issueSourceBtn = screen.getByRole('button', { name: 'Issue · 修复缺陷' })
     fireEvent.click(issueSourceBtn)
     await waitFor(() => {
       expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2#details')
@@ -281,7 +282,7 @@ describe('InteractionsPage', () => {
       freshnessAt: null,
     })
     render(<InteractionsPage />, { wrapper })
-    const source = await screen.findByText('来源')
+    const source = await screen.findByText('Issue · 来源')
     expect(source.closest('button')).toBeNull()
     fireEvent.click(source)
     expect(mockedNavigate).not.toHaveBeenCalled()

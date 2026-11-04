@@ -163,30 +163,6 @@
   flex-wrap: wrap;
 }
 
-.interaction-source-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--font-size-sm);
-  color: var(--fg-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-  text-decoration: none;
-}
-
-.interaction-source-link:hover {
-  background: var(--surface-hover);
-  color: var(--fg);
-}
-
-.interaction-source-link:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--focus-ring);
-}
-
 .interaction-task-source {
   display: inline-flex;
   align-items: center;
@@ -194,13 +170,6 @@
   font-size: var(--font-size-sm);
   color: var(--fg-muted);
   padding: 2px 6px;
-}
-
-.interaction-agent-badge {
-  font-size: var(--font-size-xs);
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: var(--surface-hover);
 }
 
 /* Questionnaire Card */
