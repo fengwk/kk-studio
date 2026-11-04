@@ -1,9 +1,5 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.dropNonTextualValue;
-import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.nonBlank;
-import static fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesReplayItems.nonBlankText;
-
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -463,7 +459,9 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
    */
   private void retainStreamedOpaqueItem(JsonNode node) {
     JsonNode item = node.get("item");
-    if (item == null || !item.isObject() || !isOpaqueReplayItem(item)) {
+    if (item == null
+        || !item.isObject()
+        || !OpenAiResponsesReplayBuilder.isOpaqueReplayItem(item)) {
       return;
     }
     String key = opaqueItemSlotKey(node, item);
@@ -811,7 +809,13 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
 
     ProviderReplayState replayState = null;
     if (canReplay) {
-      ArrayNode replayOutputArray = buildReplayOutputArray();
+      ArrayNode replayOutputArray =
+          OpenAiResponsesReplayBuilder.build(
+              rawOutputItems,
+              explicitTerminalOutputProcessed,
+              thinkingBuffer.toString(),
+              textBuffer.toString(),
+              replayTools());
       // 只含空 reasoning 占位符的 replay 不承载任何原生推理，冻结它没有语义价值，交由下一轮语义编码。
       if (!replayOutputArray.isEmpty()
           && !OpenAiResponsesReplayItems.isEmptyPlaceholderOnly(replayOutputArray)) {
@@ -855,131 +859,21 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     return finish().replayState();
   }
 
-  /**
-   * 组装 stateless replay 的 output 数组。
-   *
-   * <p>官方已知 item（{@code message}/{@code reasoning}/{@code function_call}）以终态/{@code
-   * output_item.done} 的权威 item 为唯一事实来源：整体深拷贝后只修复那些「不修复就会让下一轮必然失败或丢语义」的字段（assistant role、
-   * 可读文本、可校验的函数调用标识与参数），其余字段（{@code id}/{@code status}/注解/日志概率及未来新增成员）一律 原样保留。未知官方 item
-   * 继续作为不透明事实整体透传。
-   */
-  private ArrayNode buildReplayOutputArray() {
-    ArrayNode array = NODES.arrayNode();
-    for (JsonNode item : rawOutputItems) {
-      if (!item.isObject()) {
-        continue;
-      }
-      String type = item.path("type").asString("");
-      switch (type) {
-        case "message" -> array.add(OpenAiResponsesReplayItems.normalizeMessage(item));
-        case "reasoning" -> array.add(OpenAiResponsesReplayItems.normalizeReasoning(item));
-        case "function_call" -> array.add(normalizeReplayFunctionCallItem(item));
-        default -> {
-          // 未知但可信的官方 output item（web_search_call / file_search_call / image_generation_call /
-          // 自定义工具 item 等）：保留为不透明事实供下一轮 stateless replay，绝不再静默丢弃。
-          if (isOpaqueReplayItem(item)) {
-            array.add(item.deepCopy());
-          }
-        }
-      }
+  /** 把流内工具状态冻结为 replay 重建所需的不可变快照。 */
+  private List<OpenAiResponsesReplayBuilder.ReplayTool> replayTools() {
+    List<OpenAiResponsesReplayBuilder.ReplayTool> tools = new ArrayList<>(toolsById.size());
+    for (Map.Entry<String, WireToolCall> entry : toolsById.entrySet()) {
+      WireToolCall tool = entry.getValue();
+      tools.add(
+          new OpenAiResponsesReplayBuilder.ReplayTool(
+              entry.getKey(),
+              tool.id,
+              tool.callId,
+              tool.name,
+              tool.argumentsBuffer.toString(),
+              tool.argumentsTextual));
     }
-
-    // 若显式处理了 terminal output 且 rawOutputItems 为空（例如 output: []），
-    // 则表示终端权威输出清空了所有内容，不得回退合成草稿 replay。
-    if (explicitTerminalOutputProcessed && rawOutputItems.isEmpty()) {
-      return array;
-    }
-
-    // 若 rawOutputItems 为空但有文本或工具调用，合成标准的 replay output
-    if (array.isEmpty()) {
-      if (!thinkingBuffer.isEmpty()) {
-        ObjectNode reasoning = array.addObject();
-        reasoning.put("type", "reasoning");
-        ArrayNode sum = reasoning.putArray("summary");
-        ObjectNode s = sum.addObject();
-        s.put("type", "summary_text");
-        s.put("text", thinkingBuffer.toString());
-      }
-      if (!textBuffer.isEmpty()) {
-        ObjectNode msg = array.addObject();
-        msg.put("type", "message");
-        msg.put("role", "assistant");
-        ArrayNode c = msg.putArray("content");
-        ObjectNode t = c.addObject();
-        t.put("type", "output_text");
-        t.put("text", textBuffer.toString());
-      }
-      for (WireToolCall tool : toolsById.values()) {
-        String effectiveCallId =
-            (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
-        String args = tool.argumentsBuffer.toString();
-        if (effectiveCallId == null
-            || effectiveCallId.isBlank()
-            || tool.name == null
-            || tool.name.isBlank()
-            || args.isBlank()
-            || ProviderJsonHelper.tryParseJsonObject(args) == null) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
-        }
-        ObjectNode fc = array.addObject();
-        fc.put("type", "function_call");
-        fc.put("call_id", effectiveCallId);
-        fc.put("name", tool.name);
-        fc.put("arguments", args);
-      }
-    }
-
-    return array;
-  }
-
-  /**
-   * 归一化 replay 中的 function_call item：深拷贝权威 item，只用流式工具状态补齐 durable 语义必需的 {@code call_id}/{@code
-   * name}/{@code arguments}，其余 {@code id}/{@code status} 与未来成员原样保留。
-   *
-   * <p>缺失或畸形的函数调用标识与参数无法被下一轮严格校验承载，因此与历史行为一致地抛出 {@code INVALID_RESPONSE}，绝不合成 {@code {}} 或伪造工具身份。
-   */
-  private ObjectNode normalizeReplayFunctionCallItem(JsonNode item) {
-    String itemId = nonBlankText(item.get("id"));
-    String callId = nonBlankText(item.get("call_id"));
-    WireToolCall tool = findToolCall(itemId, callId);
-
-    String effectiveCallId = callId != null ? callId : itemId;
-    if (effectiveCallId == null && tool != null) {
-      effectiveCallId = nonBlank(tool.callId) != null ? tool.callId : tool.id;
-    }
-
-    String name = nonBlankText(item.get("name"));
-    if (name == null && tool != null) {
-      name = nonBlank(tool.name);
-    }
-
-    String args = null;
-    JsonNode argumentsNode = item.get("arguments");
-    if (argumentsNode != null && argumentsNode.isString()) {
-      args = argumentsNode.stringValue();
-    } else if (tool != null && tool.argumentsTextual && tool.argumentsBuffer.length() > 0) {
-      args = tool.argumentsBuffer.toString();
-    }
-
-    if (effectiveCallId == null
-        || effectiveCallId.isBlank()
-        || name == null
-        || name.isBlank()
-        || args == null
-        || args.isBlank()
-        || ProviderJsonHelper.tryParseJsonObject(args) == null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
-    }
-
-    ObjectNode fc = (ObjectNode) item.deepCopy();
-    fc.put("type", "function_call");
-    fc.put("call_id", effectiveCallId);
-    fc.put("name", name);
-    fc.put("arguments", args);
-    dropNonTextualValue(fc, "id");
-    return fc;
+    return tools;
   }
 
   private void appendMessageContent(JsonNode content) {
@@ -1016,15 +910,5 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     return "message".equals(itemType)
         || "reasoning".equals(itemType)
         || "function_call".equals(itemType);
-  }
-
-  /**
-   * 判断未知 type 的 output item 是否可作为不透明事实冻结。
-   *
-   * <p>只有具备非空白字符串 {@code type} 的对象才是可回放的协议 item；冻结缺少 type 的碎片只会让下一轮编码必然失败，因此这类碎片不进入 replay。
-   */
-  private static boolean isOpaqueReplayItem(JsonNode item) {
-    JsonNode typeNode = item.get("type");
-    return typeNode != null && typeNode.isString() && !typeNode.stringValue().isBlank();
   }
 }
