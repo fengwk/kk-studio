@@ -1,8 +1,12 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static org.mockito.Mockito.mock;
+
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 
 /**
  * 存储集成测试的 S3 假件：以内存对象与记录式预签名替换真实 S3 客户端， 使 reserve/complete/expiry/delete 全链路在 PostgreSQL 上以真实事务运行。
@@ -25,5 +29,11 @@ public class StorageS3TestConfiguration {
   @Primary
   public S3PresignService storageS3TestPresignService() {
     return new RecordingS3PresignService();
+  }
+
+  /** 平台测试组合根本身不提供 HarnessRuntime；存储链路不使用线程等待投影，占位满足 EnvironmentWaitProjectionService 的装配依赖。 */
+  @Bean
+  public HarnessRuntime storageTestHarnessRuntime() {
+    return mock(HarnessRuntime.class);
   }
 }
