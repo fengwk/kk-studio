@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { chatService } from '@/features/chat/chat-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { interactionService } from '@/shared/api/interaction-service'
 
 // 保留真实事件管理器及 IDE 身份契约，仅替换 WebSocket，避免连接真实服务。
@@ -27,8 +27,8 @@ vi.mock('@/shared/app-events', async (importOriginal) => {
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },
 }))
-vi.mock('@/shared/api/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),

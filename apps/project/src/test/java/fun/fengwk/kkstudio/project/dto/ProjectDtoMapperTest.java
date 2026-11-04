@@ -365,7 +365,7 @@ class ProjectDtoMapperTest {
     // 测试意图：验证 IssueAgentThread 映射为 IssueAgentThreadDTO
     UUID issueId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
-    IssueAgentThread thread = new IssueAgentThread(issueId, "coder", threadId);
+    IssueAgentThread thread = new IssueAgentThread(issueId, "coder", UUID.randomUUID(), threadId);
 
     IssueAgentThreadDTO dto = mapper.toDto(thread);
     assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());

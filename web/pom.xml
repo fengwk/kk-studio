@@ -66,11 +66,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-infra</artifactId>
+            <artifactId>kk-studio-canvas-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-core</artifactId>
+            <artifactId>kk-studio-canvas-spi</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>

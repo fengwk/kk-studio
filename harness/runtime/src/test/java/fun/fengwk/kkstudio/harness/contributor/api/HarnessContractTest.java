@@ -198,7 +198,7 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
   }
 
-  /** 验证 ToolExecutionContext 的会话/执行根/冻结能力快照与完整非空校验。 */
+  /** 验证 ToolExecutionContext 的会话/执行根/assistant 入口/冻结能力快照与完整非空校验。 */
   @Test
   void toolExecutionContextValidatesNonNull() {
     UUID invocationId = UUID.randomUUID();
@@ -206,6 +206,7 @@ class HarnessContractTest {
     UUID sessionId = UUID.randomUUID();
     UUID rootThreadId = UUID.randomUUID();
     UUID rootSessionId = UUID.randomUUID();
+    UUID assistantEntryId = UUID.randomUUID();
     Instant now = Instant.now();
     BranchView view = new DummyBranchView();
     TurnMediaCapabilities capabilities = TurnMediaCapabilities.NONE;
@@ -218,6 +219,7 @@ class HarnessContractTest {
             sessionId,
             rootThreadId,
             rootSessionId,
+            assistantEntryId,
             now,
             capabilities,
             view,
@@ -227,6 +229,7 @@ class HarnessContractTest {
     assertEquals(sessionId, ctxWithEnv.sessionId());
     assertEquals(rootThreadId, ctxWithEnv.rootThreadId());
     assertEquals(rootSessionId, ctxWithEnv.rootSessionId());
+    assertEquals(assistantEntryId, ctxWithEnv.assistantEntryId());
     assertEquals(now, ctxWithEnv.executedAt());
     assertEquals(capabilities, ctxWithEnv.mediaCapabilities());
     assertEquals(view, ctxWithEnv.branch());
@@ -240,6 +243,7 @@ class HarnessContractTest {
             sessionId,
             rootThreadId,
             rootSessionId,
+            assistantEntryId,
             now,
             capabilities,
             view,
@@ -256,6 +260,7 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,
@@ -269,6 +274,7 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,
@@ -282,6 +288,7 @@ class HarnessContractTest {
                 null,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,
@@ -295,6 +302,7 @@ class HarnessContractTest {
                 sessionId,
                 null,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,
@@ -308,6 +316,7 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 null,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,
@@ -322,6 +331,7 @@ class HarnessContractTest {
                 rootThreadId,
                 rootSessionId,
                 null,
+                now,
                 capabilities,
                 view,
                 Optional.empty()));
@@ -334,6 +344,21 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
+                null,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                assistantEntryId,
                 now,
                 null,
                 view,
@@ -347,6 +372,7 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 null,
@@ -360,6 +386,7 @@ class HarnessContractTest {
                 sessionId,
                 rootThreadId,
                 rootSessionId,
+                assistantEntryId,
                 now,
                 capabilities,
                 view,

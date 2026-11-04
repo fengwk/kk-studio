@@ -12,7 +12,11 @@ import {
   storePendingAction,
   type PendingIssueAction,
 } from './pending-action-sidecar'
-import type { IssueDetailDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
+import type {
+  IssueDetailDTO,
+  ProjectIssueSnapshotDTO,
+  ProjectSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: () => ({
@@ -25,7 +29,7 @@ vi.mock('@/shared/app-events', () => ({
 
 let capturedPaneProps: Record<string, unknown> | undefined
 
-vi.mock('@/features/chat/runtime/AgentPane', () => ({
+vi.mock('@/features/thread/runtime/AgentPane', () => ({
   AgentPane: (props: Record<string, unknown>) => {
     capturedPaneProps = props
     return (
@@ -179,18 +183,12 @@ describe('ProjectDetailPage', () => {
     blockIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     recoverIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     reopenIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    resolveUnknown: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    pauseIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    resumeIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     stopIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     appendIssueActivity: vi.fn(),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn(),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),
-    archiveIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    unarchiveIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     ...overrides,
   })
 
@@ -742,37 +740,32 @@ describe('ProjectDetailPage', () => {
     })
   })
 
-  it.each(['人工核查', '阻塞'])('opens the selected issue from the %s card action', async (action) => {
-    // 两张卡片各自定位，快捷操作只能打开自身详情。
-    const inProgressIssue = {
-      ...mockSnapshot.issues[0].issue,
-      state: 'IN_PROGRESS',
-    }
-    const unknownRunIssue = {
-      ...mockSnapshot.issues[1].issue,
-      id: 'iss-unknown',
-      title: 'Unknown Run Issue',
-      state: 'INIT',
-    }
+  it.each([
+    { action: '阻塞', index: 0 },
+    { action: '恢复', index: 1 },
+  ])('handles the $action action on the selected card', async ({ action, index }) => {
+    // 阻塞打开详情，恢复直接调用 API；两者都应作用于选中的卡片。
+    const issues: ProjectIssueSnapshotDTO[] = [
+      {
+        issue: { ...mockSnapshot.issues[0].issue, state: 'IN_PROGRESS' },
+        currentOrLatestRun: null,
+      },
+      {
+        issue: {
+          ...mockSnapshot.issues[1].issue,
+          id: 'iss-blocked',
+          title: 'Blocked Issue',
+          state: 'BLOCKED',
+          blockedFromState: 'INIT',
+          blockReason: 'Waiting for the scope decision',
+        },
+        currentOrLatestRun: null,
+      },
+    ]
     const customSnapshot: ProjectSnapshotDTO = {
       ...mockSnapshot,
-      issues: [
-        { issue: inProgressIssue, currentOrLatestRun: null },
-        {
-          issue: unknownRunIssue,
-          currentOrLatestRun: {
-            id: 'run-unk',
-            issueId: unknownRunIssue.id,
-            ordinal: '1',
-            state: 'INIT',
-            status: 'UNKNOWN',
-            agentName: 'Coder',
-            startedAt: '2026-10-01T00:00:00Z',
-            endedAt: null,
-          },
-        },
-      ],
-      referencedStateCodes: ['INIT', 'IN_PROGRESS'],
+      issues,
+      referencedStateCodes: ['INIT', 'IN_PROGRESS', 'BLOCKED'],
     } as ProjectSnapshotDTO
 
     const api = createMockApi({
@@ -782,13 +775,25 @@ describe('ProjectDetailPage', () => {
     const { getNav } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
     await screen.findByText('Awesome Platform')
 
-    const issue = action === '人工核查' ? unknownRunIssue : inProgressIssue
-    // 快捷操作与标题导航是同一张卡内的平级按钮：按卡片容器定位，动作只能打开自身详情
+    // 快捷操作与标题导航平级，按卡片容器定位。
+    const issue = issues[index].issue
     const card = screen.getByTestId(`issue-card-${issue.id}`)
+    expect(within(card).queryByRole('button', { name: '人工核查' })).toBeNull()
     fireEvent.click(within(card).getByRole('button', { name: action }))
-    await waitFor(() => {
-      expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(issue.id)
-    })
+    if (action === '阻塞') {
+      await waitFor(() => {
+        expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(issue.id)
+      })
+      expect(api.recoverIssue).not.toHaveBeenCalled()
+    } else {
+      await waitFor(() => {
+        expect(api.recoverIssue).toHaveBeenCalledWith(issue.id, {
+          expectedVersion: issue.version,
+          requestKey: expect.any(String),
+        })
+      })
+      expect(new URLSearchParams(getNav().location.search).get('issue')).toBeNull()
+    }
   })
 
   it('unarchives project when project is already archived', async () => {

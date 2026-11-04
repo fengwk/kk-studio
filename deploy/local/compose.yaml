@@ -85,13 +85,8 @@ services:
       MINIO_ROOT_USER: ${KK_STUDIO_S3_ACCESS_KEY:-kk-studio}
       MINIO_ROOT_PASSWORD: ${KK_STUDIO_S3_SECRET_KEY:-kk-studio}
       MINIO_BUCKET: ${KK_STUDIO_S3_BUCKET:-kk-studio}
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
-        mc anonymous set none "local/$${MINIO_BUCKET}"
-        mc stat "local/$${MINIO_BUCKET}"
+    # The command ships inside the image (../dependencies/minio-client/init-bucket.sh); no bind mount.
+    entrypoint: ["/bin/sh", "/usr/local/bin/init-bucket.sh"]
 
   app:
     build:

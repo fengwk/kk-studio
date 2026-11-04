@@ -24,7 +24,7 @@ cases:
     yaml: |
       agents:
         - name: ' a '
-          model: m
+          execution: {driver: builtin, settings: {modelName: m, variant: null}}
           config: {}
   - path: environments[0].name
     yaml: |

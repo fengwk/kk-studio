@@ -41,9 +41,8 @@ class BuiltinAgentInitializerTest {
     AgentDefinition created = captor.getValue();
     assertEquals(BuiltinAgentDefinitions.COMPACTION_NAME, created.name());
     assertEquals(AgentDefinitionType.BUILTIN, created.type());
-    // 独立未配置模型：model 与 variant 同为 null，不选首个 model，也不继承父配置。
-    assertNull(created.modelName());
-    assertNull(created.variant());
+    // 独立未配置 execution，不选首个 model，也不继承父配置。
+    assertNull(created.execution());
     assertEquals(BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), created.systemPrompt());
     AgentDefinitionConfigDTO config = codec.decode(created.configJson());
     assertTrue(config.getTools().isEmpty());

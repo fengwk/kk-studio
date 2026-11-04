@@ -461,9 +461,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
-    // 每次接受显式提交 5 条命令（SET_AGENT/SET_MODEL/SET_ENVIRONMENT/SET_CONTRIBUTOR_STATE/CUSTOM_MESSAGE）与 1 条
-    // root Join。
-    assertEquals(5L, count("select count(*) from harness_thread_command"));
+    // 每次接受显式提交 4 条命令（SET_AGENT/SET_EXECUTION/SET_ENVIRONMENT/CUSTOM_MESSAGE）与 1 条 root Join。
+    assertEquals(4L, count("select count(*) from harness_thread_command"));
     assertEquals(1L, count("select count(*) from harness_thread_join"));
   }
 
@@ -568,7 +567,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             "control:" + completeKey));
   }
 
-  /** 新请求键仍走版本 CAS：陈旧版本不能完成、取消、失败或标记不明。 */
+  /** 新请求键仍走版本 CAS：陈旧版本不能完成、取消或失败。 */
   @Test
   void runTerminalRequestsRejectStaleVersion() {
     String agent = createAgent();
@@ -588,9 +587,6 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectVersionConflictException.class,
         () -> issueRunService.failRun(run.getId(), stale, key("fail"), end, "失败"));
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> issueRunService.markUnknown(run.getId(), stale, key("unknown"), end, "不明"));
     assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
   }
 
@@ -655,7 +651,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
   }
 
-  /** 失败与不明收尾允许空区间（接受后还没有任何产出就要能安全停止），并与对应暂停门禁同事务写入。 */
+  /** 失败允许空区间（接受后还没有任何产出就要能安全停止），并与 ERROR 暂停门禁同事务写入；恢复必须显式。 */
   @Test
   void terminalFailureAllowsEmptyIntervalAndWritesPauseGate() {
     String agent = createAgent();
@@ -670,28 +666,25 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             failedRun.getVersion(),
             key("fail"),
             failedRun.getStartEntryId(),
-            "provider exploded");
+            "Run stopped with in-flight side effects; outcome unknown");
 
     assertEquals(IssueRunStatus.FAILED, failed.getStatus());
-    assertEquals("provider exploded", failed.getError());
+    assertEquals("Run stopped with in-flight side effects; outcome unknown", failed.getError());
     assertNotNull(failed.getEndedAt());
     assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
 
-    Issue afterFail = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
-    IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    UUID unknownEnd = appendHistoryEntry(unknownRun.getThreadId());
-    IssueRun unknown =
-        issueRunService.markUnknown(
-            unknownRun.getId(),
-            unknownRun.getVersion(),
-            key("unknown"),
-            unknownEnd,
-            "side effect lost");
+    // 门禁关闭期间不自动重试：新 Run 被拒绝，必须由显式 resume 解除。
+    assertThrows(
+        ProjectValidationException.class,
+        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
 
-    assertEquals(IssueRunStatus.UNKNOWN, unknown.getStatus());
-    assertEquals("side effect lost", unknown.getError());
-    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
+    Issue afterFail = issueEditingService.getIssue(issue.getId());
+    Issue resumed =
+        issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
+    assertNull(resumed.getPauseReason());
+    assertEquals(
+        IssueRunStatus.RUNNING,
+        issueRunService.acceptRun(issue.getId(), key("accept")).getStatus());
   }
 
   /** 人工停止收尾为 CANCELLED 并保留 USER 暂停门禁，避免轮询立即启动新 Run。 */
@@ -757,8 +750,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         waitingIssue.getId(),
         waitingIssue.getVersion(),
         key("pause"),
-        PauseReason.UNKNOWN,
-        "副作用不明");
+        PauseReason.ERROR,
+        "Run stopped with in-flight side effects; outcome unknown");
 
     assertThrows(
         ProjectValidationException.class,
@@ -767,7 +760,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun unchanged = issueRunService.getRun(waiting.getId());
     assertEquals(IssueRunStatus.WAITING, unchanged.getStatus());
     assertNull(unchanged.getActiveSince());
-    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertEquals(1L, budgetUsed(issue.getId()));
   }
 

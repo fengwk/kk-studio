@@ -249,6 +249,7 @@ class GoalFeatureTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             UUID.randomUUID(),
+            UUID.randomUUID(),
             executedAt,
             TurnMediaCapabilities.NONE,
             branch,

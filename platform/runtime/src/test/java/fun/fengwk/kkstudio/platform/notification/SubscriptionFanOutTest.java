@@ -19,9 +19,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
- * SubscriptionFanOut：与业务领域无关的组合式订阅容器。
+ * SubscriptionFanOut：平台内共享的组合式订阅容器。
  *
- * <p>覆盖 Harness 失效源与 web 失效 hub 共同依赖的语义：UUID 定点与全局注册/注销、定点投递与 broadcast 的投递集合、注销幂等、订阅与注销竞争、 单个
+ * <p>覆盖每个 version/失效 Hub 共同依赖的语义：UUID 定点与全局注册/注销、定点投递与 broadcast 的投递集合、注销幂等、订阅与注销竞争、 单个
  * RuntimeException 隔离而 Error 不被吞掉。
  */
 class SubscriptionFanOutTest {

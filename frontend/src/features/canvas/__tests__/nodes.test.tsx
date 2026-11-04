@@ -8,7 +8,7 @@ import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { ResourceFlowNodeData } from '@/features/canvas/types'
 import { setLocale } from '@/shared/i18n'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(async () => ({
     method: 'GET',
     url: 'https://s3.example/original',

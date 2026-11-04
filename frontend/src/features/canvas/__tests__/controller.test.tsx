@@ -17,7 +17,7 @@ import {
   listCanvasFunctions,
   postCanvasCommands,
   startCanvasFunctionRun,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 import { ApiError } from '@/shared/api/client'
 import { storageService } from '@/shared/api/storage-service'
 import type {
@@ -88,7 +88,7 @@ vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
 }))
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   postCanvasCommands: vi.fn(),
   cancelCanvasFunctionRun: vi.fn(),
   getCanvas: vi.fn(),
@@ -108,8 +108,8 @@ vi.mock('@/shared/api/storage-service', () => ({
   },
 }))
 
-vi.mock('@/features/chat/composer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/chat/composer')>()
+vi.mock('@/shared/lib/upload-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/lib/upload-file')>()
   return { ...actual, createWorkerHasher: () => async () => FAKE_SHA256 }
 })
 

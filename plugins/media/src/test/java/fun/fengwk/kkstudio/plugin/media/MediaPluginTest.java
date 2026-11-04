@@ -71,7 +71,7 @@ class MediaPluginTest {
   void defaultConfigurationProducesEnabledInstance() {
     PluginInstance instance =
         plugin.configure(PluginConfig.initial(plugin.configurationSchema()), CONTEXT);
-    assertEquals(1, instance.canvasAdapters().size(), "默认必须启用并贡献函数");
+    assertEquals(1, instance.contributions(CanvasFunctionAdapter.class).size(), "默认必须启用并贡献函数");
     instance.close();
   }
 
@@ -81,8 +81,9 @@ class MediaPluginTest {
     PluginInstance instance = plugin.configure(new PluginConfig(0, "{\"enabled\":true}"), CONTEXT);
 
     assertTrue(instance.harnessContributors().isEmpty());
-    List<CanvasFunctionAdapter> adapters = instance.canvasAdapters();
+    List<CanvasFunctionAdapter> adapters = instance.contributions(CanvasFunctionAdapter.class);
     assertEquals(1, adapters.size());
+    assertEquals(List.copyOf(adapters), instance.contributions(Object.class), "没有其它贡献");
     CanvasFunctionAdapter adapter = adapters.get(0);
     assertTrue(adapter instanceof MediaFunctionAdapter);
     assertEquals(
@@ -100,20 +101,20 @@ class MediaPluginTest {
   void disabledConfigurationContributesNothing() {
     PluginInstance instance = plugin.configure(new PluginConfig(0, "{\"enabled\":false}"), CONTEXT);
 
-    assertTrue(instance.canvasAdapters().isEmpty());
+    assertTrue(instance.contributions(CanvasFunctionAdapter.class).isEmpty());
     assertTrue(instance.harnessContributors().isEmpty());
     verifyNoInteractions(CONTEXT);
     instance.close();
   }
 
-  /** 冻结的贡献列表不可变，close 没有资源可释放且可重复调用。 */
+  /** 冻结的贡献读取结果不可变，close 没有资源可释放且可重复调用。 */
   @Test
   void contributionsAreImmutableAndCloseIsIdempotent() {
     PluginInstance instance = plugin.configure(new PluginConfig(0, "{\"enabled\":true}"), CONTEXT);
 
-    assertThrows(UnsupportedOperationException.class, () -> instance.canvasAdapters().clear());
     assertThrows(
-        UnsupportedOperationException.class, () -> instance.harnessContributors().add(null));
+        UnsupportedOperationException.class,
+        () -> instance.contributions(CanvasFunctionAdapter.class).clear());
 
     instance.close();
     instance.close();
