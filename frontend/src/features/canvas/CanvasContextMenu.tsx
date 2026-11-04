@@ -216,6 +216,7 @@ export function CanvasContextMenu({
       ) : null}
     </div>
     <ConfirmActionModal
+      className="modal-touch-target"
       modal={mode === 'confirm' ? {
         title: confirmTitle,
         description: confirmDescription,

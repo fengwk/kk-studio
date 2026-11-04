@@ -704,6 +704,7 @@ export function CanvasGenerationPanel({
         </div>
       </div>
       <ConfirmActionModal
+        className="modal-touch-target"
         modal={confirmingDiscard && localPendingState ? {
           title: t('canvas.generation.discardConfirmAria'),
           description: t('canvas.generation.discardConfirmText'),

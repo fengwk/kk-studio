@@ -10,13 +10,6 @@
   overflow-y: auto;
 }
 
-.environment-install-modal > form {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .environment-install-modal .modal-header,
 .environment-install-modal .modal-footer {
   flex-shrink: 0;
@@ -32,10 +25,6 @@
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-}
-
-.environment-install-modal .confirm-modal-description {
-  margin-bottom: 8px;
 }
 
 .environment-install-modal input::placeholder,
@@ -83,14 +72,7 @@
 }
 
 @media (max-width: 420px), (max-height: 500px) {
-  .environment-install-modal .modal-header,
-  .environment-install-modal .modal-body,
-  .environment-install-modal .modal-footer {
-    padding: 12px;
-  }
-
   .environment-install-modal .modal-footer button {
     white-space: normal;
-    min-height: 36px;
   }
 }

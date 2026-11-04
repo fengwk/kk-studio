@@ -208,6 +208,7 @@ export function PluginsTab() {
 
       {disconnectTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('plugins.disconnect'),
             description: t('plugins.disconnectConfirm', { name: disconnectTarget.name }),

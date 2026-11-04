@@ -64,3 +64,38 @@ test.describe('Layout Foundation Infrastructure Contract', () => {
     await expect(page.locator('#open-foundation-dialog')).toBeFocused()
   })
 })
+
+for (const width of [1280, 320]) {
+  test(`standard dialogs remain usable at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 600 })
+    await page.goto('/browser-tests/layout-foundation-harness.html')
+    const opener = page.getByRole('button', { name: '打开确认弹窗' })
+    await opener.click()
+    const confirm = page.getByRole('alertdialog', { name: '删除记录？' })
+    await expect(confirm.getByRole('button', { name: '取消' })).toBeFocused()
+    const box = (await confirm.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(12)
+    expect(box.x + box.width).toBeLessThanOrEqual(width - 12)
+    if (width === 320) {
+      for (const button of await confirm.getByRole('button').all()) {
+        const bounds = (await button.boundingBox())!
+        expect(bounds.width).toBeGreaterThanOrEqual(44)
+        expect(bounds.height).toBeGreaterThanOrEqual(44)
+      }
+    }
+    await page.screenshot({ path: testInfo.outputPath(`confirm-${width}.png`) })
+    await page.keyboard.press('Escape')
+    await expect(opener).toBeFocused()
+
+    await page.locator('#open-foundation-dialog').click()
+    const dialog = page.getByRole('dialog', { name: '基础交互弹窗' })
+    await page.screenshot({ path: testInfo.outputPath(`dialog-${width}.png`) })
+    await dialog.getByRole('button', { name: '模型' }).click()
+    if (width === 320) {
+      const option = (await page.getByRole('option', { name: 'Alpha' }).boundingBox())!
+      expect(option.height).toBeGreaterThanOrEqual(44)
+    }
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeVisible()
+  })
+}

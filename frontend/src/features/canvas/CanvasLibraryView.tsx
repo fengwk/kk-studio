@@ -150,7 +150,7 @@ export function CanvasLibraryView() {
 
       {createOpen ? (
         <Dialog
-          className="resource-modal-card"
+          className="resource-modal-card modal-touch-target"
           title={t('canvas.library.createTitle')}
           pending={createMutation.isPending}
           onClose={closeCreateDialog}
