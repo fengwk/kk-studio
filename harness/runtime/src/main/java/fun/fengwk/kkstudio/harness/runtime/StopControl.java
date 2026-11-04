@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -40,6 +39,7 @@ import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -82,6 +82,7 @@ final class StopControl {
           "USER_STOP_UNCERTAIN", "Stopped by user while the tool execution outcome was uncertain");
   private static final Comparator<WorkTarget> WORK_TARGET_ORDER =
       Comparator.comparingInt((WorkTarget target) -> workTypeRank(target.type()))
+          .thenComparing(target -> target.type().value())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
   private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
@@ -313,7 +314,6 @@ final class StopControl {
       if (ctx.driverState().workTarget() != null) {
         allWorkTargets.add(ctx.driverState().workTarget());
       }
-      allWorkTargets.add(new WorkTarget(WorkTargetType.AGENT, ctx.thread().id()));
       for (ToolInvocation sibling : ctx.toolSiblings()) {
         allWorkTargets.add(new WorkTarget(WorkTargetType.TOOL, sibling.id()));
       }
@@ -479,12 +479,7 @@ final class StopControl {
   }
 
   private static int workTypeRank(WorkTargetType type) {
-    return switch (type) {
-      case THREAD -> 0;
-      case MODEL -> 1;
-      case AGENT -> 2;
-      case TOOL -> 3;
-    };
+    return type.rank();
   }
 
   /**

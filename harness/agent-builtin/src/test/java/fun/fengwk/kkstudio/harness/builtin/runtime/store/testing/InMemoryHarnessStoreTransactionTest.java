@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -129,7 +130,7 @@ class InMemoryHarnessStoreTransactionTest {
                                   null,
                                   T2));
                       tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-                      tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
+                      tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, modelId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
@@ -145,7 +146,7 @@ class InMemoryHarnessStoreTransactionTest {
                     .isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).isEmpty()));
+            tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, modelId)).isEmpty()));
     assertEquals(
         baseline.turnStartEntryId(),
         store.transaction(

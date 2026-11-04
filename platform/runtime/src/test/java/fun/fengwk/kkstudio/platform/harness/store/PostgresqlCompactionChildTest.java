@@ -71,6 +71,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -78,6 +79,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
@@ -92,8 +94,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -105,6 +105,8 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
@@ -679,7 +681,7 @@ class PostgresqlCompactionChildTest {
             new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded")));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     assertEquals(ModelInvocationStatus.FAILED, findModel(childModelId).status());
-    assertFalse(hasWork(WorkTargetType.MODEL, childModelId));
+    assertFalse(hasWork(BuiltinWorkType.MODEL, childModelId));
 
     // 子结算失败回合：绝不因超限递归规划压缩子，也不残留 Work。
     processNext(child.childThreadId());
@@ -1448,7 +1450,7 @@ class PostgresqlCompactionChildTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.MODEL,
+                            BuiltinWorkType.MODEL,
                             UUID.randomUUID().toString(),
                             Duration.ofSeconds(30)))
             .orElseThrow();
@@ -1512,7 +1514,7 @@ class PostgresqlCompactionChildTest {
   }
 
   /** body 进入后保持显式 gate；Stop 的 interrupt 只计数，不释放 gate，也不重置清理超时。 */
-  private static final class HoldingModelGateway implements ModelGateway {
+  private static final class HoldingModelGateway extends SingleModelGateway {
     private final CountDownLatch entered = new CountDownLatch(1);
     private final CountDownLatch interrupted = new CountDownLatch(1);
     private final CountDownLatch release = new CountDownLatch(1);
@@ -1559,7 +1561,7 @@ class PostgresqlCompactionChildTest {
   }
 
   /** 脚本化子压缩 model gateway：按序返回排入的终态，覆盖截断 / 超限的真实 processor 路径（执行线程内联运行）。 */
-  private static final class ScriptedChildGateway implements ModelGateway {
+  private static final class ScriptedChildGateway extends SingleModelGateway {
     private final Deque<Outcome> outcomes = new ArrayDeque<>();
 
     void queue(Outcome outcome) {

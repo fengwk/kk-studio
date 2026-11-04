@@ -32,8 +32,9 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |
-| Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
+| Harness | harness_session/entry/thread/thread_command/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |
+| Platform Builtin | builtin_model_invocation | [Platform](platform.md#harness-持久化与调度) |
+| Durable Work | durable_work：全部后台调度共用的 mailbox，类型由各模块定义 | [Durable Work](work.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 
@@ -56,13 +57,16 @@ project
 
 chat --< chat_session >-- harness_session
 harness_thread >-- harness_session --< harness_entry
-harness_tool_invocation >-- harness_model_invocation >-- harness_thread
+harness_tool_invocation >-- harness_thread
+builtin_model_invocation >-- harness_thread / harness_entry
 ```
 
 Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease；Project Run 通过
 复合外键关联同 Issue 的 Thread 和同阶段预算，并绑定同 Session 的 Thread/Entry。
 父链区间、权限、workflow 合法性和输出完整性由应用验证。表、列的准确清单与约束名直接查 V1。
 约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
+V1 的 Platform Builtin 分段声明 `builtin_model_invocation`；`durable_work.target_type` 只校验
+`^[A-Z][A-Z0-9_]{0,15}$` 的格式，不枚举各模块的类型常量。
 
 ## 数据库兜底的不变量
 
@@ -82,12 +86,12 @@ INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待�
 
 Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
-Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Model/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 MODEL/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`（有环境外键），MODEL/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
+Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Driver/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，保存 `UNCONFIRMED`、三类真实退出之一或显式 `ABANDONED`，不随 Invocation 删除。`ABANDONED` 只带 `abandoned_at`，真实证据只带 `confirmed_at`；真实证据替换放弃时保留原 `abandoned_at`，两种时间都不得早于 `registered_at`，但彼此没有先后约束。仅 DRIVER/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`；REMOTE 代次必须携带 `environment_id`，DRIVER/TOOL 该列必须为 NULL。部分索引 `idx_harness_execution_exit_unconfirmed_remote` 支持按环境查询 `UNCONFIRMED` 远端代次。远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 或 DRIVER 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
 `agent_definition.execution` 为可空 JSONB：USER 必填，BUILTIN 可为 null；非空对象恰含
 `driver` 和对象类型的 `settings`。具体 settings、注册 Driver 和模型引用由应用校验，
 Builtin 模型引用通过按 driver 过滤的索引与同事务行锁保护，不依赖数据库外键。
-Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与
+Work lease 成对，环境亲和性由各模块声明。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与
 固定冷却秒数由应用 codec 校验；`agent_model_group_cooldown` 只保存 `(组, 成员模型, 成员 Variant)`
 的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。

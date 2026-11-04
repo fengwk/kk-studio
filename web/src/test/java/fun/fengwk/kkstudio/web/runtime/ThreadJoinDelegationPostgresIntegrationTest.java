@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -1173,8 +1174,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   private HarnessWorkDispatcher startTestDispatcher() {
     Duration lease = Duration.ofSeconds(30);
     HarnessWorkDispatcherConfig config =
-        new HarnessWorkDispatcherConfig(
-            lease, lease, lease, lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
+        new HarnessWorkDispatcherConfig(lease, Duration.ofMillis(20), Duration.ofMillis(20), 64);
     ExecutorService drainExecutor =
         Executors.newSingleThreadExecutor(daemonThreads("thread-join-test-drain-"));
     ExecutorService workerExecutor =
@@ -1202,7 +1202,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             Map.of(
                 WorkTargetType.THREAD,
                 threadProcessor::process,
-                WorkTargetType.MODEL,
+                BuiltinWorkType.MODEL,
                 modelProcessor::process,
                 WorkTargetType.TOOL,
                 toolProcessor::process));

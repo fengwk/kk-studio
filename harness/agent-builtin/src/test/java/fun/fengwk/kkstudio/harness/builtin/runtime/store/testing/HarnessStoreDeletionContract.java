@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
@@ -30,10 +31,12 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -69,7 +72,7 @@ public abstract class HarnessStoreDeletionContract {
     UUID modelId = id(100L);
     UUID toolId = id(101L);
     WorkTarget threadWork = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    WorkTarget modelWork = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget modelWork = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     WorkTarget toolWork = new WorkTarget(WorkTargetType.TOOL, toolId);
 
     inTransaction(
@@ -124,7 +127,7 @@ public abstract class HarnessStoreDeletionContract {
                 tx -> {
                   tx.threads().lockTree(baseline.threadId());
                   tx.threads().lock(baseline.threadId()).orElseThrow();
-                  tx.threads().delete(List.of(baseline.threadId()));
+                  tx.threads().delete(List.of(baseline.threadId()), threadDeletion(store));
                   throw new IllegalStateException("abort deletion");
                 }));
     assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isPresent());
@@ -141,7 +144,7 @@ public abstract class HarnessStoreDeletionContract {
             tx -> {
               tx.threads().lockTree(baseline.threadId());
               tx.threads().lock(baseline.threadId()).orElseThrow();
-              return tx.threads().delete(List.of(baseline.threadId()));
+              return tx.threads().delete(List.of(baseline.threadId()), threadDeletion(store));
             });
     assertEquals(1, deleted);
 
@@ -239,9 +242,11 @@ public abstract class HarnessStoreDeletionContract {
               for (UUID threadId : ordered) {
                 tx.threads().lock(threadId);
               }
-              assertThrows(IllegalArgumentException.class, () -> tx.threads().delete(ordered));
+              assertThrows(
+                  IllegalArgumentException.class,
+                  () -> tx.threads().delete(ordered, threadDeletion(store)));
               assertEquals(1, tx.joins().deleteForThreads(ordered));
-              return tx.threads().delete(ordered);
+              return tx.threads().delete(ordered, threadDeletion(store));
             });
     assertEquals(2, deleted);
 
@@ -325,5 +330,10 @@ public abstract class HarnessStoreDeletionContract {
                       JoinDelivery.NOTIFY_PARENT,
                       null));
         });
+  }
+
+  /** 经 Driver 生命周期清理 Builtin 私有行；契约测试不依赖 Runtime 的 SessionDeletion 闭包。 */
+  private static DriverThreadDeletion threadDeletion(HarnessStore store) {
+    return builtinRegistry(store, (threadId, path, preparation) -> null);
   }
 }

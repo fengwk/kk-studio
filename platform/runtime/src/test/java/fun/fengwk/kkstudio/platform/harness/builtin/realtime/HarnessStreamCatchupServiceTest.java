@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.realtime;
+package fun.fengwk.kkstudio.platform.harness.builtin.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
 
@@ -65,7 +65,7 @@ class HarnessStreamCatchupServiceTest {
   private static final int ATTEMPT = 3;
 
   private HarnessRuntime runtime;
-  private ModelProcessor modelProcessor;
+  private ModelCheckpointRequester modelProcessor;
   private ClusterNodePresence clusterNodePresence;
   private JdbcTemplate jdbcTemplate;
   private ThreadSnapshot snapshot;
@@ -76,7 +76,7 @@ class HarnessStreamCatchupServiceTest {
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    modelProcessor = mock(ModelProcessor.class);
+    modelProcessor = mock(ModelCheckpointRequester.class);
     clusterNodePresence = mock(ClusterNodePresence.class);
     jdbcTemplate = mock(JdbcTemplate.class);
     snapshot = mock(ThreadSnapshot.class);

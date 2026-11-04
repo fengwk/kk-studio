@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
@@ -209,15 +210,14 @@ public abstract class HarnessStoreWorkContract {
   }
 
   private void lockWorkOwner(HarnessStore.Transaction tx, WorkTarget target) {
-    UUID threadId =
-        switch (target.type()) {
-          case THREAD, AGENT -> target.id();
-          case MODEL -> builtin(store, tx)
-              .findModelInvocation(target.id())
-              .orElseThrow()
-              .threadId();
-          case TOOL -> tx.tools().find(target.id()).orElseThrow().threadId();
-        };
+    UUID threadId;
+    if (WorkTargetType.THREAD.equals(target.type())) {
+      threadId = target.id();
+    } else if (BuiltinWorkType.MODEL.equals(target.type())) {
+      threadId = builtin(store, tx).findModelInvocation(target.id()).orElseThrow().threadId();
+    } else {
+      threadId = tx.tools().find(target.id()).orElseThrow().threadId();
+    }
     tx.threads().lock(threadId).orElseThrow();
   }
 
@@ -234,7 +234,7 @@ public abstract class HarnessStoreWorkContract {
         () ->
             inTransaction(
                 store,
-                tx -> tx.work().request(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1)))));
+                tx -> tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, TestIds.id(1)))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -262,7 +262,7 @@ public abstract class HarnessStoreWorkContract {
                       T1));
         });
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, TestIds.id(1));
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, TestIds.id(1));
 
     assertThrows(
         IllegalStateException.class,
@@ -453,7 +453,7 @@ public abstract class HarnessStoreWorkContract {
                       T1));
         });
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, TestIds.id(1));
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, TestIds.id(1));
     inTransaction(
         store,
         tx -> {

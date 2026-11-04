@@ -1,20 +1,31 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
+import fun.fengwk.kkstudio.platform.catalog.model.GroupCooldownRepository;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -27,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 class PostgresqlGroupCooldownTest {
 
   private HarnessStore store;
+  private final GroupCooldownRepository cooldowns = new GroupCooldownRepository();
 
   /** 冷却按数据库事务时间判断：截止时间都相对测试开始时的数据库时间。 */
   private Instant now;
@@ -144,17 +156,103 @@ class PostgresqlGroupCooldownTest {
     assertFalse(cooling(restarted, "model2"));
   }
 
+  /** 回滚事务不得留下组冷却，即使同一事务内已经能够读到它。 */
+  @Test
+  void cooldownRollsBackWithCallerTransaction() {
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  cooldowns.freeze(tx, "group", 0L, "model", "v1", now.plusSeconds(30));
+                  assertTrue(cooldowns.isCooling(tx, "group", 0L, "model", "v1"));
+                  throw new IllegalStateException("rollback");
+                }));
+    assertEquals(0, cooldownRows());
+  }
+
+  /** 冷却、invocation 和 work 都经过同一物理事务，失败时共同回滚。 */
+  @Test
+  void cooldownInvocationAndWorkChangesRollbackTogether() {
+    var turn = seedTurnBaseline(store);
+    var modelId = id(100L);
+    var target = new WorkTarget(BuiltinWorkType.MODEL, modelId);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(turn.threadId()).orElseThrow();
+          builtin(store, tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      modelId,
+                      turn.threadId(),
+                      turn.turnStartEntryId(),
+                      turn.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+          tx.work().request(target);
+          return null;
+        });
+    var claim =
+        store
+            .transaction(
+                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "rollback", Duration.ofMinutes(1)))
+            .orElseThrow();
+    var before = store.transaction(tx -> tx.work().find(target).orElseThrow());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.threads().lock(turn.threadId()).orElseThrow();
+                  var model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+                  tx.work().lockClaimed(claim).orElseThrow();
+                  cooldowns.freeze(tx, "group", 0L, "model", "v1", tx.now().plusSeconds(30));
+                  builtin(store, tx).updateModelInvocation(model.markRunning(tx.now()));
+                  tx.work().reschedule(claim, Duration.ofSeconds(5));
+                  throw new IllegalStateException("rollback");
+                }));
+    assertEquals(0, cooldownRows());
+    assertEquals(before, store.transaction(tx -> tx.work().find(target).orElseThrow()));
+    assertEquals(
+        ModelInvocationStatus.READY,
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(modelId).orElseThrow().status()));
+  }
+
+  /** 调用方误吞冷却 SQL 异常也不能提交该事务内的其他写入。 */
+  @Test
+  void swallowedCooldownDatabaseFailurePoisonsTransaction() {
+    var turn = seedTurnBaseline(store);
+    var target = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.threads().lock(turn.threadId()).orElseThrow();
+                  tx.work().request(target);
+                  try {
+                    cooldowns.freeze(tx, "group", 0L, "missing", "v1", tx.now().plusSeconds(30));
+                  } catch (IllegalArgumentException expected) {
+                    // 故意吞掉失败，事务核心仍必须拒绝提交。
+                  }
+                  return null;
+                }));
+    assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
+    assertEquals(0, cooldownRows());
+  }
+
   private void freeze(String member, Instant until) {
     store.transaction(
         tx -> {
-          builtin(store, tx).freezeGroupMember("group", 0L, member, "v1", until);
+          cooldowns.freeze(tx, "group", 0L, member, "v1", until);
           return null;
         });
   }
 
-  private static boolean cooling(HarnessStore target, String member) {
-    return target.transaction(
-        tx -> builtin(target, tx).isGroupMemberCooling("group", 0L, member, "v1"));
+  private boolean cooling(HarnessStore target, String member) {
+    return target.transaction(tx -> cooldowns.isCooling(tx, "group", 0L, member, "v1"));
   }
 
   private static int cooldownRows() {

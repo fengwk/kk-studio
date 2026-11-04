@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.model;
+package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
 import java.util.Objects;
 

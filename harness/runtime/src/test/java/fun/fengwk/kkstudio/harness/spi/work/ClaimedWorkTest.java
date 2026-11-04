@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
 
 import java.time.Instant;
 
@@ -38,15 +39,6 @@ class ClaimedWorkTest {
             "token-2",
             Instant.parse("2026-01-01T00:00:30Z"));
     assertNull(unconstrained.requiredEnvironmentId());
-
-    ClaimedWork agentClaimed =
-        new ClaimedWork(
-            new WorkTarget(WorkTargetType.AGENT, id(9L)),
-            3L,
-            "token-3",
-            Instant.parse("2026-01-01T00:00:30Z"),
-            env);
-    assertEquals(env, agentClaimed.requiredEnvironmentId());
   }
 
   @Test
@@ -54,7 +46,7 @@ class ClaimedWorkTest {
     Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, id(7L));
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, id(8L));
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, id(9L));
+    WorkTarget modelTarget = new WorkTarget(TestWorkTypes.MODEL, id(9L));
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
     assertThrows(NullPointerException.class, () -> new ClaimedWork(null, 1L, "t", t0));

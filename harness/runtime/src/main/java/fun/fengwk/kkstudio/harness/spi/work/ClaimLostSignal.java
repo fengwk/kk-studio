@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.processor;
+package fun.fengwk.kkstudio.harness.spi.work;
 
 /**
  * 已认领执行在事务内最终所有权围栏失败时抛出的回滚信号。

@@ -186,7 +186,7 @@ final class PostgresqlHarnessLocks {
     }
   }
 
-  /** 同阶梯加锁排序防御：多个 Work 目标必须严格按 (targetType.ordinal(), targetId) 升序加锁。 */
+  /** 同阶梯加锁排序防御：多个 Work 目标必须严格按 (type rank, type value, targetId) 升序加锁。 */
   void requireCanLockWork(WorkTarget target) {
     LockKey key = LockKey.work(target);
     if (locked.contains(key)) {
@@ -195,7 +195,7 @@ final class PostgresqlHarnessLocks {
     requireCanLock(key);
     if (highestWorkTarget != null
         && PostgresqlHarnessTransaction.WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
-      if (target.type() == WorkTargetType.THREAD
+      if (WorkTargetType.THREAD.equals(target.type())
           && !lockedTrees.isEmpty()
           && locked.contains(LockKey.thread(target.id()))
           && isInLockedTree(target.id())) {

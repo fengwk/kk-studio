@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.processor;
+package fun.fengwk.kkstudio.harness.spi.work;
 
 /**
  * Processor 侧异常渲染工具。

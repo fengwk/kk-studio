@@ -75,7 +75,7 @@ class WebModuleArchitectureTest {
               BUILTIN_PREFIX + "processor.ModelProcessorConfig",
               BUILTIN_PREFIX + "processor.ModelStreamConfig"),
           WEB_SOURCE_ROOT + "runtime/HarnessRealtimeConfiguration.java",
-          List.of(BUILTIN_PREFIX + "processor.ModelProcessor"));
+          List.of(BUILTIN_PREFIX + "port.ModelCheckpointRequester"));
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
@@ -146,7 +146,9 @@ class WebModuleArchitectureTest {
         isForbiddenHarnessImport(composition, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
     assertFalse(
         isForbiddenHarnessImport(processor, BUILTIN_PREFIX + "processor.ModelProcessorConfig"));
-    assertFalse(isForbiddenHarnessImport(realtime, BUILTIN_PREFIX + "processor.ModelProcessor"));
+    assertFalse(
+        isForbiddenHarnessImport(realtime, BUILTIN_PREFIX + "port.ModelCheckpointRequester"));
+    assertTrue(isForbiddenHarnessImport(realtime, BUILTIN_PREFIX + "processor.ModelProcessor"));
     assertTrue(isForbiddenHarnessImport(controller, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
     assertTrue(
         isForbiddenHarnessImport(composition, BUILTIN_PREFIX + "processor.ModelProcessorConfig"));

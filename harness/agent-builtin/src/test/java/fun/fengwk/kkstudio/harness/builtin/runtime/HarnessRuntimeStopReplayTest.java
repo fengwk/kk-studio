@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -172,7 +173,7 @@ class HarnessRuntimeStopReplayTest {
     assertTrue(
         Boolean.TRUE.equals(
             store.transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).isPresent())));
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, modelId)).isPresent())));
   }
 
   /** 同一 raw id 归 owner Thread；共享同一 CONTINUATION 历史的 foreign Thread 的 Stop 被忽略而非冲突/stale。 */

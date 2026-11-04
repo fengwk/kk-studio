@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -57,11 +59,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -435,7 +437,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx -> {
               tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
               return null;
             });
 
@@ -573,7 +575,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx -> {
               tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
               return null;
             });
     fixture.store.resetUpdateCount();
@@ -702,7 +704,7 @@ class ModelExecutionStreamFlushTest {
             .store
             .delegate()
             .transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)))
             .orElseThrow();
     assertNotNull(work.leaseToken(), "work must remain claimed");
     assertEquals(
@@ -929,6 +931,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -997,6 +1003,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -1054,6 +1064,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -1262,6 +1276,10 @@ class ModelExecutionStreamFlushTest {
     ModelExecution execution =
         new ModelExecution(
             store,
+            SingleModelGateway.of(
+                ignored -> {
+                  throw new AssertionError("unused admission");
+                }),
             sink,
             claim,
             baseline.threadId(),
@@ -1576,7 +1594,7 @@ class ModelExecutionStreamFlushTest {
                       now,
                       now));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
         });
   }
@@ -1587,7 +1605,7 @@ class ModelExecutionStreamFlushTest {
             tx ->
                 tx.work()
                     .claimNext(
-                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                        BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 

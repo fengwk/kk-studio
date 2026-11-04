@@ -24,6 +24,6 @@ public final class PostgresqlBuiltinHarnessStore extends PostgresqlHarnessStore
 
   @Override
   public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
-    return (BuiltinStore.Transaction) driverView(tx);
+    return (BuiltinStore.Transaction) driverWorkView(tx);
   }
 }

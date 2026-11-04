@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -533,7 +534,7 @@ class HarnessRuntimeStopSubtreeTest {
             tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, child)).orElse(null)));
     assertNull(
         store.transaction(
-            tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).orElse(null)));
+            tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, modelId)).orElse(null)));
     assertNull(
         store.transaction(
             tx ->

@@ -851,7 +851,7 @@ insert into system_setting (id, config) values (
 
 -- Harness Runtime durable schema.
 --
--- 所有 Harness 生成的持久实体 ID（Session / Entry / Thread / ThreadCommand client id / ModelInvocation /
+-- 所有持久实体 ID（Session / Entry / Thread / ThreadCommand client id / Builtin ModelInvocation /
 -- ToolInvocation / WorkTarget）均为 PostgreSQL uuid，由 HarnessStore 注入的 Supplier<UUID> 生成（生产：
 -- UUID::randomUUID），本 schema 不提供任何序列。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
 -- 时间列统一使用毫秒精度 timestamptz(3)，与 HarnessStore 的时间精度契约一致。
@@ -1122,7 +1122,10 @@ create index idx_harness_thread_command_stop_request
 
 comment on index idx_harness_thread_command_stop_request is 'Stop 幂等键：(thread_id, stop_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
 
-create table harness_model_invocation (
+------------------------------------------------------------------------------
+-- 2a. Platform Builtin model invocation (depends on Harness Thread and Entry)
+------------------------------------------------------------------------------
+create table builtin_model_invocation (
     id uuid primary key,
     thread_id uuid not null,
     turn_start_entry_id uuid not null,
@@ -1144,16 +1147,16 @@ create table harness_model_invocation (
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     provider_replay_state jsonb,
-    constraint fk_harness_model_invocation_thread foreign key (thread_id)
+    constraint fk_builtin_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
-    constraint fk_harness_model_invocation_turn_start foreign key (turn_start_entry_id)
+    constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
         references harness_entry (id),
-    constraint fk_harness_model_invocation_request_head foreign key (request_head_entry_id)
+    constraint fk_builtin_model_invocation_request_head foreign key (request_head_entry_id)
         references harness_entry (id),
-    constraint fk_harness_model_invocation_result foreign key (result_entry_id)
+    constraint fk_builtin_model_invocation_result foreign key (result_entry_id)
         references harness_entry (id),
-    constraint uk_harness_model_invocation_turn unique (thread_id, turn_start_entry_id),
-    constraint ck_harness_model_invocation_status check (
+    constraint uk_builtin_model_invocation_turn unique (thread_id, turn_start_entry_id),
+    constraint ck_builtin_model_invocation_status check (
         status in (
             'READY',
             'RUNNING',
@@ -1163,10 +1166,10 @@ create table harness_model_invocation (
             'UNKNOWN'
         )
     ),
-    constraint ck_harness_model_invocation_terminal_facts check (
+    constraint ck_builtin_model_invocation_terminal_facts check (
         result is null or error is null
     ),
-    constraint ck_harness_model_invocation_provider_replay_state check (
+    constraint ck_builtin_model_invocation_provider_replay_state check (
         provider_replay_state is null
         or (
             jsonb_typeof(provider_replay_state) = 'object'
@@ -1177,31 +1180,34 @@ create table harness_model_invocation (
     )
 );
 
-comment on table harness_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
-comment on column harness_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
-comment on column harness_model_invocation.thread_id is '所属 Thread';
-comment on column harness_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
-comment on column harness_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
-comment on column harness_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
-comment on column harness_model_invocation.status is '生命周期状态';
-comment on column harness_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
-comment on column harness_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
-comment on column harness_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
-comment on column harness_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
-comment on column harness_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
-comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
-comment on column harness_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
-comment on column harness_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
-comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
-comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column harness_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
+comment on table builtin_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
+comment on column builtin_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
+comment on column builtin_model_invocation.thread_id is '所属 Thread';
+comment on column builtin_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
+comment on column builtin_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
+comment on column builtin_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
+comment on column builtin_model_invocation.status is '生命周期状态';
+comment on column builtin_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
+comment on column builtin_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
+comment on column builtin_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
+comment on column builtin_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
+comment on column builtin_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
+comment on column builtin_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
+comment on column builtin_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
+comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
+comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
+comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
+comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
 
-create unique index uk_harness_model_invocation_result
-    on harness_model_invocation (result_entry_id)
+create unique index uk_builtin_model_invocation_result
+    on builtin_model_invocation (result_entry_id)
     where result_entry_id is not null;
 
-comment on index uk_harness_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
+comment on index uk_builtin_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
 
+------------------------------------------------------------------------------
+-- 2b. Harness runtime execution protocol (continued)
+------------------------------------------------------------------------------
 create table harness_tool_invocation (
     id uuid primary key,
     thread_id uuid not null,
@@ -1305,7 +1311,7 @@ create index idx_harness_tool_invocation_pending
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
--- Durable Work：全部后台调度共用的唯一 mailbox 表，各调度目标按 target_type 区分；
+-- Durable Work：全部后台调度共用的唯一 mailbox 表。各模块定义自己的 target_type；
 -- due、租约与 wake 围栏一律以数据库时钟判定。
 create table durable_work (
     target_type varchar(16) not null,
@@ -1319,7 +1325,7 @@ create table durable_work (
     constraint fk_durable_work_environment foreign key (required_environment_id)
         references environment (id) on delete restrict,
     constraint ck_durable_work_target_type check (
-        target_type in ('THREAD', 'MODEL', 'AGENT', 'TOOL', 'ISSUE', 'CANVAS_RUN')
+        target_type ~ '^[A-Z][A-Z0-9_]{0,15}$'
     ),
     constraint ck_durable_work_lease_pair check (
         (lease_token is null) = (lease_until is null)
@@ -1327,20 +1333,17 @@ create table durable_work (
     constraint ck_durable_work_lease_token check (
         lease_token is null
         or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
-    ),
-    constraint ck_durable_work_required_environment check (
-        required_environment_id is null or target_type in ('TOOL', 'AGENT')
     )
 );
 
 comment on table durable_work is 'Durable Work：一个调度 target 的 mailbox 状态；wake_version 递增防止旧 worker 完成时吞掉新的 wake';
-comment on column durable_work.target_type is 'target 类型（THREAD/MODEL/AGENT/TOOL/ISSUE/CANVAS_RUN），决定由哪个 dispatcher 领取';
+comment on column durable_work.target_type is '模块定义的 target 类型，1–16 个大写字母、数字或下划线，首字符为字母';
 comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
 comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
 comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
 comment on column durable_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
 comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
-comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID（仅 TOOL/AGENT 可非空；非空时仅持有该 environment READY 连接租约的节点可 claim）';
+comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID；非空时仅持有该 environment READY 连接租约的节点可 claim';
 
 create index idx_durable_work_available
     on durable_work (available_at, target_type, target_id);
@@ -1503,7 +1506,7 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('MODEL', 'TOOL', 'AGENT') and parent_execution_id is null and environment_id is null)
+        (kind in ('DRIVER', 'TOOL') and parent_execution_id is null and environment_id is null)
         or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
     ),
     constraint ck_harness_execution_exit_state check (
@@ -1513,7 +1516,7 @@ create table harness_execution_exit (
     ),
     constraint ck_harness_execution_exit_kind_state check (
         state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('MODEL', 'TOOL', 'AGENT') and state = 'STUDIO_EXITED')
+        or (kind in ('DRIVER', 'TOOL') and state = 'STUDIO_EXITED')
         or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
     ),
     constraint ck_harness_execution_exit_time check (
@@ -1525,11 +1528,11 @@ create table harness_execution_exit (
 comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
 comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
 comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
-comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
+comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'MODEL、TOOL、AGENT 或挂在本地 TOOL/AGENT 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 AGENT 执行代次；本地执行为空';
+comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';

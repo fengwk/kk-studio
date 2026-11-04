@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +32,46 @@ public interface AgentDriver {
 
   /** 校验 Driver settings JSON object 文本的合法性；不合法时抛出 IllegalArgumentException。 */
   void validateSettings(String settingsJson);
+
+  /**
+   * Driver 自己的 Work 类型与处理器；组合根只注册一次，Dispatcher 按类型路由。
+   *
+   * <p>不得返回内核 THREAD / TOOL；同一类型只能由一个 Driver 注册。默认无 Work。
+   */
+  default List<DriverWork> works() {
+    return List.of();
+  }
+
+  /**
+   * Stop 事务提交后 best-effort 取消本 Driver 的本地执行。
+   *
+   * <p>参数是 {@link DriverStopResult#executionIds()} 中的执行身份；实现不得抛出异常来改变 Stop 结果，Runtime 只在边界记录失败。默认
+   * no-op。
+   */
+  default void cancelWork(UUID executionId) {}
+
+  /** 本机是否仍有 Driver 执行；节点优雅退出用它等待排空。默认无活动执行。 */
+  default boolean hasActiveWork() {
+    return false;
+  }
+
+  /**
+   * Thread 深删第一阶段：按 Driver 锁阶梯锁定私有行，返回这些行持有的 Work target。
+   *
+   * <p>在 Command 已锁定、ToolInvocation 未锁定前调用；实现只使用调用方事务，不删除任何事实。默认无私有状态。
+   */
+  default List<WorkTarget> lockThreadStateForDeletion(
+      HarnessStore.Transaction tx, List<UUID> threadIds) {
+    return List.of();
+  }
+
+  /**
+   * Thread 深删第二阶段：Work 与 ToolInvocation 已删除后，删除第一阶段已锁定的私有行。
+   *
+   * <p>必须在 Thread 行删除前完成；实现不得重新解释删除顺序。默认无私有状态。
+   */
+  default void deleteLockedThreadState(
+      HarnessStore.Transaction tx, List<UUID> threadIds, List<WorkTarget> lockedWorkTargets) {}
 
   /** 在调用方事务内解析 candidate Turn；成功时只返回语义计划，具体私有状态由 {@code install} 提交。 */
   TurnResolution resolveTurn(

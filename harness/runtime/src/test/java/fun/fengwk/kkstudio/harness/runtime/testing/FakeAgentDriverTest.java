@@ -11,12 +11,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.util.List;
 
@@ -42,7 +42,7 @@ class FakeAgentDriverTest {
     DriverStopResult stop = new DriverStopResult(id(3), List.of(id(4)));
     FakeAgentDriver.FakeLockedDriverState state =
         new FakeAgentDriver.FakeLockedDriverState(
-            DriverActivity.ACTIVE, id(5), null, null, new WorkTarget(WorkTargetType.MODEL, id(4)));
+            DriverActivity.ACTIVE, id(5), null, null, new WorkTarget(TestWorkTypes.MODEL, id(4)));
 
     FakeAgentDriver driver =
         new FakeAgentDriver(() -> resolution)
@@ -55,7 +55,7 @@ class FakeAgentDriverTest {
     assertSame(applied, driver.applyResponse(null, null, null, state, null));
     assertSame(stop, driver.stop(null, null, null, state, null, id(6)));
     assertEquals(DriverActivity.ACTIVE, state.activity());
-    assertEquals(new WorkTarget(WorkTargetType.MODEL, id(4)), state.workTarget());
+    assertEquals(new WorkTarget(TestWorkTypes.MODEL, id(4)), state.workTarget());
     assertFalse(state.cancelsToolBatch());
     assertTrue(driver.allowsQueuedInputHarvest(null, null, null));
 
@@ -71,7 +71,7 @@ class FakeAgentDriverTest {
             id(5),
             null,
             null,
-            new WorkTarget(WorkTargetType.MODEL, id(4)),
+            new WorkTarget(TestWorkTypes.MODEL, id(4)),
             true);
     assertTrue(cancellingState.cancelsToolBatch());
   }

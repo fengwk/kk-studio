@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.runtime.processor;
+package fun.fengwk.kkstudio.harness.spi.work;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,9 +18,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;

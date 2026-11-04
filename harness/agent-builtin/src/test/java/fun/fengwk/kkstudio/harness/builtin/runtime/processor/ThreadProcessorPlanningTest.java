@@ -58,6 +58,7 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -484,7 +485,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(2).id()))
             .orElseThrow();
     assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
-    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocation.id())));
+    assertNotNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);
   }

@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -663,7 +664,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(6).id()))
             .orElseThrow();
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);
   }
@@ -878,7 +879,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
                             baseline.threadId(), continued.entries().get(5).id()))
             .orElseThrow();
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);
   }

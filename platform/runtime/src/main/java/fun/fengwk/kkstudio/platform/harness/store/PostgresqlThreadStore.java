@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.store;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -243,7 +244,7 @@ final class PostgresqlThreadStore implements ThreadStore {
 
   // ---------- 应用侧深删除原语 ----------
   @Override
-  public int delete(List<UUID> threadIds) {
+  public int delete(List<UUID> threadIds, DriverThreadDeletion driverDeletion) {
     tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");
     List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
@@ -328,7 +329,8 @@ final class PostgresqlThreadStore implements ThreadStore {
       }
     }
 
-    List<WorkTarget> driverTargets = tx.driver().lockForThreads(copied);
+    Objects.requireNonNull(driverDeletion, "driverDeletion");
+    List<WorkTarget> driverTargets = driverDeletion.lockForDeletion(tx, copied);
 
     List<ToolInvocation> tools = new ArrayList<>();
     for (UUID threadId : copied) {
@@ -382,7 +384,7 @@ final class PostgresqlThreadStore implements ThreadStore {
     if (!lockedTools.isEmpty()) {
       tx.tools().deleteByIds(lockedTools.stream().map(ToolInvocation::id).toList());
     }
-    tx.driver().deleteLocked(driverTargets);
+    driverDeletion.deleteLocked(tx, copied, driverTargets);
     // 自引用 parent FK 为 NO ACTION（语句级校验）：同一条 DELETE 可同时包含父与子执行事实。
     // 删除只是 Thread 深删，不是执行退出；先删 execution facts，再删 Thread。
     tx.updateJdbc(

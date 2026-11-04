@@ -33,10 +33,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 内存 Store 的契约回归：group cooldown 使用 typed 身份并共享核心快照，model invocation 在语义校验前按原顺序检查行锁。 */
+/** 内存 Gateway 与 Store 契约：冷却共享核心快照，model invocation 在语义校验前按原顺序检查行锁。 */
 class InMemoryBuiltinHarnessStoreContractTest {
 
   private InMemoryBuiltinHarnessStore store;
+  private final InMemoryModelGateway gateway =
+      new InMemoryModelGateway() {
+        @Override
+        public Admission admit(Execution execution) {
+          throw new UnsupportedOperationException("not used by cooldown tests");
+        }
+      };
 
   @BeforeEach
   void setUp() {
@@ -48,6 +55,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     store.setNow(T0);
     String groupName = "group";
     long groupVersion = 1L;
+    inTransaction(store, tx -> gateway.setGroupVersion(tx, groupName, groupVersion));
     String firstMember = "model:2";
     String firstVariant = "v";
     String secondMember = "model";
@@ -79,6 +87,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     store.setNow(T0);
     String groupName = "group";
     long groupVersion = 7L;
+    inTransaction(store, tx -> gateway.setGroupVersion(tx, groupName, groupVersion));
     freeze(groupName, groupVersion, "model-a", "v1", T1);
     freeze(groupName, groupVersion, "model-b", "v1", T2);
 
@@ -90,10 +99,8 @@ class InMemoryBuiltinHarnessStoreContractTest {
             () ->
                 store.transaction(
                     tx -> {
-                      builtin(store, tx)
-                          .freezeGroupMember(groupName, groupVersion, "model-a", "v1", T4);
-                      builtin(store, tx)
-                          .freezeGroupMember(groupName, groupVersion, "model-b", "v1", T5);
+                      gateway.freezeGroupMember(tx, groupName, groupVersion, "model-a", "v1", T4);
+                      gateway.freezeGroupMember(tx, groupName, groupVersion, "model-b", "v1", T5);
                       throw failure;
                     })));
 
@@ -101,6 +108,30 @@ class InMemoryBuiltinHarnessStoreContractTest {
     store.setNow(T2.plusMillis(500));
     assertFalse(cooling(groupName, groupVersion, "model-a", "v1"));
     assertFalse(cooling(groupName, groupVersion, "model-b", "v1"));
+  }
+
+  /** 切换目录版本后，旧结果不能冻结新版本，且版本变化自身也随事务回滚。 */
+  @Test
+  void staleCooldownWritesAreRejectedAfterGroupVersionChanges() {
+    store.setNow(T0);
+    inTransaction(store, tx -> gateway.setGroupVersion(tx, "group", 7L));
+    freeze("group", 7L, "model", "v1", T2);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  gateway.setGroupVersion(tx, "group", 8L);
+                  throw new IllegalStateException("rollback");
+                }));
+    assertTrue(cooling("group", 7L, "model", "v1"));
+    inTransaction(store, tx -> gateway.setGroupVersion(tx, "group", 8L));
+    freeze("group", 7L, "model", "v1", T5);
+    assertFalse(cooling("group", 8L, "model", "v1"));
+    freeze("group", 8L, "model", "v1", T3);
+    freeze("group", 8L, "model", "v1", T1);
+    store.setNow(T2);
+    assertTrue(cooling("group", 8L, "model", "v1"));
   }
 
   @Test
@@ -281,17 +312,16 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx ->
-            builtin(store, tx)
-                .freezeGroupMember(
-                    groupName, groupVersion, memberModelName, memberVariant, cooldownUntil));
+            gateway.freezeGroupMember(
+                tx, groupName, groupVersion, memberModelName, memberVariant, cooldownUntil));
   }
 
   private boolean cooling(
       String groupName, long groupVersion, String memberModelName, String memberVariant) {
     return store.transaction(
         tx ->
-            builtin(store, tx)
-                .isGroupMemberCooling(groupName, groupVersion, memberModelName, memberVariant));
+            gateway.isGroupMemberCooling(
+                tx, groupName, groupVersion, memberModelName, memberVariant));
   }
 
   private static String notLocked(String rank, String key) {

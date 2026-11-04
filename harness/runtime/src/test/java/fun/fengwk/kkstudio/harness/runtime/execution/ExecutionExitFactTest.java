@@ -43,8 +43,8 @@ class ExecutionExitFactTest {
   private static final Instant CONFIRMED_AT = REGISTERED_AT.plusSeconds(1);
 
   @Test
-  void buildsValidModelToolAndRemoteFacts() {
-    assertEquals(ExecutionExitKind.MODEL, model().kind());
+  void buildsValidDriverToolAndRemoteFacts() {
+    assertEquals(ExecutionExitKind.DRIVER, model().kind());
     assertEquals(ExecutionExitKind.TOOL, tool().kind());
     assertEquals(ExecutionExitKind.REMOTE, remote().kind());
     assertEquals(TOOL_EXECUTION_ID, remote().parentExecutionId());
@@ -132,7 +132,7 @@ class ExecutionExitFactTest {
                 OTHER_LEASE,
                 ExecutionExitKind.REMOTE,
                 TOOL_EXECUTION_ID)),
-        // MODEL/TOOL 都是合法的无父代事实；kind 负例不能同时改变 parent，否则会掩盖漏掉 kind 的比较。
+        // DRIVER/TOOL 都是合法的无父代事实；kind 负例不能同时改变 parent，否则会掩盖漏掉 kind 的比较。
         Arguments.of(
             "kind",
             tool(),
@@ -142,7 +142,7 @@ class ExecutionExitFactTest {
                 INVOCATION_ID,
                 1,
                 LEASE,
-                ExecutionExitKind.MODEL,
+                ExecutionExitKind.DRIVER,
                 null)),
         Arguments.of(
             "parentExecutionId",
@@ -188,7 +188,7 @@ class ExecutionExitFactTest {
                 REGISTERED_AT,
                 null));
 
-    // MODEL 不能提供 environmentId
+    // DRIVER 不能提供 environmentId
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -198,7 +198,7 @@ class ExecutionExitFactTest {
                 INVOCATION_ID,
                 1,
                 LEASE,
-                ExecutionExitKind.MODEL,
+                ExecutionExitKind.DRIVER,
                 null,
                 ENV,
                 ExecutionExitState.UNCONFIRMED,
@@ -233,7 +233,7 @@ class ExecutionExitFactTest {
         () -> model().confirm(ExecutionExitState.REMOTE_ACKNOWLEDGED, CONFIRMED_AT));
     ExecutionExitFact agent =
         unconfirmed(
-            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.AGENT, null);
+            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.DRIVER, null);
     assertThrows(
         IllegalArgumentException.class,
         () -> agent.confirm(ExecutionExitState.REMOTE_ACKNOWLEDGED, CONFIRMED_AT));
@@ -300,22 +300,28 @@ class ExecutionExitFactTest {
   }
 
   @Test
-  void remoteParentMustBeTheSameGenerationLocalToolOrAgent() {
+  void remoteParentMustBeTheSameGenerationLocalToolOrDriver() {
     ExecutionExitFact remote = remote();
     ExecutionExitFact tool = tool();
     ExecutionExitFact agentParent =
         unconfirmed(
-            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.AGENT, null);
+            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.DRIVER, null);
 
     assertDoesNotThrow(() -> remote.requireRemoteParent(tool));
     assertDoesNotThrow(() -> remote.requireRemoteParent(agentParent));
-    // 除 kind 外与合法 TOOL/AGENT 父代完全相同，确保拒绝原因不是另一执行 id。
-    ExecutionExitFact modelParent =
+    // REMOTE 不能作为父代，即使其余 identity 与合法父代一致。
+    ExecutionExitFact remoteParent =
         unconfirmed(
-            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.MODEL, null);
+            TOOL_EXECUTION_ID,
+            THREAD_ID,
+            INVOCATION_ID,
+            1,
+            LEASE,
+            ExecutionExitKind.REMOTE,
+            OTHER_PARENT_ID);
     assertEquals(
-        "remote execution parent must be the same generation's TOOL or AGENT execution",
-        assertThrows(IllegalArgumentException.class, () -> remote.requireRemoteParent(modelParent))
+        "remote execution parent must be the same generation's TOOL or DRIVER execution",
+        assertThrows(IllegalArgumentException.class, () -> remote.requireRemoteParent(remoteParent))
             .getMessage());
     assertThrows(
         IllegalArgumentException.class,
@@ -407,7 +413,7 @@ class ExecutionExitFactTest {
 
   private static ExecutionExitFact model() {
     return unconfirmed(
-        MODEL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.MODEL, null);
+        MODEL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.DRIVER, null);
   }
 
   private static ExecutionExitFact tool() {

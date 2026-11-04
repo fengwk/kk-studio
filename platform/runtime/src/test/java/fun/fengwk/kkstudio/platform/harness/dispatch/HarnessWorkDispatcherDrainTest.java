@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
@@ -92,7 +93,7 @@ class HarnessWorkDispatcherDrainTest {
         poll,
         Map.of(
             WorkTargetType.THREAD, handler,
-            WorkTargetType.MODEL, handler,
+            BuiltinWorkType.MODEL, handler,
             WorkTargetType.TOOL, handler));
   }
 
@@ -142,7 +143,7 @@ class HarnessWorkDispatcherDrainTest {
         work(inner, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId())).leaseToken()
             != null);
     assertTrue(
-        work(inner, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()))
+        work(inner, new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()))
                 .leaseToken()
             != null);
     releaseConsumers.countDown();
@@ -184,17 +185,17 @@ class HarnessWorkDispatcherDrainTest {
     assertEquals(
         List.of(
             WorkTargetType.THREAD,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             WorkTargetType.TOOL,
             WorkTargetType.THREAD,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             WorkTargetType.TOOL),
         types);
     // 每个目标都被消费（completeWork 删除行）。
     assertNull(work(store, new WorkTarget(WorkTargetType.THREAD, thread1.threadId())));
     assertNull(work(store, new WorkTarget(WorkTargetType.THREAD, thread2.threadId())));
-    assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, model1.modelInvocationId())));
-    assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, model2.modelInvocationId())));
+    assertNull(work(store, new WorkTarget(BuiltinWorkType.MODEL, model1.modelInvocationId())));
+    assertNull(work(store, new WorkTarget(BuiltinWorkType.MODEL, model2.modelInvocationId())));
     assertNull(work(store, new WorkTarget(WorkTargetType.TOOL, tool1.toolInvocationId())));
     assertNull(work(store, new WorkTarget(WorkTargetType.TOOL, tool2.toolInvocationId())));
   }
@@ -234,11 +235,11 @@ class HarnessWorkDispatcherDrainTest {
 
     assertEquals(
         List.of(
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             WorkTargetType.TOOL,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             WorkTargetType.TOOL,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             WorkTargetType.TOOL),
         claims.stream().map(claim -> claim.target().type()).toList());
   }
@@ -277,14 +278,14 @@ class HarnessWorkDispatcherDrainTest {
         () ->
             work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId())).leaseToken()
                     != null
-                && work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()))
+                && work(store, new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()))
                         .leaseToken()
                     != null);
     assertTrue(
         work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId())).leaseToken()
             != null);
     assertTrue(
-        work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()))
+        work(store, new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()))
                 .leaseToken()
             != null);
     // 第三个目标从未被 claim（capacity 满时 drain 停止）。
@@ -391,7 +392,7 @@ class HarnessWorkDispatcherDrainTest {
     dispatcher.wake();
     awaitTrue(() -> claims.size() == 1);
     assertEquals(
-        new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+        new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()),
         claims.get(0).target());
   }
 
@@ -465,7 +466,7 @@ class HarnessWorkDispatcherDrainTest {
 
     dispatcher.start();
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId());
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId());
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId());
     awaitTrue(
         () -> {
           Work current = work(store, threadTarget);
@@ -510,7 +511,7 @@ class HarnessWorkDispatcherDrainTest {
             new RecordingScheduler(),
             Map.of(
                 WorkTargetType.THREAD, otherClaims::add,
-                WorkTargetType.MODEL, otherClaims::add,
+                BuiltinWorkType.MODEL, otherClaims::add,
                 WorkTargetType.TOOL, otherClaims::add));
 
     otherDispatcher.start();
@@ -532,7 +533,7 @@ class HarnessWorkDispatcherDrainTest {
             new RecordingScheduler(),
             Map.of(
                 WorkTargetType.THREAD, allowedClaims::add,
-                WorkTargetType.MODEL, allowedClaims::add,
+                BuiltinWorkType.MODEL, allowedClaims::add,
                 WorkTargetType.TOOL, allowedClaims::add));
 
     allowedDispatcher.start();

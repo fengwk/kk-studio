@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -44,8 +45,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -57,6 +56,8 @@ import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -184,7 +185,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, continuation.status());
     assertNotEquals(modelId, continuation.id());
-    assertTrue(findWork(new WorkTarget(WorkTargetType.MODEL, continuation.id())).isPresent());
+    assertTrue(findWork(new WorkTarget(BuiltinWorkType.MODEL, continuation.id())).isPresent());
     assertEquals(0, toolGateway.startCalls(), "recovery must not re-execute the tool");
   }
 
@@ -350,7 +351,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, continuation.status());
     assertNotEquals(modelId, continuation.id());
-    assertTrue(findWork(new WorkTarget(WorkTargetType.MODEL, continuation.id())).isPresent());
+    assertTrue(findWork(new WorkTarget(BuiltinWorkType.MODEL, continuation.id())).isPresent());
   }
 
   private ToolProcessor newToolProcessor() {

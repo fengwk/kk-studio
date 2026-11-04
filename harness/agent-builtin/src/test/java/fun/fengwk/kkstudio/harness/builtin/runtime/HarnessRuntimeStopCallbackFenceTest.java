@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -41,7 +42,7 @@ class HarnessRuntimeStopCallbackFenceTest {
         store.transaction(
             tx ->
                 tx.work()
-                    .claimNext(WorkTargetType.MODEL, "model-lease", Duration.between(T3, T6))
+                    .claimNext(BuiltinWorkType.MODEL, "model-lease", Duration.between(T3, T6))
                     .orElseThrow());
 
     runtime(store, Clock.fixed(T5, ZoneOffset.UTC))

@@ -45,9 +45,6 @@ import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonC
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
-import fun.fengwk.kkstudio.harness.spi.work.Work;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
@@ -285,18 +282,6 @@ final class PostgresqlHarnessRows {
               TOOL_INVOCATION.mapRow(resultSet, rowNumber),
               uuid(resultSet, "pending_thread_id"),
               uuid(resultSet, "pending_session_id"));
-
-  static final RowMapper<Work> WORK =
-      (resultSet, rowNumber) ->
-          new Work(
-              new WorkTarget(
-                  WorkTargetType.valueOf(resultSet.getString("target_type")),
-                  uuid(resultSet, "target_id")),
-              instant(resultSet, "available_at"),
-              resultSet.getLong("wake_version"),
-              resultSet.getString("lease_token"),
-              nullableInstant(resultSet, "lease_until"),
-              nullableEnvironmentId(resultSet.getObject("required_environment_id")));
 
   static final RowMapper<PendingEnvironmentWaitRow> PENDING_ENVIRONMENT_WAIT =
       (resultSet, rowNumber) ->

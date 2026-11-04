@@ -27,15 +27,15 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.runtime.processor.ClaimAdmissionGuard;
-import fun.fengwk.kkstudio.harness.runtime.processor.ClaimLostSignal;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorExceptions;
-import fun.fengwk.kkstudio.harness.runtime.processor.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
+import fun.fengwk.kkstudio.harness.spi.work.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
@@ -76,6 +76,7 @@ public final class ModelExecution
     implements ModelGateway.Sink, ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
+  private final ModelGateway gateway;
   private final BuiltinStore builtinStore;
   private final ExecutionExitConfirmer exitConfirmer;
   private final RealtimeEventSink realtimeEventSink;
@@ -144,6 +145,7 @@ public final class ModelExecution
    */
   public ModelExecution(
       HarnessStore store,
+      ModelGateway gateway,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
       UUID threadId,
@@ -160,6 +162,7 @@ public final class ModelExecution
       ExecutionExitConfirmer exitConfirmer) {
     this(
         store,
+        gateway,
         realtimeEventSink,
         claim,
         threadId,
@@ -179,6 +182,7 @@ public final class ModelExecution
 
   public ModelExecution(
       HarnessStore store,
+      ModelGateway gateway,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
       UUID threadId,
@@ -195,6 +199,7 @@ public final class ModelExecution
       LongSupplier nanoTime,
       ExecutionExitConfirmer exitConfirmer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.builtinStore = requireBuiltinStore(store);
     this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -325,7 +330,7 @@ public final class ModelExecution
                             invocationId,
                             attempt,
                             claim.leaseToken(),
-                            ExecutionExitKind.MODEL,
+                            ExecutionExitKind.DRIVER,
                             null);
                     return true;
                   }));
@@ -985,8 +990,9 @@ public final class ModelExecution
    */
   private Applied commitGroupFailure(ModelInvocationError error) {
     try {
-      return inTransaction(
-          tx -> {
+      return store.transaction(
+          core -> {
+            BuiltinStore.Transaction tx = builtinStore.in(core);
             Instant now = tx.now();
             ThreadState thread = tx.threads().lock(threadId).orElse(null);
             if (thread == null) {
@@ -1044,7 +1050,8 @@ public final class ModelExecution
             }
             if (group.cooldownSeconds() > 0) {
               ModelGroupMemberExecution member = group.members().get(progress.memberIndex());
-              tx.freezeGroupMember(
+              gateway.freezeGroupMember(
+                  core,
                   group.groupName(),
                   group.groupVersion(),
                   member.model().modelName(),

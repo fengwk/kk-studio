@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.thread.query;
+package fun.fengwk.kkstudio.platform.harness.builtin.query;
 
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelAttemptFailureAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelOutcomeAppender;
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
@@ -48,15 +50,17 @@ import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverWork;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,7 +70,7 @@ import java.util.UUID;
  * Builtin Agent Driver：拥有 Builtin 模型状态、Turn 解析与响应物化，Runtime 只经 {@link AgentDriver} 语义方法调用。
  *
  * <p>所有方法都在 Runtime 已开启的事务内执行；模型状态通过 {@link BuiltinStore#in(HarnessStore.Transaction)}
- * 与公共历史写入共享同一物理事务。Provider I/O 不在此类中执行，由现有 MODEL Work 路径负责。
+ * 与公共历史写入共享同一物理事务。Provider I/O 不在此类中执行，由 Builtin 注册的 MODEL Work 处理器负责。
  */
 public final class BuiltinAgentDriver implements AgentDriver {
 
@@ -74,12 +78,68 @@ public final class BuiltinAgentDriver implements AgentDriver {
 
   private final BuiltinStore store;
   private final TurnResolver resolver;
+  private final ModelProcessor processor;
   private final ModelOutcomeAppender appender = new ModelOutcomeAppender();
   private final AutomaticCompactionPlanner compactionPlanner = new AutomaticCompactionPlanner();
 
+  /** 仅供只验证规划与物化的测试构造；不注册 Work 处理器。 */
   public BuiltinAgentDriver(BuiltinStore store, TurnResolver resolver) {
+    this(store, resolver, null);
+  }
+
+  /** 生产装配：连同 Builtin 的 MODEL Work 处理器、本地取消与活跃检查一起注册。 */
+  public BuiltinAgentDriver(BuiltinStore store, TurnResolver resolver, ModelProcessor processor) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
+    this.processor = processor;
+  }
+
+  @Override
+  public List<DriverWork> works() {
+    return processor == null
+        ? List.of()
+        : List.of(new DriverWork(BuiltinWorkType.MODEL, processor::process));
+  }
+
+  @Override
+  public void cancelWork(UUID executionId) {
+    if (processor != null) {
+      processor.cancel(executionId);
+    }
+  }
+
+  @Override
+  public boolean hasActiveWork() {
+    return processor != null && processor.hasActiveExecution();
+  }
+
+  @Override
+  public List<WorkTarget> lockThreadStateForDeletion(
+      HarnessStore.Transaction tx, List<UUID> threadIds) {
+    BuiltinStore.Transaction builtin = store.in(tx);
+    List<ModelInvocation> models = new ArrayList<>();
+    for (UUID threadId : threadIds) {
+      models.addAll(builtin.findModelInvocationsByThread(threadId));
+    }
+    models.sort(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR));
+    List<WorkTarget> locked = new ArrayList<>(models.size());
+    for (ModelInvocation model : models) {
+      builtin
+          .lockModelInvocation(model.id())
+          .ifPresent(value -> locked.add(new WorkTarget(BuiltinWorkType.MODEL, value.id())));
+    }
+    return List.copyOf(locked);
+  }
+
+  @Override
+  public void deleteLockedThreadState(
+      HarnessStore.Transaction tx, List<UUID> threadIds, List<WorkTarget> lockedWorkTargets) {
+    BuiltinStore.Transaction builtin = store.in(tx);
+    for (WorkTarget target : lockedWorkTargets) {
+      if (BuiltinWorkType.MODEL.equals(target.type())) {
+        builtin.deleteModelInvocation(target.id());
+      }
+    }
   }
 
   @Override
@@ -458,7 +518,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
     public WorkTarget workTarget() {
       // Stop 据此锁定并删除本 generation 的 MODEL Work；tool 阶段 generation 已 attached、
       // activity 不是 ACTIVE，但 Work 仍归属该 generation。
-      return new WorkTarget(WorkTargetType.MODEL, model.id());
+      return new WorkTarget(BuiltinWorkType.MODEL, model.id());
     }
   }
 
@@ -556,7 +616,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
                   now,
                   null,
                   groupProgress(spec)));
-      tx.work().request(new WorkTarget(WorkTargetType.MODEL, invocationId));
+      tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
     }
   }
 

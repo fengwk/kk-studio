@@ -39,9 +39,10 @@ final class InMemoryHarnessLocks {
           .thenComparingInt(ToolInvocation::callIndex)
           .thenComparing(ToolInvocation::id, UuidOrder.COMPARATOR);
 
-  /** Work 行锁获取顺序：{@code (targetType.ordinal(), targetId)} 升序。 */
+  /** Work 行锁获取顺序：{@code (type rank, type value, targetId)} 升序。 */
   static final Comparator<WorkTarget> WORK_LOCK_ORDER =
-      Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
+      Comparator.comparingInt((WorkTarget target) -> target.type().rank())
+          .thenComparing(target -> target.type().value())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
   private final Function<UUID, ThreadState> threadLookup;
@@ -156,7 +157,7 @@ final class InMemoryHarnessLocks {
     }
     requireCanLock(key);
     if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
-      if (target.type() == WorkTargetType.THREAD
+      if (WorkTargetType.THREAD.equals(target.type())
           && !lockedTrees.isEmpty()
           && locked.contains(LockKey.thread(target.id()))
           && isInLockedTree(target.id())) {

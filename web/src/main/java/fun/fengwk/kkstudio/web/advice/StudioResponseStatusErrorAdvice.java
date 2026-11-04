@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
 import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;

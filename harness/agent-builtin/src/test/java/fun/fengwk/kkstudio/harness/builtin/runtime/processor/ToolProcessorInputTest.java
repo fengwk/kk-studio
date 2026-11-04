@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 
 /**
  * {@code ask_user} 的 READY 边界：只有可信 provenance 的内置人输入工具才被冻结为 WAITING_INPUT。

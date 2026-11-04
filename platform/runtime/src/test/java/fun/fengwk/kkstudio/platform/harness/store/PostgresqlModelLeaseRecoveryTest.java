@@ -20,18 +20,20 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -83,7 +85,7 @@ class PostgresqlModelLeaseRecoveryTest {
   void expiredRunningModelRecoveryKeepsDurableBudgetUntilInstanceExhaustsIt() {
     StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
     UUID modelId = seedRunningModel(turn);
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
     requestWork(modelTarget, turn.threadId());
 
@@ -141,7 +143,7 @@ class PostgresqlModelLeaseRecoveryTest {
   void committedModelResultIsReusedOnRestartWithoutDuplicateEntry() {
     StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
     UUID modelId = seedSucceededMaterializedModel(turn);
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     requestWork(modelTarget, turn.threadId());
 
     UUID headBefore =
@@ -303,7 +305,7 @@ class PostgresqlModelLeaseRecoveryTest {
   }
 
   private Optional<ClaimedWork> claimModel(String token) {
-    return store.transaction(tx -> tx.work().claimNext(WorkTargetType.MODEL, token, LEASE));
+    return store.transaction(tx -> tx.work().claimNext(BuiltinWorkType.MODEL, token, LEASE));
   }
 
   private ModelInvocation findModel(UUID modelId) {
@@ -328,7 +330,7 @@ class PostgresqlModelLeaseRecoveryTest {
             set available_at = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 
@@ -342,12 +344,12 @@ class PostgresqlModelLeaseRecoveryTest {
             set lease_until = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 
   /** 恢复路径唯一允许出现的 Gateway 交互是 0 次：任何 replay 都会让计数断言失败。 */
-  private static final class CountingModelGateway implements ModelGateway {
+  private static final class CountingModelGateway extends SingleModelGateway {
 
     private final AtomicInteger startCalls = new AtomicInteger();
 

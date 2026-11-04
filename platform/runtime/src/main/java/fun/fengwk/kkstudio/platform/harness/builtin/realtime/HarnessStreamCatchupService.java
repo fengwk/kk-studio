@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.realtime;
+package fun.fengwk.kkstudio.platform.harness.builtin.realtime;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -6,7 +6,7 @@ import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
 
@@ -20,8 +20,8 @@ import java.util.UUID;
  * 通知；单节点部署不产生任何 NOTIFY，也不会轮询等待未来 owner。终态、已接管或与目标 Thread 不匹配的请求都是 best-effort
  * no-op：接口成功只表示请求已被接受，不承诺已有持久化保证。
  *
- * <p>通知只让接收节点对自身 active {@link ModelProcessor} 再次执行 attempt fence，不在节点间广播，也不读取当前 head。 提交后的 {@code
- * MODEL_CHECKPOINT} 仍由 Runtime 既有 checkpoint 路径发布。
+ * <p>通知只让接收节点对自身 active owner 再次执行 attempt fence，不在节点间广播，也不读取当前 head。提交后的 {@code MODEL_CHECKPOINT}
+ * 仍由 Runtime 既有 checkpoint 路径发布。
  */
 @Slf4j
 public final class HarnessStreamCatchupService {
@@ -32,7 +32,7 @@ public final class HarnessStreamCatchupService {
   static final String NOTIFY_SQL = "select pg_notify(?, ?)";
 
   private final HarnessRuntime runtime;
-  private final ModelProcessor modelProcessor;
+  private final ModelCheckpointRequester checkpointRequester;
   private final ClusterNodePresence clusterNodePresence;
   private final JdbcTemplate jdbcTemplate;
   private final UUID originNodeId;
@@ -40,13 +40,13 @@ public final class HarnessStreamCatchupService {
 
   public HarnessStreamCatchupService(
       HarnessRuntime runtime,
-      ModelProcessor modelProcessor,
+      ModelCheckpointRequester checkpointRequester,
       ClusterNodePresence clusterNodePresence,
       JdbcTemplate jdbcTemplate,
       UUID originNodeId,
       HarnessStreamCatchupNotificationCodec notificationCodec) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
-    this.modelProcessor = Objects.requireNonNull(modelProcessor, "modelProcessor");
+    this.checkpointRequester = Objects.requireNonNull(checkpointRequester, "checkpointRequester");
     this.clusterNodePresence = Objects.requireNonNull(clusterNodePresence, "clusterNodePresence");
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.originNodeId = Objects.requireNonNull(originNodeId, "originNodeId");
@@ -74,7 +74,7 @@ public final class HarnessStreamCatchupService {
       // 非 RUNNING（含终态）、过期 attempt、其它 Thread 的 invocation 或当前并非 Model 上下文：不触碰任何执行状态。
       return;
     }
-    if (modelProcessor.requestCheckpoint(invocationId, attempt)) {
+    if (checkpointRequester.requestCheckpoint(invocationId, attempt)) {
       return;
     }
     if (!clusterNodePresence.hasOtherActiveNodes()) {
@@ -103,7 +103,7 @@ public final class HarnessStreamCatchupService {
     if (originNodeId.equals(envelope.originNodeId())) {
       return;
     }
-    modelProcessor.requestCheckpoint(envelope.invocationId(), envelope.attempt());
+    checkpointRequester.requestCheckpoint(envelope.invocationId(), envelope.attempt());
   }
 
   private void publishToOtherNodes(UUID threadId, UUID invocationId, int attempt) {
