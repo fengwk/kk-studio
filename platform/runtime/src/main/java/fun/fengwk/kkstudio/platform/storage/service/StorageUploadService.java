@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
-import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
@@ -82,8 +81,6 @@ public class StorageUploadService {
 
   /** 过期批次上限：每次后台回收最多检查的候选 upload 行数；后台维护据此判断是否已排空。 */
   public static final int MAX_EXPIRY_BATCH = 16;
-
-  private static final int MAX_DEDUP_ATTEMPTS = 3;
 
   private final StorageUploadRepository uploadRepository;
   private final StorageBlobRepository blobRepository;
@@ -598,37 +595,13 @@ public class StorageUploadService {
       // 并发 complete 已绑定：直接取其结果，不重复 retain。
       return locked.getBlobId();
     }
-    for (int attempt = 1; attempt <= MAX_DEDUP_ATTEMPTS; attempt++) {
-      boolean inserted = blobRepository.insertActiveCandidate(newCandidateBlob(upload, facts));
-      StorageBlob active =
-          blobRepository.getActiveByHashAndSize(
-              upload.getDeclaredSha256(), upload.getDeclaredSize());
-      if (active == null) {
-        // 消解出的 ACTIVE 行在并发中被回收：下一轮重新插入候选行。
-        if (attempt == MAX_DEDUP_ATTEMPTS) {
-          throw new StorageConflictException(
-              "blob dedup resolution failed for upload " + upload.getId());
-        }
-        continue;
-      }
-      if (!inserted
-          && !active.getId().equals(upload.getCandidateBlobId())
-          && !blobRepository.incrementRefCount(active.getId())) {
-        // 消解出的行恰好被并发 release 到 DELETING：下一轮重新插入候选行。
-        if (attempt == MAX_DEDUP_ATTEMPTS) {
-          throw new StorageConflictException(
-              "blob dedup resolution failed for upload " + upload.getId());
-        }
-        continue;
-      }
-      // 行锁在手：setBlobIdIfNull 不可能被并发 complete 抢走，失败即上传行状态异常。
-      if (!uploadRepository.setBlobIdIfNull(
-          upload.getId(), active.getId(), expiryCutoff(uploadTtl))) {
-        throw new IllegalStateException("upload " + upload.getId() + " changed while completing");
-      }
-      return active.getId();
+    // 唯一索引冲突与 retain 在一条语句内完成；与最后一次 release 在 blob 行上串行化。
+    UUID blobId = blobRepository.retainOrInsertActive(newCandidateBlob(upload, facts));
+    // 行锁在手：setBlobIdIfNull 不可能被并发 complete 抢走，失败即上传行状态异常。
+    if (!uploadRepository.setBlobIdIfNull(upload.getId(), blobId, expiryCutoff(uploadTtl))) {
+      throw new IllegalStateException("upload " + upload.getId() + " changed while completing");
     }
-    throw new StorageConflictException("blob dedup resolution failed for upload " + upload.getId());
+    return blobId;
   }
 
   /**

@@ -19,7 +19,7 @@ import java.util.UUID;
  * {@code storage_blob} 的 JdbcClient 仓库：去重、引用计数与两阶段删除的原子操作。
  *
  * <p>引用计数与状态切换全部使用条件 UPDATE（{@code state = 'ACTIVE'} 或 {@code ref_count} 边界），由数据库行锁串行化并发
- * retain/release，应用层不持有长事务；去重插入使用部分唯一索引的 {@code on conflict do nothing}。
+ * retain/release，应用层不持有长事务；去重插入或 retain 由部分唯一索引的 {@code on conflict do update} 原子完成。
  */
 @Repository
 public class StorageBlobRepository {
@@ -37,7 +37,9 @@ public class StorageBlobRepository {
           :id, :sha256, :sizeBytes, :mediaType, :width, :height, :durationMs,
           :refCount, 'ACTIVE', current_timestamp, current_timestamp
       )
-      on conflict (sha256, size_bytes) where state = 'ACTIVE' do nothing
+      on conflict (sha256, size_bytes) where state = 'ACTIVE'
+      do update set ref_count = storage_blob.ref_count + 1, updated_at = current_timestamp
+      returning id
       """;
 
   private static final String INSERT_DELETING_SQL =
@@ -83,12 +85,9 @@ public class StorageBlobRepository {
         .orElse(null);
   }
 
-  /**
-   * 以完整事实插入 ACTIVE 候选行（{@code ref_count} 由调用方给出，complete 时调用）。 与 ACTIVE 行同内容的并发插入由部分唯一索引消解， 本方法返回
-   * false 表示插入被消解，调用方应改读现有 ACTIVE 行并自行 retain。
-   */
-  public boolean insertActiveCandidate(StorageBlob blob) {
-    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob, true).update() == 1;
+  /** 原子插入候选或 retain 同内容的 ACTIVE 行，返回实际取得引用的 blob id。 */
+  public UUID retainOrInsertActive(StorageBlob blob) {
+    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob, true).query(UUID.class).single();
   }
 
   /** 为事务失败/去重落败后已存在的候选对象记录 DELETING 清理事实。 */
