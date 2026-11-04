@@ -61,6 +61,7 @@
 | 文档 | 回答的问题 |
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
+| [Chat](modules/chat.md) | 对话集合如何持久化、分页，并持有与深删除 Harness Session？ |
 | [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
 | [IDE](modules/ide.md) | 同源 code-server 视图如何经 Daemon 命令通道与复用数据连接打开和转发？ |
 

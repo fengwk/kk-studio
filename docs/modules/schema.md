@@ -29,7 +29,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment：注册身份、保存的安装设置（`install_config`）与一次性安装 code 摘要（`install_code`）；environment_connection：环境路由租约、最近 READY 宿主信息、Skill 同步投影与运维事件；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
-| Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
+| Chat | chat、chat_session：owner 关系 | [Chat](chat.md) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
 | Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |

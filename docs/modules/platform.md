@@ -1,9 +1,9 @@
 # Platform 模块
 
-`platform-runtime` 组合领域端口与外部设施，为 Web 提供 Catalog、Chat、Interaction、Storage、
+`platform-runtime` 组合领域端口与外部设施，为 Web 提供 Catalog、Interaction、Storage、
 Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实时配置解析和执行网关；
 执行状态机见 [Harness Runtime](harness-runtime.md)。
-[Canvas](canvas.md)、[Project](project.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
+[Canvas](canvas.md)、[Chat](chat.md)、[Project](project.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
 平台需要应用参与的地方由平台定义 SPI、应用实现（见[命令接受、产品归属与派发](#命令接受产品归属与派发)）。
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
@@ -11,7 +11,7 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 扫描领域服务、仓库与设施配置。生产组合根是 [Web](web.md)。
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
 
-Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 SQL、行映射与 CAS，
+Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 SQL、行映射与 CAS，
 业务服务使用具体类。
 
 [`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
@@ -42,7 +42,7 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；Chat 与 Project 各自实现归属、锁与写钩子 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
@@ -393,7 +393,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 
 平台对产品归属的全部感知收敛在 [`SessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/SessionOwnership.java) SPI。每个实现以不透明 `{kind, id}` 身份工作，声明是否允许分叉、是否允许经通用命令接口直写，并提供接受、交互与删除的产品锁和写钩子：
 
-- Chat：[`ChatSessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/chat/ChatSessionOwnership.java) 暂留 `platform/runtime`，`chat_session` 直接持有 Session；接受锁 `chat` KEY SHARE，允许分叉与通用命令。
+- Chat：[`ChatSessionOwnership`](../../apps/chat/src/main/java/fun/fengwk/kkstudio/chat/ChatSessionOwnership.java) 由 [Chat](chat.md) 模块实现，`chat_session` 直接持有 Session；接受锁 `chat` KEY SHARE，允许分叉与通用命令。
 - Project：`project_issue_agent_thread` 维护 `(issueId, agentName) -> thread/session` 稳定绑定；接受与交互锁 `Project SHARE -> Issue UPDATE`，不允许分叉或通用命令直写，删除 Session 前先删绑定行。
 
 `findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
