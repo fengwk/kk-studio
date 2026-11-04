@@ -116,7 +116,7 @@ registerCase({
         description: 'Local queued command batch E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
         execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentResponse.json)
       assert(

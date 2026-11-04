@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.store;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,7 +31,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
 
   private JdbcTemplate jdbc;
 
-  /** 每调用只取自身未来边界：在线租约 / future due / active Work lease，PG least 忽略 null。 */
+  /** 每调用只取自身 Work 未来边界，不受环境在线状态影响；PG least 忽略 null。 */
   @Test
   void toolProjectionUsesPerInvocationDeadlinesAndDatabaseTime() {
     SeededTools seeded = seedTools(store, 3);
@@ -44,14 +43,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             tx.work().request(new WorkTarget(WorkTargetType.TOOL, id), WAITING_ENVIRONMENT);
           }
         });
-    jdbc.update(
-        "update environment set name = 'frozen-env' where id = ?", WAITING_ENVIRONMENT.value());
     seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
-    Instant environmentDeadline =
-        jdbc.queryForObject(
-            "select lease_until from environment_connection where environment_id = ?",
-            (rs, row) -> rs.getTimestamp(1).toInstant(),
-            WAITING_ENVIRONMENT.value());
     UUID online = seeded.toolIds().get(0);
     UUID future = seeded.toolIds().get(1);
     UUID leased = seeded.toolIds().get(2);
@@ -67,11 +59,11 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     // 应用时钟错到未来仍按同一 SQL statement_timestamp 判断，而不是误认为全部已过期。
     var rows = store.transaction(tx -> tx.tools().listEnvironmentWaits(seeded.toolIds()));
     for (var row : rows) {
-      assertEquals("frozen-env", row.environmentName());
-      assertFalse(row.waitingForEnvironment());
+      assertEquals(WAITING_ENVIRONMENT, row.environmentId());
+      assertEquals(row.invocationId().equals(online), row.workAvailable());
       Instant expected =
           row.invocationId().equals(online)
-              ? environmentDeadline
+              ? null
               : store
                   .transaction(
                       tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, row.invocationId())))
@@ -81,13 +73,13 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
                               ? work.availableAt()
                               : work.leaseUntil())
                   .orElseThrow();
-      assertEquals(expected, row.freshnessAt());
+      assertEquals(expected, row.workFreshnessAt());
     }
     expireReadyEnvironmentLease(WAITING_ENVIRONMENT);
     var offline =
         store.transaction(tx -> tx.tools().listEnvironmentWaits(List.of(online))).getFirst();
-    assertTrue(offline.waitingForEnvironment());
-    assertNull(offline.freshnessAt());
+    assertTrue(offline.workAvailable());
+    assertNull(offline.workFreshnessAt());
     // CONNECTING 即使租约有效也不作为环境 READY 边界。
     seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
     jdbc.update(
@@ -97,13 +89,13 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         store
             .transaction(tx -> tx.tools().listEnvironmentWaits(List.of(online)))
             .getFirst()
-            .freshnessAt());
+            .workFreshnessAt());
     forceWorkAvailable(new WorkTarget(WorkTargetType.TOOL, future));
     expireLease(new WorkTarget(WorkTargetType.TOOL, leased));
     forceWorkAvailable(new WorkTarget(WorkTargetType.TOOL, leased));
     assertTrue(
         store.transaction(tx -> tx.tools().listEnvironmentWaits(seeded.toolIds())).stream()
-            .allMatch(row -> row.waitingForEnvironment() && row.freshnessAt() == null));
+            .allMatch(row -> row.workAvailable() && row.workFreshnessAt() == null));
     assertEquals(
         List.of(),
         store.transaction(tx -> tx.tools().listEnvironmentWaits(List.of(UUID.randomUUID()))));

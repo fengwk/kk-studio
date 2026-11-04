@@ -1040,6 +1040,10 @@ select pg_temp.rejects('NOT_A_COMMAND is not a command type',
     $$update harness_thread_command set command_type='NOT_A_COMMAND'
       where thread_id=pg_temp.uid(310) and sequence=2$$,
     '23514', 'ck_harness_thread_command_type');
+select pg_temp.rejects('removed contributor state is not a command type',
+    $$update harness_thread_command set command_type='SET_CONTRIBUTOR_STATE'
+      where thread_id=pg_temp.uid(310) and sequence=2$$,
+    '23514', 'ck_harness_thread_command_type');
 delete from harness_thread_command where thread_id = pg_temp.uid(310) and sequence = 2;
 insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id,
     source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,

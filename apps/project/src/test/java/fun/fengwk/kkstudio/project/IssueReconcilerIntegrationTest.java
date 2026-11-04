@@ -497,8 +497,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntry = appendHistoryEntry(run.getThreadId());
-    issueRunService.completeRun(
-        run.getId(), run.getVersion(), key("complete"), endEntry, null, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        key("complete"),
+        IssueRunStatus.COMPLETED,
+        endEntry,
+        null,
+        null,
+        null);
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);

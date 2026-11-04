@@ -29,9 +29,8 @@ import java.util.Set;
  * <p>集中注册 13 个内置工具（统一 {@code read}、8 个宿主 Environment capability 工具、{@code task} internal 工具、 2 个
  * Goal 工具、{@code ask_user} 人工输入工具）与 {@code goal.progress} 自定义 Entry 类型。其中 {@code read} 声明 {@link
  * EnvironmentSupport#OPTIONAL}，其余 8 个宿主工具声明 {@link EnvironmentSupport#REQUIRED}， {@code task}、Goal
- * 工具与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。目标正文只由用户在 branch settings 中维护，因此没有创建工具、
- * 也没有把 Goal 提升为 systemInstruction 的 context projector；{@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，
- * 本 Contributor 只提供它的模型可见契约。
+ * 工具与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。目标正文只由用户在 branch settings 中维护，不提升为系统指令；
+ * {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结， 本 Contributor 只提供它的模型可见契约。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 

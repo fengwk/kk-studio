@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.plugin.comfyui;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
@@ -15,8 +13,9 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport.ResponseTooLargeException;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.FilterInputStream;
 import java.io.IOException;
@@ -106,12 +105,11 @@ public final class StandardComfyuiClient implements Closeable {
     this.requestTimeout = requirePositive(requestTimeout, "requestTimeout");
     // 独立严格 profile：重复键与尾随 token 严格拒绝；自由 workflow / history 树的 number 按 BigDecimal 读回并原样搬运。
     mapper =
-        Objects.requireNonNull(objectMapper, "objectMapper")
-            .rebuild()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .build();
+        PluginHttpSupport.strictJson(
+            Objects.requireNonNull(objectMapper, "objectMapper")
+                .rebuild()
+                .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .build());
     client = Objects.requireNonNull(httpClient, "httpClient");
     this.ownsClient = ownsClient;
     if (this.authMode == ComfyuiSettings.AuthMode.BEARER) {
@@ -323,7 +321,7 @@ public final class StandardComfyuiClient implements Closeable {
     PluginCredentialSnapshot snapshot = null;
     if (authMode == ComfyuiSettings.AuthMode.BEARER) {
       snapshot = resolveCredential();
-      builder.header("Authorization", "Bearer " + apiKey(snapshot.payloadJson()));
+      builder.header("Authorization", authorization(snapshot.payloadJson()));
     }
     HttpRequest request;
     try {
@@ -345,7 +343,7 @@ public final class StandardComfyuiClient implements Closeable {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("ComfyUI HTTP request was interrupted");
     }
-    if (snapshot != null && (response.statusCode() == 401 || response.statusCode() == 403)) {
+    if (snapshot != null && PluginHttpSupport.isAuthRejected(response.statusCode())) {
       try {
         rejectUsed(snapshot);
       } catch (RuntimeException | Error failure) {
@@ -378,7 +376,7 @@ public final class StandardComfyuiClient implements Closeable {
   }
 
   /** 只接受唯一秘密字段 {@code apiKey} 的严格 JSON object；非法形状与非法字符都行不通。 */
-  private static String apiKey(String payloadJson) {
+  private static String authorization(String payloadJson) {
     JsonNode root;
     try {
       root = JsonValues.readTree(payloadJson);
@@ -396,13 +394,11 @@ public final class StandardComfyuiClient implements Closeable {
     if (token.isBlank() || !token.equals(token.strip())) {
       throw invalidCredential();
     }
-    for (int i = 0; i < token.length(); i++) {
-      char c = token.charAt(i);
-      if (c <= 32 || c >= 127) {
-        throw invalidCredential();
-      }
+    try {
+      return PluginHttpSupport.bearer(token);
+    } catch (IllegalArgumentException error) {
+      throw invalidCredential();
     }
-    return token;
   }
 
   private static IllegalStateException invalidCredential() {
@@ -410,11 +406,7 @@ public final class StandardComfyuiClient implements Closeable {
   }
 
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    try {
-      credentialAccess.rejectUsed(snapshot, AUTH_REJECTED_ERROR);
-    } catch (RuntimeException error) {
-      log.debug("ComfyUI credential rejection failed type={}", error.getClass().getSimpleName());
-    }
+    PluginHttpSupport.rejectUsed(credentialAccess, snapshot, AUTH_REJECTED_ERROR);
   }
 
   private record ComfyResponse(int statusCode, HttpHeaders headers, DeadlineResponseBody body) {}
@@ -573,18 +565,11 @@ public final class StandardComfyuiClient implements Closeable {
   }
 
   private static byte[] readBounded(InputStream content, int maxBytes) throws IOException {
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-    byte[] chunk = new byte[8 * 1024];
-    int read;
-    int total = 0;
-    while ((read = content.read(chunk)) >= 0) {
-      total += read;
-      if (total > maxBytes) {
-        throw new IllegalArgumentException("ComfyUI response exceeded " + maxBytes + " bytes");
-      }
-      buffer.write(chunk, 0, read);
+    try {
+      return PluginHttpSupport.readBounded(content, maxBytes);
+    } catch (ResponseTooLargeException error) {
+      throw new IllegalArgumentException("ComfyUI response exceeded " + maxBytes + " bytes");
     }
-    return buffer.toByteArray();
   }
 
   private static String text(ObjectNode node, String field) {

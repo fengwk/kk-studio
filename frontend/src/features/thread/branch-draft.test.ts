@@ -69,7 +69,6 @@ function agent(
     type: 'USER',
     execution: createBuiltinExecution('model', null),
     config: {
-      inheritParentEnvironment: true,
       tools,
       skills: skills.map((name) => ({ packageName: 'default', name })),
       subagents,

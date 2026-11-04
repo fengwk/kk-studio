@@ -26,8 +26,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
@@ -145,24 +144,21 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void mapsOwnerAndCreationTargets() {
-    // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型；THREAD 不由创建型 union 承载。
+    // owner 身份保持不透明，展示字段不能影响授权身份。
     HarnessCommandOwnerDTO chatOwner = new HarnessCommandOwnerDTO();
-    chatOwner.setType("CHAT");
-    chatOwner.setChatId(idText(10));
-    OwnerRef mappedChatOwner = HarnessRuntimeRequestMapper.toOwner(chatOwner);
-    assertEquals(OwnerType.CHAT, mappedChatOwner.type());
-    assertInstanceOf(OwnerRef.Chat.class, mappedChatOwner);
-    assertEquals(id(10), ((OwnerRef.Chat) mappedChatOwner).chatId());
+    chatOwner.setKind("CHAT");
+    chatOwner.setId(idText(10));
+    chatOwner.setTitle("untrusted");
+    chatOwner.setLink("/untrusted");
+    assertEquals(
+        new SessionOwner("CHAT", idText(10)), HarnessRuntimeRequestMapper.toOwner(chatOwner));
 
     HarnessCommandOwnerDTO issueAgentOwner = new HarnessCommandOwnerDTO();
-    issueAgentOwner.setType("ISSUE_AGENT");
-    issueAgentOwner.setIssueId(idText(11));
-    issueAgentOwner.setAgentName("assistant");
-    OwnerRef mappedIssueAgentOwner = HarnessRuntimeRequestMapper.toOwner(issueAgentOwner);
-    assertEquals(OwnerType.ISSUE_AGENT, mappedIssueAgentOwner.type());
-    assertInstanceOf(OwnerRef.IssueAgent.class, mappedIssueAgentOwner);
-    assertEquals(id(11), ((OwnerRef.IssueAgent) mappedIssueAgentOwner).issueId());
-    assertEquals("assistant", ((OwnerRef.IssueAgent) mappedIssueAgentOwner).agentName());
+    issueAgentOwner.setKind("CUSTOM");
+    issueAgentOwner.setId("opaque:id");
+    assertEquals(
+        new SessionOwner("CUSTOM", "opaque:id"),
+        HarnessRuntimeRequestMapper.toOwner(issueAgentOwner));
 
     AcceptCommandsCommand newSession =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
@@ -198,14 +194,14 @@ class HarnessRuntimeRequestMapperTest {
         IllegalArgumentException.class,
         () -> {
           HarnessCommandOwnerDTO unknown = new HarnessCommandOwnerDTO();
-          unknown.setType("UNKNOWN");
+          unknown.setKind("UNKNOWN");
           HarnessRuntimeRequestMapper.toOwner(unknown);
         });
     assertThrows(
         IllegalArgumentException.class,
         () -> {
           HarnessCommandOwnerDTO missingChatId = new HarnessCommandOwnerDTO();
-          missingChatId.setType("CHAT");
+          missingChatId.setKind("CHAT");
           HarnessRuntimeRequestMapper.toOwner(missingChatId);
         });
   }
@@ -561,16 +557,15 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE，也不接受未知
-    // discriminator。
-    for (String internal : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
-      HarnessCommandCreateDTO rejected = command(internal, internal);
+    // 内部命令、已删除的命令与未知 discriminator 均不可由产品 HTTP 面提交。
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+      HarnessCommandCreateDTO rejected = command(type, type);
       assertThrows(
           IllegalArgumentException.class,
           () ->
               HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                   THREAD_ID, threadBatch(rejected)),
-          internal + " must be rejected");
+          type + " must be rejected");
     }
 
     HarnessCommandCreateDTO unknown = command("UNKNOWN", "unknown");
@@ -895,7 +890,7 @@ class HarnessRuntimeRequestMapperTest {
             HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null, "user"));
 
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
-    owner.setType("CHAT");
+    owner.setKind("CHAT");
     assertThrows(IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.toOwner(owner));
     assertThrows(IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
   }
@@ -1002,8 +997,8 @@ class HarnessRuntimeRequestMapperTest {
       HarnessCommandTargetDTO target, HarnessCommandCreateDTO... commands) {
     HarnessCommandBatchDTO request = new HarnessCommandBatchDTO();
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
-    owner.setType("CHAT");
-    owner.setChatId(idText(10));
+    owner.setKind("CHAT");
+    owner.setId(idText(10));
     request.setOwner(owner);
     request.setTarget(target);
     request.setCommands(List.of(commands));

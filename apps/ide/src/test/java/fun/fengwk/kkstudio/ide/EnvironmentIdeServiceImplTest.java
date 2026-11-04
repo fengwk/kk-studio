@@ -33,6 +33,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -212,6 +215,24 @@ class EnvironmentIdeServiceImplTest {
         () -> service.focusTerminal(ENV, VIEW.toString(), binding));
     assertEquals(before + 1, transport.commands.size());
     assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
+  }
+
+  /** 用户取消关闭不撤销当前绑定，并提供可跨节点识别的校验资源。 */
+  @Test
+  void cancelledCloseKeepsBindingAndReturnsCancellationResource() {
+    open();
+    EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDiscard(false);
+    transport.replies.add(
+        IdeResult.newBuilder().setOk(false).setCode("CANCELLED").setMessage("cancelled").build());
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
+    assertEquals("ide_close_cancelled", error.resource());
+    assertTrue(bindings.find(ENV, VIEW).isPresent());
+    assertTrue(authorization.closed.isEmpty());
   }
 
   @Test
@@ -483,6 +504,77 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().getAction());
   }
 
+  /** 普通关闭可等待原生提示，但终端和强制关闭仍会超时并放弃在途命令。 */
+  @Test
+  void normalCloseWaitsForReplyWhileOtherCommandsRemainBounded() throws Exception {
+    open();
+    transport.neverCompletes.set(true);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+    close.setDocumentId(DOCUMENT.toString());
+    close.setBindingEpoch("7");
+    close.setDiscard(true);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.closeView(ENV, VIEW.toString(), close));
+    assertEquals(2, transport.abandoned);
+    close.setDiscard(false);
+    transport.pendingStarted = new CountDownLatch(1);
+    CompletableFuture<Void> waiting =
+        CompletableFuture.runAsync(() -> service.closeView(ENV, VIEW.toString(), close));
+    try {
+      assertTrue(transport.pendingStarted.await(2, TimeUnit.SECONDS));
+      assertThrows(TimeoutException.class, () -> waiting.get(500, TimeUnit.MILLISECONDS));
+      assertEquals(2, transport.abandoned);
+      transport.pendingReply.complete(success(VIEW));
+      waiting.get(2, TimeUnit.SECONDS);
+      assertEquals(2, transport.abandoned);
+    } finally {
+      transport.pendingReply.completeExceptionally(new IllegalStateException("test cleanup"));
+    }
+  }
+
+  /** 无限等待仍可中断，并且必须撤销对应在途登记。 */
+  @Test
+  void interruptingNormalCloseAbandonsPendingCommand() throws Exception {
+    open();
+    transport.neverCompletes.set(true);
+    transport.pendingStarted = new CountDownLatch(1);
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+    close.setDocumentId(DOCUMENT.toString());
+    close.setBindingEpoch("7");
+    close.setDiscard(false);
+    AtomicReference<Throwable> failure = new AtomicReference<>();
+    AtomicBoolean interrupted = new AtomicBoolean();
+    Thread worker =
+        new Thread(
+            () -> {
+              try {
+                service.closeView(ENV, VIEW.toString(), close);
+              } catch (RuntimeException error) {
+                failure.set(error);
+                interrupted.set(Thread.currentThread().isInterrupted());
+              }
+            });
+    worker.start();
+    try {
+      assertTrue(transport.pendingStarted.await(2, TimeUnit.SECONDS));
+      worker.interrupt();
+      worker.join(2000);
+      assertFalse(worker.isAlive());
+      assertTrue(failure.get() instanceof AiEnvironmentIdeUnavailableException);
+      assertTrue(interrupted.get());
+      assertEquals(1, transport.abandoned);
+    } finally {
+      worker.interrupt();
+      if (transport.pendingReply != null) {
+        transport.pendingReply.completeExceptionally(new IllegalStateException("test cleanup"));
+      }
+    }
+  }
+
   private List<IdeAction> actions() {
     return transport.commands.stream().map(IdeCommand::getAction).toList();
   }
@@ -611,6 +703,8 @@ class EnvironmentIdeServiceImplTest {
     private final Deque<IdeResult> replies = new ArrayDeque<>();
     private final AtomicBoolean neverCompletes = new AtomicBoolean();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
+    private volatile CountDownLatch pendingStarted;
+    private volatile CompletableFuture<IdeResult> pendingReply;
     private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
     private int abandoned;
 
@@ -618,6 +712,10 @@ class EnvironmentIdeServiceImplTest {
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeResult> future = new CompletableFuture<>();
+      if (pendingStarted != null) {
+        pendingReply = future;
+        pendingStarted.countDown();
+      }
       IdeAction failAction = failNext.get();
       if (failAction == command.getAction() && failNext.compareAndSet(failAction, null)) {
         // 只让指定命令一次结果不确定；后续对账命令使用脚本化回执。

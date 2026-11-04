@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFile, mkdtemp, mkdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { createCodeServerManager, idePaths, resolveCodeServerLaunch } from '../../src/ide/codeServer.js'
+import { createProcessSupervisor } from '../../src/native/index.js'
+import { applyNetworkSettings } from '../../src/network.js'
 
 /**
  * Focused tests for the code-server process manager: bundled Node launch resolution,
@@ -182,6 +184,46 @@ const credentials = { url: 'http://127.0.0.1:1', token: 'secret' }
 const signal = (): AbortSignal => new AbortController().signal
 
 describe('code-server process manager', () => {
+  // 真实 manager 通过原生 supervisor 启动两代子进程，既保留桥接凭据又清除继承代理。
+  it('passes the current platform proxy and bridge credentials to new code-server processes', async () => {
+    const script = READY_SERVER.replace(
+      "const args = process.argv.slice(2)",
+      `fs.writeFileSync('proxy-env.json', JSON.stringify({
+        proxy: Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(http|https|all|no)_proxy$/i.test(key))),
+        bridgeUrl: process.env.KK_STUDIO_IDE_BRIDGE_URL,
+        hasBridgeToken: !!process.env.KK_STUDIO_IDE_BRIDGE_TOKEN,
+        hasManagementToken: !!process.env.KK_STUDIO_IDE_MANAGEMENT_TOKEN,
+      }))
+const args = process.argv.slice(2)`,
+    )
+    const root = await distribution(script)
+    const cfg = config(root)
+    const native = createProcessSupervisor()
+    const manager = createCodeServerManager(cfg, native, credentials)
+    vi.stubEnv('http_proxy', 'http://host.invalid:1')
+    vi.stubEnv('ALL_PROXY', 'http://host.invalid:2')
+    const environment = async () => JSON.parse(await readFile(join(idePaths(cfg).codeServerDir, 'proxy-env.json'), 'utf8'))
+    try {
+      applyNetworkSettings('http://proxy.invalid:8080', 'localhost')
+      await manager.ensureStarted(signal())
+      expect(await environment()).toEqual({
+        proxy: { HTTP_PROXY: 'http://proxy.invalid:8080', HTTPS_PROXY: 'http://proxy.invalid:8080', NO_PROXY: 'localhost' },
+        bridgeUrl: credentials.url, hasBridgeToken: true, hasManagementToken: true,
+      })
+      await manager.stop()
+      applyNetworkSettings(null, '')
+      await manager.ensureStarted(signal())
+      expect(await environment()).toEqual({
+        proxy: { NO_PROXY: '' }, bridgeUrl: credentials.url, hasBridgeToken: true, hasManagementToken: true,
+      })
+    } finally {
+      await manager.close()
+      await native.close()
+      applyNetworkSettings(null, '')
+      vi.unstubAllEnvs()
+    }
+  })
+
   it.runIf(process.platform !== 'win32')('keeps IPC private and short even with a long persistent data path', async () => {
     const root = await distribution(IPC_READY_SERVER)
     const cfg = config(root)

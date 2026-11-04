@@ -5,6 +5,8 @@ import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+
 import java.util.Objects;
 
 /**
@@ -19,21 +21,17 @@ record OpenCliSettings(
     long connectTimeoutMillis,
     long requestTimeoutMillis,
     long longPollTimeoutMillis,
-    int streamBufferBytes,
-    int maxJsonResponseBytes,
-    int maxErrorResponseBytes,
-    int maxOutputChars,
     GptImage2 gptImage2,
     Seedance seedance) {
 
   private static final ObjectMapper STRICT_MAPPER =
-      JsonMapper.builder()
-          .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
-          .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
-          .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
-          .build();
+      PluginHttpSupport.strictJson(
+          JsonMapper.builder()
+              .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+              .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+              .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+              .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+              .build());
 
   OpenCliSettings {
     baseUrl = OpenCliSettingsValidation.requireHttpOrigin(baseUrl, "baseUrl");
@@ -46,13 +44,6 @@ record OpenCliSettings(
         requestTimeoutMillis, 1_000L, 30L * 60 * 1000, "requestTimeoutMillis");
     OpenCliSettingsValidation.requireBounded(
         longPollTimeoutMillis, 121_000L, 10L * 60 * 1000, "longPollTimeoutMillis");
-    OpenCliSettingsValidation.requireBounded(
-        streamBufferBytes, 1024, 1024 * 1024, "streamBufferBytes");
-    OpenCliSettingsValidation.requireBounded(
-        maxJsonResponseBytes, 1024, 4 * 1024 * 1024, "maxJsonResponseBytes");
-    OpenCliSettingsValidation.requireBounded(
-        maxErrorResponseBytes, 256, 64 * 1024, "maxErrorResponseBytes");
-    OpenCliSettingsValidation.requireBounded(maxOutputChars, 1024, 1_000_000, "maxOutputChars");
     gptImage2 = Objects.requireNonNull(gptImage2, "gptImage2");
     seedance = Objects.requireNonNull(seedance, "seedance");
   }

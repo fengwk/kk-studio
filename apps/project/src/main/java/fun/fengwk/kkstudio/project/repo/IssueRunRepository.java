@@ -161,18 +161,6 @@ public class IssueRunRepository {
         .list();
   }
 
-  /** 本 Issue 指定阶段中序号大于高水位的 Run 数（不论 Agent 与状态），用于阶段额度计算。 */
-  public long countByIssueIdAndStateAfterOrdinal(UUID issueId, String state, long afterOrdinal) {
-    return jdbc.sql(
-            "select count(*) from project_issue_run where issue_id = :issueId"
-                + " and state = :state and ordinal > :afterOrdinal")
-        .param("issueId", issueId)
-        .param("state", state)
-        .param("afterOrdinal", afterOrdinal)
-        .query((resultSet, rowNumber) -> resultSet.getLong(1))
-        .single();
-  }
-
   public boolean updateById(IssueRun run, long expectedVersion) {
     boolean changed =
         jdbc.sql(

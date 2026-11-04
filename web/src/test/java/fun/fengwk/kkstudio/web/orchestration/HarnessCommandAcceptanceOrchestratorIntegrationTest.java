@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
@@ -85,7 +85,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     UUID chatThreadId = UUID.randomUUID();
 
     accept(
-        new OwnerRef.Chat(chatId),
+        new SessionOwner("CHAT", chatId.toString()),
         chatSessionId,
         chatThreadId,
         new UserMessageCommandPayload(
@@ -103,7 +103,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   @Test
   void threadTargetContinuationPreservesCommandPrefix() {
     UUID chatId = createChat("thread-target");
-    OwnerRef owner = new OwnerRef.Chat(chatId);
+    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     AcceptedCommands initial =
@@ -147,7 +147,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   void goalCommandsPersistAndReplayInPostgresql() {
     // 测试意图：Goal 设置与清除均是 typed 用户命令，必须通过真实 PostgreSQL 约束并保持精确重放幂等。
     UUID chatId = createChat("goal-command");
-    OwnerRef owner = new OwnerRef.Chat(chatId);
+    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     AcceptCommandsCommand setGoal =
@@ -198,7 +198,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> accept(new OwnerRef.Chat(chatId), sessionId, threadId, payload));
+        () -> accept(new SessionOwner("CHAT", chatId.toString()), sessionId, threadId, payload));
 
     assertEquals(1, count("storage_upload", "id", UUID.fromString(pending.getId())));
     assertEquals(0, count("chat_session", "session_id", sessionId));
@@ -213,7 +213,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   @Test
   void existingSessionResourceCanBeReusedWithoutAnotherRetain() {
     UUID chatId = createChat("resource-reuse");
-    OwnerRef owner = new OwnerRef.Chat(chatId);
+    SessionOwner owner = new SessionOwner("CHAT", chatId.toString());
     byte[] content = "durable resource".getBytes(StandardCharsets.UTF_8);
     String uploadId = storage.completeUpload("resource.txt", content);
     UUID sessionId = UUID.randomUUID();
@@ -295,14 +295,26 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owner"))));
 
-    accept(new OwnerRef.Chat(chat1Id), sessionId, threadId, payload, idempotencyKey);
+    accept(
+        new SessionOwner("CHAT", chat1Id.toString()), sessionId, threadId, payload, idempotencyKey);
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> accept(new OwnerRef.Chat(chat2Id), sessionId, UUID.randomUUID(), payload));
+        () ->
+            accept(
+                new SessionOwner("CHAT", chat2Id.toString()),
+                sessionId,
+                UUID.randomUUID(),
+                payload));
     assertThrows(
         IllegalArgumentException.class,
-        () -> accept(new OwnerRef.Chat(chat2Id), sessionId, threadId, payload, idempotencyKey));
+        () ->
+            accept(
+                new SessionOwner("CHAT", chat2Id.toString()),
+                sessionId,
+                threadId,
+                payload,
+                idempotencyKey));
 
     assertEquals(1, chatSessionRepository.listSessionIds(chat1Id).size());
     assertEquals(0, chatSessionRepository.listSessionIds(chat2Id).size());
@@ -329,7 +341,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     // 逆证：无 owner relation 的内部 Session 即使能命中 Runtime exact replay，也不能被产品 owner 接管。
     assertThrows(
         IllegalArgumentException.class,
-        () -> acceptanceService.accept(new OwnerRef.Chat(chatId), command));
+        () -> acceptanceService.accept(new SessionOwner("CHAT", chatId.toString()), command));
     assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
@@ -343,12 +355,12 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   }
 
   private void accept(
-      OwnerRef owner, UUID sessionId, UUID threadId, UserMessageCommandPayload payload) {
+      SessionOwner owner, UUID sessionId, UUID threadId, UserMessageCommandPayload payload) {
     accept(owner, sessionId, threadId, payload, UUID.randomUUID());
   }
 
   private void accept(
-      OwnerRef owner,
+      SessionOwner owner,
       UUID sessionId,
       UUID threadId,
       UserMessageCommandPayload payload,

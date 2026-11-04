@@ -132,13 +132,24 @@ public final class ProviderRequestPreviewService {
     List<NewThreadCommand> prepared =
         contentPreparer.prepare(snapshot.thread().sessionId(), command.commands());
     Instant now = clock.instant();
+    boolean childThread = !threadId.equals(snapshot.thread().rootThreadId());
+    String rootEnvironmentName =
+        childThread
+            ? runtime
+                .getThreadSnapshot(snapshot.thread().rootThreadId())
+                .requireFullPath()
+                .baseSettings()
+                .environmentName()
+            : null;
     EntryPath candidatePath =
         runtime.previewInputCandidatePath(
             threadId,
             snapshot.requireFullPath(),
             snapshot.thread().nextCommandSequence(),
             prepared,
-            now);
+            now,
+            childThread,
+            rootEnvironmentName);
     return planAndEncode(
         turnResolver.planLive(threadId, candidatePath, now),
         candidatePath,
@@ -175,7 +186,7 @@ public final class ProviderRequestPreviewService {
     UUID candidateThreadId = UUID.randomUUID();
     EntryPath candidatePath =
         runtime.previewInputCandidatePath(
-            candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now);
+            candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now, false, null);
     if (!BuiltinExecution.DRIVER.equals(candidatePath.baseSettings().execution().driver())) {
       throw new ProviderRequestPreviewUnavailableException(
           Reason.PREVIEW_UNSUPPORTED,

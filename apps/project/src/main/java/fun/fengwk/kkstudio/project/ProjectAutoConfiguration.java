@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.work.DurableWorkStore;
  * Project 模块的自动装配入口：把 Project 领域 Bean、领域编解码器与 Spring JDBC 持久化组件注册到宿主应用。
  *
  * <p>Project 是建立在平台之上的应用：经平台的公开服务使用运行时、全局 Blob 与 Agent 目录（窄适配见 {@code
- * fun.fengwk.kkstudio.project.platform}），并实现平台定义的 {@code IssueAgentOwnership}。Issue Reconcile
+ * fun.fengwk.kkstudio.project.platform}），并实现平台定义的 {@code SessionOwnership}。Issue Reconcile
  * 的执行器与生命周期由 web 组合根装配。
  */
 @ComponentScan(basePackageClasses = ProjectAutoConfiguration.class)

@@ -183,14 +183,6 @@ public class InMemoryHarnessTransaction implements HarnessStore.Transaction {
     return store.isRouteReady(nodeInstanceId, environmentId, now);
   }
 
-  boolean hasReadyEnvironmentLease(EnvironmentId environmentId, Instant now) {
-    return store.hasReadyEnvironmentLease(environmentId, now);
-  }
-
-  String environmentName(EnvironmentId environmentId) {
-    return store.environmentName(environmentId);
-  }
-
   // ---------- 测试基座扩展 hook：runtime test-jar 内部，Driver 私有视图专用，不是生产 SPI ----------
 
   /** 按 id 读取不透明 driver 行；不存在返回 {@link Optional#empty()}。 */

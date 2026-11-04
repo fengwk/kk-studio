@@ -5,11 +5,11 @@ import java.util.Objects;
 /**
  * 一次 Entry branch 的完整不可变 settings 快照。
  *
- * <p>只冻结用户可见的 branch 选择：Agent 引用、Model selection、Environment 引用与用户维护的 Goal。{@code environmentName}
- * 可为 null，表示该 branch 未选择 Environment；非 null 时是 Environment 的全局唯一不可变 name，Platform 在每个 Turn 将其解析为内部
- * EnvironmentId。{@code goal} 可为 null，表示该 branch 当前没有用户设定的 Goal；非 null 时是 用户经 typed GOAL
- * 输入命令设置的目标正文快照，Agent 无权创改。目录只存在于具体工具 arguments 中，因此 branch 历史不保存任何 workspace/cwd 状态。YOLO 被刻意省略：它属于
- * Thread runtime policy，而不是 branch 历史。
+ * <p>冻结 Agent、执行选择与用户维护的 Goal。环境选择归执行根；子线程初始设置不含环境，回合快照中的 {@code environmentName}
+ * 是该回合规划时执行根已生效的环境，不是子线程自己的选择。name 可为 null 表示无环境；非 null 时是 Environment 的全局唯一不可变 name， Platform 在每个
+ * Turn 将其解析为内部 EnvironmentId。{@code goal} 可为 null，表示该 branch 当前没有用户设定的 Goal；非 null 时是 用户经 typed
+ * GOAL 输入命令设置的目标正文快照，Agent 无权创改。目录只存在于具体工具 arguments 中，因此 branch 历史不保存任何 workspace/cwd 状态。YOLO
+ * 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
     String agentName, ExecutionSelection execution, String environmentName, GoalSetting goal) {

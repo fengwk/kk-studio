@@ -243,7 +243,6 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
       tools: [...TOOL_NAMES],
       skills: [],
       subagents: [],
-      inheritParentEnvironment: true,
     },
   }
   const { status, json } = await ctx.call('POST', '/api/agents', body)

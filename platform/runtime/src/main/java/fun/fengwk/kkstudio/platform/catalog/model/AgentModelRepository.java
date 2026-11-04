@@ -6,7 +6,6 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
-import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentModelReferences;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 

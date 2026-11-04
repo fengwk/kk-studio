@@ -80,6 +80,22 @@ public class ProjectRepository {
         .orElse(null);
   }
 
+  /** 未归档项目的工作流阶段是否引用该 Agent。 */
+  public boolean existsReferencingAgent(String name) {
+    return jdbc.sql(
+            """
+            select exists (
+                select 1
+                from project p, jsonb_array_elements(p.workflow -> 'states') state
+                where p.archived_at is null
+                  and state ->> 'agent' = :name
+            )
+            """)
+        .param("name", name)
+        .query(Boolean.class)
+        .single();
+  }
+
   public Project lockById(UUID id) {
     return jdbc.sql("select " + COLUMNS + " from project where id = :id for update")
         .param("id", id)

@@ -8,6 +8,7 @@ import {
 import type { CanvasSnapshot } from '@/features/canvas/domain'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
+import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
 
 export interface CanvasStageContextMenuApi {
   contextMenu: CanvasContextMenuState | null
@@ -93,7 +94,7 @@ export function useCanvasStageContextMenu({
       return
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented && !hasBlockingModal()) {
         closeContextMenu()
       }
     }

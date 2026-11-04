@@ -116,6 +116,7 @@ export function Select({
     options.findIndex((option) => option.value === value && !option.disabled),
   )
   const [open, setOpen] = useState(false)
+  const [modalTouchOptions, setModalTouchOptions] = useState(false)
   const [activeIndex, setActiveIndex] = useState(selectedIndex)
   const [menuPosition, setMenuPosition] = useState<CSSProperties | null>(null)
   const selected = options.find((option) => option.value === value)
@@ -139,6 +140,7 @@ export function Select({
 
   function openListbox() {
     setActiveIndex(selectedIndex)
+    setModalTouchOptions(Boolean(rootRef.current?.closest('.modal-touch-target')))
     if (triggerRef.current) {
       setMenuPosition(computeMenuPosition(triggerRef.current, compact))
     }
@@ -309,7 +311,12 @@ export function Select({
             <div
               ref={menuRef}
               id={listboxId}
-              className={['ui-select-menu', compact ? 'is-compact' : '', className]
+              className={[
+                'ui-select-menu',
+                compact ? 'is-compact' : '',
+                modalTouchOptions ? 'modal-touch-options' : '',
+                className,
+              ]
                 .filter(Boolean)
                 .join(' ')}
               role="listbox"

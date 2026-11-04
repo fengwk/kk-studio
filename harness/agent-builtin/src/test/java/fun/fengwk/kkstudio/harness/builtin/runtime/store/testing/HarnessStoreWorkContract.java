@@ -942,7 +942,7 @@ public abstract class HarnessStoreWorkContract {
 
   private List<PendingEnvironmentWaitRow> environmentWaits(Instant afterCreatedAt, UUID afterId) {
     return store.transaction(
-        tx -> tx.tools().listPendingEnvironmentWaits(afterCreatedAt, afterId, 10));
+        tx -> tx.tools().listEnvironmentWaitCandidates(afterCreatedAt, afterId, 10));
   }
 
   /** 在同一 root thread 播种 {@code count} 个 READY TOOL 调用，用于验证按根聚合计数。 */
@@ -1020,12 +1020,9 @@ public abstract class HarnessStoreWorkContract {
         });
   }
 
-  /**
-   * 测试意图：只有「READY 调用 + 到期且无有效执行 lease 的 TOOL Work + 环境无有效 READY 连接租约」同时成立才进入等待环境投影；环境上线后消失，
-   * 自然到期后重新出现（不依赖任何写入事件）。
-   */
+  /** 测试意图：候选只依赖调用与 Work 事实，环境上线或租约到期都不改变引擎返回的候选。 */
   @Test
-  void environmentWaitTracksOfflineEnvironmentAndLeaseExpiry() {
+  void environmentWaitCandidatesDoNotDependOnConnection() {
     SeededTools seeded = seedTools(store, 1);
     UUID toolId = seeded.toolIds().get(0);
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, toolId);
@@ -1035,9 +1032,9 @@ public abstract class HarnessStoreWorkContract {
         new PendingEnvironmentWaitRow(seeded.threadId(), WAITING_ENVIRONMENT, T1, toolId, 1);
     assertEquals(List.of(expected), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
 
-    // 环境持有有效 READY 租约：待领取事实消失。
+    // 环境连接状态不属于引擎查询。
     seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
-    assertEquals(List.of(), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
+    assertEquals(List.of(expected), environmentWaits(Instant.EPOCH, CURSOR_ZERO));
 
     // 租约自然到期（无数据库写事件）：重新成为等待环境。
     expireReadyEnvironmentLease(WAITING_ENVIRONMENT);
@@ -1092,19 +1089,19 @@ public abstract class HarnessStoreWorkContract {
     // 同一根不同环境是两个独立分组，不会合并；按代表游标翻页不重不漏。
     List<PendingEnvironmentWaitRow> firstPage =
         store.transaction(
-            tx -> tx.tools().listPendingEnvironmentWaits(Instant.EPOCH, CURSOR_ZERO, 2));
+            tx -> tx.tools().listEnvironmentWaitCandidates(Instant.EPOCH, CURSOR_ZERO, 2));
     assertEquals(all.subList(0, 2), firstPage);
     PendingEnvironmentWaitRow cursor = firstPage.get(firstPage.size() - 1);
     List<PendingEnvironmentWaitRow> secondPage =
         store.transaction(
             tx ->
                 tx.tools()
-                    .listPendingEnvironmentWaits(
+                    .listEnvironmentWaitCandidates(
                         cursor.representativeCreatedAt(), cursor.representativeInvocationId(), 2));
     assertEquals(List.of(all.get(2)), secondPage);
   }
 
-  /** 单调用投影保留冻结环境，不能从根聚合反推；未 due、上线和 server-side 均不标等待。 */
+  /** 单调用投影保留冻结环境，未 due 和 server-side 不可领取；不读取环境在线状态。 */
   @Test
   void toolEnvironmentSnapshotAndTimeHorizonUseWorkFacts() {
     SeededTools seeded = seedTools(store, 3);
@@ -1121,26 +1118,29 @@ public abstract class HarnessStoreWorkContract {
     EnvironmentToolWaitRow waitingRow =
         rows.stream().filter(row -> row.invocationId().equals(waiting)).findFirst().orElseThrow();
     assertEquals(WAITING_ENVIRONMENT, waitingRow.environmentId());
-    assertTrue(waitingRow.waitingForEnvironment());
-    assertNull(waitingRow.freshnessAt());
+    assertTrue(waitingRow.workAvailable());
+    assertNull(waitingRow.workFreshnessAt());
     EnvironmentToolWaitRow futureRow =
         rows.stream().filter(row -> row.invocationId().equals(future)).findFirst().orElseThrow();
     assertEquals(WAITING_ENVIRONMENT, futureRow.environmentId());
-    assertFalse(futureRow.waitingForEnvironment());
+    assertFalse(futureRow.workAvailable());
     assertEquals(
         store.transaction(tx -> tx.work().find(futureTarget)).orElseThrow().availableAt(),
-        futureRow.freshnessAt());
-    assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, false, null, null)));
+        futureRow.workFreshnessAt());
+    assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, true, false, null)));
+    assertEquals(
+        List.of(WAITING_ENVIRONMENT),
+        store.transaction(tx -> tx.tools().listReadyToolEnvironments()));
     Instant horizon =
-        store.transaction(tx -> tx.tools().findNextEnvironmentWaitChange()).orElseThrow();
+        store.transaction(tx -> tx.tools().findNextEnvironmentWorkChange()).orElseThrow();
     assertTrue(horizon.isAfter(authorityNow()));
     assertTrue(horizon.isBefore(authorityNow().plus(Duration.ofMinutes(6))));
     seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
-    assertFalse(
+    assertTrue(
         store
             .transaction(tx -> tx.tools().listEnvironmentWaits(List.of(waiting)))
             .get(0)
-            .waitingForEnvironment());
+            .workAvailable());
     assertEquals(List.of(), store.transaction(tx -> tx.tools().listEnvironmentWaits(List.of())));
   }
 
@@ -1165,8 +1165,10 @@ public abstract class HarnessStoreWorkContract {
         store
             .transaction(tx -> tx.tools().listEnvironmentWaits(List.of(seeded.toolId())))
             .getFirst();
-    assertFalse(running.waitingForEnvironment());
-    assertNull(running.freshnessAt());
+    assertFalse(running.invocationReady());
+    assertFalse(running.workAvailable());
+    assertNull(running.workFreshnessAt());
+    assertTrue(store.transaction(tx -> tx.tools().listReadyToolEnvironments()).isEmpty());
     inTransaction(
         store,
         tx -> {
@@ -1180,7 +1182,7 @@ public abstract class HarnessStoreWorkContract {
         store
             .transaction(tx -> tx.tools().listEnvironmentWaits(List.of(seeded.toolId())))
             .getFirst();
-    assertFalse(terminal.waitingForEnvironment());
-    assertNull(terminal.freshnessAt());
+    assertFalse(terminal.workAvailable());
+    assertNull(terminal.workFreshnessAt());
   }
 }

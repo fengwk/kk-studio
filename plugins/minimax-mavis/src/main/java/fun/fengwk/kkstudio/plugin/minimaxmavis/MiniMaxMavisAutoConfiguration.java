@@ -22,7 +22,7 @@ public class MiniMaxMavisAutoConfiguration {
   @ConditionalOnMissingBean
   @DependsOn("systemProxySelector")
   public MavisHttpTransport mavisHttpTransport() {
-    return new JdkMavisHttpTransport();
+    return new MavisHttpTransport();
   }
 
   @Bean

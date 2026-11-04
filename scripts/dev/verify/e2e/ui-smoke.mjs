@@ -1267,7 +1267,7 @@ async function main(argv) {
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
         execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       assert(
         agentCreateRes.status === 201,
@@ -1359,7 +1359,7 @@ async function main(argv) {
         description: 'Temporary real UI E2E agent.',
         systemPrompt: 'Reply concisely and never call tools.',
         execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID, variant: REAL_UI_MODEL.variant } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       assert(
         agentCreateRes.status === 201,

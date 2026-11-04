@@ -322,7 +322,6 @@ registerCase({
               tools: ['get_goal'],
               skills: [],
               subagents: [],
-              inheritParentEnvironment: true,
             },
           })
         ).json,
@@ -390,7 +389,6 @@ registerCase({
               tools: ['get_goal', 'update_goal'],
               skills: [],
               subagents: [],
-              inheritParentEnvironment: true,
             },
             expectedVersion: agent.version,
           })

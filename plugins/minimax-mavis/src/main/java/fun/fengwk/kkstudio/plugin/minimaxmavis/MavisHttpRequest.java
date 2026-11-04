@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -32,7 +34,7 @@ public record MavisHttpRequest(
     return "MavisHttpRequest[method="
         + method
         + ", url="
-        + MavisRedaction.safeUrl(url)
+        + PluginRedaction.safeUrl(url)
         + ", timeout="
         + timeout
         + "]";

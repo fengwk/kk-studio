@@ -10,7 +10,7 @@
  * APIs for workspace changes, opened-file watching, native tab closing and terminal supervision.
  * The managed `.code-workspace` file is persisted by the daemon.
  *
- * No `executeCommand`, private SDK or DOM workbench hacks are used.
+ * The mobile layout uses public workbench commands; no private SDK or DOM hacks are used.
  */
 
 const DEFAULT_RECONNECT_MILLIS = 500
@@ -406,13 +406,17 @@ function createBridgeHost(vscode, options) {
       if (!closed || hasDirtyDocuments() || vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)) {
         await reply(message.id, {
           ok: false,
-          code: 'DIRTY',
+          code: 'CANCELLED',
           message: 'closing the view was cancelled or editors remain open',
         })
         return
       }
     }
-    disposeTerminals()
+    // A normal result may arrive after the daemon lost its controlling connection.
+    // The managed view owns terminals and disposes them only once close is committed.
+    if (message.discard === true) {
+      disposeTerminals()
+    }
     await reply(message.id, { ok: true })
   }
 
@@ -429,6 +433,10 @@ function createBridgeHost(vscode, options) {
         await inspectView(message)
       } else if (message.op === 'closeView') {
         await closeView(message)
+      } else if (message.op === 'collapseMobile') {
+        await vscode.commands.executeCommand('workbench.action.closeSidebar')
+        await vscode.commands.executeCommand('workbench.action.closePanel')
+        await reply(message.id, { ok: true })
       } else if (message.op === 'snapshot') {
         await snapshot(message)
       } else if (message.op === 'restore') {

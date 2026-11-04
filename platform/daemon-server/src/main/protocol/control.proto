@@ -75,6 +75,8 @@ enum IdeAction {
   CLOSE_VIEW = 4;
   DETACH_VIEW = 5;
   LIST_VIEWS = 6;
+  LIST_DIRECTORIES = 7;
+  COLLAPSE_MOBILE = 8;
 }
 
 enum IdeOpenMode {
@@ -132,6 +134,8 @@ message UpgradeRequired {
 message Settings {
   ResourceBudgets resource_budgets = 1;
   optional string display_name = 2;
+  optional string proxy_url = 3;
+  optional string no_proxy_hosts = 4;
 }
 
 message ResourceBudgets {
@@ -289,8 +293,8 @@ message TemporaryResourcePolicy {
 message Update {
   optional string operation_id = 1;
   optional string target_version = 2;
-  optional string artifact_url = 3;
-  optional string artifact_sha256 = 4;
+  reserved 3, 4;
+  reserved "artifact_url", "artifact_sha256";
 }
 
 message UpdateResult {
@@ -325,6 +329,19 @@ message IdeResult {
   optional string directory = 10;
   optional string workspace_path = 11;
   repeated IdeViewSummary views = 12;
+  IdeDirectoryListing directory_listing = 13;
+}
+
+message IdeDirectoryListing {
+  optional string path = 1;
+  optional string parent_path = 2;
+  repeated IdeDirectoryEntry children = 3;
+  optional bool truncated = 4;
+}
+
+message IdeDirectoryEntry {
+  optional string name = 1;
+  optional string path = 2;
 }
 
 message IdeViewSummary {

@@ -25,9 +25,7 @@ export type PaneTarget =
 export type PaneTargetKind = PaneTarget['kind']
 
 export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
-  return owner.type === 'CHAT'
-    ? `CHAT:${owner.chatId}`
-    : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
+  return `${encodeURIComponent(owner.kind)}:${encodeURIComponent(owner.id)}`
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,12 +53,10 @@ function isEnvironmentName(value: unknown): value is string | null {
 }
 
 function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
-  return isRecord(value) && (
-    (value.type === 'CHAT' && hasExactKeys(value, ['type', 'chatId']) && nonBlank(value.chatId))
-    || (value.type === 'ISSUE_AGENT'
-      && hasExactKeys(value, ['type', 'issueId', 'agentName'])
-      && nonBlank(value.issueId) && nonBlank(value.agentName))
-  )
+  return isRecord(value)
+    && hasExactKeys(value, ['kind', 'id'])
+    && nonBlank(value.kind)
+    && nonBlank(value.id)
 }
 
 function isExecutionSelection(value: unknown): value is HarnessExecutionSelectionDTO {

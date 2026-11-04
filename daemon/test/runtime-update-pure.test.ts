@@ -25,8 +25,6 @@ function makeCommand(overrides: Partial<Update> = {}): Update {
   return create(UpdateSchema, {
     operationId: 'op-1',
     targetVersion: '1.0.1',
-    artifactUrl: 'https://example.com/v1.0.1.tar.gz',
-    artifactSha256: 'a'.repeat(64),
     ...overrides,
   })
 }

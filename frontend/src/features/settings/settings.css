@@ -285,7 +285,6 @@ select.settings-input option {
 .settings-sync-modal-body {
   min-height: 0;
   overflow-y: auto;
-  gap: 12px;
 }
 
 .settings-sync-groups {

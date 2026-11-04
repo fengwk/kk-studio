@@ -61,9 +61,9 @@ describe('owner-free HTTP wire', () => {
   beforeEach(() => captured.splice(0))
 
   it('serializes a Chat container creation with owner and a NEW_SESSION target', async () => {
-    // 测试意图：创建型批次走 owner 契约，序列化为 { type, chatId }。
+    // 测试意图：创建型批次走不透明 owner 契约，序列化为 { kind, id }。
     const created = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft,
       base: draft,
@@ -78,10 +78,10 @@ describe('owner-free HTTP wire', () => {
       target: { type: string }
       commands: Array<{ type: string }>
     }
-    expect(body.owner).toEqual({ type: 'CHAT', chatId: 'chat-1' })
+    expect(body.owner).toEqual({ kind: 'CHAT', id: 'chat-1' })
     expect(body.target.type).toBe('NEW_SESSION')
     expect(body.commands.some((command) => command.type === 'USER_MESSAGE')).toBe(true)
-    expect(data).not.toContain('"id":')
+    expect(body.owner).not.toHaveProperty('chatId')
   })
 
   it('serializes an existing thread message batch without owner or target', async () => {
@@ -126,11 +126,10 @@ describe('owner-free HTTP wire', () => {
     expect(body).not.toHaveProperty('target')
   })
 
-  it('fails closed for bound-thread acceptance while ISSUE_AGENT stays a container owner', async () => {
-    // 测试意图：既有 Thread 不能走创建型构建器（失败前无网络副作用），而 ISSUE_AGENT
-    // 仅作为容器 owner 被接受：创建请求携带它，既有 Thread 请求完全不发送它。
+  it('fails closed for bound-thread acceptance and passes opaque container owners unchanged', async () => {
+    // 既有 Thread 不能走创建型构建器；未知 owner 不由通用客户端解释。
     expect(() => buildAcceptanceRequest({
-      owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
+      owner: { kind: 'PLUGIN', id: 'opaque:owner' },
       target: { kind: 'BOUND_THREAD', threadId: 'thread-1' },
       draft,
       base: draft,
@@ -139,7 +138,7 @@ describe('owner-free HTTP wire', () => {
     expect(captured).toHaveLength(0)
 
     const created = buildAcceptanceRequest({
-      owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
+      owner: { kind: 'PLUGIN', id: 'opaque:owner' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft,
       base: draft,
@@ -148,7 +147,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptCommandBatch(created.request)
     const creation = JSON.parse(wireAt(0).data) as { owner: unknown }
-    expect(creation.owner).toEqual({ type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' })
+    expect(creation.owner).toEqual({ kind: 'PLUGIN', id: 'opaque:owner' })
 
     const plan = buildMessageBatchPlan({
       thread,

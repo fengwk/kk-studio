@@ -34,7 +34,6 @@ class HarnessCatalogTest {
     assertTrue(catalog.tools().isEmpty());
     assertTrue(catalog.selectableTools().isEmpty());
     assertTrue(catalog.customEntryTypes().isEmpty());
-    assertTrue(catalog.contextProjectors().isEmpty());
     assertTrue(catalog.findDescriptor(new ContributorId("core")).isEmpty());
     assertTrue(catalog.transitiveRequires(new ContributorId("core")).isEmpty());
     assertTrue(catalog.findTool("bash").isEmpty());
@@ -140,7 +139,7 @@ class HarnessCatalogTest {
                     HarnessContributor.of(second, r -> {}))));
   }
 
-  /** 验证注册统一 Tool、Custom Entry 与 Projector，及其多维索引查询。 */
+  /** 验证注册统一 Tool 与 Custom Entry，及其多维索引查询。 */
   @Test
   void registersAndIndexesAllContributionTypes() {
     Tool plainTool = dummyTool("plain_tool", ToolRequirements.none());
@@ -150,7 +149,6 @@ class HarnessCatalogTest {
             new ToolRequirements(
                 EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.READ))));
     Tool envTool = dummyTool("env_tool", ToolRequirements.environment());
-    ContextProjector projector = view -> List.of();
 
     ContributorDescriptor desc =
         new ContributorDescriptor(new ContributorId("core"), "Core", "1.0", Set.of());
@@ -163,7 +161,6 @@ class HarnessCatalogTest {
               reg.registerTool("plain", plainTool, ToolVisibility.SELECTABLE, 5);
               reg.registerTool("state", stateTool, ToolVisibility.INTERNAL, 3);
               reg.registerTool("env", envTool, ToolVisibility.SELECTABLE, 1);
-              reg.registerContextProjector("proj", projector, 2);
             });
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
@@ -200,11 +197,6 @@ class HarnessCatalogTest {
     assertEquals(1, catalog.customEntryTypes().size());
     assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "state").isPresent());
     assertTrue(catalog.findCustomEntryType(new ContributorId("core"), "other").isEmpty());
-
-    // 验证 context projectors
-    assertEquals(1, catalog.contextProjectors().size());
-    ContributionId projId = new ContributionId(new ContributorId("core"), "proj");
-    assertTrue(catalog.findContextProjector(projId).isPresent());
   }
 
   /** 验证 tools 排序：requires 偏序优先，然后 priority 降序，然后 ContributionId 字典序。 */

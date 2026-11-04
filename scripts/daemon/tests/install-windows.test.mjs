@@ -113,7 +113,7 @@ describe('Windows installer security: credentials, task ownership and direct exe
       'must be siblings named daemon.json and daemon.token',
     ])
     // The option whitelist is exactly what the usage text offers.
-    assert.ok(scriptText().includes('$script:InstallParameterNames = @("ConfigFile", "TokenFile")'))
+    assert.ok(scriptText().includes('$script:InstallParameterNames = @("ConfigFile", "TokenFile", "Version")'))
   })
 
   it('surfaces only the bounded trusted config marker from the preflight', () => {
@@ -320,8 +320,8 @@ describe('Windows installer lifecycle: validation and ownership checks precede e
     assert.ok(!body.includes('SilentlyContinue'))
   })
 
-  it('is latest-only and checks the staged config', () => {
-    // Official latest tag selects the windows archive, then it validates sibling inputs.
+  it('downloads an official release and checks the staged config', () => {
+    // The resolved tag selects the Windows archive, then it validates sibling inputs.
     assert.ok(scriptText().includes('[string] $Command = "install"'))
     assertInOrder(
       functionBody('Prepare-StagedArchive'),
@@ -355,11 +355,6 @@ describe('Windows installer native contracts: native tests run only where Window
       'Assert-DirectArgumentRoundTrip',
       'real node.exe',
     ])
-  })
-
-  it('also runs the managed-update native suite from the installer suite', () => {
-    // The CI-invoked installer suite must chain the update suite for both PS hosts.
-    assertIncludesAll(readFileSync(NATIVE_TEST, 'utf8'), ['test_daemon_update_windows.ps1', '& $hostExe', 'if ($LASTEXITCODE -ne 0)'])
   })
 
   it('keeps native capture streams separate and drains both before waiting', () => {

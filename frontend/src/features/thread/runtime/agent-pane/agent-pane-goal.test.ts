@@ -95,7 +95,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
       // 创建构造器对 BOUND_THREAD 失败关闭，防止伪造 owner/target。
       expect(() =>
         buildGoalAcceptanceRequest({
-          owner: { type: 'CHAT', chatId: 'chat-1' },
+          owner: { kind: 'CHAT', id: 'chat-1' },
           target: { kind: 'BOUND_THREAD', threadId: 't-123' },
           draft: baseDraft,
           base: baseDraft,
@@ -105,7 +105,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
     })
 
     it('always preserves rootSettings.goal as null on NEW_SESSION target', () => {
-      const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
+      const owner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-1' }
       const frozen = buildGoalAcceptanceRequest({
         owner,
         target: { kind: 'NEW_SESSION_DRAFT' },
@@ -193,7 +193,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
         }
       })()
 
-      const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
+      const owner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-1' }
       const attachment = createAttachmentPart('upload-uuid', 'test.png')
       const textPart = createTextPart('/goal New goal')
 

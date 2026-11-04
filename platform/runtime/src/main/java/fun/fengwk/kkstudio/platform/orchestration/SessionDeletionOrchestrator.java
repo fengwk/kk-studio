@@ -5,12 +5,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -25,22 +24,15 @@ import java.util.UUID;
 @Service
 public class SessionDeletionOrchestrator {
 
-  private final ChatSessionRepository chatSessionRepository;
-  private final ChatRepository chatRepository;
-  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
+  private final List<SessionOwnership> ownerships;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final SessionBlobRefManager refManager;
 
   public SessionDeletionOrchestrator(
-      ChatSessionRepository chatSessionRepository,
-      ChatRepository chatRepository,
-      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
+      List<SessionOwnership> ownerships,
       ObjectProvider<HarnessRuntime> runtimes,
       SessionBlobRefManager refManager) {
-    this.chatSessionRepository =
-        Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
+    this.ownerships = List.copyOf(ownerships);
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
@@ -50,57 +42,35 @@ public class SessionDeletionOrchestrator {
    * -&gt; Thread）；任何失败整体回滚。owner 行不存在视为已删，整个操作无副作用。
    */
   @Transactional
-  public void deleteSessionsByOwner(OwnerRef owner) {
+  public void deleteSessionsByOwner(SessionOwner owner) {
     Objects.requireNonNull(owner, "owner");
-    List<UUID> sessionIds = lockOwnerAndListSessionIds(owner);
+    List<SessionOwnership> matches =
+        ownerships.stream().filter(ownership -> owner.kind().equals(ownership.kind())).toList();
+    if (matches.size() != 1) {
+      throw new IllegalArgumentException(
+          "Unknown or ambiguous session owner kind: " + owner.kind());
+    }
+    SessionOwnership ownership = matches.getFirst();
+    List<UUID> sessionIds = ownership.lockForDeletion(owner);
     if (sessionIds.isEmpty()) {
       return;
     }
+    Set<UUID> ownedSessionIds = Set.copyOf(sessionIds);
     // Runtime 的 store 事务加入本应用事务，blob release 要求已有事务。
     requireRuntime()
         .deleteSessions(
             sessionIds,
-            ids -> ids.forEach(id -> deleteRelation(owner, id)),
+            ids ->
+                ids.stream()
+                    .filter(ownedSessionIds::contains)
+                    .forEach(id -> ownership.beforeSessionDeletion(owner, id)),
             ids -> ids.forEach(this::releaseSessionBlobRefs));
-  }
-
-  /** 排他锁定 owner 行并枚举其 Session；owner 不存在（或 Issue+Agent 尚未绑定）返回空列表表示删除目标不存在。 */
-  private List<UUID> lockOwnerAndListSessionIds(OwnerRef owner) {
-    return switch (owner) {
-      case OwnerRef.Chat chat -> {
-        if (chatRepository.lockById(chat.chatId()) == null) {
-          yield List.of();
-        }
-        yield chatSessionRepository.listSessionIds(chat.chatId());
-      }
-        // Issue+Agent 的锁序与接受路径一致（Project 排他 -&gt; Issue 排他 -&gt; 读稳定绑定）；绑定缺失即无归属可删。
-      case OwnerRef.IssueAgent issueAgent -> requireIssueAgentOwnership()
-          .lockForDeletion(issueAgent)
-          .map(threadId -> List.of(boundThreadSessionId(threadId)))
-          .orElse(List.of());
-    };
-  }
-
-  /** 由稳定绑定解析其 Thread 的 Session：绑定行持有指向 Thread 的外键且归属已被排他锁定，Thread 必然存在。 */
-  private UUID boundThreadSessionId(UUID threadId) {
-    return requireRuntime().findThreadSessionId(threadId).orElseThrow();
   }
 
   /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */
   private void releaseSessionBlobRefs(UUID sessionId) {
     for (UUID blobId : refManager.listBlobIds(sessionId)) {
       refManager.releaseRef(sessionId, blobId);
-    }
-  }
-
-  /**
-   * 归属行（FK RESTRICT）先于 Session/Thread 行删除：Chat 删 {@code chat_session} 边；Issue+Agent 删稳定 Thread 绑定（其
-   * thread_id 指向将被删除的 harness Thread）。
-   */
-  private void deleteRelation(OwnerRef owner, UUID sessionId) {
-    switch (owner) {
-      case OwnerRef.Chat chat -> chatSessionRepository.deleteBySessionId(sessionId);
-      case OwnerRef.IssueAgent issueAgent -> requireIssueAgentOwnership().deleteBinding(issueAgent);
     }
   }
 
@@ -111,13 +81,5 @@ public class SessionDeletionOrchestrator {
           "harness runtime is not available; cannot deep delete owner sessions");
     }
     return runtime;
-  }
-
-  private IssueAgentOwnership requireIssueAgentOwnership() {
-    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
-    if (ownership == null) {
-      throw new IllegalStateException("Issue agent owners require the Project application");
-    }
-    return ownership;
   }
 }

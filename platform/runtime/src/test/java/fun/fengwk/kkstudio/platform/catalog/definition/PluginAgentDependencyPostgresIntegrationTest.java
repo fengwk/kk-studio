@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -157,7 +156,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
             new AgentEditableSupport(JsonMapper.builder().build()),
-            pluginAgentDependencies);
+            pluginAgentDependencies,
+            List.of());
 
     configurationRepository.insertIfMissing(DECLARING_PLUGIN_ID, VALUES_NO_DECLARATION);
   }
@@ -425,8 +425,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(ModelSelection.model(MODEL_NAME, null)))
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .version(0L)
             .build();
     return agent;

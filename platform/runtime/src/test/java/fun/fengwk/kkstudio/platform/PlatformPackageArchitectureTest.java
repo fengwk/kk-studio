@@ -30,6 +30,7 @@ class PlatformPackageArchitectureTest {
             "harness",
             "http",
             "interaction",
+            "notification",
             "orchestration",
             "persistence",
             "pluginhost",
