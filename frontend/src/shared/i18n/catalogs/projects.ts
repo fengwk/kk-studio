@@ -1230,10 +1230,6 @@ export const projectsCatalog = {
     'zh-CN': '确定要彻底删除该 Issue 吗？此操作将清理该 Issue 的执行记录、活动、证据和关联会话，无法恢复。',
     'en-US': 'Delete this issue permanently? This removes its runs, activities, evidence and bound sessions, and cannot be undone.',
   },
-  'projects.issue.deleting': {
-    'zh-CN': '删除中...',
-    'en-US': 'Deleting…',
-  },
   'projects.issue.modalAriaLabel': {
     'zh-CN': 'Issue #{{number}} 详情',
     'en-US': 'Issue #{{number}} details',

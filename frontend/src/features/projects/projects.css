@@ -366,15 +366,21 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1;
 }
 
+.edit-project-tabs .ui-tab-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 正文统一交给共享 modal-body 承担内边距与滚动链。 */
 .edit-project-panel {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 20px;
-  max-height: calc(80vh - 180px);
-  overflow-y: auto;
 }
 
 .edit-project-section {
@@ -410,15 +416,6 @@
   margin: 0;
   font-size: var(--font-size-xs);
   color: var(--fg-muted);
-}
-
-.edit-project-workflow {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px;
-  max-height: calc(80vh - 180px);
-  overflow-y: auto;
 }
 
 .workflow-editor {
@@ -511,6 +508,19 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+
+.issue-detail-tabs .ui-tab-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.issue-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .issue-detail-header-left {

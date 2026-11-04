@@ -1017,4 +1017,23 @@ describe('DeleteProjectModal', () => {
       expect(onSuccess).toHaveBeenCalled()
     })
   })
+
+  it('uses the shared confirmation dialog for the delete confirmation', async () => {
+    // 测试意图：普通确认必须走共享 ConfirmActionModal 的 alertdialog 语义，而不是自定义弹窗
+    const mockApi = {
+      deleteProject: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ProjectsApi
+
+    renderWithClient(
+      <DeleteProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    expect(screen.getByRole('alertdialog', { name: '确认删除项目' })).toBeInTheDocument()
+  })
 })
