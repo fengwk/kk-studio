@@ -1,16 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -52,11 +50,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       PosixFilePermissions.fromString("rwx------");
   private static final Set<PosixFilePermission> FILE_PERMISSIONS =
       PosixFilePermissions.fromString("rw-------");
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   private final Path directory;
   private final FileChannel lockChannel;

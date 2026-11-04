@@ -1,13 +1,10 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 
@@ -27,12 +24,7 @@ import java.util.regex.Pattern;
 public record AnthropicConfiguration(
     AnthropicThinkingMode anthropicThinkingMode, List<String> anthropicBetaFeatures) {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
   public static final String FIELD_ANTHROPIC_THINKING_MODE = "anthropicThinkingMode";
   public static final String FIELD_ANTHROPIC_BETA_FEATURES = "anthropicBetaFeatures";
 

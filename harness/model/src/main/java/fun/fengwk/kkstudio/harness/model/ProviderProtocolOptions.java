@@ -1,13 +1,8 @@
 package fun.fengwk.kkstudio.harness.model;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.SerializationFeature;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -30,7 +25,7 @@ public record ProviderProtocolOptions(String canonicalJson) {
   public static final int MAX_UTF8_BYTES = 64 * 1024;
 
   private static final String EMPTY_JSON = "{}";
-  private static final ObjectMapper STRICT_MAPPER = newStrictMapper();
+  private static final ObjectMapper STRICT_MAPPER = HarnessJson.STRICT_OPTIONS;
 
   /** 空 object：未声明任何原生协议选项。 */
   public static final ProviderProtocolOptions EMPTY = new ProviderProtocolOptions(EMPTY_JSON);
@@ -84,17 +79,5 @@ public record ProviderProtocolOptions(String canonicalJson) {
       throw new IllegalArgumentException(
           "protocolOptions must not exceed " + MAX_UTF8_BYTES + " UTF-8 bytes");
     }
-  }
-
-  private static ObjectMapper newStrictMapper() {
-    return JsonMapper.builder()
-        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-        // 厂商原生数值先按 BigDecimal 读回（保留 1e309/1e-324 精度），canonical 文本再移除无语义意义的尾零。
-        .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-        .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
-        // 无法映射为 JSON 的值（如无属性的任意对象）必须明确失败，而不是静默序列化为空 object。
-        .enable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
-        .build();
   }
 }

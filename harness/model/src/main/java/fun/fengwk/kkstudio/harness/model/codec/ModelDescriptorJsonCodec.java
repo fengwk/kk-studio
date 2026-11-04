@@ -5,12 +5,11 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -50,15 +49,7 @@ import java.util.Set;
  */
 public final class ModelDescriptorJsonCodec {
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // variant 的 protocolOptions 以厂商原生数值语义搬运：先按 BigDecimal 读回避免 1e309/1e-324 失真，
-          // 再做 canonical 规范化（移除无语义意义的尾零），与既有 canonical wire golden 一致。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT_CANONICAL;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 

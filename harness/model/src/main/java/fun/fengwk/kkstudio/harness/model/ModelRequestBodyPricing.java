@@ -2,13 +2,9 @@ package fun.fengwk.kkstudio.harness.model;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadConstraints;
-import tools.jackson.core.StreamReadFeature;
 import tools.jackson.core.json.JsonFactory;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition.RequestBody;
 
@@ -36,18 +32,14 @@ public final class ModelRequestBodyPricing {
   public static final int MAX_NESTING_DEPTH = 64;
 
   private static final ObjectMapper BODY_MAPPER =
-      JsonMapper.builder(
-              JsonFactory.builder()
-                  .streamReadConstraints(
-                      StreamReadConstraints.builder()
-                          .maxDocumentLength(MAX_BODY_BYTES)
-                          .maxNestingDepth(MAX_NESTING_DEPTH)
-                          .build())
-                  .build())
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+      HarnessJson.strictDecimal(
+          JsonFactory.builder()
+              .streamReadConstraints(
+                  StreamReadConstraints.builder()
+                      .maxDocumentLength(MAX_BODY_BYTES)
+                      .maxNestingDepth(MAX_NESTING_DEPTH)
+                      .build())
+              .build());
 
   private ModelRequestBodyPricing() {}
 

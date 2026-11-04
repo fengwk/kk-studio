@@ -400,6 +400,8 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 保留原文；厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
 
+Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。各 codec 仍负责自己的字段校验和错误语义。
+
 ## 包架构
 
 生产源码位于 `fun.fengwk.kkstudio.harness` 之下，公开值类型集中在 `api` 根与 `api.*` 子包，它们的 wire codec 在 `codec`，`runtime.*` 只保留实现与仅内核可见的内部值；表中省略该前缀：
