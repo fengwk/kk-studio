@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
 
 /** Harness Runtime domain 事实到严格 HTTP DTO 的响应投影。 */
 public final class HarnessRuntimeResponseMapper {
@@ -79,11 +80,7 @@ public final class HarnessRuntimeResponseMapper {
    */
   public static List<HarnessThreadTreeNodeDTO> toThreadTreeDtos(List<ThreadTreeNode> nodes) {
     Objects.requireNonNull(nodes, "nodes");
-    List<HarnessThreadTreeNodeDTO> dtos = new ArrayList<>(nodes.size());
-    for (ThreadTreeNode node : nodes) {
-      dtos.add(toThreadTreeNodeDto(node));
-    }
-    return List.copyOf(dtos);
+    return mapAll(nodes, HarnessRuntimeResponseMapper::toThreadTreeNodeDto);
   }
 
   private static HarnessThreadTreeNodeDTO toThreadTreeNodeDto(ThreadTreeNode node) {
@@ -204,25 +201,8 @@ public final class HarnessRuntimeResponseMapper {
     dto.setStatus(generation.status().name());
     dto.setAttempt(generation.attempt());
     dto.setSequence(Long.toString(generation.sequence()));
-    List<HarnessAgentMessageContentDTO> contents =
-        new ArrayList<>(generation.outputContents().size());
-    for (AgentMessageContent content : generation.outputContents()) {
-      HarnessAgentMessageContentDTO contentDto = new HarnessAgentMessageContentDTO();
-      switch (content) {
-        case TextMessageContent text -> {
-          contentDto.setType("text");
-          contentDto.setText(text.text());
-        }
-        case ThinkingMessageContent thinking -> {
-          contentDto.setType("thinking");
-          contentDto.setText(thinking.text());
-        }
-        default -> throw new IllegalStateException(
-            "unsupported public assistant output content: " + content.getClass().getName());
-      }
-      contents.add(contentDto);
-    }
-    dto.setContents(List.copyOf(contents));
+    dto.setContents(
+        mapAll(generation.outputContents(), HarnessRuntimeResponseMapper::toContentDto));
     if (generation.error() != null) {
       HarnessAssistantErrorDTO error = new HarnessAssistantErrorDTO();
       error.setCode(generation.error().code());
@@ -297,59 +277,24 @@ public final class HarnessRuntimeResponseMapper {
         snapshot.entrySlice().baseEntryId() == null
             ? null
             : snapshot.entrySlice().baseEntryId().toString());
-    List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entrySlice().entries().size());
-    for (Entry entry : snapshot.entrySlice().entries()) {
-      entries.add(toEntryDto(entry, usageCosts.get(entry.id())));
-    }
-    dto.setEntries(List.copyOf(entries));
-    List<HarnessThreadCommandDTO> queued = new ArrayList<>(snapshot.queuedCommands().size());
-    for (ThreadCommand command : snapshot.queuedCommands()) {
-      queued.add(toCommandDto(command));
-    }
-    dto.setQueuedCommands(List.copyOf(queued));
+    dto.setEntries(
+        mapAll(
+            snapshot.entrySlice().entries(),
+            entry -> toEntryDto(entry, usageCosts.get(entry.id()))));
+    dto.setQueuedCommands(
+        mapAll(snapshot.queuedCommands(), HarnessRuntimeResponseMapper::toCommandDto));
     dto.setExecutionStatus(snapshot.runtimeStatus().name());
     GenerationProjection generation = snapshot.generation();
     dto.setActiveAssistantOutput(
         generation == null ? null : toActiveAssistantOutputDto(generation));
-    List<ToolInvocationDTO> tools = new ArrayList<>(snapshot.toolSiblings().size());
-    for (ToolInvocation invocation : snapshot.toolSiblings()) {
-      tools.add(toToolInvocationDto(invocation));
-    }
-    dto.setToolInvocations(List.copyOf(tools));
-    List<HarnessGenerationFailureDTO> failures =
-        new ArrayList<>(snapshot.generationFailures().size());
-    for (FailureProjection failure : snapshot.generationFailures()) {
-      if (generation == null) {
-        throw new IllegalStateException("failure projection requires a generation projection");
-      }
-      HarnessGenerationFailureDTO failureDto = new HarnessGenerationFailureDTO();
-      failureDto.setGenerationId(generation.generationId().toString());
-      failureDto.setTurnStartEntryId(generation.turnStartEntryId().toString());
-      failureDto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
-      failureDto.setAttempt(failure.attempt());
-      failureDto.setSequence(Long.toString(failure.sequence()));
-      failureDto.setText(failure.text());
-      failureDto.setThinking(failure.thinking());
-      failureDto.setErrorCode(failure.errorCode());
-      failureDto.setErrorMessage(failure.errorMessage());
-      failureDto.setFailedAt(failure.failedAt());
-      failureDto.setRetryAt(failure.retryAt());
-      failures.add(failureDto);
-    }
-    dto.setGenerationFailures(List.copyOf(failures));
+    dto.setToolInvocations(
+        mapAll(snapshot.toolSiblings(), HarnessRuntimeResponseMapper::toToolInvocationDto));
+    dto.setGenerationFailures(
+        mapAll(
+            snapshot.generationFailures(), failure -> toGenerationFailureDto(failure, generation)));
     dto.setStopReceipts(toStopReceiptDtos(snapshot.stopReceipts()));
-    List<HarnessExecutionExitDTO> executions =
-        new ArrayList<>(snapshot.unconfirmedExecutions().size());
-    for (ExecutionExitFact fact : snapshot.unconfirmedExecutions()) {
-      HarnessExecutionExitDTO execution = new HarnessExecutionExitDTO();
-      execution.setExecutionId(fact.executionId().toString());
-      execution.setInvocationId(fact.invocationId().toString());
-      execution.setAttempt(fact.attempt());
-      execution.setKind(fact.kind().name());
-      execution.setRegisteredAt(fact.registeredAt());
-      executions.add(execution);
-    }
-    dto.setUnconfirmedExecutions(List.copyOf(executions));
+    dto.setUnconfirmedExecutions(
+        mapAll(snapshot.unconfirmedExecutions(), HarnessRuntimeResponseMapper::toExecutionExitDto));
     return dto;
   }
 
@@ -378,20 +323,17 @@ public final class HarnessRuntimeResponseMapper {
       AcceptedCommands accepted, ThreadSnapshot currentSnapshot) {
     Objects.requireNonNull(accepted, "accepted");
     Objects.requireNonNull(currentSnapshot, "currentSnapshot");
-    if (!accepted.thread().id().equals(currentSnapshot.thread().id())) {
-      throw new IllegalArgumentException(
-          "accepted result and current snapshot thread do not match");
-    }
+    requireSameThread(
+        accepted.thread().id(),
+        currentSnapshot,
+        "accepted result and current snapshot thread do not match");
     HarnessAcceptedCommandsDTO dto = new HarnessAcceptedCommandsDTO();
     dto.setSession(toSessionDto(accepted.session()));
     // 创建回执只回显 root entry 本身，它不是读取投影，因此显式不带费用。
     dto.setRootEntry(toEntryDto(accepted.rootEntry(), null));
     dto.setThread(toThreadDto(currentSnapshot));
-    List<HarnessThreadCommandDTO> commands = new ArrayList<>(accepted.acceptedCommands().size());
-    for (ThreadCommand command : accepted.acceptedCommands()) {
-      commands.add(toCommandDto(command));
-    }
-    dto.setAcceptedCommands(List.copyOf(commands));
+    dto.setAcceptedCommands(
+        mapAll(accepted.acceptedCommands(), HarnessRuntimeResponseMapper::toCommandDto));
     dto.setReplayed(accepted.replayed());
     return dto;
   }
@@ -401,9 +343,10 @@ public final class HarnessRuntimeResponseMapper {
       CompactThreadResult result, ThreadSnapshot currentSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(currentSnapshot, "currentSnapshot");
-    if (!result.thread().id().equals(currentSnapshot.thread().id())) {
-      throw new IllegalArgumentException("compact result and current snapshot thread do not match");
-    }
+    requireSameThread(
+        result.thread().id(),
+        currentSnapshot,
+        "compact result and current snapshot thread do not match");
     HarnessThreadCompactResultDTO dto = new HarnessThreadCompactResultDTO();
     dto.setThread(toThreadDto(currentSnapshot));
     dto.setTurnStartEntryId(result.turnStartEntryId().toString());
@@ -416,8 +359,9 @@ public final class HarnessRuntimeResponseMapper {
       StopResult result, ThreadSnapshot postStopSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(postStopSnapshot, "postStopSnapshot");
-    if (!result.thread().id().equals(postStopSnapshot.thread().id())
-        || result.thread().version() != postStopSnapshot.thread().version()) {
+    requireSameThread(
+        result.thread().id(), postStopSnapshot, "post-stop snapshot does not match Stop result");
+    if (result.thread().version() != postStopSnapshot.thread().version()) {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
@@ -427,15 +371,84 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
+  private static HarnessAgentMessageContentDTO toContentDto(AgentMessageContent content) {
+    HarnessAgentMessageContentDTO contentDto = new HarnessAgentMessageContentDTO();
+    switch (content) {
+      case TextMessageContent text -> {
+        contentDto.setType("text");
+        contentDto.setText(text.text());
+      }
+      case ThinkingMessageContent thinking -> {
+        contentDto.setType("thinking");
+        contentDto.setText(thinking.text());
+      }
+      default -> throw new IllegalStateException(
+          "unsupported public assistant output content: " + content.getClass().getName());
+    }
+    return contentDto;
+  }
+
+  private static HarnessGenerationFailureDTO toGenerationFailureDto(
+      FailureProjection failure, GenerationProjection generation) {
+    if (generation == null) {
+      throw new IllegalStateException("failure projection requires a generation projection");
+    }
+    HarnessGenerationFailureDTO failureDto = new HarnessGenerationFailureDTO();
+    failureDto.setGenerationId(generation.generationId().toString());
+    failureDto.setTurnStartEntryId(generation.turnStartEntryId().toString());
+    failureDto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
+    failureDto.setAttempt(failure.attempt());
+    failureDto.setSequence(Long.toString(failure.sequence()));
+    failureDto.setText(failure.text());
+    failureDto.setThinking(failure.thinking());
+    failureDto.setErrorCode(failure.errorCode());
+    failureDto.setErrorMessage(failure.errorMessage());
+    failureDto.setFailedAt(failure.failedAt());
+    failureDto.setRetryAt(failure.retryAt());
+    return failureDto;
+  }
+
+  private static HarnessExecutionExitDTO toExecutionExitDto(ExecutionExitFact fact) {
+    HarnessExecutionExitDTO execution = new HarnessExecutionExitDTO();
+    execution.setExecutionId(fact.executionId().toString());
+    execution.setInvocationId(fact.invocationId().toString());
+    execution.setAttempt(fact.attempt());
+    execution.setKind(fact.kind().name());
+    execution.setRegisteredAt(fact.registeredAt());
+    return execution;
+  }
+
+  private static HarnessCancelledInputDTO toCancelledInputDto(CancelledThreadInput input) {
+    HarnessCancelledInputDTO inputDto = new HarnessCancelledInputDTO();
+    inputDto.setSequence(Long.toString(input.sequence()));
+    inputDto.setIdempotencyKey(input.idempotencyKey().toString());
+    inputDto.setType(input.payload().type().name());
+    inputDto.setPayloadJson(COMMAND_PAYLOADS.encode(input.payload()));
+    return inputDto;
+  }
+
+  /** 列表映射的唯一入口：保留源顺序、不可变副本与逐项 null 拒绝语义。 */
+  private static <T, R> List<R> mapAll(List<T> source, Function<T, R> mapper) {
+    List<R> mapped = new ArrayList<>(source.size());
+    for (T element : source) {
+      mapped.add(mapper.apply(element));
+    }
+    return List.copyOf(mapped);
+  }
+
+  /** 写后回读的唯一一致性判定：结果与当前快照必须指向同一 Thread。 */
+  private static void requireSameThread(
+      UUID expectedThreadId, ThreadSnapshot snapshot, String message) {
+    if (!expectedThreadId.equals(snapshot.thread().id())) {
+      throw new IllegalArgumentException(message);
+    }
+  }
+
   /** 映射 Stop 的聚合回执集合；只投影可恢复人工输入，不把 CUSTOM_MESSAGE / NOTIFICATION 当作草稿。 */
   private static List<HarnessStoppedThreadReceiptDTO> toStopReceiptDtos(
       List<StoppedThreadReceipt> receipts) {
     Objects.requireNonNull(receipts, "receipts");
-    List<HarnessStoppedThreadReceiptDTO> mapped = new ArrayList<>(receipts.size());
-    for (StoppedThreadReceipt receipt : receipts) {
-      mapped.add(toStopReceiptDto(receipt));
-    }
-    return List.copyOf(mapped);
+    return mapAll(receipts, HarnessRuntimeResponseMapper::toStopReceiptDto);
   }
 
   private static HarnessStoppedThreadReceiptDTO toStopReceiptDto(StoppedThreadReceipt receipt) {
@@ -448,16 +461,8 @@ public final class HarnessRuntimeResponseMapper {
             ? null
             : receipt.stoppedTurnEndEntryId().toString());
     dto.setCancelledCommandCount(receipt.cancelledCommandCount());
-    List<HarnessCancelledInputDTO> cancelled = new ArrayList<>(receipt.cancelledInputs().size());
-    for (CancelledThreadInput input : receipt.cancelledInputs()) {
-      HarnessCancelledInputDTO inputDto = new HarnessCancelledInputDTO();
-      inputDto.setSequence(Long.toString(input.sequence()));
-      inputDto.setIdempotencyKey(input.idempotencyKey().toString());
-      inputDto.setType(input.payload().type().name());
-      inputDto.setPayloadJson(COMMAND_PAYLOADS.encode(input.payload()));
-      cancelled.add(inputDto);
-    }
-    dto.setCancelledInputs(List.copyOf(cancelled));
+    dto.setCancelledInputs(
+        mapAll(receipt.cancelledInputs(), HarnessRuntimeResponseMapper::toCancelledInputDto));
     return dto;
   }
 }

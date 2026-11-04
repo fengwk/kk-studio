@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,13 +14,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.web.servlet.ResultActions;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
@@ -29,83 +25,74 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
-import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
-import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Session 作用域请求预览的 HTTP 契约：本地分支草稿（Thread 尚未创建）与历史模型输出重建。
+ * Session 作用域请求预览的独有契约：本地分支草稿（Thread 尚未创建）与历史模型输出重建。
  *
- * <p>测试意图：两个入口都只接受自己的边界字段，400/404/409 与其他 Harness 端点同义；历史视图必须显式声明它不是原始发送字节，且响应绝不 泄露
- * credential、endpoint 或认证 Header。
+ * <p>共享的成功、拒绝与命令映射断言见 {@link ProviderRequestPreviewContractTest}；这里保留历史入口的 重建声明、草稿起点与两个入口各自的请求形状。
  */
-class StudioHarnessSessionProviderRequestPreviewControllerTest {
+class StudioHarnessSessionProviderRequestPreviewControllerTest
+    extends ProviderRequestPreviewContractTest {
 
   private static final String SESSION_ID = "00000000-0000-0000-0000-000000000001";
   private static final String START_ENTRY_ID = "00000000-0000-0000-0000-000000000002";
   private static final String OUTPUT_ENTRY_ID = "00000000-0000-0000-0000-000000000003";
-  private static final String SET_EXECUTION_KEY = "00000000-0000-0000-0000-000000000004";
-  private static final String USER_MESSAGE_KEY = "00000000-0000-0000-0000-000000000005";
 
-  private ProviderRequestPreviewService previewService;
-  private MockMvc mockMvc;
-
-  @BeforeEach
-  void setUp() {
-    previewService = mock(ProviderRequestPreviewService.class);
-    mockMvc =
-        MockMvcBuilders.standaloneSetup(
-                new StudioHarnessSessionProviderRequestPreviewController(previewService))
-            .setControllerAdvice(
-                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ApiResponseStatusAdvice())
-            .build();
+  @Override
+  protected Object controller() {
+    return new StudioHarnessSessionProviderRequestPreviewController(previewService);
   }
 
-  /** 草稿预览成功响应给出协议请求体与稳定 cursor，且不含 credential / endpoint / 认证 Header。 */
-  @Test
-  void draftPreviewReturnsEncodedBodyForALocalBranchDraft() throws Exception {
-    String body = "{\"model\":\"acceptance-stub\",\"messages\":[{\"role\":\"user\"}]}";
+  @Override
+  protected ResultActions performPreview() throws Exception {
+    return mockMvc.perform(
+        post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(draftBody()));
+  }
+
+  @Override
+  protected void stubPreviewSuccess(HarnessProviderRequestPreviewDTO dto) {
+    when(previewService.previewDraft(any(UUID.class), any(UUID.class), any())).thenReturn(dto);
+  }
+
+  @Override
+  protected void stubPreviewUnavailable(ProviderRequestPreviewUnavailableException error) {
+    when(previewService.previewDraft(any(UUID.class), any(UUID.class), any())).thenThrow(error);
+  }
+
+  @Override
+  protected void stubPreviewFailure(RuntimeException error) {
+    when(previewService.previewDraft(any(UUID.class), any(UUID.class), any())).thenThrow(error);
+  }
+
+  @Override
+  protected List<NewThreadCommand> captureCommands() throws Exception {
+    AtomicReference<List<NewThreadCommand>> captured = new AtomicReference<>();
     when(previewService.previewDraft(any(UUID.class), any(UUID.class), any()))
-        .thenReturn(
-            previewDto(
-                HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW,
-                HarnessProviderRequestPreviewDTO.DRAFT_NOTICE,
-                START_ENTRY_ID,
-                body));
+        .thenAnswer(
+            invocation -> {
+              captured.set(invocation.getArgument(2));
+              return previewDto(
+                  "DRAFT_REQUEST_PREVIEW",
+                  HarnessProviderRequestPreviewDTO.DRAFT_NOTICE,
+                  START_ENTRY_ID,
+                  "{}");
+            });
+    performPreview().andExpect(status().isOk());
+    return captured.get();
+  }
 
-    String response =
-        mockMvc
-            .perform(
-                post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(draftBody()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.kind").value("DRAFT_REQUEST_PREVIEW"))
-            .andExpect(
-                jsonPath("$.data.notice").value(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE))
-            .andExpect(jsonPath("$.data.providerType").value("OPENAI"))
-            .andExpect(jsonPath("$.data.modelName").value("acceptance-stub"))
-            .andExpect(jsonPath("$.data.bodyJson").value(body))
-            .andExpect(jsonPath("$.data.sourceHeadEntryId").value(START_ENTRY_ID))
-            .andExpect(jsonPath("$.data.generatedAt").value("2026-01-01T00:00:00Z"))
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-
-    assertFalse(response.contains("secret"), "响应不得包含任何凭据");
-    assertFalse(response.toLowerCase().contains("authorization"), "响应不得包含认证 Header");
-    assertFalse(response.contains("http://"), "响应不得包含任何 endpoint");
+  @Override
+  protected String sourceHeadEntryId() {
+    return START_ENTRY_ID;
   }
 
   /**
@@ -126,12 +113,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                   "{}");
             });
 
-    mockMvc
-        .perform(
-            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(draftBody()))
-        .andExpect(status().isOk());
+    performPreview().andExpect(status().isOk());
 
     verify(previewService)
         .previewDraft(eq(UUID.fromString(SESSION_ID)), eq(UUID.fromString(START_ENTRY_ID)), any());
@@ -221,33 +203,18 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                     """
                     {"startEntryId":"%s","commands":[{
                       "type":"USER_MESSAGE","idempotencyKey":"%s","contents":[{"type":"TEXT","text":"hi"}]
-                    },{
-                      "type":"SET_EXECUTION","idempotencyKey":"%s",
-                      "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}
-                    }]}
+                    },%s]}
                     """
-                        .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, SET_EXECUTION_KEY)))
+                        .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, setExecutionCommand())))
         .andExpect(status().isBadRequest());
 
     verify(previewService, never()).previewDraft(any(UUID.class), any(UUID.class), any());
     verify(previewService, never()).previewHistorical(any(UUID.class), any(UUID.class));
   }
 
-  /** 当前事实不允许精确预览（规划拒绝、附件未就绪、压缩调用不可重建、adapter 不支持）统一 409 并保留稳定 reason。 */
+  /** 历史入口的当前事实不允许精确预览时保留稳定 reason，且 cause 详情不进入响应。 */
   @Test
-  void translatesUnavailableFactsToConflict() throws Exception {
-    when(previewService.previewDraft(any(UUID.class), any(UUID.class), any()))
-        .thenThrow(
-            new ProviderRequestPreviewUnavailableException(
-                Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview"));
-    mockMvc
-        .perform(
-            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(draftBody()))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.reason").value("PREVIEW_ATTACHMENT_NOT_READY"));
-
+  void historicalPreviewTranslatesUnavailableFactsToConflictWithoutCauseDetails() throws Exception {
     when(previewService.previewHistorical(any(UUID.class), any(UUID.class)))
         .thenThrow(
             new ProviderRequestPreviewUnavailableException(
@@ -271,19 +238,9 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
     assertFalse(response.contains("private planning detail"), "cause 详情不得进入响应");
   }
 
-  /** 缺失 Session 与其它查询一致是 404；服务自身的边界拒绝（起点不合法）是 400。 */
+  /** 服务自身的边界拒绝（历史输出不匹配该 Session）是 400，并保留安全 detail。 */
   @Test
-  void translatesMissingSessionToNotFoundAndBoundaryRejectionToBadRequest() throws Exception {
-    when(previewService.previewDraft(any(UUID.class), any(UUID.class), any()))
-        .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
-    mockMvc
-        .perform(
-            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(draftBody()))
-        .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.errors.detail").value("session is missing"));
-
+  void historicalPreviewTranslatesBoundaryRejectionToBadRequest() throws Exception {
     when(previewService.previewHistorical(any(UUID.class), any(UUID.class)))
         .thenThrow(
             new IllegalArgumentException(
@@ -302,20 +259,6 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                 .value("start entry does not belong to the session: " + OUTPUT_ENTRY_ID));
   }
 
-  private static HarnessProviderRequestPreviewDTO previewDto(
-      String kind, String notice, String sourceHeadEntryId, String body) {
-    HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
-    dto.setKind(kind);
-    dto.setNotice(notice);
-    dto.setGeneratedAt(Instant.parse("2026-01-01T00:00:00Z"));
-    dto.setProviderType("OPENAI");
-    dto.setModelName("acceptance-stub");
-    dto.setBodyByteSize(body.getBytes(StandardCharsets.UTF_8).length);
-    dto.setBodyJson(body);
-    dto.setSourceHeadEntryId(sourceHeadEntryId);
-    return dto;
-  }
-
   /** 本地分支草稿请求体：只有分支起点与有序命令，没有 cursor、owner、target 或创建期字段。 */
   private static String draftBody() {
     return """
@@ -326,17 +269,8 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
 
   private static String draftCommands() {
     return """
-        [{
-          "type":"SET_EXECUTION",
-          "idempotencyKey":"%s",
-          "execution":{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}
-        },
-        {
-          "type":"USER_MESSAGE",
-          "idempotencyKey":"%s",
-          "contents":[{"type":"TEXT","text":"hello"}]
-        }]
+        [%s,%s]
         """
-        .formatted(SET_EXECUTION_KEY, USER_MESSAGE_KEY);
+        .formatted(setExecutionCommand(), textUserMessageCommand());
   }
 }

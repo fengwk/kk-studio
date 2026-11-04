@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.advice;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -8,15 +7,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
-import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
-import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 
 import java.util.Locale;
 import java.util.Map;
@@ -26,16 +22,6 @@ class StudioSystemSettingsErrorAdviceTest {
   @AfterEach
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
-  }
-
-  @Test
-  void scopesAdviceToSettingsAndSyncControllers() {
-    // 同步中的 settings 写入使用相同错误模型，不影响无关控制器。
-    RestControllerAdvice advice =
-        StudioSystemSettingsErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
-    assertArrayEquals(
-        new Class<?>[] {StudioSystemSettingsController.class, StudioConfigSyncController.class},
-        advice.assignableTypes());
   }
 
   @Test

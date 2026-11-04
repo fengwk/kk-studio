@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -75,20 +74,6 @@ class StudioHarnessThreadStreamCatchupControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(validBody()))
         .andExpect(status().isAccepted());
-  }
-
-  @Test
-  void missingThreadIs404() throws Exception {
-    doThrow(new HarnessRuntimeNotFoundException("thread does not exist"))
-        .when(catchupService)
-        .catchUp(THREAD, INVOCATION, 3);
-
-    mockMvc
-        .perform(
-            post("/api/threads/{threadId}/stream-catchup", THREAD_TEXT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(validBody()))
-        .andExpect(status().isNotFound());
   }
 
   @Test

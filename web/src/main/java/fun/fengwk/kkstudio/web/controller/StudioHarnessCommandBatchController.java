@@ -8,18 +8,13 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.Objects;
 
@@ -33,13 +28,10 @@ import java.util.Objects;
 @RequestMapping("/api/command-batches")
 public class StudioHarnessCommandBatchController {
 
-  private final HarnessCommandAcceptanceOrchestrator acceptanceService;
-  private final HarnessRuntime runtime;
+  private final HarnessCommandBatchService commandBatchService;
 
-  public StudioHarnessCommandBatchController(
-      HarnessCommandAcceptanceOrchestrator acceptanceService, HarnessRuntime runtime) {
-    this.acceptanceService = Objects.requireNonNull(acceptanceService, "acceptanceService");
-    this.runtime = Objects.requireNonNull(runtime, "runtime");
+  public StudioHarnessCommandBatchController(HarnessCommandBatchService commandBatchService) {
+    this.commandBatchService = Objects.requireNonNull(commandBatchService, "commandBatchService");
   }
 
   /** 接受一个 owner-aware 用户命令批；202 仅表示 durable acceptance 已提交。 */
@@ -47,26 +39,16 @@ public class StudioHarnessCommandBatchController {
   public ApiResponse<HarnessAcceptedCommandsDTO> accept(
       @RequestBody HarnessCommandBatchDTO request) {
     return ApiResponse.accepted(
-        StudioHarnessThreadController.withRuntimeTranslation(
+        RuntimeErrors.translate(
             () -> {
               SessionOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
-              if (command.target() instanceof AcceptCommandsTarget.NewThread fork) {
-                ManualThreadControlGuard.requireForkRootSession(runtime, fork.sessionId());
-              } else if (command.target()
-                  instanceof AcceptCommandsTarget.NewForkedSession forkedSession) {
-                ManualThreadControlGuard.requireForkRootSourceThread(
-                    runtime, forkedSession.sourceThreadId());
-              }
-              AcceptedCommands accepted;
               try {
-                accepted = acceptanceService.accept(owner, command);
+                return commandBatchService.accept(owner, command);
               } catch (DirectCommandsNotAllowedException error) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
               }
-              ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
-              return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
             }));
   }
 }

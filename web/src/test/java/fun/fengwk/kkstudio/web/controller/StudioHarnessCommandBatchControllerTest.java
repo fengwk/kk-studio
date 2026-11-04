@@ -42,6 +42,8 @@ import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrches
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.harness.HarnessCommandBatchService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
@@ -68,7 +70,8 @@ class StudioHarnessCommandBatchControllerTest {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
     StudioHarnessCommandBatchController controller =
-        new StudioHarnessCommandBatchController(acceptanceService, runtime);
+        new StudioHarnessCommandBatchController(
+            new HarnessCommandBatchService(acceptanceService, runtime));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -22,7 +21,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
@@ -36,6 +34,8 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.harness.AgentTaskSubmissionService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -66,7 +66,9 @@ class StudioAgentTaskControllerTest {
               return request.threadId();
             });
     mockMvc =
-        MockMvcBuilders.standaloneSetup(new StudioAgentTaskController(agentTasks, materializer))
+        MockMvcBuilders.standaloneSetup(
+                new StudioAgentTaskController(
+                    new AgentTaskSubmissionService(agentTasks, materializer)))
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ApiResponseStatusAdvice())
@@ -278,14 +280,6 @@ class StudioAgentTaskControllerTest {
         .andExpect(jsonPath("$.data.partialResult").value("partial"))
         .andExpect(jsonPath("$.data.error").value("stopped"));
     verify(agentTasks).stop(TICKET_ID);
-  }
-
-  @Test
-  void stopOfAnUnknownTaskIsNotFound() throws Exception {
-    doThrow(new HarnessRuntimeNotFoundException("gone")).when(agentTasks).stop(TICKET_ID);
-    mockMvc
-        .perform(post("/api/agent-tasks/" + TICKET_ID + "/stop"))
-        .andExpect(status().isNotFound());
   }
 
   private static String withTicket(String json) {

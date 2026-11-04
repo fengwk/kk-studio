@@ -65,8 +65,13 @@ public final class HarnessRuntimeTestFixtures {
   private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-  private static UUID id(long value) {
+  /** 规范测试身份：低 64 位递增，便于断言。 */
+  public static UUID id(long value) {
     return new UUID(0L, value);
+  }
+
+  public static String idText(long value) {
+    return id(value).toString();
   }
 
   private HarnessRuntimeTestFixtures() {}
@@ -178,7 +183,7 @@ public final class HarnessRuntimeTestFixtures {
     return new Session(id(1), "session", NOW);
   }
 
-  private static ThreadSnapshot snapshot(
+  public static ThreadSnapshot snapshot(
       ThreadState thread,
       EntryPath path,
       List<ThreadCommand> commands,
@@ -190,10 +195,39 @@ public final class HarnessRuntimeTestFixtures {
       boolean continuationBlocked,
       List<ExecutionExitFact> exitFacts,
       boolean inFlightInterrupted) {
-    return new ThreadSnapshot(
+    return snapshot(
         thread,
         EntryCurrentState.from(path),
         new EntrySlice(null, path.entries()),
+        commands,
+        generation,
+        toolSiblings,
+        liveState,
+        stoppedReceipts,
+        runningSubagentCount,
+        continuationBlocked,
+        exitFacts,
+        inFlightInterrupted);
+  }
+
+  /** 完整快照构造：增量读取需要自定义 current state 与 Entry slice。 */
+  public static ThreadSnapshot snapshot(
+      ThreadState thread,
+      EntryCurrentState currentState,
+      EntrySlice entrySlice,
+      List<ThreadCommand> commands,
+      GenerationProjection generation,
+      List<ToolInvocation> toolSiblings,
+      ThreadLiveState liveState,
+      List<StoppedThreadReceipt> stoppedReceipts,
+      int runningSubagentCount,
+      boolean continuationBlocked,
+      List<ExecutionExitFact> exitFacts,
+      boolean inFlightInterrupted) {
+    return new ThreadSnapshot(
+        thread,
+        currentState,
+        entrySlice,
         commands,
         generation,
         toolSiblings,

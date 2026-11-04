@@ -557,11 +557,162 @@ function checkModuleBoundaries() {
       addError(`${file}: runtime must reach builtin tools only through the catalog (${imported})`)
     }
   }
+}
 
-  // web 生产源码不得编译期接触 opencli；发行物按 web/pom.xml 的 runtime 依赖装配，可以不带该 Plugin。
-  for (const { file, imported } of javaImports(path.join(repositoryRoot, 'web/src/main/java'))) {
-    if (imported.startsWith('fun.fengwk.kkstudio.plugin.opencli.')) {
-      addError(`${file}: web production must not compile-import opencli plugin classes`)
+/**
+ * web 是唯一应用组合根：生产源码只可接触公开的 Harness 契约包与声明过的组合根类型；Plugin 实现必须保持 runtime 可选，
+ * Controller 不得接触 Harness runtime processor。约束在仓库级检查中维护，模块内不再写重复的架构测试。
+ */
+const webMainJavaRoot = 'web/src/main/java'
+const webHarnessAllowedPrefixes = [
+  'fun.fengwk.kkstudio.harness.runtime.',
+  'fun.fengwk.kkstudio.harness.api.',
+  'fun.fengwk.kkstudio.harness.spi.',
+  'fun.fengwk.kkstudio.harness.codec.',
+  'fun.fengwk.kkstudio.harness.contributor.api.',
+  'fun.fengwk.kkstudio.harness.environment.',
+]
+const webHarnessValueImports = new Set([
+  'fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec',
+  'fun.fengwk.kkstudio.harness.model.ImageInputTier',
+])
+
+/** 精确按文件放行真实装配；不为 controller、普通 mapper 或任意 Driver 私有包开通配。 */
+const webBuiltinImportAllowlist = new Map([
+  [
+    'fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java',
+    [
+      'fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver',
+      'fun.fengwk.kkstudio.harness.builtin.port.TurnResolver',
+      'fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor',
+      'fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery',
+    ],
+  ],
+  [
+    'fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java',
+    [
+      'fun.fengwk.kkstudio.harness.builtin.port.ModelGateway',
+      'fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor',
+      'fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig',
+      'fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig',
+    ],
+  ],
+  [
+    'fun/fengwk/kkstudio/web/runtime/HarnessRealtimeConfiguration.java',
+    ['fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester'],
+  ],
+])
+
+const webForbiddenImportPrefixes = [
+  'fun.fengwk.kkstudio.project.repo.',
+  'fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway',
+  'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection',
+  'fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry',
+]
+const webPluginImportPrefix = 'fun.fengwk.kkstudio.plugin.'
+const webControllerSourcePrefix = 'web/src/main/java/fun/fengwk/kkstudio/web/controller/'
+const webHarnessProcessorPrefix = 'fun.fengwk.kkstudio.harness.runtime.processor.'
+const webForbiddenSourceTokens = [
+  'TrustedJarContributorLoader',
+  'URLClassLoader',
+  'ServiceLoader',
+  'kk-studio.harness.contributors.directory',
+  'KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY',
+]
+const webForbiddenPomArtifacts = ['kk-studio-common']
+const webRequiredPomArtifacts = [
+  'kk-studio-platform-plugin-api',
+  'kk-studio-platform-runtime',
+  'kk-studio-canvas-runtime',
+  'kk-studio-harness-environment',
+  'kk-studio-harness-runtime',
+  'kk-studio-harness-agent-builtin',
+  'kk-studio-harness-model',
+]
+const webRequiredPluginConfigurationLines = [
+  'poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}',
+  'lease-duration: ${KK_STUDIO_PLUGINS_REFRESH_LEASE_DURATION:2m}',
+]
+const webBusinessSqlPattern =
+  /["'`](?:select\s+.+?\s+from|insert\s+into|update\s+.+?\s+set|delete\s+from)\s+/isu
+
+function checkWebArchitecture() {
+  const webMainRoot = path.join(repositoryRoot, webMainJavaRoot)
+  if (!existsSync(webMainRoot)) {
+    addError(`missing web main sources: ${webMainJavaRoot}`)
+    return
+  }
+
+  for (const { file, imported } of javaImports(webMainRoot)) {
+    if (imported.startsWith('fun.fengwk.kkstudio.harness.')) {
+      const relativeFile = path.relative(webMainRoot, path.join(repositoryRoot, file)).split(path.sep).join('/')
+      const allowed =
+        webHarnessAllowedPrefixes.some((prefix) => imported.startsWith(prefix)) ||
+        webHarnessValueImports.has(imported) ||
+        (webBuiltinImportAllowlist.get(relativeFile) ?? []).includes(imported)
+      if (!allowed) {
+        addError(`${file}: web must use only declared Harness boundaries (${imported})`)
+      }
+    }
+    for (const prefix of webForbiddenImportPrefixes) {
+      if (imported.startsWith(prefix)) {
+        addError(`${file}: web must not reference internal implementation (${imported})`)
+      }
+    }
+    if (imported.startsWith(webPluginImportPrefix)) {
+      addError(`${file}: web production must not import plugin implementations (${imported})`)
+    }
+  }
+
+  const pomPath = 'web/pom.xml'
+  if (!existsSync(path.join(repositoryRoot, pomPath))) {
+    addError(`missing web pom: ${pomPath}`)
+  } else {
+    const artifacts = new Set(pomDependencies(pomPath).map((dependency) => dependency.artifactId))
+    for (const artifact of webForbiddenPomArtifacts) {
+      if (artifacts.has(artifact)) {
+        addError(`${pomPath}: direct dependency ${artifact} is forbidden in any scope`)
+      }
+    }
+    for (const artifact of webRequiredPomArtifacts) {
+      if (!artifacts.has(artifact)) {
+        addError(`${pomPath}: composition root must declare direct dependency ${artifact}`)
+      }
+    }
+  }
+
+  const applicationYml = 'web/src/main/resources/application.yml'
+  if (!existsSync(path.join(repositoryRoot, applicationYml))) {
+    addError(`missing web configuration: ${applicationYml}`)
+  } else {
+    const yml = read(applicationYml)
+    for (const line of webRequiredPluginConfigurationLines) {
+      if (!yml.includes(line)) {
+        addError(`${applicationYml}: must declare exactly '${line}'`)
+      }
+    }
+  }
+
+  for (const file of walkFiles(webMainRoot).filter((file) => file.endsWith('.java'))) {
+    const relativePath = relativeFromRoot(file)
+    const source = read(relativePath)
+    for (const token of webForbiddenSourceTokens) {
+      if (source.includes(token)) {
+        addError(`${relativePath}: contains forbidden trusted-JAR remnant '${token}'`)
+      }
+    }
+    if (relativePath.startsWith(webControllerSourcePrefix)) {
+      for (const [index, line] of source.split('\n').entries()) {
+        if (line.includes(webHarnessProcessorPrefix)) {
+          addError(
+            `${relativePath}:${index + 1}: controllers must not depend on Harness runtime processors`,
+          )
+        }
+      }
+    }
+    const sql = source.match(webBusinessSqlPattern)
+    if (sql) {
+      addError(`${relativePath}: contains direct business SQL query: ${sql[0]}`)
     }
   }
 }
@@ -786,6 +937,7 @@ checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
 checkModuleBoundaries()
+checkWebArchitecture()
 checkUniquePackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()

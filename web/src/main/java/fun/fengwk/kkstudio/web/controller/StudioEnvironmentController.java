@@ -15,12 +15,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
-import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
@@ -31,7 +27,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
-import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
+import fun.fengwk.kkstudio.web.environment.EnvironmentRuntimeRoutingService;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -55,9 +51,7 @@ public class StudioEnvironmentController {
       new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8);
 
   private final EnvironmentService environmentService;
-  private final EnvironmentUpdateService environmentUpdateService;
-  private final ClusterNodeRegistry clusterNodeRegistry;
-  private final EnvironmentRuntimeOwnerClient runtimeOwnerClient;
+  private final EnvironmentRuntimeRoutingService environmentRuntimeRoutingService;
 
   @GetMapping
   public ApiResponse<List<EnvironmentCardDTO>> listEnvironments() {
@@ -92,7 +86,7 @@ public class StudioEnvironmentController {
   public ApiResponse<EnvironmentRuntimeStatusDTO> getEnvironmentRuntime(
       @PathVariable String environmentId) {
     EnvironmentId id = RequestParameters.environmentId(environmentId);
-    return ApiResponse.ok(runtimeStatus(id));
+    return ApiResponse.ok(environmentRuntimeRoutingService.runtimeStatus(id));
   }
 
   /**
@@ -104,7 +98,7 @@ public class StudioEnvironmentController {
   public ApiResponse<EnvironmentUpdateStartDTO> startEnvironmentUpdate(
       @PathVariable String environmentId) {
     EnvironmentId id = RequestParameters.environmentId(environmentId);
-    return ApiResponse.ok(startUpdate(id));
+    return ApiResponse.ok(environmentRuntimeRoutingService.startUpdate(id));
   }
 
   /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
@@ -157,33 +151,6 @@ public class StudioEnvironmentController {
         environmentService.updateInstallConfig(
             RequestParameters.environmentId(environmentId),
             EnvironmentInstallConfigs.parseUpdate(EnvironmentInstallConfigs.tree(request))));
-  }
-
-  /** owner 单跳：本节点为 READY owner 时直接读取本地缓存，否则经内部 HMAC 调 owner；无路由即明确 unavailable。 */
-  private EnvironmentRuntimeStatusDTO runtimeStatus(EnvironmentId environmentId) {
-    ClusterOwnerRoute route = requireOwnerRoute(environmentId);
-    if (route.local()) {
-      return environmentUpdateService.runtimeStatus(environmentId);
-    }
-    return runtimeOwnerClient.runtimeStatus(route, environmentId);
-  }
-
-  /** owner 单跳发起更新；只在 READY owner 上执行一次严格准入，不向其它节点扇出。 */
-  private EnvironmentUpdateStartDTO startUpdate(EnvironmentId environmentId) {
-    ClusterOwnerRoute route = requireOwnerRoute(environmentId);
-    if (route.local()) {
-      return environmentUpdateService.startUpdate(environmentId);
-    }
-    return runtimeOwnerClient.startUpdate(route, environmentId);
-  }
-
-  private ClusterOwnerRoute requireOwnerRoute(EnvironmentId environmentId) {
-    return clusterNodeRegistry
-        .route(environmentId)
-        .orElseThrow(
-            () ->
-                new AiEnvironmentUnavailableException(
-                    "environment has no current READY owner route"));
   }
 
   /** 脚本按原文字节返回，禁止缓存，并阻止浏览器按附件内容嗅探。 */

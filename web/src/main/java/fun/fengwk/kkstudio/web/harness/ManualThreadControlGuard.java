@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.controller;
+package fun.fengwk.kkstudio.web.harness;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;

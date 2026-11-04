@@ -98,6 +98,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
+import fun.fengwk.kkstudio.web.harness.HarnessThreadService;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -515,10 +516,10 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     StudioHarnessThreadController threadController =
         new StudioHarnessThreadController(
             runtime,
+            new HarnessThreadService(
+                runtime, mock(UsageCostProjectionService.class), environmentWaitProjectionService),
             mock(ModelRequestDebugService.class),
-            interactionService,
-            mock(UsageCostProjectionService.class),
-            environmentWaitProjectionService);
+            interactionService);
     var waitingTool =
         threadController
             .getSnapshot(second.threadId().toString(), null)

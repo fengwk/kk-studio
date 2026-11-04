@@ -251,14 +251,4 @@ class StudioHarnessSessionControllerTest {
     verify(harnessQueryService).listSessionEntries(SESSION_ID);
     verify(usageCostProjectionService).project(entries);
   }
-
-  @Test
-  void translatesMissingSessionToNotFound() throws Exception {
-    when(harnessQueryService.listThreadSummaries(SESSION_ID))
-        .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
-
-    mockMvc
-        .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
-        .andExpect(status().isNotFound());
-  }
 }

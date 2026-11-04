@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.advice;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.AfterEach;
@@ -13,12 +12,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.canvas.http.CanvasController;
-import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
-import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
@@ -26,17 +21,6 @@ import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreview
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
-import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
-import fun.fengwk.kkstudio.web.controller.StudioChatController;
-import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionProviderRequestPreviewController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadCommandBatchController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
-import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadStreamCatchupController;
-import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
 
 import java.util.Locale;
 import java.util.Map;
@@ -60,32 +44,6 @@ class StudioResponseStatusErrorAdviceTest {
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
     Locale.setDefault(originalDefault);
-  }
-
-  @Test
-  void scopesAdviceToSupportedControllersIncludingSync() {
-    // 同步请求反序列化错误沿用安全翻译，其他控制器仍维持原有边界。
-    RestControllerAdvice annotation =
-        StudioResponseStatusErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
-    assertArrayEquals(
-        new Class<?>[] {
-          StudioAgentTaskController.class,
-          CanvasController.class,
-          CanvasFunctionController.class,
-          CanvasResourceController.class,
-          StudioChatController.class,
-          StudioHarnessCommandBatchController.class,
-          StudioHarnessProviderRequestPreviewController.class,
-          StudioHarnessSessionController.class,
-          StudioHarnessSessionProviderRequestPreviewController.class,
-          StudioHarnessThreadCommandBatchController.class,
-          StudioHarnessThreadController.class,
-          StudioHarnessThreadStreamCatchupController.class,
-          StudioInteractionController.class,
-          StudioConfigSyncController.class,
-          StudioEnvironmentIdeController.class
-        },
-        annotation.assignableTypes());
   }
 
   @Test
