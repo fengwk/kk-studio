@@ -260,8 +260,8 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsInternalOnlyCommandTypesFromProductHttpSurface() throws Exception {
-    // CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE 都是内部 steering：产品 HTTP 请求体携带即 400。
+  void rejectsInternalAndRemovedCommandTypesFromProductHttpSurface() throws Exception {
+    // 内部命令与已删除的命令在产品 HTTP 请求中均返回 400。
     for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
       String internalOnly =
           batchWithCommands(

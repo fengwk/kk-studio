@@ -15,8 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 统一的 Agent 创建原语：子代理 task、插件 Prompt 任务、Issue 任务与压缩共用这一条「创建 / 续用 Thread + 首批输入 + 票据 + THREAD
- * Work」路径。
+ * 统一的 Agent 创建原语：子代理 task、插件 Prompt 任务、控制器任务与压缩共用这一条「创建 / 续用 Thread + 首批输入 + 票据 + THREAD Work」路径。
  *
  * <p>{@link #spawn} 运行在调用方事务内，<b>假定调用方已按 {@code HarnessStore} 的规范锁序持有全部所需的锁</b>：需要时先取全局 Join
  * 准入锁，再取执行树锁， 再按 Session、Thread 的 UUID 序锁定父链（含续用的目标 Thread）。从零开始的调用方使用 {@link #lockForSpawn}

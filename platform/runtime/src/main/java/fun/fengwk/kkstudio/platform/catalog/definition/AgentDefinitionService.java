@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
-import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;

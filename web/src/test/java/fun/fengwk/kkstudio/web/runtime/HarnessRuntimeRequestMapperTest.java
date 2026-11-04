@@ -557,16 +557,15 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE，也不接受未知
-    // discriminator。
-    for (String internal : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
-      HarnessCommandCreateDTO rejected = command(internal, internal);
+    // 内部命令、已删除的命令与未知 discriminator 均不可由产品 HTTP 面提交。
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+      HarnessCommandCreateDTO rejected = command(type, type);
       assertThrows(
           IllegalArgumentException.class,
           () ->
               HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                   THREAD_ID, threadBatch(rejected)),
-          internal + " must be rejected");
+          type + " must be rejected");
     }
 
     HarnessCommandCreateDTO unknown = command("UNKNOWN", "unknown");

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.builtin;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 

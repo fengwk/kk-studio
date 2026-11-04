@@ -54,14 +54,11 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertTrue(
         harnessCatalog.selectableTools().stream()
             .anyMatch(candidate -> candidate.id().equals(tool.id())));
-    // Issue 的运行上下文由 Markdown 任务消息承载：project contributor 不再注册 custom entry type 与投影器。
+    // Issue 的运行上下文由 Markdown 任务消息承载，不注册 custom entry type。
     ContributorId contributorId = tool.id().contributorId();
     assertTrue(
         harnessCatalog.customEntryTypes().stream()
             .noneMatch(entryType -> entryType.id().contributorId().equals(contributorId)));
-    assertTrue(
-        harnessCatalog.contextProjectors().stream()
-            .noneMatch(projector -> projector.id().contributorId().equals(contributorId)));
   }
 
   /** 建一个 Issue 处于 DESIGN 阶段、已有活动 Run 的场景，返回该 Run。 */

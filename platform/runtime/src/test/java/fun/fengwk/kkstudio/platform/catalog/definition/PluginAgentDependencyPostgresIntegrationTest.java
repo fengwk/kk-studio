@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
