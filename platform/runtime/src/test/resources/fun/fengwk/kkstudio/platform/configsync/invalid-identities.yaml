@@ -42,4 +42,3 @@ cases:
         - packageName: ' pkg '
           repositoryUrl: file:///tmp/unused
           branch: main
-          currentCommit: '1111111111111111111111111111111111111111'

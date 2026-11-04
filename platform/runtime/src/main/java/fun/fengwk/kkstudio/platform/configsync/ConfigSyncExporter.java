@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -76,7 +77,9 @@ public final class ConfigSyncExporter {
 
     List<Object> skills = new ArrayList<>();
     for (SkillPackage pkg : snapshot.skillPackages()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.packageName()))) {
+      if (pkg.gitSource() != null
+          && selected.contains(
+              ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.packageName()))) {
         skills.add(exportSkillPackage(pkg));
       }
     }
@@ -177,12 +180,12 @@ public final class ConfigSyncExporter {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("packageName", pkg.packageName());
     putIfNotNull(map, "description", pkg.description());
-    map.put("repositoryUrl", pkg.repositoryUrl());
-    map.put("branch", pkg.branch());
-    map.put("currentCommit", pkg.currentCommit());
+    SkillPackageGitSource gitSource = pkg.gitSource();
+    map.put("repositoryUrl", gitSource.repositoryUrl());
+    map.put("branch", gitSource.branch());
     // 与 provider credential 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
-    if (pkg.token() != null) {
-      map.put("token", pkg.token());
+    if (gitSource.token() != null) {
+      map.put("token", gitSource.token());
     }
     return map;
   }

@@ -28,9 +28,11 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** Agent 引用解析必须在写入前校验全局 Agent、Model 与 Skill 引用。 */
 class AgentDefinitionReferenceResolverTest {
@@ -84,13 +86,19 @@ class AgentDefinitionReferenceResolverTest {
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     SkillPackage pkg =
-        SkillPackage.builder()
-            .packageName("tools")
-            .skills(
-                List.of(
-                    new SkillManifestEntry("dev", "dev desc"),
-                    new SkillManifestEntry("ops", "ops desc")))
-            .build();
+        new SkillPackage(
+            "tools",
+            null,
+            "v1",
+            UUID.randomUUID(),
+            List.of(
+                new SkillManifestEntry("dev", "dev desc"),
+                new SkillManifestEntry("ops", "ops desc")),
+            Instant.now(),
+            0L,
+            Instant.now(),
+            Instant.now(),
+            null);
     when(skillPackages.getPackage("tools")).thenReturn(pkg);
     when(skillPackages.lockPackageForShare("tools")).thenReturn(pkg);
 
@@ -290,13 +298,17 @@ class AgentDefinitionReferenceResolverTest {
   }
 
   private static SkillPackage packageWith(String packageName, String... skillNames) {
-    SkillPackage skillPackage =
-        SkillPackage.builder()
-            .packageName(packageName)
-            .skills(
-                Arrays.stream(skillNames).map(name -> new SkillManifestEntry(name, name)).toList())
-            .build();
-    return skillPackage;
+    return new SkillPackage(
+        packageName,
+        null,
+        "v1",
+        UUID.randomUUID(),
+        Arrays.stream(skillNames).map(name -> new SkillManifestEntry(name, name)).toList(),
+        Instant.now(),
+        0L,
+        Instant.now(),
+        Instant.now(),
+        null);
   }
 
   private static ToolContribution tool(String contributor, String localName) {

@@ -7,7 +7,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
+import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
+import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -18,9 +19,16 @@ public class PlatformReadConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  public SkillArchiveFileReader skillArchiveFileReader(
+      StorageBlobManager storageBlobManager, S3StorageService s3StorageService) {
+    return new SkillArchiveFileReader(storageBlobManager, s3StorageService);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   public PlatformSkillContentReader platformSkillContentReader(
-      SkillPackageRepository skillPackageRepository, SkillGitCache skillGitCache) {
-    return new PlatformSkillContentReader(skillPackageRepository, skillGitCache);
+      SkillPackageRepository skillPackageRepository, SkillArchiveFileReader archiveFileReader) {
+    return new PlatformSkillContentReader(skillPackageRepository, archiveFileReader);
   }
 
   @Bean

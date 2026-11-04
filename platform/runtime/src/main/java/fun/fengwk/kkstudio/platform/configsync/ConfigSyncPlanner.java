@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
@@ -14,8 +13,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigC
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.Environment;
@@ -64,8 +61,6 @@ public final class ConfigSyncPlanner {
 
   private final ConfigSyncSnapshotReader snapshotReader;
   private final ConfigSyncMcpDiscovery mcpDiscovery;
-  private final SkillGitCache skillGitCache;
-  private final AgentDefinitionRepository agentDefinitionRepository;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final AgentModelRuntimeConfigParser configParser;
@@ -263,7 +258,7 @@ public final class ConfigSyncPlanner {
     return models;
   }
 
-  /** Skill Package 需要外部 Git 精确 commit；Git 失败只跳过条目，repositoryUrl 变化或丢失被引用 Skill 是硬冲突。 */
+  /** Skill Package 校验不可变 repositoryUrl 与渠道；不访问 Git，真正拉取与冲突校验延迟到 apply 阶段由 importGitPackage 执行。 */
   private SkillPlan planSkillPackages(
       ConfigSyncParser.ParsedDocument document,
       ConfigSyncSnapshot snapshot,
@@ -282,31 +277,16 @@ public final class ConfigSyncPlanner {
     List<ConfigSyncPlan.SkillImport> skillImports = new ArrayList<>();
     for (ConfigSyncParser.SkillSpec spec : document.skillPackages()) {
       SkillPackage existing = existingPackages.get(spec.packageName());
-      if (existing != null && !existing.repositoryUrl().equals(spec.repositoryUrl())) {
-        // repositoryUrl 是不可变身份：同名换仓库是硬冲突，不能通过部分导入规避，也不回显 URL。
-        throw new AiValidationException(
-            RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
-      }
-      List<SkillManifestEntry> manifest;
-      try {
-        skillGitCache.ensureCommit(
-            spec.packageName(), spec.repositoryUrl(), spec.currentCommit(), spec.token());
-        manifest = skillGitCache.scanManifest(spec.packageName(), spec.currentCommit());
-      } catch (SkillGitException error) {
-        // 不回显 Git 错误文本：其中可能包含 repositoryUrl 或凭据。
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.SKILL_PACKAGES.wireValue(),
-                spec.packageName(),
-                "cannot restore exact commit"));
-        skippedSkills.add(spec.packageName());
-        continue;
-      }
-      if (existing != null
-          && !referencedRemovedSkills(spec.packageName(), existing, manifest).isEmpty()) {
-        // 移除仍被 Agent 引用的 Skill 是硬冲突，不能通过部分导入规避。
-        throw new AiValidationException(
-            RESOURCE, "skill package would remove referenced skills: " + spec.packageName());
+      if (existing != null) {
+        if (!existing.isGit()) {
+          throw new AiValidationException(
+              RESOURCE,
+              "uploaded skill package cannot be replaced by a Git import: " + spec.packageName());
+        }
+        if (!spec.repositoryUrl().equals(existing.gitSource().repositoryUrl())) {
+          throw new AiValidationException(
+              RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
+        }
       }
       skillImports.add(
           new ConfigSyncPlan.SkillImport(
@@ -314,25 +294,12 @@ public final class ConfigSyncPlanner {
               spec.description(),
               spec.repositoryUrl(),
               spec.branch(),
-              spec.currentCommit(),
-              manifest,
               spec.token()));
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, spec.packageName()));
-      availableSkills.put(spec.packageName(), skillNames(manifest));
+      availableSkills.put(spec.packageName(), null);
     }
     skippedSkills.forEach(availableSkills::remove);
     return new SkillPlan(skillImports, availableSkills);
-  }
-
-  /** 新 manifest 未提供、但仍被 Agent 引用的 Skill（按名称排序，用于硬拒绝判定）。 */
-  private List<String> referencedRemovedSkills(
-      String packageName, SkillPackage existing, List<SkillManifestEntry> manifest) {
-    Set<String> published = new LinkedHashSet<>(skillNames(manifest));
-    return skillNames(existing.skills()).stream()
-        .filter(skill -> !published.contains(skill))
-        .filter(skill -> agentDefinitionRepository.existsReferencingSkill(packageName, skill))
-        .sorted()
-        .toList();
   }
 
   /** MCP Server 先建立可用池与已知工具名池，再逐个 Server 做发现；文件条目的工具变化在此判定。 */
@@ -720,7 +687,8 @@ public final class ConfigSyncPlanner {
         if (!availableSkills.containsKey(ref.getPackageName())) {
           return "missing skill package: " + ref.getPackageName();
         }
-        if (!availableSkills.get(ref.getPackageName()).contains(ref.getName())) {
+        Set<String> packageSkills = availableSkills.get(ref.getPackageName());
+        if (packageSkills != null && !packageSkills.contains(ref.getName())) {
           return "missing skill: " + ref.getPackageName() + "/" + ref.getName();
         }
       }

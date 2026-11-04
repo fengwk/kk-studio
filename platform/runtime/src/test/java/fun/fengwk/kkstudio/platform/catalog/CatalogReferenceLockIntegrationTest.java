@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -39,8 +40,11 @@ import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -488,20 +492,43 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
         });
   }
 
+  private UUID insertArtifactBlob(String packageName) {
+    UUID blobId =
+        UUID.nameUUIDFromBytes(("artifact:" + packageName).getBytes(StandardCharsets.UTF_8));
+    String sha256 = String.format("%064x", Math.abs((long) packageName.hashCode()));
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)"
+            + " values (?, ?, 1, 'application/zip', 1, 'ACTIVE')"
+            + " on conflict do nothing",
+        blobId,
+        sha256);
+    return blobId;
+  }
+
   private void insertPackage(String packageName, String... skillNames) {
     List<SkillManifestEntry> skills = new ArrayList<>();
     for (String skillName : skillNames) {
       skills.add(new SkillManifestEntry(skillName, skillName + " skill"));
     }
+    UUID artifactBlobId = insertArtifactBlob(packageName);
     SkillPackage skillPackage =
-        SkillPackage.builder()
-            .packageName(packageName)
-            .repositoryUrl("https://example.com/" + packageName + ".git")
-            .branch("main")
-            .currentCommit(COMMIT)
-            .observedHeadCommit(COMMIT)
-            .skills(skills)
-            .build();
+        new SkillPackage(
+            packageName,
+            null,
+            COMMIT,
+            artifactBlobId,
+            skills,
+            Instant.now(),
+            0L,
+            null,
+            null,
+            new SkillPackageGitSource(
+                "https://example.com/" + packageName + ".git",
+                "main",
+                null,
+                COMMIT,
+                Instant.now(),
+                null));
     TransactionTemplate transaction = new TransactionTemplate(transactionManager);
     Boolean inserted = transaction.execute(status -> skillPackages.insertPackage(skillPackage));
     assertTrue(inserted);
@@ -523,9 +550,19 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           for (String skillName : skillNames) {
             skills.add(new SkillManifestEntry(skillName, skillName + " skill"));
           }
-          assertTrue(
-              skillPackages.updatePackage(
-                  current.toBuilder().skills(skills).build(), current.version()));
+          SkillPackage updated =
+              new SkillPackage(
+                  current.packageName(),
+                  current.description(),
+                  current.packageVersion(),
+                  current.artifactBlobId(),
+                  skills,
+                  Instant.now(),
+                  current.version(),
+                  current.createTime(),
+                  current.updateTime(),
+                  current.gitSource());
+          assertTrue(skillPackages.updatePublication(updated, current.version()));
         });
   }
 

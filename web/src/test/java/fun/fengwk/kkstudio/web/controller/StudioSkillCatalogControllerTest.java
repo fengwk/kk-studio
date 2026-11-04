@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -16,9 +17,8 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -28,11 +28,12 @@ import tools.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,17 +45,14 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Platform 全局 Git Skill Package Web REST API 的 HTTP 契约测试。
+ * Platform 技能包 Web REST API 的 HTTP 契约测试。
  *
- * <p>验证 {@code /api/skill-packages} 下 list/get/create/edit/check/update/delete 的端到端契约：Create
- * 发布当时解析出的 branch HEAD；Check 只更新观察值、失败时保留已发布内容；Update 只接受该 version 展示过的 exact commit；陈旧 Card、重复名与
- * Agent 引用保护映射到稳定的 HTTP 状态码。技能仓库与 Platform bare cache 都落在进程临时目录，测试不接触模块工作树。
+ * <p>验证 {@code /api/skill-packages} 下的列表、详情、Git 创建/编辑/检查/发布、归档下载、各环境同步状态与环境重新同步：创建发布当时解析出的 branch
+ * HEAD；检查只更新观察值；发布只接受该 version 展示过的 exact commit；陈旧卡片、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。
  */
 @AutoConfigureMockMvc
+@Import(WebStorageS3TestConfiguration.class)
 class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
-
-  /** 技能的 Git 仓库与 Platform bare cache 都落在进程临时目录。 */
-  private static final Path TEST_ROOT = createTestRoot();
 
   private static final String DEV_SKILL_MD =
       """
@@ -77,12 +75,6 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
 
-  @DynamicPropertySource
-  static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {
-    // bare cache 根必须在测试临时目录，避免把 cache 写进模块目录。
-    registry.add("kk-studio.catalog.skill.cache-root", () -> TEST_ROOT.resolve("cache").toString());
-  }
-
   /** 测试意图：完整生命周期——创建发布 branch HEAD、检查只更新观察值、发布 exact observed commit、CAS 删除。 */
   @Test
   void fullLifecyclePublishesExactObservedCommit() throws Exception {
@@ -95,77 +87,93 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
             .perform(createRequest(name, git.url()))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.packageName").value(name))
-            .andExpect(jsonPath("$.data.repositoryUrl").value(git.url()))
-            .andExpect(jsonPath("$.data.branch").value("main"))
-            .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
-            .andExpect(jsonPath("$.data.observedHeadCommit").value(firstCommit))
-            .andExpect(jsonPath("$.data.checkStatus").value("UP_TO_DATE"))
-            .andExpect(jsonPath("$.data.headCheckError").doesNotExist())
+            .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
+            .andExpect(jsonPath("$.data.source").value("GIT"))
+            .andExpect(jsonPath("$.data.git.repositoryUrl").value(git.url()))
+            .andExpect(jsonPath("$.data.git.branch").value("main"))
+            .andExpect(jsonPath("$.data.git.hasToken").value(false))
+            .andExpect(jsonPath("$.data.headCommit").value(firstCommit))
+            .andExpect(jsonPath("$.data.headCheckError").value(nullValue()))
+            .andExpect(jsonPath("$.data.updateAvailable").value(false))
             .andExpect(jsonPath("$.data.skills[0].name").value("dev"))
             .andExpect(jsonPath("$.data.skills[0].description").value("开发者技能包含开发规范"))
             .andExpect(jsonPath("$.data.version").value("0"))
             .andReturn();
-    assertEquals(firstCommit, data(createResult).path("currentCommit").asText());
+    assertEquals(firstCommit, data(createResult).path("packageVersion").asText());
 
     // 列表与单读回读同一条权威事实。
     assertTrue(packageNames().contains(name), "created package must appear in the list");
     mockMvc
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
+        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.data.version").value("0"));
 
-    // 检查：HEAD 未变时是只读操作，不推进 version。
+    // HEAD 未变时检查是只读操作，不推进 version。
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.checkStatus").value("UP_TO_DATE"))
+        .andExpect(jsonPath("$.data.headCommit").value(firstCommit))
         .andExpect(jsonPath("$.data.version").value("0"));
 
-    // 编辑：repository URL 与已发布内容不可变，只有可编辑字段与 version 前进。
-    SkillPackageEditDTO edit = new SkillPackageEditDTO();
+    // 编辑：只有可编辑字段变化，version 前进。
+    SkillPackageGitEditDTO edit = new SkillPackageGitEditDTO();
     edit.setExpectedVersion("0");
     edit.setDescription("updated description");
     edit.setBranch("release");
     mockMvc
         .perform(
-            put("/api/skill-packages/{name}", name)
+            put("/api/skill-packages/git/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.description").value("updated description"))
-        .andExpect(jsonPath("$.data.branch").value("release"))
-        .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
+        .andExpect(jsonPath("$.data.git.branch").value("release"))
+        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.data.version").value("1"));
 
-    // branch 前进：检查只更新观察值，current commit 与 manifest 保持原样。
+    // branch 前进：检查只更新观察值，当前版本与清单保持原样。
     String secondCommit =
         git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD, "review/SKILL.md", REVIEW_SKILL_MD));
     mockMvc
         .perform(checkRequest(name, "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.checkStatus").value("UPDATE_AVAILABLE"))
-        .andExpect(jsonPath("$.data.observedHeadCommit").value(secondCommit))
-        .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
+        .andExpect(jsonPath("$.data.headCommit").value(secondCommit))
+        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
+        .andExpect(jsonPath("$.data.updateAvailable").value(true))
         .andExpect(jsonPath("$.data.skills.length()").value(1))
+        .andExpect(jsonPath("$.data.version").value("1"));
+
+    // 发布卡片展示过的 exact commit：版本号与清单在同一次 CAS 中切换。
+    mockMvc
+        .perform(publishRequest(name, "1", secondCommit))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.packageVersion").value(secondCommit))
+        .andExpect(jsonPath("$.data.headCommit").value(secondCommit))
+        .andExpect(jsonPath("$.data.updateAvailable").value(false))
+        .andExpect(jsonPath("$.data.skills.length()").value(2))
         .andExpect(jsonPath("$.data.version").value("2"));
 
-    // 发布 card 展示过的 exact commit：commit 与 manifest 在同一次 CAS 中切换。
+    // 归档下载返回预签名 GET 与摘要。
     mockMvc
-        .perform(publishRequest(name, "2", secondCommit))
+        .perform(post("/api/skill-packages/{name}/archive-url", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.currentCommit").value(secondCommit))
-        .andExpect(jsonPath("$.data.observedHeadCommit").value(secondCommit))
-        .andExpect(jsonPath("$.data.checkStatus").value("UP_TO_DATE"))
-        .andExpect(jsonPath("$.data.skills.length()").value(2))
-        .andExpect(jsonPath("$.data.version").value("3"));
+        .andExpect(jsonPath("$.data.filename").value(name + "-" + secondCommit + ".zip"))
+        .andExpect(jsonPath("$.data.sha256").isNotEmpty())
+        .andExpect(jsonPath("$.data.download.url").isNotEmpty());
 
-    // 陈旧 Card 的删除必须冲突，命中当前 version 才删除。
+    // 环境同步状态按环境投影，新建包尚未安装。
     mockMvc
-        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "2"))
+        .perform(get("/api/skill-packages/{name}/environments", name))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data").isArray());
+
+    // 陈旧卡片的删除必须冲突，命中当前 version 才删除。
+    mockMvc
+        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "1"))
         .andExpect(status().isConflict());
     mockMvc
-        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "3"))
+        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "2"))
         .andExpect(status().isNoContent());
     mockMvc.perform(get("/api/skill-packages/{name}", name)).andExpect(status().isNotFound());
   }
@@ -177,17 +185,15 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     String name = packageName("create-guard");
 
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
-    // 同名重复创建是 duplicate，不是覆盖。
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isConflict());
-    // 无 scheme 的 URL 与不存在的 branch 都是请求不合法。
     mockMvc
         .perform(createRequest(packageName("bad-url"), "not-a-url"))
         .andExpect(status().isBadRequest());
-    SkillPackageCreateDTO badBranch = create(packageName("bad-branch"), git.url());
+    SkillPackageGitCreateDTO badBranch = create(packageName("bad-branch"), git.url());
     badBranch.setBranch("no-such-branch");
     mockMvc
         .perform(
-            post("/api/skill-packages")
+            post("/api/skill-packages/git")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badBranch)))
         .andExpect(status().isBadRequest());
@@ -213,36 +219,34 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
                 .param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
 
-    SkillPackageEditDTO stale = new SkillPackageEditDTO();
+    SkillPackageGitEditDTO stale = new SkillPackageGitEditDTO();
     stale.setExpectedVersion("7");
     stale.setDescription("stale edit");
     stale.setBranch("main");
     mockMvc
         .perform(
-            put("/api/skill-packages/{name}", name)
+            put("/api/skill-packages/git/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(stale)))
         .andExpect(status().isConflict());
 
-    // card 观察到某 commit 之后 branch 又前进：该 version 只认当时展示的 exact commit。
+    // 卡片观察到某 commit 之后 branch 又前进：该 version 只认当时展示的 exact commit。
     String observed = git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD));
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.observedHeadCommit").value(observed))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.data.headCommit").value(observed))
+        .andExpect(jsonPath("$.data.version").value("0"));
     String advanced =
         git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD, "review/SKILL.md", REVIEW_SKILL_MD));
 
-    // 更旧的 firstCommit 与更新的 advanced 都不是该 version 展示过的 commit。
-    mockMvc.perform(publishRequest(name, "1", firstCommit)).andExpect(status().isBadRequest());
-    mockMvc.perform(publishRequest(name, "1", advanced)).andExpect(status().isBadRequest());
-    // 只有观察值本身可以发布。
+    mockMvc.perform(publishRequest(name, "0", firstCommit)).andExpect(status().isBadRequest());
+    mockMvc.perform(publishRequest(name, "0", advanced)).andExpect(status().isBadRequest());
     mockMvc
-        .perform(publishRequest(name, "1", observed))
+        .perform(publishRequest(name, "0", observed))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.currentCommit").value(observed))
-        .andExpect(jsonPath("$.data.version").value("2"));
+        .andExpect(jsonPath("$.data.packageVersion").value(observed))
+        .andExpect(jsonPath("$.data.version").value("1"));
   }
 
   /** 测试意图：仍被 Agent SkillRef 引用的 Package 不能删除，引用保护返回 409 且行保持原状。 */
@@ -260,10 +264,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("0"))
-        .andExpect(jsonPath("$.data.currentCommit").value(git.firstCommit()));
+        .andExpect(jsonPath("$.data.packageVersion").value(git.firstCommit()));
   }
 
-  /** 测试意图：Skill 在 manifest 中消失但仍被 Agent 引用时，发布也必须拒绝。 */
+  /** 测试意图：Skill 在清单中消失但仍被 Agent 引用时，发布也必须拒绝。 */
   @Test
   void rejectsPublishRemovingReferencedSkill() throws Exception {
     GitFixture git = GitFixture.init("publish-in-use", Map.of("dev/SKILL.md", DEV_SKILL_MD));
@@ -272,19 +276,29 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
     referencingAgent(name, "dev");
 
-    // 下一个 commit 移除了 dev：仍被引用的 Skill 不得从 Package 中消失。
     String removingCommit = git.commit(Map.of("review/SKILL.md", REVIEW_SKILL_MD));
     mockMvc
         .perform(checkRequest(name, "0"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.observedHeadCommit").value(removingCommit));
-    mockMvc.perform(publishRequest(name, "1", removingCommit)).andExpect(status().isConflict());
+        .andExpect(jsonPath("$.data.headCommit").value(removingCommit));
+    mockMvc.perform(publishRequest(name, "0", removingCommit)).andExpect(status().isConflict());
     mockMvc
         .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
+        .andExpect(jsonPath("$.data.packageVersion").value(firstCommit))
         .andExpect(jsonPath("$.data.skills[0].name").value("dev"))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(jsonPath("$.data.version").value("0"));
+  }
+
+  /** 测试意图：不存在环境的重新同步请求返回 404，而不是静默成功。 */
+  @Test
+  void resyncUnknownEnvironmentIsNotFound() throws Exception {
+    mockMvc
+        .perform(
+            post(
+                "/api/environments/{environmentId}/skills/resync",
+                "00000000-0000-0000-0000-000000000001"))
+        .andExpect(status().isNotFound());
   }
 
   /** 通过公开 API 建立真实 Skill 引用：Agent config 精确指向某 Package 的 Skill。 */
@@ -309,22 +323,22 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private MockHttpServletRequestBuilder createRequest(String packageName, String repositoryUrl)
       throws Exception {
-    return json(post("/api/skill-packages"), create(packageName, repositoryUrl));
+    return json(post("/api/skill-packages/git"), create(packageName, repositoryUrl));
   }
 
   private MockHttpServletRequestBuilder checkRequest(String packageName, String expectedVersion)
       throws Exception {
     SkillPackageCheckDTO check = new SkillPackageCheckDTO();
     check.setExpectedVersion(expectedVersion);
-    return json(post("/api/skill-packages/{name}/check", packageName), check);
+    return json(post("/api/skill-packages/git/{name}/check", packageName), check);
   }
 
   private MockHttpServletRequestBuilder publishRequest(
       String packageName, String expectedVersion, String targetCommit) throws Exception {
-    SkillPackagePublishDTO publish = new SkillPackagePublishDTO();
+    SkillPackageGitPublishDTO publish = new SkillPackageGitPublishDTO();
     publish.setExpectedVersion(expectedVersion);
     publish.setTargetCommit(targetCommit);
-    return json(post("/api/skill-packages/{name}/update", packageName), publish);
+    return json(post("/api/skill-packages/git/{name}/publish", packageName), publish);
   }
 
   private MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder builder, Object body)
@@ -334,8 +348,8 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .content(objectMapper.writeValueAsString(body));
   }
 
-  private static SkillPackageCreateDTO create(String packageName, String repositoryUrl) {
-    SkillPackageCreateDTO create = new SkillPackageCreateDTO();
+  private static SkillPackageGitCreateDTO create(String packageName, String repositoryUrl) {
+    SkillPackageGitCreateDTO create = new SkillPackageGitCreateDTO();
     create.setPackageName(packageName);
     create.setDescription("web skill package");
     create.setRepositoryUrl(repositoryUrl);
@@ -367,14 +381,6 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     return objectMapper.readTree(body).path("data");
   }
 
-  private static Path createTestRoot() {
-    try {
-      return Files.createTempDirectory("kk-studio-skill-web");
-    } catch (IOException error) {
-      throw new IllegalStateException("failed to create skill test root", error);
-    }
-  }
-
   /** 测试临时目录中的技能仓库：每个测试独立，{@code main} 与 {@code release} 同步推进。 */
   private static final class GitFixture {
 
@@ -400,7 +406,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
       return commit(git, directory, files);
     }
 
-    /** 每次提交都声明完整 tree：先清空工作区（{@code .git} 除外）再写入给定文件集。 */
+    /** 每次提交都声明完整 tree：先清空工作区（{@code .git} 除外）再写入给定文件集合。 */
     private static String commit(Git git, Path directory, Map<String, String> files)
         throws Exception {
       clearTree(directory);

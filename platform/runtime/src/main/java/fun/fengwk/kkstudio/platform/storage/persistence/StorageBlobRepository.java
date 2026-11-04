@@ -25,16 +25,17 @@ import java.util.UUID;
 public class StorageBlobRepository {
 
   private static final String COLUMNS =
-      "id, sha256, size_bytes, media_type, width, height, duration_ms, ref_count, state, "
-          + "created_at as create_time, updated_at as update_time";
+      "id, sha256, size_bytes, media_type, width, height, duration_ms, archive_index, ref_count, "
+          + "state, created_at as create_time, updated_at as update_time";
 
   private static final String INSERT_ACTIVE_SQL =
       """
       insert into storage_blob (
-          id, sha256, size_bytes, media_type, width, height, duration_ms,
+          id, sha256, size_bytes, media_type, width, height, duration_ms, archive_index,
           ref_count, state, created_at, updated_at
       ) values (
           :id, :sha256, :sizeBytes, :mediaType, :width, :height, :durationMs,
+          cast(:archiveIndex as jsonb),
           :refCount, 'ACTIVE', current_timestamp, current_timestamp
       )
       on conflict (sha256, size_bytes) where state = 'ACTIVE' do nothing
@@ -129,6 +130,22 @@ public class StorageBlobRepository {
         == 1;
   }
 
+  /** 记录服务端校验通过的归档索引；对同一内容重复写入相同索引是幂等的。 */
+  public boolean updateArchiveIndex(UUID id, String archiveIndex) {
+    Objects.requireNonNull(archiveIndex, "archiveIndex");
+    return jdbcClient
+            .sql(
+                """
+                update storage_blob
+                set archive_index = cast(:archiveIndex as jsonb), updated_at = current_timestamp
+                where id = :id and state = 'ACTIVE'
+                """)
+            .param("id", id)
+            .param("archiveIndex", archiveIndex)
+            .update()
+        == 1;
+  }
+
   /** 条件删除 DELETING 行：仅在 S3 对象已删除后调用（{@code ref_count = 0} 兜底）。 */
   public boolean deleteDeleting(UUID id) {
     return jdbcClient
@@ -158,7 +175,8 @@ public class StorageBlobRepository {
             .param("mediaType", blob.getMediaType())
             .param("width", blob.getWidth())
             .param("height", blob.getHeight())
-            .param("durationMs", blob.getDurationMs());
+            .param("durationMs", blob.getDurationMs())
+            .param("archiveIndex", blob.getArchiveIndex());
     if (withRefCount) {
       statement = statement.param("refCount", blob.getRefCount());
     }
@@ -174,6 +192,7 @@ public class StorageBlobRepository {
     blob.setWidth(nullableLong(rs, "width"));
     blob.setHeight(nullableLong(rs, "height"));
     blob.setDurationMs(nullableLong(rs, "duration_ms"));
+    blob.setArchiveIndex(rs.getString("archive_index"));
     blob.setRefCount(rs.getLong("ref_count"));
     blob.setState(StorageBlobState.valueOf(rs.getString("state")));
     blob.setCreateTime(

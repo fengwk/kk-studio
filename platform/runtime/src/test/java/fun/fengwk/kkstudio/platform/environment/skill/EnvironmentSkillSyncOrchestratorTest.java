@@ -33,7 +33,9 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
@@ -43,6 +45,9 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.lang.reflect.Field;
 import java.time.Clock;
@@ -85,7 +90,11 @@ class EnvironmentSkillSyncOrchestratorTest {
   private static final UUID LEASE_TOKEN = UUID.randomUUID();
   private static final String COMMIT_A = "aaaaaaaabbbbbbbbccccccccddddddddaaaaaaaa";
   private static final String COMMIT_B = "bbbbbbbbccccccccddddddddaaaaaaaabbbbbbbb";
-  private static final String PREVIOUS_COMMIT = "ccccccccddddddddaaaaaaaabbbbbbbbcccccccc";
+  private static final String PREVIOUS_COMMIT = "c".repeat(64);
+  private static final String ARTIFACT_SHA_A = "a".repeat(64);
+  private static final String ARTIFACT_SHA_B = "b".repeat(64);
+  private static final UUID BLOB_A = UUID.fromString("00000000-0000-0000-0000-00000000000a");
+  private static final UUID BLOB_B = UUID.fromString("00000000-0000-0000-0000-00000000000b");
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
   private static final Duration SYNC_TIMEOUT = Duration.ZERO;
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -103,6 +112,7 @@ class EnvironmentSkillSyncOrchestratorTest {
 
   private final Map<String, SkillPackage> catalog = new LinkedHashMap<>();
   private final List<EnvironmentSkillState> rowSkillState = new ArrayList<>();
+  private StorageBlobManager blobManager;
   private final Map<EnvironmentId, LiveEnvironmentStatus> rowStatus = new LinkedHashMap<>();
   private final Map<EnvironmentId, DaemonCapabilities> rowCapabilities = new LinkedHashMap<>();
   private final ScriptedTransport transport = new ScriptedTransport();
@@ -134,10 +144,13 @@ class EnvironmentSkillSyncOrchestratorTest {
     when(catalogQuery.getPackage(any()))
         .thenAnswer(invocation -> catalog.get(invocation.getArgument(0)));
 
+    blobManager = mock(StorageBlobManager.class);
+    when(blobManager.getBlob(BLOB_A)).thenReturn(blob(BLOB_A, ARTIFACT_SHA_A));
+    when(blobManager.getBlob(BLOB_B)).thenReturn(blob(BLOB_B, ARTIFACT_SHA_B));
     // 直接执行的 executor：异步边界在测试里退化为同步调用，无需等待。
     orchestrator =
         new EnvironmentSkillSyncOrchestrator(
-            registry, catalogQuery, transport, new DirectExecutor(), CLOCK);
+            registry, catalogQuery, transport, blobManager, new DirectExecutor(), CLOCK);
   }
 
   /**
@@ -169,8 +182,10 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     assertEquals(
         List.of(
-            EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa"),
-            EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb")),
+            EnvironmentSkillState.installed(
+                "aaa", ARTIFACT_SHA_A, "/home/dev/.kkstudio/skills/aaa"),
+            EnvironmentSkillState.installed(
+                "bbb", ARTIFACT_SHA_B, "/home/dev/.kkstudio/skills/bbb")),
         rowSkillState);
     assertEquals(List.of("aaa", "bbb"), startedPackageNames());
     assertEquals(
@@ -203,12 +218,11 @@ class EnvironmentSkillSyncOrchestratorTest {
     assertEquals(2, rowSkillState.size());
     EnvironmentSkillState failed = rowSkillState.get(0);
     assertEquals("aaa", failed.packageName());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, failed.status());
-    assertEquals(PREVIOUS_COMMIT, failed.installedCommit());
+    assertEquals(PREVIOUS_COMMIT, failed.installedSha256());
     assertEquals("/home/dev/.kkstudio/skills/aaa-old", failed.localPath());
     assertEquals("skill package sync failed: COMMIT_NOT_FOUND", failed.error());
     assertEquals(
-        EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb"),
+        EnvironmentSkillState.installed("bbb", ARTIFACT_SHA_B, "/home/dev/.kkstudio/skills/bbb"),
         rowSkillState.get(1));
 
     List<EnvironmentEvent> terminals = terminalEvents();
@@ -279,8 +293,8 @@ class EnvironmentSkillSyncOrchestratorTest {
       orchestrator.onEnvironmentReady(ENV);
 
       EnvironmentSkillState failed = rowSkillState.get(0);
-      assertEquals(EnvironmentSkillState.STATUS_FAILED, failed.status(), malformed);
-      assertEquals(null, failed.installedCommit(), malformed);
+      assertTrue(failed.error() != null, malformed);
+      assertEquals(null, failed.installedSha256(), malformed);
       assertEquals(null, failed.localPath(), malformed);
       assertEquals("skill package sync failed", failed.error(), malformed);
       assertEquals(
@@ -318,7 +332,7 @@ class EnvironmentSkillSyncOrchestratorTest {
     assertEquals(
         List.of(
             EnvironmentSkillState.installed(
-                "aaa", COMMIT_A, "C:\\Users\\dev\\.kkstudio\\skills\\aaa")),
+                "aaa", ARTIFACT_SHA_A, "C:\\Users\\dev\\.kkstudio\\skills\\aaa")),
         rowSkillState);
 
     transport.responder =
@@ -331,7 +345,7 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     orchestrator.onEnvironmentReady(ENV);
 
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
+    assertTrue(rowSkillState.get(0).error() != null);
     assertEquals("skill package sync failed", rowSkillState.get(0).error());
   }
 
@@ -383,9 +397,9 @@ class EnvironmentSkillSyncOrchestratorTest {
     orchestrator.onEnvironmentReady(ENV);
 
     assertEquals(1, transport.requests.size());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
+    assertTrue(rowSkillState.get(0).error() != null);
     assertEquals("skill package sync could not be sent", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
+    assertEquals(null, rowSkillState.get(0).installedSha256());
   }
 
   /** 测试意图：能力调用以 onError 失败（如 Daemon 侧拒绝或超时）时只收敛为固定去敏失败摘要，绝不重放，也不写入任何安装事实。 */
@@ -397,9 +411,9 @@ class EnvironmentSkillSyncOrchestratorTest {
     orchestrator.onEnvironmentReady(ENV);
 
     assertEquals(1, transport.requests.size());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
+    assertTrue(rowSkillState.get(0).error() != null);
     assertEquals("skill package sync failed", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
+    assertEquals(null, rowSkillState.get(0).installedSha256());
     assertEquals(EnvironmentEvent.TYPE_SKILL_SYNC_FAILED, terminalEvents().get(0).type());
   }
 
@@ -411,9 +425,9 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     orchestrator.onEnvironmentReady(ENV);
 
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
+    assertTrue(rowSkillState.get(0).error() != null);
     assertEquals("skill package sync failed", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
+    assertEquals(null, rowSkillState.get(0).installedSha256());
   }
 
   /** 测试意图：registry / catalog 的读取故障只被记录，绝不抛给触发方，也绝不发送任何调用。 */
@@ -457,7 +471,9 @@ class EnvironmentSkillSyncOrchestratorTest {
     assertEquals(1, transport.requests.size());
     assertEquals("bbb", packageName(transport.requests.get(0)));
     assertEquals(
-        List.of(EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb")),
+        List.of(
+            EnvironmentSkillState.installed(
+                "bbb", ARTIFACT_SHA_B, "/home/dev/.kkstudio/skills/bbb")),
         rowSkillState);
   }
 
@@ -474,7 +490,9 @@ class EnvironmentSkillSyncOrchestratorTest {
     assertEquals(1, transport.requests.size());
     assertEquals("aaa", packageName(transport.requests.get(0)));
     assertEquals(
-        List.of(EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa")),
+        List.of(
+            EnvironmentSkillState.installed(
+                "aaa", ARTIFACT_SHA_A, "/home/dev/.kkstudio/skills/aaa")),
         rowSkillState);
   }
 
@@ -512,7 +530,8 @@ class EnvironmentSkillSyncOrchestratorTest {
     ExecutorService rejecting = Executors.newSingleThreadExecutor();
     rejecting.shutdown();
     EnvironmentSkillSyncOrchestrator rejected =
-        new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, rejecting, CLOCK);
+        new EnvironmentSkillSyncOrchestrator(
+            registry, catalogQuery, transport, blobManager, rejecting, CLOCK);
 
     assertDoesNotThrow(() -> rejected.onEnvironmentReady(ENV));
 
@@ -553,7 +572,8 @@ class EnvironmentSkillSyncOrchestratorTest {
       ExecutorService executor = Executors.newSingleThreadExecutor();
       try {
         EnvironmentSkillSyncOrchestrator async =
-            new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
+            new EnvironmentSkillSyncOrchestrator(
+                registry, catalogQuery, pending, blobManager, executor, CLOCK);
         async.onEnvironmentReady(ENV);
         assertTrue(invoked.await(2, TimeUnit.SECONDS));
         if (interrupt) {
@@ -606,7 +626,8 @@ class EnvironmentSkillSyncOrchestratorTest {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
+          new EnvironmentSkillSyncOrchestrator(
+              registry, catalogQuery, pending, blobManager, executor, CLOCK);
       async.onEnvironmentReady(ENV);
       assertTrue(invoked.await(2, TimeUnit.SECONDS));
       assertEquals(Duration.ZERO, request.get().timeout());
@@ -615,7 +636,7 @@ class EnvironmentSkillSyncOrchestratorTest {
       verify(handle, never()).cancel();
       listener.get().onComplete(success(request.get()));
       barrier.get(2, TimeUnit.SECONDS);
-      assertEquals(COMMIT_A, rowSkillState.getFirst().installedCommit());
+      assertEquals(ARTIFACT_SHA_A, rowSkillState.getFirst().installedSha256());
       assertEquals(EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED, terminalEvents().getFirst().type());
     } finally {
       executor.shutdownNow();
@@ -636,7 +657,8 @@ class EnvironmentSkillSyncOrchestratorTest {
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
+          new EnvironmentSkillSyncOrchestrator(
+              registry, catalogQuery, transport, blobManager, executor, CLOCK);
 
       assertTimeoutPreemptively(
           Duration.ofSeconds(5),
@@ -669,7 +691,8 @@ class EnvironmentSkillSyncOrchestratorTest {
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
       EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
+          new EnvironmentSkillSyncOrchestrator(
+              registry, catalogQuery, transport, blobManager, executor, CLOCK);
       async.onEnvironmentReady(ENV);
       assertTrue(firstSendStarted.await(5, TimeUnit.SECONDS));
       async.onEnvironmentReady(ENV);
@@ -683,7 +706,7 @@ class EnvironmentSkillSyncOrchestratorTest {
     assertEquals(1, transport.maxInFlight.get());
     assertEquals(1, rowSkillState.size());
     assertEquals(
-        EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa"),
+        EnvironmentSkillState.installed("aaa", ARTIFACT_SHA_A, "/home/dev/.kkstudio/skills/aaa"),
         rowSkillState.get(0));
   }
 
@@ -723,7 +746,8 @@ class EnvironmentSkillSyncOrchestratorTest {
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
       EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
+          new EnvironmentSkillSyncOrchestrator(
+              registry, catalogQuery, transport, blobManager, executor, CLOCK);
       async.onEnvironmentReady(ENV);
       assertTrue(firstSendStarted.await(5, TimeUnit.SECONDS));
       async.onEnvironmentReady(otherStripe);
@@ -841,14 +865,30 @@ class EnvironmentSkillSyncOrchestratorTest {
   }
 
   private static SkillPackage skillPackage(String packageName, String commit) {
-    SkillPackage skillPackage =
-        SkillPackage.builder()
-            .packageName(packageName)
-            .repositoryUrl("https://git.example.com/" + packageName + ".git")
-            .branch("main")
-            .currentCommit(commit)
-            .build();
-    return skillPackage;
+    UUID blobId = "aaa".equals(packageName) ? BLOB_A : BLOB_B;
+    return new SkillPackage(
+        packageName,
+        null,
+        commit,
+        blobId,
+        List.of(new SkillManifestEntry(packageName, packageName)),
+        NOW,
+        0L,
+        NOW,
+        NOW,
+        new SkillPackageGitSource(
+            "https://git.example.com/" + packageName + ".git", "main", null, commit, NOW, null));
+  }
+
+  private static StorageBlob blob(UUID id, String sha256) {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(id);
+    blob.setSha256(sha256);
+    blob.setSizeBytes(10);
+    blob.setMediaType("application/zip");
+    blob.setRefCount(1);
+    blob.setState(StorageBlobState.ACTIVE);
+    return blob;
   }
 
   private static void await(CountDownLatch latch) {

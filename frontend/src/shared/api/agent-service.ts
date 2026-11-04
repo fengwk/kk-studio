@@ -12,11 +12,17 @@ import type {
   AgentProviderDTO,
   AgentProviderUpdateDTO,
   ModelCatalogPageDTO,
+  SkillArchiveDownloadDTO,
+  SkillEnvironmentSyncDTO,
   SkillPackageCheckDTO,
-  SkillPackageCreateDTO,
-  SkillPackageDTO,
-  SkillPackageEditDTO,
-  SkillPackagePublishDTO,
+  SkillPackageDetailDTO,
+  SkillPackageGitCreateDTO,
+  SkillPackageGitEditDTO,
+  SkillPackageGitPublishDTO,
+  SkillPackagePreviewDTO,
+  SkillPackageSummaryDTO,
+  SkillPackageUploadPreviewDTO,
+  SkillPackageUploadPublishDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -101,28 +107,37 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     // --- Global Skills & Skill Packages ---
 
-    listSkillPackages: (): Promise<SkillPackageDTO[]> => client.get('/skill-packages'),
+    listSkillPackages: (): Promise<SkillPackageSummaryDTO[]> => client.get('/skill-packages'),
 
-    createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDTO> =>
-      client.post('/skill-packages', data, { timeout: 0 }),
+    getSkillPackage: (name: string): Promise<SkillPackageDetailDTO> =>
+      client.get(`/skill-packages/${encodeURIComponent(name)}`),
+
+    getSkillPackageArchiveUrl: (name: string): Promise<SkillArchiveDownloadDTO> =>
+      client.post(`/skill-packages/${encodeURIComponent(name)}/archive-url`),
+
+    listSkillPackageEnvironments: (name: string): Promise<SkillEnvironmentSyncDTO[]> =>
+      client.get(`/skill-packages/${encodeURIComponent(name)}/environments`),
+
+    createSkillPackage: (data: SkillPackageGitCreateDTO): Promise<SkillPackageDetailDTO> =>
+      client.post('/skill-packages/git', data, { timeout: 0 }),
 
     editSkillPackage: (
       name: string,
-      data: SkillPackageEditDTO,
-    ): Promise<SkillPackageDTO> =>
-      client.put(`/skill-packages/${encodeURIComponent(name)}`, data),
+      data: SkillPackageGitEditDTO,
+    ): Promise<SkillPackageDetailDTO> =>
+      client.put(`/skill-packages/git/${encodeURIComponent(name)}`, data),
 
     checkSkillPackage: (
       name: string,
       data: SkillPackageCheckDTO,
-    ): Promise<SkillPackageDTO> =>
-      client.post(`/skill-packages/${encodeURIComponent(name)}/check`, data, { timeout: 0 }),
+    ): Promise<SkillPackageDetailDTO> =>
+      client.post(`/skill-packages/git/${encodeURIComponent(name)}/check`, data, { timeout: 0 }),
 
     publishSkillPackage: (
       name: string,
-      data: SkillPackagePublishDTO,
-    ): Promise<SkillPackageDTO> =>
-      client.post(`/skill-packages/${encodeURIComponent(name)}/update`, data, { timeout: 0 }),
+      data: SkillPackageGitPublishDTO,
+    ): Promise<SkillPackageDetailDTO> =>
+      client.post(`/skill-packages/git/${encodeURIComponent(name)}/publish`, data, { timeout: 0 }),
 
     deleteSkillPackage: (
       name: string,
@@ -131,6 +146,22 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.delete(`/skill-packages/${encodeURIComponent(name)}`, {
         params: { expectedVersion },
       }),
+
+    previewSkillPackageUpload: (
+      data: SkillPackageUploadPreviewDTO,
+    ): Promise<SkillPackagePreviewDTO> =>
+      client.post('/skill-packages/uploads/preview', data, { timeout: 0 }),
+
+    publishSkillPackageUpload: (
+      data: SkillPackageUploadPublishDTO,
+    ): Promise<SkillPackageDetailDTO> =>
+      client.post('/skill-packages/uploads/publish', data, { timeout: 0 }),
+
+    cancelSkillPackageUpload: (stagingUploadId: string): Promise<void> =>
+      client.post(`/skill-packages/uploads/${encodeURIComponent(stagingUploadId)}/cancel`),
+
+    resyncEnvironmentSkills: (environmentId: string): Promise<void> =>
+      client.post(`/environments/${encodeURIComponent(environmentId)}/skills/resync`),
 
   }
 }

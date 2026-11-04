@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 
 import java.time.Clock;
 import java.util.Objects;
@@ -16,15 +17,18 @@ public final class EnvironmentSkillSyncOrchestratorFactory {
 
   private final EnvironmentRegistry environmentRegistry;
   private final SkillPackageRepository skillPackageRepository;
+  private final StorageBlobManager storageBlobManager;
   private final Clock clock;
 
   public EnvironmentSkillSyncOrchestratorFactory(
       EnvironmentRegistry environmentRegistry,
       SkillPackageRepository skillPackageRepository,
+      StorageBlobManager storageBlobManager,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
+    this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -34,6 +38,7 @@ public final class EnvironmentSkillSyncOrchestratorFactory {
         environmentRegistry,
         skillPackageRepository,
         Objects.requireNonNull(capabilityTransport, "capabilityTransport"),
+        storageBlobManager,
         Objects.requireNonNull(executor, "executor"),
         clock);
   }

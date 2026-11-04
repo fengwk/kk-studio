@@ -1226,7 +1226,7 @@ select pg_temp.assert_true('unconfirmed remote execution partial index exists',
 
 -- ---------------------------------------------------------------------------
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload
--- expiry, encrypted skill token envelope, and managed update admission.
+-- expiry, the current-version skill package model, and managed update admission.
 -- ---------------------------------------------------------------------------
 select pg_temp.assert_true('default HTTP retry list matches the runtime policy',
     (select config->'aiRuntime'->'modelHttpRetryStatusCodes' = '[408,429,500,502,503,504]'::jsonb
@@ -1243,26 +1243,82 @@ select pg_temp.assert_true('storage_upload no longer persists an expiry fact',
     and exists(select 1 from pg_indexes where schemaname = 'public'
         and indexname = 'idx_storage_upload_cleanup_claim'
         and strpos(indexdef, 'created_at') > 0));
-select pg_temp.assert_true('skill_package stores an optional access token',
+select pg_temp.assert_true('skill_package stores the current version only',
     exists(select 1 from information_schema.columns
-        where table_name = 'skill_package' and column_name = 'token'
-        and data_type = 'text' and is_nullable = 'YES'));
-select pg_temp.rejects('an empty access token is rejected',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit,token)
-      values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),'')$$,
-    '23514', 'ck_skill_package_token');
+        where table_name = 'skill_package' and column_name = 'package_version'
+        and data_type = 'character varying' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'artifact_blob_id'
+        and data_type = 'uuid' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'manifest'
+        and data_type = 'jsonb' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'published_at'
+        and data_type = 'timestamp with time zone' and is_nullable = 'NO')
+    and not exists(select 1 from information_schema.columns
+        where table_name = 'skill_package'
+        and column_name in ('repository_url','branch','current_commit','observed_head_commit',
+            'head_checked_at','head_check_error','skills','token')));
+select pg_temp.assert_true('skill_package_git_source stores an optional access token',
+    exists(select 1 from information_schema.columns
+        where table_name = 'skill_package_git_source' and column_name = 'token'
+        and data_type = 'text' and is_nullable = 'YES')
+    and exists(select 1 from pg_constraint
+        where conrelid = 'skill_package_git_source'::regclass
+        and conname = 'pk_skill_package_git_source'));
+select pg_temp.assert_true('storage_blob carries a nullable archive index',
+    exists(select 1 from information_schema.columns
+        where table_name = 'storage_blob' and column_name = 'archive_index'
+        and data_type = 'jsonb' and is_nullable = 'YES')
+    and exists(select 1 from pg_constraint
+        where conrelid = 'storage_blob'::regclass
+        and conname = 'ck_storage_blob_archive_index'));
+insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)
+    values (pg_temp.uid(3000), repeat('a', 64), 1, 'application/zip', 1, 'ACTIVE');
+select pg_temp.rejects('an archive index must be a JSON object',
+    $$update storage_blob set archive_index = '[]'::jsonb where id = pg_temp.uid(3000)$$,
+    '23514', 'ck_storage_blob_archive_index');
 select pg_temp.rejects('skill package names reject repeated hyphens',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit)
-      values('probe--pkg','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe--pkg','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
     '23514', 'ck_skill_package_name');
 select pg_temp.rejects('skill package names reject uppercase',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit)
-      values('Probe','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('Probe','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
     '23514', 'ck_skill_package_name');
 select pg_temp.rejects('skill package names reject non-ASCII letters',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit)
-      values('é','https://example.invalid/repo.git','main',repeat('a',40))$$,
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('é','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
     '23514', 'ck_skill_package_name');
+select pg_temp.rejects('padded skill package descriptions are rejected',
+    $$insert into skill_package(package_name,description,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg',' padded ','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_description');
+select pg_temp.rejects('blank skill package versions are rejected',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg',' ',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_version_text');
+select pg_temp.rejects('skill package manifests must be JSON objects',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg','v1',pg_temp.uid(3000),'[]'::jsonb,now())$$,
+    '23514', 'ck_skill_package_manifest');
+insert into skill_package (package_name, package_version, artifact_blob_id, manifest, published_at)
+    values ('probe-pkg', 'v1', pg_temp.uid(3000), '{"skills":[]}'::jsonb, now());
+select pg_temp.rejects('duplicate skill package names are rejected',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg','v2',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23505', 'pk_skill_package');
+insert into skill_package (package_name, package_version, artifact_blob_id, manifest, published_at)
+    values ('probe-git-pkg', 'v1', pg_temp.uid(3000), '{"skills":[]}'::jsonb, now());
+insert into skill_package_git_source (package_name, repository_url, branch, head_commit, checked_at)
+    values ('probe-git-pkg', 'https://example.invalid/repo.git', 'main', repeat('b', 40), now());
+delete from skill_package where package_name = 'probe-git-pkg';
+select pg_temp.assert_true('deleting a skill package removes its git source',
+    not exists(select 1 from skill_package_git_source where package_name = 'probe-git-pkg'));
+select pg_temp.rejects('a referenced skill archive cannot be deleted',
+    $$delete from storage_blob where id = pg_temp.uid(3000)$$,
+    '23503', 'fk_skill_package_artifact');
 
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.

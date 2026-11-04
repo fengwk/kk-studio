@@ -30,6 +30,8 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -89,6 +91,7 @@ public class EnvironmentSkillSyncOrchestrator {
   private final EnvironmentRegistry environmentRegistry;
   private final SkillPackageRepository skillPackageRepository;
   private final EnvironmentCapabilityTransport capabilityTransport;
+  private final StorageBlobManager storageBlobManager;
   private final ExecutorService executor;
   private final Clock clock;
   private final ReentrantLock[] environmentLocks = new ReentrantLock[LOCK_STRIPES];
@@ -97,12 +100,14 @@ public class EnvironmentSkillSyncOrchestrator {
       EnvironmentRegistry environmentRegistry,
       SkillPackageRepository skillPackageRepository,
       EnvironmentCapabilityTransport capabilityTransport,
+      StorageBlobManager storageBlobManager,
       ExecutorService executor,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
+    this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.clock = Objects.requireNonNull(clock, "clock");
     for (int i = 0; i < environmentLocks.length; i++) {
@@ -199,7 +204,12 @@ public class EnvironmentSkillSyncOrchestrator {
   /** 同步单个 Package：读取当前行 → 记录 STARTED 事件 → 发送调用 → 在同一围栏下写回投影与终态事件。 */
   private void syncPackage(EnvironmentId environmentId, String packageName) {
     SkillPackage skillPackage = skillPackageRepository.getPackage(packageName);
-    if (skillPackage == null) {
+    if (skillPackage == null || !skillPackage.isGit()) {
+      // 上传渠道的包没有 Git 事实，等 Daemon 对账控制消息落地后统一下发归档摘要与预签名地址。
+      return;
+    }
+    StorageBlob artifact = storageBlobManager.getBlob(skillPackage.artifactBlobId());
+    if (artifact == null) {
       return;
     }
     EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
@@ -221,8 +231,7 @@ public class EnvironmentSkillSyncOrchestrator {
     EnvironmentEvent terminalEvent;
     if (outcome.succeeded()) {
       entry =
-          EnvironmentSkillState.installed(
-              packageName, outcome.installedCommit(), outcome.localPath());
+          EnvironmentSkillState.installed(packageName, artifact.getSha256(), outcome.localPath());
       terminalEvent =
           new EnvironmentEvent(
               clock.instant(),
@@ -346,7 +355,10 @@ public class EnvironmentSkillSyncOrchestrator {
     for (ResultContent content : result.contents()) {
       if (content instanceof JsonResultContent json) {
         return parseOutcome(
-            json.json(), skillPackage.packageName(), skillPackage.currentCommit(), operatingSystem);
+            json.json(),
+            skillPackage.packageName(),
+            skillPackage.packageVersion(),
+            operatingSystem);
       }
     }
     return SyncOutcome.failure(RESULT_FAILURE);
@@ -431,11 +443,11 @@ public class EnvironmentSkillSyncOrchestrator {
   private String argumentsJson(SkillPackage skillPackage) {
     ObjectNode node = JSON.createObjectNode();
     node.put("packageName", skillPackage.packageName());
-    node.put("repositoryUrl", skillPackage.repositoryUrl());
-    node.put("branch", skillPackage.branch());
-    node.put("targetCommit", skillPackage.currentCommit());
+    node.put("repositoryUrl", skillPackage.gitSource().repositoryUrl());
+    node.put("branch", skillPackage.gitSource().branch());
+    node.put("targetCommit", skillPackage.packageVersion());
     // 私有仓库令牌从加密事实解析后只进入这条受信任的 capability 通道；绝不进入模型上下文、事件或日志。
-    String credential = skillPackage.token();
+    String credential = skillPackage.gitSource().token();
     if (credential != null) {
       node.put("credential", credential);
     }

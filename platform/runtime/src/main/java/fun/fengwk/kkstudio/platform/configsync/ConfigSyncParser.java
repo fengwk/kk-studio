@@ -333,19 +333,18 @@ public final class ConfigSyncParser {
     String description = entry.optString("description");
     String repositoryUrl = entry.reqString("repositoryUrl");
     String branch = entry.reqString("branch");
-    String currentCommit = entry.reqString("currentCommit");
     String token = entry.optString("token");
-    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch、commit 与令牌。
+    // 唯一业务校验入口：SkillCatalogService.validateImport 校验 canonical 包名、描述、URL、branch 与令牌。
     validateEntry(
         ConfigSyncKind.SKILL_PACKAGES,
         packageName,
         () ->
             skillCatalogService.validateImport(
-                packageName, description, repositoryUrl, branch, currentCommit, token));
+                packageName, description, repositoryUrl, branch, token));
     if (skipUnknown(entry, ConfigSyncKind.SKILL_PACKAGES, packageName, skipped)) {
       return null;
     }
-    return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit, token);
+    return new SkillSpec(packageName, description, repositoryUrl, branch, token);
   }
 
   private EnvironmentSpec parseEnvironment(
@@ -527,12 +526,7 @@ public final class ConfigSyncParser {
       String name, String modelName, AgentDefinitionEditablePropertiesDTO properties) {}
 
   public record SkillSpec(
-      String packageName,
-      String description,
-      String repositoryUrl,
-      String branch,
-      String currentCommit,
-      String token) {}
+      String packageName, String description, String repositoryUrl, String branch, String token) {}
 
   public record EnvironmentSpec(
       String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {}

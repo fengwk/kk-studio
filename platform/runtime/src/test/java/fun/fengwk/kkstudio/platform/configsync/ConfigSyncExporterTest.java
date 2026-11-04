@@ -129,7 +129,9 @@ class ConfigSyncExporterTest {
 
   @Test
   void exportIncludesSkillAccessTokenVerbatim() {
-    SkillPackage pkg = skillPackage("pkg", "s").toBuilder().token("pkg-token").build();
+    SkillPackage pkg =
+        ConfigSyncFixtures.gitSkillPackage(
+            "pkg", "https://example.com/pkg.git", "main", "pkg-token", "s");
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(), List.of(), List.of(), List.of(pkg), List.of(), List.of(), List.of());
 
@@ -141,6 +143,43 @@ class ConfigSyncExporterTest {
     List<Map<String, Object>> skillPackages =
         (List<Map<String, Object>>) document.get("skillPackages");
     assertEquals("pkg-token", skillPackages.get(0).get("token"));
+  }
+
+  @Test
+  void exportOmitsUploadSkillPackagesAndPinnedCommits() {
+    SkillPackage gitPkg =
+        ConfigSyncFixtures.gitSkillPackage(
+            "git-pkg", "https://example.com/git.git", "main", null, "s1");
+    SkillPackage uploadPkg = ConfigSyncFixtures.uploadSkillPackage("upload-pkg", "s2");
+    ConfigSyncSnapshot snapshot =
+        snapshot(
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(gitPkg, uploadPkg),
+            List.of(),
+            List.of(),
+            List.of());
+
+    String yamlText =
+        exporter.export(
+            snapshot,
+            List.of(
+                new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "git-pkg"),
+                new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "upload-pkg")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> skillPackages =
+        (List<Map<String, Object>>) document.get("skillPackages");
+    assertEquals(1, skillPackages.size());
+    Map<String, Object> exported = skillPackages.get(0);
+    assertEquals("git-pkg", exported.get("packageName"));
+    assertEquals("https://example.com/git.git", exported.get("repositoryUrl"));
+    assertEquals("main", exported.get("branch"));
+    assertFalse(exported.containsKey("currentCommit"));
+    assertFalse(exported.containsKey("headCommit"));
+    assertFalse(exported.containsKey("packageVersion"));
   }
 
   @Test

@@ -705,7 +705,7 @@ class HarnessRuntimeDtoContractTest {
     for (String fieldName : List.of("requiredEnvironmentId", "filterReason")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.ToolDTO.class, fieldName);
     }
-    for (String fieldName : List.of("observedHeadCommit", "installedCommit")) {
+    for (String fieldName : List.of("headCommit", "installedSha256")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.SkillDTO.class, fieldName);
     }
     assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "key");
@@ -761,8 +761,10 @@ class HarnessRuntimeDtoContractTest {
     skill.setName("dev");
     skill.setDelivery("LOCAL");
     skill.setPath("/data/skills/dev-tools/dev/SKILL.md");
-    skill.setCurrentCommit("0123456789012345678901234567890123456789");
-    skill.setInstalledCommit("0123456789012345678901234567890123456789");
+    skill.setPackageVersion("0123456789012345678901234567890123456789");
+    skill.setHeadCommit(null);
+    skill.setArtifactSha256("a".repeat(64));
+    skill.setInstalledSha256("a".repeat(64));
     skill.setPromptXml("<skill name=\"dev\"/>");
 
     HarnessModelRequestDebugDTO debug = new HarnessModelRequestDebugDTO();

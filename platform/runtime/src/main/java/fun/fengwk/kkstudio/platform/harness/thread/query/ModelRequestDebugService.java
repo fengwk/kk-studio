@@ -164,9 +164,10 @@ public final class ModelRequestDebugService {
     dto.setDescription(skill.description());
     dto.setPath(skill.path());
     dto.setDelivery(skill.delivery().name());
-    dto.setCurrentCommit(skill.currentCommit());
-    dto.setObservedHeadCommit(skill.observedHeadCommit());
-    dto.setInstalledCommit(skill.installedCommit());
+    dto.setPackageVersion(skill.packageVersion());
+    dto.setHeadCommit(skill.headCommit());
+    dto.setArtifactSha256(skill.artifactSha256());
+    dto.setInstalledSha256(skill.installedSha256());
     // 与 compose 共用同一个渲染入口：展示的 XML 就是实际进入 systemInstruction 的片段。
     dto.setPromptXml(AgentPromptComposer.skillFragment(skill.promptEntry()));
     return dto;

@@ -1186,9 +1186,10 @@ export interface HarnessModelRequestDebugSkillDTO {
   description: string
   path: string
   delivery: string
-  currentCommit: string
-  observedHeadCommit: string | null
-  installedCommit: string | null
+  packageVersion: string
+  headCommit: string | null
+  artifactSha256: string
+  installedSha256: string | null
   promptXml: string
 }
 
@@ -1878,6 +1879,30 @@ export interface ResumeIssueRequestDTO {
   requestKey: string
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO */
+export interface SkillArchiveDownloadDTO {
+  filename: string
+  sha256: string
+  sizeBytes: string
+  download: StoragePresignedUrlDTO
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO */
+export interface SkillEnvironmentSyncDTO {
+  environmentId: string
+  installedSha256: string | null
+  localPath: string | null
+  error: string | null
+  upToDate: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillGitSourceDTO */
+export interface SkillGitSourceDTO {
+  repositoryUrl: string
+  branch: string
+  hasToken: boolean
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.skill.SkillManifestEntryDTO */
 export interface SkillManifestEntryDTO {
   name: string
@@ -1889,45 +1914,92 @@ export interface SkillPackageCheckDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO */
-export interface SkillPackageCreateDTO {
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO */
+export interface SkillPackageDetailDTO {
   packageName: string
   description?: string | null
-  repositoryUrl: string
-  branch: string
-  token?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO */
-export interface SkillPackageDTO {
-  packageName: string
-  description?: string | null
-  repositoryUrl: string
-  branch: string
-  hasToken: boolean
-  currentCommit: string
-  observedHeadCommit: string | null
+  packageVersion: string
+  publishedAt: number
+  skills: SkillManifestEntryDTO[]
+  source: string
+  git: SkillGitSourceDTO | null
+  headCommit: string | null
   headCheckedAt: number | null
   headCheckError: string | null
-  checkStatus: string
-  skills: SkillManifestEntryDTO[]
+  updateAvailable: boolean
+  artifactSha256: string
+  artifactSizeBytes: string
   version: string
   createTime: number
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO */
-export interface SkillPackageEditDTO {
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO */
+export interface SkillPackageGitCreateDTO {
+  packageName: string
+  description?: string | null
+  repositoryUrl: string
+  branch: string
+  token?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO */
+export interface SkillPackageGitEditDTO {
   expectedVersion: string
   description?: string | null
   branch: string
   token?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO */
-export interface SkillPackagePublishDTO {
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO */
+export interface SkillPackageGitPublishDTO {
   expectedVersion: string
   targetCommit: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO */
+export interface SkillPackagePreviewDTO {
+  stagingUploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+  skills: SkillManifestEntryDTO[]
+  ignoredDirectories: string[]
+  archiveSha256: string
+  archiveSizeBytes: string
+  contentSizeBytes: string
+  fileCount: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO */
+export interface SkillPackageSummaryDTO {
+  packageName: string
+  description?: string | null
+  packageVersion: string
+  publishedAt: number
+  skills: SkillManifestEntryDTO[]
+  source: string
+  updateAvailable: boolean
+  version: string
+  createTime: number
+  updateTime: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPreviewDTO */
+export interface SkillPackageUploadPreviewDTO {
+  uploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO */
+export interface SkillPackageUploadPublishDTO {
+  stagingUploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+  expectedVersion?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO */

@@ -281,13 +281,12 @@ class ConfigSyncParserTest {
   }
 
   @Test
-  void invalidCommitIsAHardError() {
+  void invalidRepositoryUrlIsAHardError() {
     String yaml =
         "skillPackages:\n"
             + "  - packageName: skill\n"
-            + "    repositoryUrl: https://example.com/s.git\n"
-            + "    branch: main\n"
-            + "    currentCommit: deadbeef\n";
+            + "    repositoryUrl: not-a-valid-url\n"
+            + "    branch: main\n";
     assertThrows(AiValidationException.class, () -> parser.parse(yaml));
   }
 
@@ -355,9 +354,6 @@ class ConfigSyncParserTest {
                 + "  - packageName: pkg\n"
                 + "    repositoryUrl: https://example.com/pkg.git\n"
                 + "    branch: main\n"
-                + "    currentCommit: "
-                + "a".repeat(40)
-                + "\n"
                 + "    bogus: 1\n");
     assertTrue(skill.skillPackages().isEmpty());
 
@@ -376,6 +372,23 @@ class ConfigSyncParserTest {
                 + "    url: https://mcp.example.com/mcp\n"
                 + "    bogus: 1\n");
     assertTrue(mcp.mcpServers().isEmpty());
+  }
+
+  @Test
+  void currentCommitInSkillPackageIsSkippedAsUnknownField() {
+    ConfigSyncParser.ParsedDocument skill =
+        parser.parse(
+            "skillPackages:\n"
+                + "  - packageName: pkg\n"
+                + "    repositoryUrl: https://example.com/pkg.git\n"
+                + "    branch: main\n"
+                + "    currentCommit: "
+                + "a".repeat(40)
+                + "\n");
+    assertTrue(skill.skillPackages().isEmpty());
+    assertEquals(1, skill.skipped().size());
+    assertEquals("skillPackages", skill.skipped().get(0).getKind());
+    assertTrue(skill.skipped().get(0).getReason().contains("currentCommit"));
   }
 
   /** 未知嵌套 config 字段不能掩盖当前必填字段缺失：只有 obsolete、缺 limit/abilities/pricing/variants 必须硬拒绝。 */

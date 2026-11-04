@@ -69,9 +69,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   @MockitoBean private PluginCredentialRefreshDispatcher pluginCredentialRefreshDispatcher;
 
   @DynamicPropertySource
-  static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {
-    registry.add("kk-studio.catalog.skill.cache-root", () -> TEST_ROOT.resolve("cache").toString());
-  }
+  static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {}
 
   /** 发起请求并断言指定 HTTP 状态，返回原始结果。 */
   protected MvcResult perform(MockHttpServletRequestBuilder builder, int expectedStatus)

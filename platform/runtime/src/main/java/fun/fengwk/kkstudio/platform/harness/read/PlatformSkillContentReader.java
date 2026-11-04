@@ -3,26 +3,26 @@ package fun.fengwk.kkstudio.platform.harness.read;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
+import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 
 import java.util.Objects;
 
 /**
  * 平台侧 Skill 内容读取器。
  *
- * <p>按 {@code kkstudio:/skills/<package>/<skill>/<relativePath>} 读取已发布 Skill 的内容。 校验 package
- * 存在、skill 在 manifest 中存在、相对路径合法后，确保 exact commit 存在于 Git cache 并读取目标文件。
+ * <p>按 {@code kkstudio:/skills/<package>/<skill>/<relativePath>} 读取已发布 Skill 的内容：校验 package
+ * 存在、skill 在 manifest 中存在、相对路径合法后，按当前版本归档的条目索引做范围读取，只解压目标文件。
  */
 public class PlatformSkillContentReader {
 
   private final SkillPackageRepository skillPackageRepository;
-  private final SkillGitCache gitCache;
+  private final SkillArchiveFileReader archiveFileReader;
 
   public PlatformSkillContentReader(
-      SkillPackageRepository skillPackageRepository, SkillGitCache gitCache) {
+      SkillPackageRepository skillPackageRepository, SkillArchiveFileReader archiveFileReader) {
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
-    this.gitCache = Objects.requireNonNull(gitCache, "gitCache");
+    this.archiveFileReader = Objects.requireNonNull(archiveFileReader, "archiveFileReader");
   }
 
   /**
@@ -32,7 +32,7 @@ public class PlatformSkillContentReader {
    * @param skillName Skill 名称，非空
    * @param relativePath 相对文件路径，非空
    * @return 文件的原始字节
-   * @throws PlatformReadException Package 不存在、Skill 不存在、路径非法或 Git 读取失败时抛出
+   * @throws PlatformReadException Package 不存在、Skill 不存在、路径非法或归档读取失败时抛出
    */
   public byte[] readSkillFile(String packageName, String skillName, String relativePath) {
     if (packageName == null || packageName.isBlank()) {
@@ -53,23 +53,9 @@ public class PlatformSkillContentReader {
       throw new PlatformReadException("skill not found: " + packageName + "/" + skillName);
     }
 
-    String currentCommit = pkg.currentCommit();
-    if (currentCommit == null || currentCommit.isBlank()) {
-      throw new PlatformReadException("skill package has no published commit: " + packageName);
-    }
-
     try {
-      // 冷启动也必须成功：从当前发布事实解析令牌（未配置为 null），绝不因 cache miss 而放弃私有仓库鉴权。
-      gitCache.ensureCommit(packageName, pkg.repositoryUrl(), currentCommit, pkg.token());
-    } catch (Exception e) {
-      throw new PlatformReadException("skill content is unavailable: " + e.getMessage(), e);
-    }
-
-    String repoPath = skillName + "/" + relativePath;
-
-    try {
-      return gitCache.readFile(packageName, currentCommit, repoPath);
-    } catch (Exception e) {
+      return archiveFileReader.readFile(pkg.artifactBlobId(), skillName + "/" + relativePath);
+    } catch (RuntimeException e) {
       throw new PlatformReadException("failed to read skill file: " + e.getMessage(), e);
     }
   }

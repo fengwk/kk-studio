@@ -127,10 +127,11 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
    * @param name Package 内的 Skill 名
    * @param description manifest 中的 Skill 描述
    * @param path 实际 Prompt 使用的稳定 path
-   * @param delivery 交付方式；LOCAL 只在精确安装 currentCommit 时成立
-   * @param currentCommit Package 当前发布 commit
-   * @param observedHeadCommit Package 最近检查到的 branch HEAD；从未成功检查时为 null
-   * @param installedCommit 当前 Environment 已安装的 commit；无 Environment 或未安装时为 null
+   * @param delivery 交付方式；LOCAL 只在精确安装 artifactSha256 时成立
+   * @param packageVersion Package 当前发布版本或 Git commit SHA
+   * @param headCommit Package 最近检查到的 branch HEAD；从未成功检查时为 null
+   * @param artifactSha256 Package 当前工件包的 SHA-256
+   * @param installedSha256 当前 Environment 已安装的工件包 SHA-256；无 Environment 或未安装时为 null
    */
   record PlannedSkill(
       String packageName,
@@ -138,9 +139,10 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       String description,
       String path,
       SkillPromptResolution.Delivery delivery,
-      String currentCommit,
-      String observedHeadCommit,
-      String installedCommit) {
+      String packageVersion,
+      String headCommit,
+      String artifactSha256,
+      String installedSha256) {
 
     public PlannedSkill {
       packageName = Objects.requireNonNull(packageName, "packageName");
@@ -148,11 +150,12 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       description = Objects.requireNonNull(description, "description");
       path = Objects.requireNonNull(path, "path");
       delivery = Objects.requireNonNull(delivery, "delivery");
-      currentCommit = Objects.requireNonNull(currentCommit, "currentCommit");
+      packageVersion = Objects.requireNonNull(packageVersion, "packageVersion");
+      artifactSha256 = Objects.requireNonNull(artifactSha256, "artifactSha256");
       if (delivery == SkillPromptResolution.Delivery.LOCAL
-          && !currentCommit.equals(installedCommit)) {
+          && !artifactSha256.equals(installedSha256)) {
         throw new IllegalArgumentException(
-            "LOCAL skill delivery requires the exact installed commit");
+            "LOCAL skill delivery requires the exact installed artifact SHA-256");
       }
     }
 

@@ -7,123 +7,12 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.NoSuchFileException;
-import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-/** 扫描已物化目录中根目录一层的 {@code <name>/SKILL.md}，严格解析并校验 Skill manifest。 */
+/** SKILL.md YAML frontmatter 的严格解析：name 必须等于目录名，description 去边缘空白后 1–1024 字符。 */
 public final class SkillManifestScanner {
 
   private SkillManifestScanner() {}
-
-  /**
-   * 扫描物化目录的根目录一层子目录，提取合法 SkillManifestEntry 并按 name 升序返回。
-   *
-   * @param root 本地物化目录根路径
-   * @param packageName package 名称（用于日志与错误上下文）
-   * @return 按 name 升序排序的 SkillManifestEntry 列表
-   * @throws SkillGitException 当条目不符合契约、frontmatter 非法或 name 重复时
-   */
-  public static List<SkillManifestEntry> scan(Path root, String packageName) {
-    if (root == null || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
-      throw new SkillGitException("Root directory not found for package: " + packageName);
-    }
-
-    List<SkillManifestEntry> entries = new ArrayList<>();
-    Set<String> seenNames = new HashSet<>();
-
-    try (DirectoryStream<Path> stream = Files.newDirectoryStream(root)) {
-      for (Path entry : stream) {
-        String name = entry.getFileName().toString();
-        validateEntrySegment(name);
-
-        BasicFileAttributes attrs;
-        try {
-          attrs = Files.readAttributes(entry, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        } catch (IOException e) {
-          throw new SkillGitException(
-              "Failed to read attributes for entry '" + name + "' in package " + packageName, e);
-        }
-
-        if (attrs.isSymbolicLink() || (!attrs.isDirectory() && !attrs.isRegularFile())) {
-          throw new SkillGitException("Root entry '" + name + "' has forbidden file type");
-        }
-
-        if (attrs.isRegularFile()) {
-          // 根目录下的普通文件（如 README.md、.kkstudio-commit）忽略
-          continue;
-        }
-
-        Path skillMd = entry.resolve("SKILL.md");
-        BasicFileAttributes skillMdAttrs;
-        try {
-          skillMdAttrs =
-              Files.readAttributes(skillMd, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        } catch (NoSuchFileException e) {
-          // SKILL.md missing -> ignore the directory
-          continue;
-        } catch (IOException e) {
-          throw new SkillGitException(
-              "Failed to read attributes for '" + name + "/SKILL.md' in package " + packageName, e);
-        }
-
-        if (!skillMdAttrs.isRegularFile()) {
-          throw new SkillGitException("Skill '" + name + "/SKILL.md' is not a regular file");
-        }
-
-        try {
-          String canonicalName = SkillNames.canonicalSkillName(name);
-          if (!name.equals(canonicalName)) {
-            throw new SkillGitException(
-                "Skill directory '"
-                    + name
-                    + "' is not equal to canonical name '"
-                    + canonicalName
-                    + "'");
-          }
-        } catch (IllegalArgumentException e) {
-          throw new SkillGitException(
-              "Skill directory '" + name + "' is not a canonical skill name: " + e.getMessage(), e);
-        }
-
-        String content;
-        try {
-          content = Files.readString(skillMd, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-          throw new SkillGitException(
-              "Failed to read content for '" + name + "/SKILL.md' in package " + packageName, e);
-        }
-
-        SkillManifestEntry manifestEntry = parseFrontmatter(name, content);
-        if (!seenNames.add(manifestEntry.name())) {
-          throw new SkillGitException(
-              "Duplicate skill name '" + manifestEntry.name() + "' found in package");
-        }
-
-        entries.add(manifestEntry);
-      }
-    } catch (SkillGitException e) {
-      throw e;
-    } catch (IOException e) {
-      throw new SkillGitException(
-          "Failed to scan manifest directory for package " + packageName + ": " + e.getMessage(),
-          e);
-    }
-
-    entries.sort(Comparator.comparing(SkillManifestEntry::name, Comparator.naturalOrder()));
-    return List.copyOf(entries);
-  }
 
   /** 解析技能文件的 YAML frontmatter；调用方负责校验目录名和输入大小。 */
   public static SkillManifestEntry parseFrontmatter(String dirName, String content) {
@@ -217,20 +106,5 @@ public final class SkillManifestScanner {
     }
 
     return new SkillManifestEntry(name, canonicalDesc);
-  }
-
-  static void validateEntrySegment(String name) {
-    if (name == null || name.isEmpty()) {
-      throw new SkillGitException("Invalid empty entry name in repository");
-    }
-    if (".".equals(name) || "..".equals(name)) {
-      throw new SkillGitException("Invalid entry name '" + name + "' in repository");
-    }
-    if (name.contains("/") || name.contains("\\")) {
-      throw new SkillGitException("Invalid entry name containing path separators: '" + name + "'");
-    }
-    if (name.codePoints().anyMatch(Character::isISOControl)) {
-      throw new SkillGitException("Entry name contains control characters: '" + name + "'");
-    }
   }
 }

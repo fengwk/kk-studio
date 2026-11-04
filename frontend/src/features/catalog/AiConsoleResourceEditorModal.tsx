@@ -10,7 +10,7 @@ import { useI18n } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-  SkillPackageDTO,
+  SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -43,7 +43,7 @@ export function ResourceEditorModal({
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
-  skills?: SkillPackageDTO[]
+  skills?: SkillPackageSummaryDTO[]
   skillsLoading?: boolean
   skillsError?: unknown
   providerDraft: ProviderDraft

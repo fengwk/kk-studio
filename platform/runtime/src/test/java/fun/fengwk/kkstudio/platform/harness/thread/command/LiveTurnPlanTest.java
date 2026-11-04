@@ -82,21 +82,23 @@ class LiveTurnPlanTest {
         () -> new LiveTurnPlan.Planned(spec(), 0, List.of(), List.of()));
   }
 
-  /** 测试意图：LOCAL 交付只能建立在「已安装 commit 与 currentCommit 完全一致」之上，其余组合立即失败。 */
+  /** 测试意图：LOCAL 交付只能建立在「已安装工件摘要与 artifactSha256 完全一致」之上，其余组合立即失败。 */
   @Test
-  void localDeliveryRequiresTheExactInstalledCommit() {
+  void localDeliveryRequiresTheExactInstalledSha256() {
+    String shaA = "a".repeat(64);
+    String shaB = "b".repeat(64);
     assertEquals(
         SkillPromptResolution.Delivery.LOCAL,
-        skill(SkillPromptResolution.Delivery.LOCAL, "commit-a", "commit-a").delivery());
+        skill(SkillPromptResolution.Delivery.LOCAL, shaA, shaA).delivery());
     assertThrows(
         IllegalArgumentException.class,
-        () -> skill(SkillPromptResolution.Delivery.LOCAL, "commit-a", "commit-b"));
+        () -> skill(SkillPromptResolution.Delivery.LOCAL, shaA, shaB));
     assertThrows(
         IllegalArgumentException.class,
-        () -> skill(SkillPromptResolution.Delivery.LOCAL, "commit-a", null));
+        () -> skill(SkillPromptResolution.Delivery.LOCAL, shaA, null));
     assertEquals(
         SkillPromptResolution.Delivery.PLATFORM,
-        skill(SkillPromptResolution.Delivery.PLATFORM, "commit-a", null).delivery());
+        skill(SkillPromptResolution.Delivery.PLATFORM, shaA, null).delivery());
   }
 
   /** 测试意图：拒绝必须自带稳定 error code，缺失时立即失败，绝不产生无 code 的降级投影。 */
@@ -137,15 +139,16 @@ class LiveTurnPlanTest {
   }
 
   private static LiveTurnPlan.PlannedSkill skill(
-      SkillPromptResolution.Delivery delivery, String currentCommit, String installedCommit) {
+      SkillPromptResolution.Delivery delivery, String artifactSha256, String installedSha256) {
     return new LiveTurnPlan.PlannedSkill(
         "pkg",
         "dev",
         "description",
         "path",
         delivery,
-        currentCommit,
+        "0123456789abcdef0123456789abcdef01234567",
         "observed-head",
-        installedCommit);
+        artifactSha256,
+        installedSha256);
   }
 }

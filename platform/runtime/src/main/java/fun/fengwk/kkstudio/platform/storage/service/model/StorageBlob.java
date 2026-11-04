@@ -30,6 +30,13 @@ public class StorageBlob {
   /** 不可变媒体时长（毫秒）；静止媒体为 null。 */
   private Long durationMs;
 
+  /**
+   * 服务端校验过的 ZIP 归档条目索引 JSON；null 表示该 blob 不是服务端生成的归档。
+   *
+   * <p>索引由归档构建器回读最终 ZIP 得出，文件列表、目录树与解压总大小都从它推导。
+   */
+  private String archiveIndex;
+
   /** 活跃引用计数（READY 上传及后续 Canvas/Harness 消费者）。 */
   private long refCount;
 

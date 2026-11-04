@@ -199,9 +199,10 @@ export function ThreadDebugInspector({
               </KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.path')}><Mono>{selection.skill.path}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.skill.description}</KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.currentCommit')}><Mono>{selection.skill.currentCommit}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.observedHeadCommit')}><Mono>{selection.skill.observedHeadCommit || '—'}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledCommit')}><Mono>{selection.skill.installedCommit || '—'}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.packageVersion')}><Mono>{selection.skill.packageVersion}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.headCommit')}><Mono>{selection.skill.headCommit || '—'}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.artifactSha256')}><Mono>{selection.skill.artifactSha256}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledSha256')}><Mono>{selection.skill.installedSha256 || '—'}</Mono></KeyValueRow>
           </KeyValue>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">

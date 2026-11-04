@@ -36,12 +36,13 @@ import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
+import fun.fengwk.kkstudio.platform.catalog.skill.archive.SkillArchiveFileReader;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -312,21 +313,28 @@ class PlatformReadToolExecutorTest {
   @ValueSource(strings = {"dev/SKILL.md", "%2e%2e/literal%20.md"})
   void skillUriReadsExactGitPath(String relativePath) throws Exception {
     SkillPackageRepository skillPackageRepository = mock(SkillPackageRepository.class);
-    SkillGitCache gitCache = mock(SkillGitCache.class);
+    SkillArchiveFileReader archiveFileReader = mock(SkillArchiveFileReader.class);
+    UUID blobId = UUID.randomUUID();
     SkillPackage pkg =
-        SkillPackage.builder()
-            .repositoryUrl("https://example.com/repo.git")
-            .currentCommit("c1")
-            .skills(List.of(new SkillManifestEntry("dev", "desc")))
-            .build();
+        new SkillPackage(
+            "pkg",
+            "desc",
+            "c1",
+            blobId,
+            List.of(new SkillManifestEntry("dev", "desc")),
+            Instant.now(),
+            0L,
+            Instant.now(),
+            Instant.now(),
+            null);
     when(skillPackageRepository.getPackage("pkg")).thenReturn(pkg);
-    when(gitCache.readFile("pkg", "c1", "dev/SKILL.md"))
+    when(archiveFileReader.readFile(blobId, "dev/SKILL.md"))
         .thenReturn("root".getBytes(StandardCharsets.UTF_8));
-    when(gitCache.readFile("pkg", "c1", "dev/" + relativePath))
+    when(archiveFileReader.readFile(blobId, "dev/" + relativePath))
         .thenReturn("exact-file".getBytes(StandardCharsets.UTF_8));
     executor =
         new PlatformReadToolExecutor(
-            new PlatformSkillContentReader(skillPackageRepository, gitCache),
+            new PlatformSkillContentReader(skillPackageRepository, archiveFileReader),
             resourceReader,
             objectMapper);
     String uri = "kkstudio:/skills/pkg/dev/" + relativePath;
@@ -337,9 +345,7 @@ class PlatformReadToolExecutorTest {
     assertFalse(result.error());
     assertTrue(firstText(result).contains("1|exact-file"));
     assertFalse(firstText(result).contains("1|root"));
-    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1", null);
-    verify(gitCache).readFile("pkg", "c1", "dev/" + relativePath);
-    verifyNoMoreInteractions(gitCache);
+    verify(archiveFileReader).readFile(blobId, "dev/" + relativePath);
   }
 
   /** 未声明的双斜杠 URI 必须只回调一次，且不读取 Skill、Resource 或委托 Environment。 */

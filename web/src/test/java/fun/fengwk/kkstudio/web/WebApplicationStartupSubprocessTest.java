@@ -74,8 +74,7 @@ class WebApplicationStartupSubprocessTest {
                 "--server.port=" + port,
                 "--kk-studio.harness.runtime.workers-enabled=false",
                 "--kk-studio.storage.maintenance.poll-delay=1h",
-                "--kk-studio.plugins.refresh.poll-delay=1h",
-                "--kk-studio.catalog.skill.cache-root=" + work.resolve("skills")));
+                "--kk-studio.plugins.refresh.poll-delay=1h"));
     cleanEnvironment(builder);
     var env = builder.environment();
     env.put("KK_STUDIO_DB_URL", postgres.getJdbcUrl());
