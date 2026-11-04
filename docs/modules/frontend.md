@@ -406,10 +406,13 @@ Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列�
 Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
 ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
-Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
-共用单一提交互斥。版本基线仅在成功写入或显式 reload 后推进，409 保留草稿与原版本。
-看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。工作流用阶段列表与表单配置，
-支持重排、转移边及人工/Agent 执行；缺失 Agent 或非法额度不能保存。
+Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；基础信息、YOLO 与工作流
+三个子表单共用单一提交互斥与按子表单隔离的结果提示。版本基线仅在成功写入或显式 reload 后推进，
+409 保留草稿与原版本。看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。
+工作流阶段编辑器独立为列表与属性表单组件，支持重排、转移边及人工/Agent 执行；
+缺失 Agent 或非法额度不能保存。Projects 的删除确认复用共享 ConfirmActionModal，
+复杂弹窗统一使用 Dialog 的 modal-body/modal-footer，并在窄屏通过 modal-touch-target
+提供 44px 触区与安全区留白；Issue 详情的规格编辑与证据上传分别由独立 pane 与 hook 承担。
 快照的 `referencedStateCodes` 汇总所有 Issue（含归档）的阶段与阻塞恢复点，
 因此可见列表为空也不能删除或改码这些阶段。项目级推送同时失效该项目下的 Issue 与 Evidence，
 订阅与重连共用既有 WebSocket。

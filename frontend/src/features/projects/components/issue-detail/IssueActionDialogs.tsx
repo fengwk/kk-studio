@@ -5,6 +5,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { MAX_RUNS } from '../../workflow-draft'
 
@@ -50,7 +51,7 @@ export function TextActionDialog({
 }: TextActionDialogProps) {
   const { t } = useI18n()
   return (
-    <Dialog className="sub-card" title={title} headerIcon={headerIcon} pending={isBlocked} onClose={onClose}>
+    <Dialog className="sub-card modal-touch-target" title={title} headerIcon={headerIcon} pending={isBlocked} onClose={onClose}>
       <form className="modal-card-form" onSubmit={onSubmit}>
         <div className="modal-body">
           {description && (
@@ -105,7 +106,7 @@ export function ResetBudgetDialog({
   const { t } = useI18n()
   return (
     <Dialog
-      className="sub-card"
+      className="sub-card modal-touch-target"
       title={t('projects.issue.resetStageBudgetAction')}
       pending={isBlocked}
       onClose={onClose}
@@ -147,38 +148,29 @@ export function ResetBudgetDialog({
 
 export function DeleteIssueDialog({
   issueNumber,
-  isPending,
   isBlocked,
   onConfirm,
   onClose,
 }: {
   issueNumber: number | string
-  isPending: boolean
   isBlocked: boolean
   onConfirm: () => void
   onClose: () => void
 }) {
   const { t } = useI18n()
   return (
-    <Dialog
-      className="sub-card"
-      title={t('projects.issue.deleteDialogTitle', { number: issueNumber })}
+    <ConfirmActionModal
+      className="sub-card modal-touch-target"
+      modal={{
+        title: t('projects.issue.deleteDialogTitle', { number: issueNumber }),
+        description: t('projects.issue.deleteConfirmDesc'),
+        confirmLabel: t('projects.delete.confirm'),
+        icon: 'delete',
+        tone: 'danger',
+        onConfirm,
+      }}
       pending={isBlocked}
       onClose={onClose}
-    >
-      <div className="modal-body">
-        <p style={{ margin: 0, color: 'var(--fg)' }}>
-          {t('projects.issue.deleteConfirmDesc')}
-        </p>
-      </div>
-      <div className="modal-footer">
-        <Button variant="ghost" onClick={onClose}>
-          {t('projects.cancel')}
-        </Button>
-        <Button danger disabled={isBlocked} onClick={onConfirm}>
-          {isPending ? t('projects.issue.deleting') : t('projects.delete.confirm')}
-        </Button>
-      </div>
-    </Dialog>
+    />
   )
 }

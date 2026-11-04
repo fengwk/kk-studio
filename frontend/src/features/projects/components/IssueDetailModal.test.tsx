@@ -430,6 +430,7 @@ describe('IssueDetailModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除 Issue' }))
 
     expect(screen.getByText('删除 Issue #12')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '删除 Issue #12' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
 
     await waitFor(() => {

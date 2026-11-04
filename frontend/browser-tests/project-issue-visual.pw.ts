@@ -87,7 +87,8 @@ for (const width of [320, 1280]) {
     await expect(banner).toHaveCSS('border-top-color', await token(banner, 'borderColor', '--warning-border'))
     await expect(banner.locator('strong')).toHaveCSS('color', await token(banner, 'color', '--warning'))
     const discard = banner.getByRole('button', { name: '放弃未决操作' })
-    await expect(discard).toHaveCSS('height', '28px')
+    // 窄屏由 modal-touch-target 统一提供 44px 触区；桌面仍保持紧凑高度。
+    await expect(discard).toHaveCSS('height', width <= 860 ? '44px' : '28px')
     await expect(discard).toHaveCSS('color', await token(discard, 'color', '--danger'))
     await discard.click()
     const confirmation = banner.locator('.issue-detail-alert-discard')
@@ -156,7 +157,7 @@ test('corrupt pending record renders warning and compact danger discard without 
   await expect(banner).toContainText('检测到损坏的本地未决操作记录')
   await expect(banner).toHaveCSS('background-color', await token(banner, 'backgroundColor', '--warning-soft'))
   const discard = banner.getByRole('button', { name: '放弃损坏记录并解锁' })
-  await expect(discard).toHaveCSS('height', '28px')
+  await expect(discard).toHaveCSS('height', '44px')
   await expect(discard).toHaveCSS('color', await token(discard, 'color', '--fg'))
   await expect(discard).toHaveCSS('border-top-color', await token(discard, 'borderColor', '--danger-strong'))
   await noOverflow(page.getByRole('dialog'))
