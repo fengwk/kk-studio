@@ -45,7 +45,7 @@ import java.util.UUID;
 /**
  * MediaFunctionAdapter 单元测试。
  *
- * <p>涵盖定义声明、严格 Schema 校验与默认值补齐、Preflight 边界校验、真实内存图像裁剪执行、取消与 Checkpoint 行为。
+ * <p>涵盖定义声明、严格 Schema 校验与默认值补齐、Preflight 边界校验、真实内存图像裁剪执行、取消与不写 checkpoint 行为。
  */
 class MediaFunctionAdapterTest {
 
@@ -239,7 +239,7 @@ class MediaFunctionAdapterTest {
     assertDoesNotThrow(() -> adapter.cancel(run), "cancel 必须安全返回且不抛出异常");
   }
 
-  /** 验证对真实内存 PNG 执行裁剪，断言像素、尺寸、物化格式与 Checkpoint 记录。 */
+  /** 验证对真实内存 PNG 执行裁剪，断言像素、尺寸、物化格式，且本地确定性执行不写 checkpoint。 */
   @Test
   void executePerformsRealCropAndMaterializesPng() throws IOException {
     // 构造一张 100x80 的测试图片，4 个象限填充不同颜色
@@ -276,14 +276,8 @@ class MediaFunctionAdapterTest {
     List<UUID> results = adapter.execute(context, run);
     assertEquals(List.of(targetResourceId), results, "execute 必须返回物化的 targetResourceId");
 
-    // 验证 Checkpoint
-    assertEquals(1, context.checkpoints().size());
-    FakeExecutionContext.CheckpointRecord checkpoint = context.checkpoints().get(0);
-    assertEquals("CROPPING", checkpoint.stage());
-    assertEquals(50, checkpoint.adapterState().get("x"));
-    assertEquals(40, checkpoint.adapterState().get("y"));
-    assertEquals(30, checkpoint.adapterState().get("width"));
-    assertEquals(20, checkpoint.adapterState().get("height"));
+    // 本地、确定、可重复的裁剪没有外部任务身份，绝不写 checkpoint。
+    assertTrue(context.checkpoints().isEmpty(), "local crop must not checkpoint");
 
     // 验证物化出来的 PNG 内容
     assertEquals(targetResourceId, context.materializedResourceId());
