@@ -45,14 +45,14 @@ function formatFilterReason(
 }
 
 function formatEnvSupport(
-  support: 'NONE' | 'OPTIONAL' | 'REQUIRED',
+  support: 'NONE' | 'ROUTED' | 'REQUIRED',
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (support) {
     case 'NONE':
       return t('ai.runtime.debug.envSupport.none')
-    case 'OPTIONAL':
-      return t('ai.runtime.debug.envSupport.optional')
+    case 'ROUTED':
+      return t('ai.runtime.debug.envSupport.routed')
     case 'REQUIRED':
       return t('ai.runtime.debug.envSupport.required')
     default:

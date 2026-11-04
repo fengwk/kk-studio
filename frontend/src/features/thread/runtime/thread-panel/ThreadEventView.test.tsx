@@ -336,7 +336,7 @@ describe('ThreadEventView', () => {
             name: 'read',
             description: 'Read file',
             inputSchemaJson: '{"type":"object"}',
-            environmentSupport: 'OPTIONAL',
+            environmentSupport: 'ROUTED',
             requiredEnvironmentId: null,
             provenance: 'builtin:read',
             state: 'SENT',

@@ -10,11 +10,11 @@ import { useI18n } from '@/shared/i18n'
 import { Code, Mono } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 
-function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
+function envBadge(support: 'NONE' | 'ROUTED' | 'REQUIRED'): string {
   switch (support) {
     case 'NONE':
       return 'P'
-    case 'OPTIONAL':
+    case 'ROUTED':
       return 'P+E'
     case 'REQUIRED':
       return 'E'
@@ -24,14 +24,14 @@ function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
 }
 
 function envBadgeTitle(
-  support: 'NONE' | 'OPTIONAL' | 'REQUIRED',
+  support: 'NONE' | 'ROUTED' | 'REQUIRED',
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (support) {
     case 'NONE':
       return t('ai.runtime.debug.envSupport.none')
-    case 'OPTIONAL':
-      return t('ai.runtime.debug.envSupport.optional')
+    case 'ROUTED':
+      return t('ai.runtime.debug.envSupport.routed')
     case 'REQUIRED':
       return t('ai.runtime.debug.envSupport.required')
     default:

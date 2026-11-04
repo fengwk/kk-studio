@@ -10,8 +10,8 @@ import java.util.Objects;
 /**
  * 平台侧 Skill 内容读取器。
  *
- * <p>按 {@code vfs:/skills/<package>/<skill>/<relativePath>} 读取已发布 Skill 的内容：校验 package
- * 存在、skill 在 manifest 中存在、相对路径合法后，按当前版本归档的条目索引做范围读取，只解压目标文件。
+ * <p>按 {@code vfs:/skills/<package>/<skill>/<relativePath>} 读取已发布 Skill 的内容：校验 package 存在、skill 在
+ * manifest 中存在、相对路径合法后，按当前版本归档的条目索引做范围读取，只解压目标文件。
  */
 public class PlatformSkillContentReader {
 

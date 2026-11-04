@@ -67,7 +67,7 @@ function createDebugData(): ThreadModelRequestDebugData {
           },
           required: ['path'],
         }, null, 2),
-        environmentSupport: 'OPTIONAL',
+        environmentSupport: 'ROUTED',
         requiredEnvironmentId: null,
         provenance: 'builtin:read',
         state: 'SENT',

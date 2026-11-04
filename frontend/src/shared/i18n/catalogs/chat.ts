@@ -1561,9 +1561,9 @@ export const chatCatalog = {
     'en-US': 'Platform only · NONE',
     'zh-CN': '平台独立 · NONE',
   },
-  'ai.runtime.debug.envSupport.optional': {
-    'en-US': 'Optional environment · OPTIONAL',
-    'zh-CN': '可选环境 · OPTIONAL',
+  'ai.runtime.debug.envSupport.routed': {
+    'en-US': 'Routed per call · ROUTED',
+    'zh-CN': '按调用路由 · ROUTED',
   },
   'ai.runtime.debug.envSupport.required': {
     'en-US': 'Environment required · REQUIRED',
