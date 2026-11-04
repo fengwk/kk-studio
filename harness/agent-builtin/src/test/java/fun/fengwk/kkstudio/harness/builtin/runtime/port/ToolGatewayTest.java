@@ -323,6 +323,7 @@ class ToolGatewayTest {
         UUID.fromString("00000000-0000-0000-0000-0000000000c1"),
         UUID.fromString("00000000-0000-0000-0000-0000000000c2"),
         UUID.fromString("00000000-0000-0000-0000-0000000000c3"),
+        UUID.fromString("00000000-0000-0000-0000-0000000000c4"),
         new BranchView() {
           @Override
           public List<CustomStateSnapshot> customEntries(String customType) {

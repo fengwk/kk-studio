@@ -57,7 +57,6 @@ describe('Frontend architecture and entry contracts', () => {
     expect(typeof apiInstance.createIssue).toBe('function')
     expect(typeof apiInstance.getIssue).toBe('function')
     expect(typeof apiInstance.transitionIssue).toBe('function')
-    expect(typeof apiInstance.resolveUnknown).toBe('function')
     expect(typeof apiInstance.stopIssue).toBe('function')
 
     // 路由契约：Project 扩展对外暴露统一的列表与详情入口

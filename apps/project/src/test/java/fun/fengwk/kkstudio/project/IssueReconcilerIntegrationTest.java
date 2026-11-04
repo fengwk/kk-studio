@@ -30,6 +30,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -52,7 +54,6 @@ import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.project.tool.IssueTransitionService;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.work.DurableWork;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
@@ -81,6 +82,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   @Autowired private HarnessRuntime harnessRuntime;
 
   private final Map<UUID, EntryPayload> customPayloads = new ConcurrentHashMap<>();
+  private final HistoryEntryPayloadJsonCodec entryCodec = new HistoryEntryPayloadJsonCodec();
 
   @BeforeEach
   void setUpHarnessSnapshot() {
@@ -127,8 +129,18 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     for (UUID entryId : ids) {
       Entry entry = mock(Entry.class);
       when(entry.id()).thenReturn(entryId);
-      EntryPayload payload =
-          customPayloads.getOrDefault(entryId, new CustomEntryPayload("test", "test", "{}"));
+      Map<String, Object> stored =
+          jdbc.queryForMap(
+              "select entry_type, payload::text as payload from harness_entry where id = ?",
+              entryId);
+      String json = (String) stored.get("payload");
+      EntryPayload payload = customPayloads.get(entryId);
+      if (payload == null) {
+        payload =
+            "{}".equals(json)
+                ? new CustomEntryPayload("test", "test", "{}")
+                : entryCodec.decode(EntryType.valueOf((String) stored.get("entry_type")), json);
+      }
       when(entry.payload()).thenReturn(payload);
       entries.add(entry);
     }
@@ -628,10 +640,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    // 交接只能由本 Run 起点之后的 assistant turn 发起，因此先落一条真实历史位置。
+    UUID assistantEntryId = appendHandoffAssistant(run.getThreadId());
+    issueTransitionService.accept(run.getThreadId(), assistantEntryId, "REVIEW");
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
-    issueTransitionService.accept(
-        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
 
     WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -675,8 +688,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.COMPLETED);
     matchRunJoin(run.getId(), terminal);
-    issueTransitionService.accept(
-        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
+    UUID assistantEntryId = appendHandoffAssistant(run.getThreadId());
+    issueTransitionService.accept(run.getThreadId(), assistantEntryId, "REVIEW");
     // Join 冻结之后本 Thread 又有人类对话与在途模型：已匹配的收尾仍正常提交。
     appendHistoryEntry(run.getThreadId());
     ModelInvocation activeModel = mock(ModelInvocation.class);
@@ -695,10 +708,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId(),
             terminal));
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
-    // 收尾在同一业务锁内闭合 scope：最新 scope 是同一 runId 的 active=false 副本。
-    ProjectRunScope closed = latestRunScope(run.getThreadId());
-    assertEquals(run.getId(), closed.runId());
-    assertFalse(closed.active());
+    // 收尾不再向 Harness 写任何 branch custom state：Run 的业务事实只保留在 Project 自己的行里。
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
+                + " 'SET_CONTRIBUTOR_STATE'",
+            run.getThreadId()));
   }
 
   /** 测试意图：root Join outcome=ERROR 的 Run 只做失败收尾，即使已登记交接意图也绝不按完成推进阶段。 */
@@ -709,8 +725,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueTransitionService.accept(
-        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
+    UUID assistantEntryId = appendHandoffAssistant(run.getThreadId());
+    issueTransitionService.accept(run.getThreadId(), assistantEntryId, "REVIEW");
     UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.FAILED);
     matchRunJoin(run.getId(), terminal);
 
@@ -726,7 +742,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             terminal));
     // 失败不推进阶段：Issue 仍停在本阶段，交接意图不生效。
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
-    assertFalse(latestRunScope(run.getThreadId()).active());
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
+                + " 'SET_CONTRIBUTOR_STATE'",
+            run.getThreadId()));
   }
 
   /** 测试意图：root Join outcome=CANCELLED 的 Run 只做取消收尾，绝不按完成提交阶段推进。 */
@@ -751,37 +772,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId(),
             terminal));
     assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
-    assertFalse(latestRunScope(run.getThreadId()).active());
-  }
-
-  /** 测试意图：旧 Run 收尾写入的 active=false 必须先于新 Run 接受的 active=true，后写的 scope 才代表当前生命周期。 */
-  @Test
-  void closingScopeIsOrderedBeforeNextRunScope() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("scope写入顺序", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
-    UUID threadId = first.getThreadId();
-    UUID terminal = appendTurnEndEntry(threadId, TurnEndOutcome.COMPLETED);
-    matchRunJoin(first.getId(), terminal);
-    issueTransitionService.accept(threadId, frozenRunScopeJson(threadId), "REVIEW");
     assertEquals(
-        IssueReconcileOutcome.RUN_HANDED_OFF, reconciler.reconcile(claimWork(issue.getId())));
-    long closeSequence = latestRunScopeSequence(threadId);
-    assertFalse(latestRunScope(threadId).active());
-
-    // 下一个调谐在 REVIEW 阶段接受新 Run；同一 Agent 复用同一 Thread，命令序号可直接比较。
-    assertEquals(
-        IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
-    IssueRun second = issueRunService.getActiveRun(issue.getId());
-    assertNotNull(second);
-    assertNotEquals(first.getId(), second.getId());
-    assertEquals(threadId, second.getThreadId());
-    ProjectRunScope reopened = latestRunScope(threadId);
-    assertEquals(second.getId(), reopened.runId());
-    assertTrue(reopened.active());
-    assertTrue(latestRunScopeSequence(threadId) > closeSequence);
+        0L,
+        count(
+            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
+                + " 'SET_CONTRIBUTOR_STATE'",
+            run.getThreadId()));
   }
 
   /** 测试意图：匹配 root Join 先收尾时，未在安全点投递的人工指示不能被吞，游标保持原位置并由下一个 Run 投递。 */
@@ -804,7 +800,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId());
 
     issueTransitionService.accept(
-        first.getThreadId(), frozenRunScopeJson(first.getThreadId()), "REVIEW");
+        first.getThreadId(), appendHandoffAssistant(first.getThreadId()), "REVIEW");
     UUID terminal = appendTurnEndEntry(first.getThreadId(), TurnEndOutcome.COMPLETED);
     matchRunJoin(first.getId(), terminal);
     assertEquals(
@@ -1464,9 +1460,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             Long.class,
             issue.getId());
 
-    // 模拟 Agent 发起交接请求
+    // 模拟 Agent 发起交接请求（assistant turn 已落库）
     issueTransitionService.accept(
-        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
+        run.getThreadId(), appendHandoffAssistant(run.getThreadId()), "REVIEW");
     run = issueRunService.getRun(run.getId());
     assertEquals("REVIEW", run.getNextState());
 
@@ -1554,7 +1550,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     issueTransitionService.accept(
-        run.getThreadId(), frozenRunScopeJson(run.getThreadId()), "REVIEW");
+        run.getThreadId(), appendHandoffAssistant(run.getThreadId()), "REVIEW");
 
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);

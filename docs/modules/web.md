@@ -79,7 +79,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
-| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、重开、归档 |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
@@ -155,7 +155,8 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
 Canvas commands 返回 patch，Function start 返回 202。
-UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
+UNKNOWN resolve 要求 resolution 与非空 verification。Issue 没有 UNKNOWN 终态/暂停原因：结果未定的停止按 FAILED 收尾并以
+ERROR 暂停，`error`/`pauseDetail` 明确说明结果未知，只能由显式 resume 继续。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
 ## 同源 IDE 网关

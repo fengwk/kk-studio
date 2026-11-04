@@ -65,17 +65,18 @@ public interface ToolGateway {
   }
 
   /**
-   * 一次 Tool execution 所属的冻结 Harness 上下文事实：Thread、会话、执行根、该调用 assistant 分支的只读视图与消费者媒体能力。
+   * 一次 Tool execution 所属的冻结 Harness 上下文事实：Thread、会话、执行根、该调用 assistant 分支的入口 Entry 与只读视图，以及消费者媒体能力。
    *
    * <p>全部事实来自 Processor 对 own Thread、执行根与该调用 assistant path 的同一事务读取。执行网关、Plugin 与产品不得为了这些事实 再查询
-   * Harness 存储：{@code branch} 已按该调用的 Contributor 与 assistant 分支限定，{@code mediaCapabilities}
-   * 唯一来源是冻结的 TURN_START 能力快照。
+   * Harness 存储：{@code assistantEntryId} 是该调用在 Thread 历史中的真实位置，{@code branch} 已按该调用的 Contributor 与
+   * assistant 分支限定，{@code mediaCapabilities} 唯一来源是冻结的 TURN_START 能力快照。
    */
   record ExecutionScope(
       UUID threadId,
       UUID sessionId,
       UUID rootThreadId,
       UUID rootSessionId,
+      UUID assistantEntryId,
       BranchView branch,
       TurnMediaCapabilities mediaCapabilities) {
 
@@ -84,6 +85,7 @@ public interface ToolGateway {
       Objects.requireNonNull(sessionId, "sessionId");
       Objects.requireNonNull(rootThreadId, "rootThreadId");
       Objects.requireNonNull(rootSessionId, "rootSessionId");
+      Objects.requireNonNull(assistantEntryId, "assistantEntryId");
       branch = Objects.requireNonNull(branch, "branch");
       mediaCapabilities = Objects.requireNonNull(mediaCapabilities, "mediaCapabilities");
     }
@@ -91,8 +93,8 @@ public interface ToolGateway {
 
   /**
    * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, attempt)}，request 已冻结。 {@code
-   * scope} 携带该调用所属的 Thread/会话/执行根、assistant 分支视图与冻结媒体能力，平台据此装配 {@code ToolExecutionContext}，不查询
-   * Harness 存储。{@code remoteExecutions} 只登记这一本地代次上的实际远端调用。
+   * scope} 携带该调用所属的 Thread/会话/执行根、该调用的 assistant 入口、assistant 分支视图与冻结媒体能力，平台据此装配 {@code
+   * ToolExecutionContext}，不查询 Harness 存储。{@code remoteExecutions} 只登记这一本地代次上的实际远端调用。
    */
   record Execution(
       UUID invocationId,

@@ -176,20 +176,27 @@ describe('projects codecs', () => {
     }
 
     it('decodeIssue should decode valid issue with pauseReason and blocked state', () => {
-      // 测试意图：验证 Issue 状态自然 token、pauseReason (USER/ERROR/UNKNOWN) 和阻塞恢复来源
+      // 测试意图：验证 Issue 状态自然 token、pauseReason (USER/ERROR) 和阻塞恢复来源
       const decoded = decodeIssue({
         ...validIssue,
         state: 'BLOCKED',
         blockedFromState: 'DESIGN',
         blockReason: 'Missing spec',
-        pauseReason: 'UNKNOWN',
-        pauseDetail: 'Worker crash',
+        pauseReason: 'ERROR',
+        pauseDetail: 'Run stopped with in-flight side effects; outcome unknown',
       })
       expect(decoded.state).toBe('BLOCKED')
       expect(decoded.blockedFromState).toBe('DESIGN')
       expect(decoded.blockReason).toBe('Missing spec')
-      expect(decoded.pauseReason).toBe('UNKNOWN')
-      expect(decoded.pauseDetail).toBe('Worker crash')
+      expect(decoded.pauseReason).toBe('ERROR')
+      expect(decoded.pauseDetail).toBe('Run stopped with in-flight side effects; outcome unknown')
+    })
+
+    it('decodeIssue rejects the removed UNKNOWN pause reason', () => {
+      // 测试意图：结果未知按 FAILED + ERROR 表达，线协议不再接受 UNKNOWN 暂停原因
+      expect(() => decodeIssue({ ...validIssue, pauseReason: 'UNKNOWN', pauseDetail: 'x' })).toThrow(
+        ApiError,
+      )
     })
 
     it('decodeIssueAgentThread should decode agent thread binding', () => {

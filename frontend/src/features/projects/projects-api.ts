@@ -30,7 +30,6 @@ import type {
   RecoverIssueRequestDTO,
   ReopenIssueRequestDTO,
   ResetStageBudgetRequestDTO,
-  ResolveUnknownIssueRequestDTO,
   ResumeIssueRequestDTO,
   StopIssueRequestDTO,
   TransitionIssueRequestDTO,
@@ -221,17 +220,6 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
     stopIssue: async (issueId: string, request: StopIssueRequestDTO): Promise<IssueDTO> => {
       const raw = await client.post<unknown>(
         `/issues/${encodeURIComponent(issueId)}/stop`,
-        request,
-      )
-      return decodeIssue(raw)
-    },
-
-    resolveUnknown: async (
-      issueId: string,
-      request: ResolveUnknownIssueRequestDTO,
-    ): Promise<IssueDTO> => {
-      const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/resolve-unknown`,
         request,
       )
       return decodeIssue(raw)

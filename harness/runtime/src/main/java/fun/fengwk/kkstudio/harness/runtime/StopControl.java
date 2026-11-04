@@ -391,7 +391,12 @@ final class StopControl {
         }
       }
 
-      // 所有上下文都先撤销 Driver 执行权：generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
+      // Tool 结果与子行必须先收敛，Driver 才能删除其私有 parent；Thread head 仍保持原样供 Driver 校验。
+      UUID toolOutcomeHead =
+          context instanceof ThreadContext.ToolActive active
+              ? settleTools(tx, path, active, now)
+              : null;
+      // generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
       // 返回的 executionIds 在本事务提交后交给组合根提供的 Driver 执行取消函数。
       DriverStopResult driverStop =
           driver.stop(tx, thread, path, driverState, commit(tx), stopRequestId);
@@ -406,7 +411,7 @@ final class StopControl {
             case ThreadContext.GenerationActive active -> stopGeneration(
                 tx, thread, path, driverStop, stopRequestId, now);
             case ThreadContext.ToolActive active -> stopTools(
-                tx, thread, path, driverState, active, stopRequestId, now);
+                tx, thread, path, toolOutcomeHead, stopRequestId, now);
             case ThreadContext.GenerationTerminalPending ignored -> throw new IllegalStateException(
                 "terminal generation context escaped the Stop guard");
             case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
@@ -761,18 +766,8 @@ final class StopControl {
     return new NodeStop(stopped, turnEndId);
   }
 
-  private NodeStop stopTools(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      EntryPath path,
-      LockedDriverState driverState,
-      ThreadContext.ToolActive active,
-      UUID stopRequestId,
-      Instant now) {
-    UUID turnStartEntryId =
-        path.openTurnStart()
-            .orElseThrow(() -> new IllegalStateException("tool stop requires an open TURN_START"))
-            .id();
+  private static UUID settleTools(
+      HarnessStore.Transaction tx, EntryPath path, ThreadContext.ToolActive active, Instant now) {
     UUID parentId = active.assistant().id();
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
@@ -786,6 +781,21 @@ final class StopControl {
           ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
       parentId = applied.headEntryId();
     }
+    tx.tools().deleteByIds(active.siblings().stream().map(ToolInvocation::id).toList());
+    return parentId;
+  }
+
+  private NodeStop stopTools(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      UUID parentId,
+      UUID stopRequestId,
+      Instant now) {
+    UUID turnStartEntryId =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("tool stop requires an open TURN_START"))
+            .id();
     UUID turnEndId = tx.nextId();
     tx.entries()
         .insert(
@@ -797,7 +807,6 @@ final class StopControl {
                 now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
     tx.threads().update(stopped);
-    tx.tools().deleteByIds(active.siblings().stream().map(ToolInvocation::id).toList());
     return new NodeStop(stopped, turnEndId);
   }
 

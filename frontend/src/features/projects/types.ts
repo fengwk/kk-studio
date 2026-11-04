@@ -3,10 +3,10 @@
  *
  * <p>基于 dev/spec §4 规范，彻底移除 dependencies、executor-reviewer 与 maxReviewRejections；
  * 支持动态工作流配置、自然状态 token、稳定 AgentThread 绑定、阶段预算、Run 执行事实与区间报告、
- * 明确区分的评论与指令活动事实流、证据上传与预览、Stop 终止、UNKNOWN 门禁人工核查以及项目/Issue 彻底删除。
+ * 明确区分的评论与指令活动事实流、证据上传与预览、Stop 终止以及项目/Issue 彻底删除。
  */
 
-export type IssuePauseReason = 'USER' | 'ERROR' | 'UNKNOWN'
+export type IssuePauseReason = 'USER' | 'ERROR'
 
 export type IssueActivityKind =
   | 'COMMENT'
@@ -25,7 +25,6 @@ export type IssueRunStatus =
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
-  | 'UNKNOWN'
   | string
 
 export interface ProjectsChangedEventPayload {

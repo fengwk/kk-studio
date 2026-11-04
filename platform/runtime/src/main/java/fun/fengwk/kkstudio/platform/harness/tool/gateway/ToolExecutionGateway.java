@@ -333,6 +333,7 @@ public final class ToolExecutionGateway implements ToolGateway {
               scope.sessionId(),
               scope.rootThreadId(),
               scope.rootSessionId(),
+              scope.assistantEntryId(),
               clock.instant(),
               scope.mediaCapabilities(),
               scope.branch(),

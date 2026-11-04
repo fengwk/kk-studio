@@ -193,8 +193,8 @@ export function decodeIssue(raw: unknown, path = 'issue'): IssueDTO {
   let pauseReason: IssuePauseReason | null = null
   if (obj.pauseReason !== undefined && obj.pauseReason !== null) {
     const pr = requireString(obj.pauseReason, `${path}.pauseReason`)
-    if (pr !== 'USER' && pr !== 'ERROR' && pr !== 'UNKNOWN') {
-      throw invalidPayload(`${path}.pauseReason must be USER, ERROR, or UNKNOWN`)
+    if (pr !== 'USER' && pr !== 'ERROR') {
+      throw invalidPayload(`${path}.pauseReason must be USER or ERROR`)
     }
     pauseReason = pr
   }

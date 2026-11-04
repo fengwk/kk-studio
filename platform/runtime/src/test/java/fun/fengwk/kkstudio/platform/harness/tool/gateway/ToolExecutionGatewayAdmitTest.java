@@ -81,6 +81,8 @@ class ToolExecutionGatewayAdmitTest {
     assertEquals(ToolGatewayTestSupport.SESSION_ID, executed.context().sessionId());
     assertEquals(ToolGatewayTestSupport.ROOT_THREAD_ID, executed.context().rootThreadId());
     assertEquals(ToolGatewayTestSupport.ROOT_SESSION_ID, executed.context().rootSessionId());
+    // 网关必须原样传递该调用冻结的 assistant 入口，产品据此判断调用归属。
+    assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, executed.context().assistantEntryId());
     assertEquals(TurnMediaCapabilities.NONE, executed.context().mediaCapabilities());
     assertSame(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW, executed.context().branch());
     assertTrue(transport.invocations.isEmpty());

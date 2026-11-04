@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
@@ -26,7 +25,7 @@ import java.util.UUID;
 /**
  * Issue/Run 执行所需的 Thread 事实读取与命令控制。
  *
- * <p>只暴露 Project 真正消费的窄事实与控制面：单个线程的权威执行事实切片、命令接受（含 Join）与停止、以及三类只读回执查询。命令、回执与 Join 值契约复用 Harness
+ * <p>只暴露 Project 真正消费的窄事实与控制面：单个线程的权威执行事实切片、命令接受（含 Join）与停止、以及两类只读回执查询。命令、回执与 Join 值契约复用 Harness
  * 的不可变定义，不暴露线程执行树、存储或运行时聚合。所有方法沿用运行时的事务参与、幂等与异常语义：接受与停止加入调用方已有事务，权威 head/version 与类型化冲突/未找到异常原样传递。
  *
  * <p>运行时以 {@link ObjectProvider} 惰性解析：只装配 Project 的上下文不会因为缺少运行时而在启动期失败；真正需要执行能力时确定失败，绝不退回本地假执行。
@@ -53,6 +52,11 @@ public class IssueThreadExecution {
         thread.nextCommandSequence(),
         snapshot.requireFullPath(),
         snapshot.executionFacts());
+  }
+
+  /** 读取 Thread 的不可变 Session 身份；不存在时返回空。 */
+  public Optional<UUID> findThreadSessionId(UUID threadId) {
+    return requireRuntime().findThreadSessionId(threadId);
   }
 
   /** 原子接受一批命令及其 Work（NEW_ROOT_SESSION / THREAD 单原语），返回接受结果。 */
@@ -100,11 +104,6 @@ public class IssueThreadExecution {
   /** 从已匹配的固定结果投影只读 Join 回执；未匹配时返回空。 */
   public Optional<ThreadJoinReceipt> projectJoinReceipt(UUID invocationId) {
     return requireRuntime().projectJoinReceipt(invocationId);
-  }
-
-  /** 按 Thread + idempotencyKey 读取 durable 命令，用于应用层精确重放校验或冻结命令读取。 */
-  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID idempotencyKey) {
-    return requireRuntime().findThreadCommand(threadId, idempotencyKey);
   }
 
   private HarnessRuntime requireRuntime() {

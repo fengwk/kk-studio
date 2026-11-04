@@ -9,13 +9,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -24,10 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
@@ -60,8 +54,6 @@ import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.nio.charset.StandardCharsets;
@@ -80,6 +72,10 @@ import java.util.UUID;
  * 绑定、Run 与 RUN 活动、Issue Work；已有 Thread 则冻结当前 head 后继续接受本次命令。任一步失败整体回滚，包括已接受的 Harness 初始命令与
  * Work。模型/工具外部调用发生在事务外，锁内不做网络 I/O；部署缺少 Harness Runtime 时确定失败，绝不退回本地假执行。
  *
+ * <p>一次 Run 的 Harness 输入只有通用命令（{@code SET_AGENT} / {@code SET_EXECUTION} / {@code
+ * SET_ENVIRONMENT}）与一条 由 Project 自己渲染的 Markdown 任务消息：Issue 事实、阶段说明与可交接目标都在消息里，不写任何 branch custom
+ * state，也不在收尾时回写 Harness 状态。
+ *
  * <p>幂等（设计 §4.6）：每个写操作都要求调用方请求键，活动身份为 {@code kind:requestKey}，指纹含动作与规范化请求字段。锁前检查只是快速路径； owner
  * 锁（Project SHARE → Issue UPDATE → Run）之后、版本/状态/额度校验与 Harness 派发之前必须再查一次 receipt。同键同指纹按原活动精确重放并返回当前
  * Run，不新建 Session/Thread/命令、不重新扣额度、不重复推进状态；同键异指纹确定性冲突。无交接的完成使用 CONTROL/COMPLETE_RUN 活动作为同一事务
@@ -96,8 +92,9 @@ public class IssueRunService {
   /** 新接受 Run 的初始活动执行额度；安全等待不消耗活动时长。 */
   static final long DEFAULT_RUN_EXECUTION_BUDGET_MS = 30L * 60L * 1000L;
 
-  /** Run 冻结快照的规范编解码器：无状态纯函数，Project 与渲染它的宿主组件共享同一份实现。 */
-  private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
+  /** 任务消息模板：可信 Markdown，Issue 事实与阶段说明按原文渲染。 */
+  private static final String TASK_MESSAGE =
+      "fun/fengwk/kkstudio/project/prompts/messages/issue-task.md";
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
@@ -210,8 +207,7 @@ public class IssueRunService {
       continuation = new SpawnRequest.Continuation(existingHead, view.nextCommandSequence());
     }
 
-    ProjectRunScope scope = runScope(issue, stage, agentName, runId, threadId);
-    List<NewThreadCommand> commands = buildRunCommands(settings, scope, stage.environment());
+    List<NewThreadCommand> commands = buildRunCommands(settings, issue, stage, runId);
     NewThreadCommand taskInput = commands.getLast();
     AcceptedCommands accepted =
         requireThreadExecution()
@@ -227,7 +223,8 @@ public class IssueRunService {
                     taskInput.requestHash()));
     UUID startEntryId;
     if (binding == null) {
-      if (!issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, threadId))) {
+      if (!issueAgentThreadRepository.insert(
+          new IssueAgentThread(issueId, agentName, sessionId, threadId))) {
         throw new IllegalStateException("failed to bind issue agent thread");
       }
       startEntryId = accepted.rootEntry().id();
@@ -432,7 +429,6 @@ public class IssueRunService {
     run.setError(null);
     updateRun(run, expectedVersion);
     persistIssue(issue, locked.issueVersion());
-    closeRunScope(run);
     return issueRunRepository.getById(runId);
   }
 
@@ -495,35 +491,6 @@ public class IssueRunService {
     return issueRunRepository.getById(runId);
   }
 
-  @Transactional
-  public IssueRun markUnknown(
-      UUID runId, long expectedVersion, String requestKey, UUID endEntryId, String error) {
-    Objects.requireNonNull(runId, "runId");
-    Objects.requireNonNull(endEntryId, "endEntryId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    String validError =
-        ProjectValidationUtils.requireUtf8Text(
-            error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "MARK_UNKNOWN", key, runId, endEntryId, validError);
-    if (replayed(runId, identity)) {
-      return currentRun(runId);
-    }
-    RunLock locked = lockRun(runId);
-    if (replayedUnderLock(locked, identity)) {
-      return locked.run();
-    }
-    IssueRun run = locked.run();
-    requireActive(run);
-    requireVersion(run, expectedVersion);
-    requireWithinRunInterval(
-        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
-    terminate(run, IssueRunStatus.UNKNOWN, endEntryId, validError, expectedVersion);
-    applyPauseGate(locked, identity, PauseReason.UNKNOWN, validError);
-    return issueRunRepository.getById(runId);
-  }
-
   private void terminate(
       IssueRun run, IssueRunStatus status, UUID endEntryId, String error, long expectedVersion) {
     run.setStatus(status);
@@ -533,48 +500,6 @@ public class IssueRunService {
     run.setEndedAt(Instant.now());
     run.setError(error);
     updateRun(run, expectedVersion);
-    closeRunScope(run);
-  }
-
-  /**
-   * 在本 Run 进入终态的业务锁内闭合 branch scope：读取接受该 Run 时冻结的 SET_CONTRIBUTOR_STATE 源命令，翻成同一 {@code runId} 的
-   * {@code active=false} 副本，并以纯设置批次写回同一 Thread——不产生用户消息、也不唤醒模型。
-   *
-   * <p>因为同一 Thread 的命令按 sequence 有序，新 Run 的 {@code active=true} 快照必然排在旧 Run 的 {@code false} 之后；旧
-   * Run 收尾必须持有活动 Run 锁，因此不可能在关闭后覆盖新 Run 的 scope。
-   */
-  private void closeRunScope(IssueRun run) {
-    IssueThreadExecution threadExecutions = requireThreadExecution();
-    UUID threadId = run.getThreadId();
-    ThreadCommand source =
-        threadExecutions
-            .findThreadCommand(threadId, commandKey(run.getId(), "contributor-state"))
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "frozen run scope command is missing for run " + run.getId()));
-    if (!(source.payload() instanceof SetContributorStateCommandPayload frozen)) {
-      throw new IllegalStateException("run scope source command is not SET_CONTRIBUTOR_STATE");
-    }
-    ProjectRunScope scope = RUN_SCOPE_CODEC.decode(frozen.state().dataJson());
-    if (!scope.runId().equals(run.getId()) || !scope.sourceThreadId().equals(threadId)) {
-      throw new IllegalStateException("frozen run scope does not match the closing run");
-    }
-    NewThreadCommand closeCommand =
-        new NewThreadCommand(
-            new SetContributorStateCommandPayload(
-                new CustomEntryPayload(
-                    ProjectRunScope.CONTRIBUTOR_ID,
-                    ProjectRunScope.CUSTOM_TYPE,
-                    RUN_SCOPE_CODEC.encode(scope.closed()))),
-            commandKey(run.getId(), "scope-closed"));
-    IssueThreadView view = threadExecutions.readThread(threadId);
-    threadExecutions.acceptCommands(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                threadId, view.headEntryId(), view.nextCommandSequence()),
-            List.of(closeCommand)),
-        AcceptancePreflight.IDENTITY);
   }
 
   private void applyPauseGate(
@@ -719,50 +644,22 @@ public class IssueRunService {
   }
 
   /**
-   * 冻结本次 Run 的权威上下文快照：当前 Issue、阶段职责与业务执行身份（sourceThreadId）一起写入 branch custom state， 之后的模型 turn
-   * 只读取这份快照。
-   */
-  private ProjectRunScope runScope(
-      Issue issue, ProjectWorkflowState stage, String agentName, UUID runId, UUID threadId) {
-    return new ProjectRunScope(
-        runId,
-        issue.getId(),
-        issue.getProjectId(),
-        threadId,
-        issue.getNumber(),
-        issue.getTitle(),
-        issue.getDescription(),
-        stage.state().value(),
-        stage.name(),
-        stage.instructions(),
-        stage.next().stream().map(ProjectStateCode::value).toList(),
-        agentName,
-        true);
-  }
-
-  /**
-   * 每次 Run 显式提交的完整命令批：先按固定顺序设置 Agent/Model/Environment 并冻结本次 Run 的 contributor state， 最后以恰一条
-   * CUSTOM_MESSAGE（可信调用方输入，而非人类 USER_MESSAGE）启动任务。
+   * 每次 Run 显式提交的完整命令批：先按固定顺序设置 Agent/Execution/Environment，最后以恰一条 CUSTOM_MESSAGE（可信调用方输入，而非人类
+   * USER_MESSAGE）启动任务。
    *
    * <p>Environment 取当前 stage 的显式选择（含 null 清除），而不是 Agent 默认 settings 的 environmentName，否则工作流里配置的
    * stage 环境会被 Agent 默认值悄悄覆盖；Agent 与 Model 仍以本 Run 明确物化的 run 配置为准。
+   *
+   * <p>任务消息是本次 Run 唯一的业务上下文来源：它在接受时由 Project 自己的模板渲染成 Markdown，不写任何 branch custom state，也不依赖
+   * Harness 侧的历史状态投影。
    */
   private List<NewThreadCommand> buildRunCommands(
-      BranchSettings settings, ProjectRunScope scope, String environmentName) {
-    UUID runId = scope.runId();
+      BranchSettings settings, Issue issue, ProjectWorkflowState stage, UUID runId) {
     return List.of(
         command(new SetAgentCommandPayload(settings.agentName()), runId, "agent"),
         command(new SetExecutionCommandPayload(settings.execution()), runId, "execution"),
-        command(new SetEnvironmentCommandPayload(environmentName), runId, "environment"),
-        command(
-            new SetContributorStateCommandPayload(
-                new CustomEntryPayload(
-                    ProjectRunScope.CONTRIBUTOR_ID,
-                    ProjectRunScope.CUSTOM_TYPE,
-                    RUN_SCOPE_CODEC.encode(scope))),
-            runId,
-            "contributor-state"),
-        command(new CustomMessageCommandPayload(taskInput(scope)), runId, "task"));
+        command(new SetEnvironmentCommandPayload(stage.environment()), runId, "environment"),
+        command(new CustomMessageCommandPayload(taskInput(issue, stage)), runId, "task"));
   }
 
   private static NewThreadCommand command(ThreadCommandPayload payload, UUID runId, String role) {
@@ -775,12 +672,33 @@ public class IssueRunService {
         ("issue-run:" + runId + ":" + role).getBytes(StandardCharsets.UTF_8));
   }
 
-  /** 自动任务输入：显式指向系统指令中冻结的 Issue 上下文，不复制可变业务事实。 */
-  private static AgentMessage taskInput(ProjectRunScope scope) {
+  /**
+   * 自动任务输入：Issue 要求、阶段说明与可选的下一阶段一次渲染成可信 Markdown。
+   *
+   * <p>事实以三花括号原样插入，Issue 正文与阶段说明里的 Markdown 不会被转义；这些文本是当前 Run 开始时的事实，不是授权来源—— 交接仍只由 {@code
+   * issue_transition} 在业务事务内按活动 Run 校验。
+   */
+  private static AgentMessage taskInput(Issue issue, ProjectWorkflowState stage) {
+    List<String> nextStates = stage.next().stream().map(ProjectStateCode::value).toList();
+    String description = issue.getDescription();
+    String instructions = stage.instructions();
+    String stageInstructions =
+        instructions == null || instructions.isBlank()
+            ? "(this stage declares no additional instructions)"
+            : instructions;
     String text =
         PromptRenderer.render(
-                "fun/fengwk/kkstudio/project/prompts/messages/issue-task.md",
-                Map.of("stage", scope.stage(), "stageName", scope.stageName()))
+                TASK_MESSAGE,
+                Map.ofEntries(
+                    Map.entry("issueNumber", issue.getNumber()),
+                    Map.entry("issueTitle", issue.getTitle()),
+                    Map.entry("hasDescription", description != null && !description.isBlank()),
+                    Map.entry("issueDescription", description == null ? "" : description),
+                    Map.entry("stage", stage.state().value()),
+                    Map.entry("stageName", stage.name()),
+                    Map.entry("stageInstructions", stageInstructions),
+                    Map.entry("hasNext", !nextStates.isEmpty()),
+                    Map.entry("nextStates", String.join(", ", nextStates))))
             .stripTrailing();
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }

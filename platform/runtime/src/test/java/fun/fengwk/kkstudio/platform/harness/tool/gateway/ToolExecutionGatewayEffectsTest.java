@@ -234,6 +234,8 @@ class ToolExecutionGatewayEffectsTest {
         assertEquals(ToolGatewayTestSupport.SESSION_ID, request.context().sessionId());
         assertEquals(ToolGatewayTestSupport.ROOT_THREAD_ID, request.context().rootThreadId());
         assertEquals(ToolGatewayTestSupport.ROOT_SESSION_ID, request.context().rootSessionId());
+        assertEquals(
+            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, request.context().assistantEntryId());
         assertEquals(TurnMediaCapabilities.NONE, request.context().mediaCapabilities());
         return outcome;
       }

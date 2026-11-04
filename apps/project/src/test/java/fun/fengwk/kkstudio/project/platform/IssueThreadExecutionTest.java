@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.util.List;
@@ -181,39 +180,30 @@ class IssueThreadExecutionTest {
     verify(runtime).stop(command);
   }
 
-  /** join 查询与命令重放查询原样转发 Optional 结果。 */
+  /** join 查询原样转发 Optional 结果。 */
   @Test
   void readQueriesForwardOptionalResults() {
     UUID invocationId = UUID.randomUUID();
     ThreadJoin join = mock(ThreadJoin.class);
     ThreadJoinReceipt receipt = mock(ThreadJoinReceipt.class);
-    ThreadCommand threadCommand = mock(ThreadCommand.class);
-    UUID idempotencyKey = UUID.randomUUID();
     when(runtime.findJoin(invocationId)).thenReturn(Optional.of(join));
     when(runtime.projectJoinReceipt(invocationId)).thenReturn(Optional.of(receipt));
-    when(runtime.findThreadCommand(THREAD_ID, idempotencyKey))
-        .thenReturn(Optional.of(threadCommand));
 
     assertSame(join, port.findJoin(invocationId).orElseThrow());
     assertSame(receipt, port.projectJoinReceipt(invocationId).orElseThrow());
-    assertSame(threadCommand, port.findThreadCommand(THREAD_ID, idempotencyKey).orElseThrow());
     verify(runtime).findJoin(invocationId);
     verify(runtime).projectJoinReceipt(invocationId);
-    verify(runtime).findThreadCommand(THREAD_ID, idempotencyKey);
   }
 
-  /** 未匹配的 join / command 返回空而不制造占位对象。 */
+  /** 未匹配的 join 返回空而不制造占位对象。 */
   @Test
   void missingReadsReturnEmptyOptional() {
     UUID invocationId = UUID.randomUUID();
-    UUID idempotencyKey = UUID.randomUUID();
     when(runtime.findJoin(any())).thenReturn(Optional.empty());
     when(runtime.projectJoinReceipt(any())).thenReturn(Optional.empty());
-    when(runtime.findThreadCommand(any(), any())).thenReturn(Optional.empty());
 
     assertEquals(Optional.empty(), port.findJoin(invocationId));
     assertEquals(Optional.empty(), port.projectJoinReceipt(invocationId));
-    assertEquals(Optional.empty(), port.findThreadCommand(THREAD_ID, idempotencyKey));
   }
 
   /** 构造适配器不会提前解析运行时，避免把执行依赖拉进宿主装配顺序。 */

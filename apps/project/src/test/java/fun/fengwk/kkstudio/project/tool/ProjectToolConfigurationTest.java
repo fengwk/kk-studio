@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
@@ -10,17 +11,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
 import java.util.List;
 
-/**
- * {@link ProjectToolConfiguration} 的 Spring 装配契约：每个组件唯一暴露，且 Contributor 冻结出可显式选择的交接工具与 Run 上下文投影。
- */
+/** {@link ProjectToolConfiguration} 的 Spring 装配契约：每个组件唯一暴露，且 Contributor 只冻结可显式选择的交接工具。 */
 class ProjectToolConfigurationTest {
 
   private final ApplicationContextRunner runner =
@@ -29,6 +28,7 @@ class ProjectToolConfigurationTest {
           .withBean(ProjectRepository.class, () -> mock(ProjectRepository.class))
           .withBean(IssueRepository.class, () -> mock(IssueRepository.class))
           .withBean(IssueRunRepository.class, () -> mock(IssueRunRepository.class))
+          .withBean(IssueThreadExecution.class, () -> mock(IssueThreadExecution.class))
           .withBean(ProjectWorkflowJsonCodec.class, ProjectWorkflowJsonCodec::new)
           .withUserConfiguration(ProjectToolConfiguration.class);
 
@@ -45,11 +45,11 @@ class ProjectToolConfigurationTest {
   }
 
   /**
-   * 测试意图：Contributor 冻结出唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择），并注册 {@code
-   * project/run} custom entry type 与对应的上下文 projector；运行时不按 Thread owner 注入工具或上下文。
+   * 测试意图：Contributor 只冻结唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择）；Issue 的运行上下文由
+   * Markdown 任务消息承载，因此不再注册任何 custom entry type 或上下文 projector。
    */
   @Test
-  void freezesSelectableTransitionToolAndRunContextProjector() {
+  void freezesOnlyTheSelectableTransitionTool() {
     runner.run(
         context -> {
           HarnessCatalog catalog =
@@ -62,9 +62,8 @@ class ProjectToolConfigurationTest {
           assertEquals("project:issue.transition", tool.id().toString());
           assertEquals(List.of(tool), catalog.selectableTools());
 
-          assertEquals(1, catalog.customEntryTypes().size());
-          assertEquals(ProjectRunScope.CUSTOM_TYPE, catalog.customEntryTypes().get(0).customType());
-          assertEquals(1, catalog.contextProjectors().size());
+          assertTrue(catalog.customEntryTypes().isEmpty());
+          assertTrue(catalog.contextProjectors().isEmpty());
         });
   }
 }
