@@ -1,6 +1,10 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
+import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -18,6 +22,7 @@ import java.time.Duration;
 public class MavisHttpTransport {
 
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+  static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
   private final HttpClient client;
 
@@ -40,17 +45,26 @@ public class MavisHttpTransport {
     try {
       httpRequest = build(request);
     } catch (IllegalArgumentException error) {
-      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+      throw new MavisTransportException(error.getClass().getSimpleName());
     }
+    long deadline = System.nanoTime() + request.timeout().toNanos();
     try {
-      HttpResponse<String> response =
-          client.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-      return new MavisHttpResponse(response.statusCode(), response.body());
+      HttpResponse<InputStream> response =
+          client.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+      try (InputStream body = new DeadlineResponseBody(response.body(), deadline)) {
+        if (PluginHttpSupport.isAuthRejected(response.statusCode())) {
+          return new MavisHttpResponse(response.statusCode(), "");
+        }
+        return new MavisHttpResponse(
+            response.statusCode(),
+            new String(
+                PluginHttpSupport.readBounded(body, MAX_RESPONSE_BYTES), StandardCharsets.UTF_8));
+      }
     } catch (IOException error) {
-      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+      throw new MavisTransportException(error.getClass().getSimpleName());
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+      throw new MavisTransportException(error.getClass().getSimpleName());
     }
   }
 

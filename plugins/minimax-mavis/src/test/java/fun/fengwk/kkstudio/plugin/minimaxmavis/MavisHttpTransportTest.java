@@ -129,6 +129,22 @@ class MavisHttpTransportTest {
     assertEquals("/redirect", recorded.get(0).path());
   }
 
+  /** 网关响应超过内部上限时中止读取，错误及原因不暴露正文。 */
+  @Test
+  void rejectsOversizedBody() {
+    server.createContext(
+        "/large",
+        exchange -> finish(exchange, 200, "x".repeat(MavisHttpTransport.MAX_RESPONSE_BYTES + 1)));
+    MavisTransportException error =
+        assertThrows(
+            MavisTransportException.class,
+            () ->
+                new MavisHttpTransport()
+                    .send(new MavisHttpRequest("GET", origin + "/large", Map.of(), null, TIMEOUT)));
+    assertEquals("ResponseTooLargeException", error.getMessage());
+    assertEquals(null, error.getCause());
+  }
+
   /** 超时映射为传输错误，消息只包含 JDK 异常类型名。 */
   @Test
   void mapsRequestTimeoutToTransportException() {

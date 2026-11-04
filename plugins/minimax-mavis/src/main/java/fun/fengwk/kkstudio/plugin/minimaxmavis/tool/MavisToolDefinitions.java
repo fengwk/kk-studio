@@ -1,14 +1,13 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis.tool;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 
 import java.io.IOException;
@@ -33,10 +32,7 @@ public final class MavisToolDefinitions {
   private static final String INPUT_SCHEMA_FIELD = "inputSchema";
 
   private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+      PluginHttpSupport.strictJson(JsonMapper.builder().build());
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private MavisToolDefinitions() {}

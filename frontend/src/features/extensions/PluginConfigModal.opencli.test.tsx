@@ -50,10 +50,13 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
     expect(screen.getByText(`Rev ${opencliPluginFixture.configuration.revision}`)).toBeInTheDocument()
 
-    // 顶层 9 个标量字段渲染（以 baseUrl/connectTimeoutMillis/requestTimeoutMillis 为代表）
+    // 连接设置仍可编辑，内部响应缓冲限制不再是用户配置。
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')
     expect(screen.getByRole('textbox', { name: 'connectTimeoutMillis' })).toHaveValue('5000')
     expect(screen.getByRole('textbox', { name: 'requestTimeoutMillis' })).toHaveValue('120000')
+    for (const field of ['streamBufferBytes', 'maxJsonResponseBytes', 'maxErrorResponseBytes', 'maxOutputChars']) {
+      expect(screen.queryByRole('textbox', { name: field })).not.toBeInTheDocument()
+    }
 
     // instanceId 与 apiKey 绝对不作为普通表单输入渲染，也不在 valuesJson 暴露
     expect(screen.queryByRole('textbox', { name: 'instanceId' })).not.toBeInTheDocument()
