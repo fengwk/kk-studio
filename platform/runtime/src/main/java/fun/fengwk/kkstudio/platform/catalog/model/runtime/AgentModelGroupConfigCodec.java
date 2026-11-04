@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -36,7 +37,7 @@ public final class AgentModelGroupConfigCodec {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build()
-            .readerFor(AgentModelGroupDTO.class);
+            .readerFor(StoredGroup.class);
   }
 
   public AgentModelGroupDTO decode(String json) {
@@ -44,7 +45,8 @@ public final class AgentModelGroupConfigCodec {
       throw new IllegalArgumentException("group config must not be blank");
     }
     try {
-      AgentModelGroupDTO group = reader.readValue(json);
+      StoredGroup stored = reader.readValue(json);
+      AgentModelGroupDTO group = toDto(stored);
       validateShape(group);
       return group;
     } catch (DatabindException error) {
@@ -58,7 +60,12 @@ public final class AgentModelGroupConfigCodec {
   public String encode(AgentModelGroupDTO group) {
     validateShape(group);
     try {
-      return objectMapper.writeValueAsString(group);
+      List<StoredMember> members =
+          group.getMembers().stream()
+              .map(member -> new StoredMember(member.getModelName(), member.getVariant()))
+              .toList();
+      return objectMapper.writeValueAsString(
+          new StoredGroup(members, group.getFallbackStatusCodes(), group.getCooldownSeconds()));
     } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode model group config", error);
     }
@@ -121,6 +128,45 @@ public final class AgentModelGroupConfigCodec {
     Integer cooldown = group.getCooldownSeconds();
     if (cooldown == null || cooldown < 0) {
       throw new IllegalArgumentException("group.cooldownSeconds must be a non-negative integer");
+    }
+  }
+
+  private static AgentModelGroupDTO toDto(StoredGroup stored) {
+    if (stored == null) {
+      return null;
+    }
+    AgentModelGroupDTO group = new AgentModelGroupDTO();
+    if (stored.members() != null) {
+      List<AgentModelGroupMemberDTO> members = new ArrayList<>(stored.members().size());
+      for (StoredMember storedMember : stored.members()) {
+        if (storedMember == null) {
+          members.add(null);
+        } else {
+          AgentModelGroupMemberDTO member = new AgentModelGroupMemberDTO();
+          member.setModelName(storedMember.modelName());
+          member.setVariant(storedMember.variant());
+          members.add(member);
+        }
+      }
+      group.setMembers(members);
+    }
+    group.setFallbackStatusCodes(stored.fallbackStatusCodes());
+    group.setCooldownSeconds(stored.cooldownSeconds());
+    return group;
+  }
+
+  private record StoredGroup(
+      List<StoredMember> members, List<Integer> fallbackStatusCodes, Integer cooldownSeconds) {
+    @JsonAnySetter
+    public void rejectUnknownField(String name, Object value) {
+      throw new IllegalArgumentException("unknown model group field: " + name);
+    }
+  }
+
+  private record StoredMember(String modelName, String variant) {
+    @JsonAnySetter
+    public void rejectUnknownField(String name, Object value) {
+      throw new IllegalArgumentException("unknown model group member field: " + name);
     }
   }
 
