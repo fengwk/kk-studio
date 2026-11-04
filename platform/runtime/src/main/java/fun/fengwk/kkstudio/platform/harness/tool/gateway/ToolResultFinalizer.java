@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
@@ -360,16 +360,16 @@ public final class ToolResultFinalizer {
   /**
    * 返回该工具身份适用的文本投影内联 UTF-8 字节上限。
    *
-   * <p>只有可信内置 {@link ReadTool#NAME read} 身份使用 {@link #READ_INLINE_MAX_UTF8_BYTES}；其他工具保持 {@link
-   * #INLINE_MAX_UTF8_BYTES}。工具身份就是模型可见 name，同名冲突在运行时目录 fail-closed，因此该名称只能解析到内置 read。
+   * <p>只有可信内置 {@link FileTool#READ_NAME read} 身份使用 {@link #READ_INLINE_MAX_UTF8_BYTES}；其他工具保持
+   * {@link #INLINE_MAX_UTF8_BYTES}。工具身份就是模型可见 name，同名冲突在运行时目录 fail-closed，因此该名称只能解析到内置 read。
    */
   private static int inlineMaxUtf8Bytes(String toolName) {
-    return ReadTool.NAME.equals(toolName) ? READ_INLINE_MAX_UTF8_BYTES : INLINE_MAX_UTF8_BYTES;
+    return FileTool.READ_NAME.equals(toolName) ? READ_INLINE_MAX_UTF8_BYTES : INLINE_MAX_UTF8_BYTES;
   }
 
   /** 返回该工具身份适用的文本投影内联物理行数上限；只有可信内置 {@code read} 身份使用加宽上限。 */
   private static int inlineMaxLines(String toolName) {
-    return ReadTool.NAME.equals(toolName) ? READ_INLINE_MAX_LINES : INLINE_MAX_LINES;
+    return FileTool.READ_NAME.equals(toolName) ? READ_INLINE_MAX_LINES : INLINE_MAX_LINES;
   }
 
   /** 严格计算物理行数：空文本为 0；否则为 LF 数量加上未以 LF 结尾时的最后一行。 */

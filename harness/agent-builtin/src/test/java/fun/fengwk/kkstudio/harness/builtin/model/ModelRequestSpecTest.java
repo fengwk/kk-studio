@@ -171,7 +171,7 @@ class ModelRequestSpecTest {
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "optional", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             other,
             "other-env");
     assertThrows(
@@ -183,7 +183,7 @@ class ModelRequestSpecTest {
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional1"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "opt1", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
     assertThrows(
@@ -198,14 +198,14 @@ class ModelRequestSpecTest {
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "optional", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
     ToolBinding optionalWithoutEnv =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("optional_unbound"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "unbound", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             null,
             null);
 

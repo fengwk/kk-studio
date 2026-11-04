@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -63,8 +62,7 @@ class GoalFeatureTest {
   @Test
   void catalogFreezesGoalToolsProgressOwnershipAndAccessModes() {
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributor(
-            new ReadTool((request, listener) -> null), stubTool("task", ToolRequirements.none()));
+        new BuiltinHarnessContributor(fileTools(), stubTool("task", ToolRequirements.none()));
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
     assertTrue(catalog.findTool("create_goal").isEmpty());
@@ -298,6 +296,16 @@ class GoalFeatureTest {
     assertFalse(descriptor.description().isBlank());
     assertEquals(requiredParams, descriptor.inputSchema().required());
     assertEquals(allParams, descriptor.inputSchema().properties().keySet());
+  }
+
+  /** 冻结清单要求的五个文件工具：Goal 测试只关心目录中的 Goal 工具，文件工具用桩占位。 */
+  private static List<Tool> fileTools() {
+    return List.of(
+        stubTool("read", ToolRequirements.routed()),
+        stubTool("write", ToolRequirements.routed()),
+        stubTool("edit", ToolRequirements.routed()),
+        stubTool("grep", ToolRequirements.routed()),
+        stubTool("find", ToolRequirements.routed()));
   }
 
   private static Tool stubTool(String name, ToolRequirements requirements) {

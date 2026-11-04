@@ -364,10 +364,11 @@ ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
 [`ToolRequirements`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java) 冻结三项声明：
 
 ```text
-environmentSupport       NONE / OPTIONAL / REQUIRED
-requiredEnvironmentId    精确要求的目标 Environment；非空时 support 必须为 REQUIRED
+environmentSupport       NONE / ROUTED / REQUIRED
 stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 ```
+
+`ROUTED` 是逐调用路由的文件工具（`read`、`write`、`edit`、`grep`、`find`）：工具层面不固定执行位置，每次调用按 `path` 走 Platform VFS 或绑定的 Environment；`REQUIRED` 才表示只能在环境上执行，未选择环境时从模型工具面过滤。固定要求某个 Environment 身份的声明已删除。
 
 `REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。分支状态只经声明修改：[`BranchView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只读当前 Contributor 在当前分支上的自定义状态与用户 Goal；[`ToolOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带结果与有序的 [`AppendCustomEntry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)（错误结果不得携带），与 Tool 结果在同一事务追加。同一 Assistant 的工具共享冻结快照，因此某状态已被先前 sibling 声明 WRITE 时，后续访问在派发前被确定性拒绝。[`ContextProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数地投影为片段，平台按目录顺序把它们拼进本次请求唯一的系统指令。
 
@@ -379,16 +380,14 @@ stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 
 | 模型可见 name | 依赖 | 可见性 | 说明 |
 | --- | --- | --- | --- |
-| `read` | Platform + Environment（OPTIONAL） | SELECTABLE | `vfs:` URI 或 `fs.read`，READ_ONLY |
-| `write` / `edit` | Environment | SELECTABLE | `fs.write`（IDEMPOTENT）/ `fs.edit`（NON_IDEMPOTENT） |
-| `bash` | Environment | SELECTABLE | `process.exec`，NON_IDEMPOTENT |
-| `grep` / `find` | Environment | SELECTABLE | `fs.grep` / `fs.find`，READ_ONLY |
+| `read` / `write` / `edit` / `grep` / `find` | Platform VFS + Environment（ROUTED） | SELECTABLE | 按调用 `path` 路由：`vfs:` 走 VFS，绝对路径走环境 |
+| `bash` | Environment（REQUIRED） | SELECTABLE | `process.exec`，NON_IDEMPOTENT |
 | `lsp_goto_definition` / `lsp_workspace_symbols` / `lsp_java_decompile` | Environment | SELECTABLE | 对应 `lsp.*` 能力，READ_ONLY |
 | `task` | 无 | INTERNAL | 委派 Subagent 任务，NON_IDEMPOTENT |
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
 | `get_goal` / `update_goal` | READ / WRITE `goal.progress` | SELECTABLE | 读取用户 Goal 与进度；声明当前 Goal 的终态进度 |
 
-每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时过滤宿主工具，`read` 仍保留平台资源读取。宿主工具由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个能力，schema 与默认超时取自能力描述符，说明文本在 [`prompts/tools`](../../harness/runtime/src/main/resources/fun/fengwk/kkstudio/harness/prompts/tools/)。`read` 对 `vfs:/skills/...` 读取平台当前发布的 Skill，对 `vfs:/resources/<blobId>` 按执行上下文中冻结的 `sessionId` 校验 Session 引用（不再反查 Thread 行），媒体可送达判定只读该 `TURN_START` 冻结的 `TurnMediaCapabilities`，对绝对本地路径委托 `BoundEnvironment`。
+每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时只过滤 `REQUIRED` 工具（`bash` 与 LSP），文件工具始终可见。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`vfs:` 路径调用 [`VfsGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/VfsGateway.java)，绝对路径委托 `BoundEnvironment`，没有绑定环境时非 `vfs:` 路径返回「未执行」并提示会话目录。`bash` 与 LSP 仍由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行。
 
 Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能读取它并声明终态进度：[`GoalProgress`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgress.java)（`goalId`、`complete | blocked`、非空 `reason`）由 [`GoalProgressCodec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/goal/GoalProgressCodec.java) 严格编解码；`update_goal` 绑定执行时生效的 `goalId`，没有 Goal 或已有终态声明时拒绝。[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给只接受、不等待的 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期与异步委派的行为契约见 [内置工具与异步委派](builtin-tools.md)。
 

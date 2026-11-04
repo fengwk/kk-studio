@@ -8,6 +8,7 @@ import java.util.regex.Pattern;
  * Platform VFS URI 纯词法解析与规范化。
  *
  * <p>支持的命名空间种类（Kind）：
+ *
  * <ul>
  *   <li>{@link Kind#ROOT}：{@code vfs:/} 或 {@code vfs:}
  *   <li>{@link Kind#SESSIONS_ROOT}：{@code vfs:/sessions} 或 {@code vfs:/sessions/}
@@ -15,7 +16,8 @@ import java.util.regex.Pattern;
  *   <li>{@link Kind#SKILLS_PATH}：{@code vfs:/skills/<package>/<skill>/<relativePath>}
  *   <li>{@link Kind#RESOURCE}：{@code vfs:/resources/<blobId>}
  *   <li>{@link Kind#RESOURCES_ROOT}：{@code vfs:/resources} 或 {@code vfs:/resources/}
- *   <li>{@link Kind#SESSION_DIR}：{@code vfs:/sessions/<sessionId>} 或 {@code vfs:/sessions/<sessionId>/}
+ *   <li>{@link Kind#SESSION_DIR}：{@code vfs:/sessions/<sessionId>} 或 {@code
+ *       vfs:/sessions/<sessionId>/}
  *   <li>{@link Kind#SESSION_FILE}：{@code vfs:/sessions/<sessionId>/<sessionPath>}
  * </ul>
  */
@@ -80,8 +82,7 @@ public final class VfsPath {
       throw new IllegalArgumentException("path must not contain backslashes: " + uri);
     }
     if ("vfs:".equals(uri)) {
-      return new VfsPath(
-          Kind.ROOT, uri, "vfs:/", null, null, null, null, null, null, null, false);
+      return new VfsPath(Kind.ROOT, uri, "vfs:/", null, null, null, null, null, null, null, false);
     }
     if (!uri.startsWith("vfs:/")) {
       throw new IllegalArgumentException("path must start with vfs:/: " + uri);
@@ -96,8 +97,7 @@ public final class VfsPath {
     boolean trailingSlash = uri.endsWith("/");
     String remainder = uri.substring(5); // strip "vfs:/"
     if (remainder.isEmpty()) {
-      return new VfsPath(
-          Kind.ROOT, uri, "vfs:/", null, null, null, null, null, null, null, true);
+      return new VfsPath(Kind.ROOT, uri, "vfs:/", null, null, null, null, null, null, null, true);
     }
 
     int firstSlash = remainder.indexOf('/');

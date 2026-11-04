@@ -22,22 +22,18 @@ class ToolCatalogDtoContractTest {
 
   @Test
   void toolCatalogEntryExposesEnvironmentSupportAndRequiredEnvironmentId() throws Exception {
-    // 意图：ToolCatalogEntryDTO 包含三态环境支持枚举与可选限定环境 ID。
+    // 意图：ToolCatalogEntryDTO 只包含三态环境支持枚举，没有固定环境身份字段。
     assertEquals(
         EnvironmentSupportDTO.class,
         ToolCatalogEntryDTO.class.getDeclaredField("environmentSupport").getType());
-    assertEquals(
-        String.class,
-        ToolCatalogEntryDTO.class.getDeclaredField("requiredEnvironmentId").getType());
 
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
     dto.setName("read");
     dto.setDescription("Read a file.");
-    dto.setEnvironmentSupport(EnvironmentSupportDTO.OPTIONAL);
-    dto.setRequiredEnvironmentId(null);
+    dto.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
 
     String json = MAPPER.writeValueAsString(dto);
-    assertTrue(json.contains("\"environmentSupport\":\"OPTIONAL\""), json);
+    assertTrue(json.contains("\"environmentSupport\":\"ROUTED\""), json);
   }
 
   @Test
@@ -45,7 +41,7 @@ class ToolCatalogDtoContractTest {
     // 意图：catalog 与 Debug 共用同一个枚举，客户端只需实现一次三态语义。
     assertEquals(3, EnvironmentSupportDTO.values().length);
     assertEquals("NONE", EnvironmentSupportDTO.NONE.name());
-    assertEquals("OPTIONAL", EnvironmentSupportDTO.OPTIONAL.name());
+    assertEquals("ROUTED", EnvironmentSupportDTO.ROUTED.name());
     assertEquals("REQUIRED", EnvironmentSupportDTO.REQUIRED.name());
   }
 

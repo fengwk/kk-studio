@@ -3,7 +3,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "Absolute path on the target daemon's file system of the file, directory, or supported image to read, or a complete `vfs:` resource/skill URI. Relative paths are rejected; use a drive-rooted or UNC path such as `C:/src/app.ts` on Windows targets."
+      "description": "Absolute path on the target daemon's file system of the file, directory, or supported image to read, or a complete `vfs:` path: `vfs:/sessions/<sessionId>/...` in the conversation directory, `vfs:/resources/<blobId>` for a session resource, or `vfs:/skills/<package>/<skill>/<relativePath>` for a published skill. Relative paths are rejected; use a drive-rooted or UNC path such as `C:/src/app.ts` on Windows targets."
     },
     "offset": {
       "type": "integer",

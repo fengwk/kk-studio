@@ -77,10 +77,6 @@ public class HarnessModelRequestDebugDTO {
     /** Tool 与 Environment 的关系，与 Tool catalog 共用同一个枚举。 */
     private EnvironmentSupportDTO environmentSupport;
 
-    /** 精确要求的目标 Environment UUID（canonical UUID 文本）；不限定环境时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String requiredEnvironmentId;
-
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
     private String provenance;
 

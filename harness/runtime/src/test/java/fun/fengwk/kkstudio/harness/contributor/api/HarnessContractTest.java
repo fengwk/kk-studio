@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -115,43 +114,28 @@ class HarnessContractTest {
   /**
    * 验证 ToolRequirements 的环境关系声明、状态访问集合校验与非法组合 fail closed。
    *
-   * <p>环境关系是封闭三态：{@code NONE} 工具不参与环境绑定，{@code OPTIONAL} 工具在无环境时仍可执行，只有 {@code REQUIRED} 才允许携带精确的
-   * {@code requiredEnvironmentId}。
+   * <p>环境关系只有执行位置语义：{@code NONE} 工具不参与环境绑定，{@code ROUTED} 文件工具按每次调用的参数决定位置，{@code REQUIRED}
+   * 工具只能在绑定环境执行。固定要求某个环境身份的做法已删除，因此不再有 {@code requiredEnvironmentId}。
    */
   @Test
   void toolRequirementsValidatesAndEnforcesUniqueness() {
     ToolRequirements none = ToolRequirements.none();
     assertEquals(EnvironmentSupport.NONE, none.environmentSupport());
-    assertNull(none.requiredEnvironmentId());
     assertTrue(none.stateAccesses().isEmpty());
 
-    ToolRequirements optional = ToolRequirements.optionalEnvironment();
-    assertEquals(EnvironmentSupport.OPTIONAL, optional.environmentSupport());
-    assertNull(optional.requiredEnvironmentId());
+    ToolRequirements routed = ToolRequirements.routed();
+    assertEquals(EnvironmentSupport.ROUTED, routed.environmentSupport());
+    assertTrue(routed.stateAccesses().isEmpty());
 
     ToolRequirements env = ToolRequirements.environment();
     assertEquals(EnvironmentSupport.REQUIRED, env.environmentSupport());
-    assertNull(env.requiredEnvironmentId());
     assertTrue(env.stateAccesses().isEmpty());
-
-    EnvironmentId pinned = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-    ToolRequirements pinnedEnv = ToolRequirements.environment(pinned);
-    assertEquals(EnvironmentSupport.REQUIRED, pinnedEnv.environmentSupport());
-    assertEquals(pinned, pinnedEnv.requiredEnvironmentId());
 
     StateDeclaration read = new StateDeclaration("state.read", StateMode.READ);
     StateDeclaration write = new StateDeclaration("state.write", StateMode.WRITE);
     ToolRequirements custom = new ToolRequirements(EnvironmentSupport.NONE, List.of(read, write));
     assertEquals(EnvironmentSupport.NONE, custom.environmentSupport());
     assertEquals(List.of(read, write), custom.stateAccesses());
-
-    // requiredEnvironmentId 只对 REQUIRED 有意义：NONE/OPTIONAL 携带精确环境身份必须被拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolRequirements(EnvironmentSupport.NONE, pinned, List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolRequirements(EnvironmentSupport.OPTIONAL, pinned, List.of()));
 
     // 拒绝重复 customType
     assertThrows(

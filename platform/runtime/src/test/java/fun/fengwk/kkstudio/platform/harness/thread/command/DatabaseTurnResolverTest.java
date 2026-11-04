@@ -71,8 +71,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -136,6 +134,7 @@ import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionServ
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -517,7 +516,7 @@ class DatabaseTurnResolverTest {
         List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        EnvironmentSupport.OPTIONAL, requestSpec.toolBindings().getFirst().environmentSupport());
+        EnvironmentSupport.ROUTED, requestSpec.toolBindings().getFirst().environmentSupport());
     assertNull(requestSpec.toolBindings().getFirst().environmentId());
     assertNull(requestSpec.toolBindings().getFirst().environmentName());
 
@@ -534,7 +533,7 @@ class DatabaseTurnResolverTest {
         List.of("read"),
         skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        EnvironmentSupport.OPTIONAL, skillSpec.toolBindings().getFirst().environmentSupport());
+        EnvironmentSupport.ROUTED, skillSpec.toolBindings().getFirst().environmentSupport());
     assertNull(skillSpec.toolBindings().getFirst().environmentId());
   }
 
@@ -566,31 +565,15 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
   }
 
+  /** 只能在环境执行的工具：选定环境时冻结该环境，未选定环境时在规划期被过滤。 */
   @Test
-  void fixedRequiredEnvironmentIsFrozenAndOnlyConflictsWithAnotherSelectedEnvironment() {
-    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool", ENV_B);
+  void environmentRequiredToolIsFrozenWithTheSelectedEnvironmentOrFiltered() {
+    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool");
 
-    // branch 选择的正是该固定环境：正常冻结。
-    Fixture matching = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
+    Fixture bound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
     assertEquals(
-        ENV_B,
-        matching
-            .resolved(
-                matching.path(
-                    new BranchSettings(
-                        "assistant",
-                        BuiltinExecution.of(new ModelSelection("model", "default")),
-                        ENV_B_NAME)))
-            .toolBindings()
-            .getFirst()
-            .environmentId());
-
-    // branch 选择了另一个非 null 环境：确定性拒绝规划。
-    Fixture conflicting = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
-    TurnResolver.Rejected rejected = conflicting.rejected(conflicting.path(settings("default")));
-    assertEquals(
-        "tool fixed_tool requires environment " + ENV_B + " but branch has environment " + ENV_A,
-        rejected.error().message());
+        ENV_A,
+        bound.resolved(bound.path(settings("default"))).toolBindings().getFirst().environmentId());
 
     // branch 未选择环境：REQUIRED 工具在规划期被过滤，toolBindings 为空。
     Fixture unbound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
@@ -802,7 +785,7 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
     assertEquals(List.of("bash", "update_goal", "read"), boundNames);
     assertEquals(
-        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
+        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.ROUTED),
         requestSpec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
     assertEquals(List.of("bash", "update_goal", "read"), boundNames);
@@ -822,11 +805,11 @@ class DatabaseTurnResolverTest {
    */
   @Test
   void freezesGoalToolProvenanceWithoutProjectingUserGoalIntoSystemInstruction() {
-    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(readTool, dummyTask);
+    BuiltinHarnessContributor builtin =
+        new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask);
     HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
     Fixture fixture = new Fixture(List.of("update_goal"), List.of(), List.of(), catalog);
     BranchSettings settings =
@@ -872,7 +855,7 @@ class DatabaseTurnResolverTest {
         List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        EnvironmentSupport.OPTIONAL, requestSpec.toolBindings().getFirst().environmentSupport());
+        EnvironmentSupport.ROUTED, requestSpec.toolBindings().getFirst().environmentSupport());
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
     assertEquals(ENV_A_NAME, requestSpec.toolBindings().getFirst().environmentName());
     assertTrue(
@@ -1398,7 +1381,7 @@ class DatabaseTurnResolverTest {
    */
   @Test
   void previewPlanListsSentCandidatesBeforeFilteredRequiredCandidates() {
-    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool", ENV_B);
+    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool");
     Fixture fixture =
         new Fixture(
             List.of("bash", "fixed_tool", "update_goal", "read"),
@@ -1428,7 +1411,6 @@ class DatabaseTurnResolverTest {
 
     LiveTurnPlan.CandidateTool environmentTool = candidates.getLast();
     assertEquals(EnvironmentSupport.REQUIRED, environmentTool.environmentSupport());
-    assertEquals(ENV_B, environmentTool.requiredEnvironmentId());
     assertEquals("fixed:fixed.tool", environmentTool.provenance());
     assertEquals(
         LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, environmentTool.filterReason());
@@ -1456,8 +1438,7 @@ class DatabaseTurnResolverTest {
     }
 
     LiveTurnPlan.CandidateTool optionalTool = candidates.get(1);
-    assertEquals(EnvironmentSupport.OPTIONAL, optionalTool.environmentSupport());
-    assertNull(optionalTool.requiredEnvironmentId());
+    assertEquals(EnvironmentSupport.ROUTED, optionalTool.environmentSupport());
     assertNull(optionalTool.filterReason());
     assertEquals("builtin:read", optionalTool.provenance());
   }
@@ -2186,11 +2167,10 @@ class DatabaseTurnResolverTest {
   }
 
   static BuiltinHarnessContributor defaultBuiltinContributor() {
-    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    return new BuiltinHarnessContributor(readTool, dummyTask);
+    return new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask);
   }
 
   /** 业务 contributor 替身：一个可显式选择、无需环境的工具，加上只从本 branch 冻结 custom state 渲染的上下文 projector。 */
@@ -2581,7 +2561,7 @@ class DatabaseTurnResolverTest {
     List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
     assertEquals(List.of("bash", "update_goal", "read"), names);
     assertEquals(
-        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
+        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.ROUTED),
         spec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     assertEquals(ENV_A, spec.toolBindings().get(0).environmentId());
     assertNull(spec.toolBindings().get(1).environmentId());
@@ -2610,7 +2590,7 @@ class DatabaseTurnResolverTest {
     assertNull(boundTools.get(1).environmentName());
     assertNull(boundTools.get(1).environmentId());
     // read (OPTIONAL) -> ENV_A_NAME
-    assertEquals(EnvironmentSupport.OPTIONAL, boundTools.get(2).environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, boundTools.get(2).environmentSupport());
     assertEquals(ENV_A_NAME, boundTools.get(2).environmentName());
     assertEquals(ENV_A, boundTools.get(2).environmentId());
 
@@ -2623,7 +2603,7 @@ class DatabaseTurnResolverTest {
     assertNull(unboundTools.get(0).environmentName());
     assertNull(unboundTools.get(0).environmentId());
     assertEquals("read", unboundTools.get(1).descriptor().name());
-    assertEquals(EnvironmentSupport.OPTIONAL, unboundTools.get(1).environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, unboundTools.get(1).environmentSupport());
     assertNull(unboundTools.get(1).environmentName());
     assertNull(unboundTools.get(1).environmentId());
 
@@ -2635,7 +2615,7 @@ class DatabaseTurnResolverTest {
     assertEquals("update_goal", clearedTools.get(0).descriptor().name());
     assertEquals(EnvironmentSupport.NONE, clearedTools.get(0).environmentSupport());
     assertEquals("read", clearedTools.get(1).descriptor().name());
-    assertEquals(EnvironmentSupport.OPTIONAL, clearedTools.get(1).environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, clearedTools.get(1).environmentSupport());
     assertNull(clearedTools.get(1).environmentName());
     assertNull(clearedTools.get(1).environmentId());
   }
@@ -3093,17 +3073,15 @@ class DatabaseTurnResolverTest {
         NOW);
   }
 
-  /** 声明固定 {@code requiredEnvironmentId} 的 SELECTABLE 工具 catalog。 */
-  private static HarnessCatalog fixedEnvironmentCatalog(
-      String toolName, EnvironmentId requiredEnvironmentId) {
+  /** 声明只能在环境执行的 SELECTABLE 工具 catalog。 */
+  private static HarnessCatalog fixedEnvironmentCatalog(String toolName) {
     HarnessContributor fixedContributor =
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("fixed"), "Fixed", "1", Set.of()),
             registrar -> {
               Tool tool = mock(Tool.class);
               when(tool.descriptor()).thenReturn(hostDescriptor(toolName));
-              when(tool.requirements())
-                  .thenReturn(ToolRequirements.environment(requiredEnvironmentId));
+              when(tool.requirements()).thenReturn(ToolRequirements.environment());
               registrar.registerTool(
                   toolName.replace('_', '.'), tool, ToolVisibility.SELECTABLE, 0);
             });

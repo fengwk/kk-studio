@@ -6,22 +6,27 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.spi.VfsGateway;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskRunner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
+import java.util.List;
+
 /**
- * 装配第一方内置工具（{@code read} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
+ * 装配第一方内置工具（5 个逐调用路由的文件工具与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
  *
  * <p>核心内置装配为无条件装配（不使用 {@code @ConditionalOnBean}），确保缺失必要依赖时在启动期明确失败， 而不会静默降级并丢失最小功能集。
  *
@@ -30,10 +35,46 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 @Configuration(proxyBeanMethods = false)
 public class BuiltinHarnessContributorConfiguration {
 
+  /** 五个文件工具：{@code vfs:} 路径走 Platform VFS，绝对宿主路径走分支绑定的 Environment。 */
   @Bean
-  @ConditionalOnMissingBean
-  public ReadTool readTool(ReadToolExecutor readToolExecutor) {
-    return new ReadTool(readToolExecutor);
+  @ConditionalOnMissingBean(name = "builtinFileTools")
+  public List<Tool> builtinFileTools(VfsGateway vfsGateway) {
+    return List.of(
+        new FileTool(
+            "read",
+            FileTool.Operation.READ,
+            "read.md",
+            EnvironmentCapabilityIds.FS_READ,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway),
+        new FileTool(
+            "write",
+            FileTool.Operation.WRITE,
+            "write.md",
+            EnvironmentCapabilityIds.FS_WRITE,
+            ToolSideEffect.IDEMPOTENT,
+            vfsGateway),
+        new FileTool(
+            "edit",
+            FileTool.Operation.EDIT,
+            "edit.md",
+            EnvironmentCapabilityIds.FS_EDIT,
+            ToolSideEffect.NON_IDEMPOTENT,
+            vfsGateway),
+        new FileTool(
+            "grep",
+            FileTool.Operation.GREP,
+            "grep.md",
+            EnvironmentCapabilityIds.FS_GREP,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway),
+        new FileTool(
+            "find",
+            FileTool.Operation.FIND,
+            "find.md",
+            EnvironmentCapabilityIds.FS_FIND,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway));
   }
 
   /**
@@ -75,7 +116,8 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public BuiltinHarnessContributor builtinHarnessContributor(ReadTool readTool, TaskTool taskTool) {
-    return new BuiltinHarnessContributor(readTool, taskTool);
+  public BuiltinHarnessContributor builtinHarnessContributor(
+      List<Tool> builtinFileTools, TaskTool taskTool) {
+    return new BuiltinHarnessContributor(builtinFileTools, taskTool);
   }
 }

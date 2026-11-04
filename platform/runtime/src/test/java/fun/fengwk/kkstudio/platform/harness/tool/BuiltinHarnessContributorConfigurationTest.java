@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -9,12 +10,13 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
+import fun.fengwk.kkstudio.harness.spi.VfsGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -75,13 +77,13 @@ class BuiltinHarnessContributorConfigurationTest {
 
   @Test
   void builtinHarnessContributorRegistersInternalAndSelectableTools() {
-    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     TaskTool task = mock(TaskTool.class);
     when(task.descriptor()).thenReturn(descriptor("task"));
     when(task.requirements()).thenReturn(ToolRequirements.none());
 
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributorConfiguration().builtinHarnessContributor(readTool, task);
+        new BuiltinHarnessContributorConfiguration()
+            .builtinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     assertEquals(
@@ -89,14 +91,17 @@ class BuiltinHarnessContributorConfigurationTest {
         catalog.findTool(TaskTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.SELECTABLE,
-        catalog.findTool(ReadTool.NAME).orElseThrow().definition().visibility());
+        catalog.findTool(FileTool.READ_NAME).orElseThrow().definition().visibility());
   }
 
   @Test
-  void readToolBeanInstantiatesWithExecutor() {
-    ReadToolExecutor executor = mock(ReadToolExecutor.class);
-    ReadTool tool = new BuiltinHarnessContributorConfiguration().readTool(executor);
-    assertEquals(ReadTool.NAME, tool.descriptor().name());
+  void fileToolBeanInstantiatesExactlyTheFiveFileTools() {
+    List<Tool> tools =
+        new BuiltinHarnessContributorConfiguration().builtinFileTools(mock(VfsGateway.class));
+    assertEquals(
+        List.of("read", "write", "edit", "grep", "find"),
+        tools.stream().map(tool -> tool.descriptor().name()).toList());
+    assertTrue(tools.stream().allMatch(FileTool.class::isInstance));
   }
 
   private static ToolDescriptor descriptor(String name) {

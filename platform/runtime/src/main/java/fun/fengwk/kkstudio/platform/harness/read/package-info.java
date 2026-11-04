@@ -1,13 +1,9 @@
 /**
- * Platform 统一 {@code read} 工具执行器与相关内容读取器实现。
- *
- * <p>本包提供 {@code ReadToolExecutor} 的平台侧实现及配套组件：
+ * 平台统一读取的内容来源实现。
  *
  * <ul>
- *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformReadToolExecutor}：统一路由 {@code
- *       vfs:/skills/...}、{@code vfs:/resources/<blobId>} 与本地路径；
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformSkillContentReader}：按 {@code
- *       vfs:/skills/...} 读取 Platform bare Git cache 中的已发布 Skill 内容；
+ *       vfs:/skills/<package>/<skill>/...} 读取 Platform bare Git cache 中的已发布 Skill 内容；
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader}：按 {@code
  *       vfs:/resources/<blobId>} 读取当前会话授权的 Blob 内容；
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.TextReadWindow}：文本窗口读取和格式化工具，复刻与 daemon
@@ -16,5 +12,7 @@
  *   <li>{@link fun.fengwk.kkstudio.platform.harness.read.PlatformReadConfiguration}：自动装配上述组件的
  *       Spring 配置。
  * </ul>
+ *
+ * <p>{@code vfs:} 路径的路由与其余文件工具操作见 {@code fun.fengwk.kkstudio.platform.vfs}。
  */
 package fun.fengwk.kkstudio.platform.harness.read;

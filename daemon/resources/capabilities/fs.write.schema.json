@@ -3,7 +3,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "Absolute path on the target daemon's file system of the text file to create or intentionally overwrite as a whole file. Relative paths are rejected; Windows targets use a drive-rooted or UNC path."
+      "description": "Absolute path on the target daemon's file system of the text file to create or intentionally overwrite as a whole file, or a writable `vfs:/sessions/<sessionId>/...` path in the conversation directory. Relative paths are rejected; `vfs:/skills` and `vfs:/resources` are read-only. Windows targets use a drive-rooted or UNC path."
     },
     "content": {
       "type": "string",

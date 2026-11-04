@@ -149,8 +149,6 @@ public final class ModelRequestDebugService {
     dto.setInputSchemaJson(tool.inputSchemaJson());
     // Debug 与 Tool catalog 共用同一个 wire 枚举，两端名字一一对应。
     dto.setEnvironmentSupport(EnvironmentSupportDTO.valueOf(tool.environmentSupport().name()));
-    dto.setRequiredEnvironmentId(
-        tool.requiredEnvironmentId() == null ? null : tool.requiredEnvironmentId().toString());
     dto.setProvenance(tool.provenance());
     dto.setState(tool.state().name());
     dto.setFilterReason(tool.filterReason() == null ? null : tool.filterReason().name());

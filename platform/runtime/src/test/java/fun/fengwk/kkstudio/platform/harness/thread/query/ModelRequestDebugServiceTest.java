@@ -176,15 +176,13 @@ class ModelRequestDebugServiceTest {
     HarnessModelRequestDebugDTO.ToolDTO sent = debug.getTools().getFirst();
     assertEquals("SENT", sent.getState());
     assertNull(sent.getFilterReason());
-    assertEquals(EnvironmentSupportDTO.OPTIONAL, sent.getEnvironmentSupport());
-    assertNull(sent.getRequiredEnvironmentId());
+    assertEquals(EnvironmentSupportDTO.ROUTED, sent.getEnvironmentSupport());
     assertEquals("builtin:read", sent.getProvenance());
     assertEquals("{\"type\":\"object\"}", sent.getInputSchemaJson());
     HarnessModelRequestDebugDTO.ToolDTO filtered = debug.getTools().get(1);
     assertEquals("FILTERED", filtered.getState());
     assertEquals("ENVIRONMENT_NOT_SELECTED", filtered.getFilterReason());
     assertEquals(EnvironmentSupportDTO.REQUIRED, filtered.getEnvironmentSupport());
-    assertEquals(ENV_B.toString(), filtered.getRequiredEnvironmentId());
 
     // Skill 交付事实与 promptXml：只复用 compose 的同一渲染入口，XML 不可能漂移。
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
@@ -617,8 +615,7 @@ class ModelRequestDebugServiceTest {
                 "read",
                 "Read a file.",
                 "{\"type\":\"object\"}",
-                EnvironmentSupport.OPTIONAL,
-                null,
+                EnvironmentSupport.ROUTED,
                 "builtin:read",
                 LiveTurnPlan.ToolState.SENT,
                 null),
@@ -627,7 +624,6 @@ class ModelRequestDebugServiceTest {
                 "Run a command.",
                 "{\"type\":\"object\"}",
                 EnvironmentSupport.REQUIRED,
-                ENV_B,
                 "builtin:environment.bash",
                 LiveTurnPlan.ToolState.FILTERED,
                 LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED)),

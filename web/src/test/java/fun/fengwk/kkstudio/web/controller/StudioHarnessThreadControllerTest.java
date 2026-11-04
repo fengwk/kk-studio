@@ -399,7 +399,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.systemInstruction").value("system instruction"))
         .andExpect(jsonPath("$.data.tools[0].name").value("read"))
         .andExpect(jsonPath("$.data.tools[0].state").value("SENT"))
-        .andExpect(jsonPath("$.data.tools[0].environmentSupport").value("OPTIONAL"))
+        .andExpect(jsonPath("$.data.tools[0].environmentSupport").value("ROUTED"))
         .andExpect(jsonPath("$.data.tools[0].filterReason").value(nullValue()))
         .andExpect(jsonPath("$.data.tools[1].name").value("bash"))
         .andExpect(jsonPath("$.data.tools[1].state").value("FILTERED"))
@@ -532,8 +532,7 @@ class StudioHarnessThreadControllerTest {
     sent.setName("read");
     sent.setDescription("Read a file.");
     sent.setInputSchemaJson("{\"type\":\"object\"}");
-    sent.setEnvironmentSupport(EnvironmentSupportDTO.OPTIONAL);
-    sent.setRequiredEnvironmentId(null);
+    sent.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
     sent.setProvenance("builtin:read");
     sent.setState("SENT");
     sent.setFilterReason(null);
@@ -543,7 +542,6 @@ class StudioHarnessThreadControllerTest {
     filtered.setDescription("Run a command.");
     filtered.setInputSchemaJson("{\"type\":\"object\"}");
     filtered.setEnvironmentSupport(EnvironmentSupportDTO.REQUIRED);
-    filtered.setRequiredEnvironmentId(null);
     filtered.setProvenance("builtin:bash");
     filtered.setState("FILTERED");
     filtered.setFilterReason("ENVIRONMENT_NOT_SELECTED");

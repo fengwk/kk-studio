@@ -11,8 +11,9 @@ import org.springframework.context.ApplicationContext;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
@@ -28,7 +29,7 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
   @Autowired private List<HarnessContributor> contributors;
   @Autowired private BuiltinHarnessContributor builtinContributor;
   @Autowired private HarnessCatalog harnessCatalog;
-  @Autowired private ReadTool readTool;
+  @Autowired private List<Tool> builtinFileTools;
   @Autowired private TaskTool taskTool;
   @Autowired private ApplicationContext context;
 
@@ -47,7 +48,7 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
     RuntimeToolCatalogSource source = context.getBean(RuntimeToolCatalogSource.class);
     assertSame(context.getBean("runtimeToolCatalogSource"), source);
     try (RuntimeToolCatalogSource.Lease lease = source.acquire()) {
-      assertTrue(lease.catalog().findTool(ReadTool.NAME).isPresent());
+      assertTrue(lease.catalog().findTool(FileTool.READ_NAME).isPresent());
       assertTrue(lease.harnessCatalog().findTool(TaskTool.NAME).isPresent());
     }
   }
@@ -56,18 +57,21 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
   void registersBuiltinContributorAndExposesToolsThroughCatalog() {
     assertTrue(contributors.contains(builtinContributor));
     assertEquals(BuiltinHarnessContributor.ID, builtinContributor.descriptor().id());
-    assertEquals(ReadTool.NAME, readTool.descriptor().name());
+    assertEquals(
+        List.of("read", "write", "edit", "grep", "find"),
+        builtinFileTools.stream().map(tool -> tool.descriptor().name()).toList());
+    assertTrue(builtinFileTools.stream().allMatch(FileTool.class::isInstance));
     assertEquals(TaskTool.NAME, taskTool.descriptor().name());
 
-    assertTrue(harnessCatalog.findTool(ReadTool.NAME).isPresent());
+    assertTrue(harnessCatalog.findTool(FileTool.READ_NAME).isPresent());
     assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
     assertTrue(harnessCatalog.findTool("update_goal").isPresent());
     // Goal 正文由用户维护：内建 catalog 不再暴露任何 Goal 创建工具。
     assertTrue(harnessCatalog.findTool("create_goal").isEmpty());
 
     assertEquals(
-        ReadTool.NAME,
-        harnessCatalog.findTool(ReadTool.NAME).orElseThrow().definition().descriptor().name());
+        FileTool.READ_NAME,
+        harnessCatalog.findTool(FileTool.READ_NAME).orElseThrow().definition().descriptor().name());
     assertEquals(
         TaskTool.NAME,
         harnessCatalog.findTool(TaskTool.NAME).orElseThrow().definition().descriptor().name());

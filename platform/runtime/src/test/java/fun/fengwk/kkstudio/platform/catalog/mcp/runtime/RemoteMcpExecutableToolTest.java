@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -78,7 +77,6 @@ class RemoteMcpExecutableToolTest {
     assertEquals(descriptor, tool.descriptor());
     assertNotNull(tool.requirements());
     assertEquals(EnvironmentSupport.NONE, tool.requirements().environmentSupport());
-    assertNull(tool.requirements().requiredEnvironmentId());
   }
 
   @Test

@@ -976,12 +976,12 @@ export interface EnvironmentRuntimeStatusDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
   | 'NONE'
-  | 'OPTIONAL'
+  | 'ROUTED'
   | 'REQUIRED'
 
 export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = [
   'NONE',
-  'OPTIONAL',
+  'ROUTED',
   'REQUIRED',
 ]
 
@@ -1205,7 +1205,6 @@ export interface HarnessModelRequestDebugToolDTO {
   description: string
   inputSchemaJson: string
   environmentSupport: EnvironmentSupportDTO
-  requiredEnvironmentId: string | null
   provenance: string
   state: string
   filterReason: string | null
@@ -2142,7 +2141,6 @@ export interface ToolCatalogEntryDTO {
   name: string
   description: string
   environmentSupport?: EnvironmentSupportDTO | null
-  requiredEnvironmentId?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO */

@@ -104,7 +104,7 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
           name: 'read',
           description: 'Read file content from a repository path.',
           inputSchemaJson: '{"type":"object","properties":{"path":{"type":"string"}}}',
-          environmentSupport: 'OPTIONAL',
+          environmentSupport: 'ROUTED',
           requiredEnvironmentId: null,
           provenance: 'builtin:read',
           state: 'SENT',

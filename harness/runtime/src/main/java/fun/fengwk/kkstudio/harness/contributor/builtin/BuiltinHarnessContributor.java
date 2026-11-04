@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentPrompts;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.input.AskUserTool;
@@ -20,6 +19,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -28,7 +28,7 @@ import java.util.Set;
  *
  * <p>集中注册 13 个内置工具（统一 {@code read}、8 个宿主 Environment capability 工具、{@code task} internal 工具、 2 个
  * Goal 工具、{@code ask_user} 人工输入工具）与 {@code goal.progress} 自定义 Entry 类型。其中 {@code read} 声明 {@link
- * EnvironmentSupport#OPTIONAL}，其余 8 个宿主工具声明 {@link EnvironmentSupport#REQUIRED}， {@code task}、Goal
+ * EnvironmentSupport#ROUTED}，其余 8 个宿主工具声明 {@link EnvironmentSupport#REQUIRED}， {@code task}、Goal
  * 工具与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。目标正文只由用户在 branch settings 中维护，因此没有创建工具、
  * 也没有把 Goal 提升为 systemInstruction 的 context projector；{@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，
  * 本 Contributor 只提供它的模型可见契约。
@@ -43,17 +43,30 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
 
-  private final ReadTool readTool;
+  private static final List<String> FILE_TOOL_NAMES =
+      List.of("read", "write", "edit", "grep", "find");
+
+  private final List<Tool> fileTools;
   private final Tool taskTool;
 
-  public BuiltinHarnessContributor(ReadTool readTool, Tool taskTool) {
-    this.readTool = Objects.requireNonNull(readTool, "readTool");
+  public BuiltinHarnessContributor(List<Tool> fileTools, Tool taskTool) {
+    this.fileTools = List.copyOf(Objects.requireNonNull(fileTools, "fileTools"));
     this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
-    ToolDescriptor readDescriptor = this.readTool.descriptor();
-    if (readDescriptor == null || !"read".equals(readDescriptor.name())) {
-      throw new IllegalArgumentException(
-          "readTool descriptor name must be \"read\", got "
-              + (readDescriptor == null ? "null" : "\"" + readDescriptor.name() + "\""));
+    if (this.fileTools.size() != FILE_TOOL_NAMES.size()) {
+      throw new IllegalArgumentException("fileTools must contain exactly " + FILE_TOOL_NAMES);
+    }
+    for (int index = 0; index < FILE_TOOL_NAMES.size(); index++) {
+      ToolDescriptor descriptor = this.fileTools.get(index).descriptor();
+      String expected = FILE_TOOL_NAMES.get(index);
+      if (descriptor == null || !expected.equals(descriptor.name())) {
+        throw new IllegalArgumentException(
+            "fileTools["
+                + index
+                + "] descriptor name must be \""
+                + expected
+                + "\", got "
+                + (descriptor == null ? "null" : "\"" + descriptor.name() + "\""));
+      }
     }
     ToolDescriptor taskDescriptor = this.taskTool.descriptor();
     if (taskDescriptor == null || !"task".equals(taskDescriptor.name())) {
@@ -72,40 +85,19 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
 
-    // 统一 read 工具（SELECTABLE, priority 0, optionalEnvironment）
-    registrar.registerTool("read", readTool, ToolVisibility.SELECTABLE, 0);
+    // 5 个逐调用路由的文件工具（SELECTABLE, priority 0, routed）
+    for (int index = 0; index < FILE_TOOL_NAMES.size(); index++) {
+      registrar.registerTool(
+          FILE_TOOL_NAMES.get(index), fileTools.get(index), ToolVisibility.SELECTABLE, 0);
+    }
 
-    // 8 个 Environment capability 工具（write/edit/bash/grep/find + 3 个 LSP）
-    registerEnvironment(
-        registrar,
-        "environment.write",
-        "write",
-        EnvironmentCapabilityIds.FS_WRITE,
-        ToolSideEffect.IDEMPOTENT);
-    registerEnvironment(
-        registrar,
-        "environment.edit",
-        "edit",
-        EnvironmentCapabilityIds.FS_EDIT,
-        ToolSideEffect.NON_IDEMPOTENT);
+    // 只能在环境执行的内置工具：bash 与 3 个 LSP
     registerEnvironment(
         registrar,
         "environment.bash",
         "bash",
         EnvironmentCapabilityIds.PROCESS_EXEC,
         ToolSideEffect.NON_IDEMPOTENT);
-    registerEnvironment(
-        registrar,
-        "environment.grep",
-        "grep",
-        EnvironmentCapabilityIds.FS_GREP,
-        ToolSideEffect.READ_ONLY);
-    registerEnvironment(
-        registrar,
-        "environment.find",
-        "find",
-        EnvironmentCapabilityIds.FS_FIND,
-        ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.lsp-goto-definition",

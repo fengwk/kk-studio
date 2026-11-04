@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.spi.VfsGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -152,7 +153,7 @@ class BuiltinHistoryRenderersTest {
   }
 
   /**
-   * 验证全部 5 个内建工具（EnvironmentCapabilityTool、ReadTool、GetGoalTool、UpdateGoalTool、TaskTool） 均通过
+   * 验证全部 5 个内建工具（EnvironmentCapabilityTool、FileTool、GetGoalTool、UpdateGoalTool、TaskTool） 均通过
    * historyRenderer() 暴露渲染器，且该渲染器为确定性纯函数：同一合法输入连续两次调用返回相同非空结果，同一非法输入连续两次调用返回相同 empty。
    */
   @Test
@@ -170,8 +171,15 @@ class BuiltinHistoryRenderersTest {
             fsReadDesc.defaultTimeout());
     Tool envTool = new EnvironmentCapabilityTool(envToolDesc, fsReadDesc);
 
-    // 构造 2: ReadTool
-    Tool readTool = new ReadTool((request, listener) -> null);
+    // 构造 2: FileTool（read）
+    Tool readTool =
+        new FileTool(
+            FileTool.READ_NAME,
+            FileTool.Operation.READ,
+            "read.md",
+            EnvironmentCapabilityIds.FS_READ,
+            ToolSideEffect.READ_ONLY,
+            mock(VfsGateway.class));
 
     // 构造 3: GetGoalTool
     Tool getGoalTool = new GetGoalTool();

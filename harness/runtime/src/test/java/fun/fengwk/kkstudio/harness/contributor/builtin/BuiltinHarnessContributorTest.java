@@ -24,12 +24,13 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.input.AskUserTool;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.spi.VfsGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -46,7 +47,7 @@ import java.util.stream.Collectors;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (13 tools: 1 read + 8 environment + 1 internal task + 2 goal + 1 ask_user),
+ * <p>验证 exact inventory (13 tools: 5 file + 4 environment + 1 internal task + 2 goal + 1 ask_user),
  * visibility/requirements/capability 映射, 稳定模型可见 name, goal.progress ownership（无 Goal projector）,
  * 和全局唯一性。
  */
@@ -55,7 +56,7 @@ class BuiltinHarnessContributorTest {
   @Test
   void contributorDescriptorMatchesSpecification() {
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributor(stubReadTool(), stubTool("task", ToolRequirements.none()));
+        new BuiltinHarnessContributor(stubFileTools(), stubTool("task", ToolRequirements.none()));
     ContributorDescriptor descriptor = contributor.descriptor();
 
     assertEquals(new ContributorId("builtin"), descriptor.id());
@@ -70,56 +71,53 @@ class BuiltinHarnessContributorTest {
         NullPointerException.class,
         () -> new BuiltinHarnessContributor(null, stubTool("task", ToolRequirements.none())));
     assertThrows(
-        NullPointerException.class, () -> new BuiltinHarnessContributor(stubReadTool(), null));
+        NullPointerException.class, () -> new BuiltinHarnessContributor(stubFileTools(), null));
   }
 
   @Test
   void constructorRejectsIncorrectOrSwappedTools() {
-    // 传错 readTool 名字
-    ReadTool badReadTool = mock(ReadTool.class);
-    ToolDescriptor badReadDesc =
-        new ToolDescriptor(
-            "other",
-            "desc",
-            "other",
-            new InputSchema(null, Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ZERO);
-    when(badReadTool.descriptor()).thenReturn(badReadDesc);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new BuiltinHarnessContributor(badReadTool, stubTool("task", ToolRequirements.none())));
-
-    // readTool descriptor 为 null
-    ReadTool nullDescReadTool = mock(ReadTool.class);
-    when(nullDescReadTool.descriptor()).thenReturn(null);
+    // 文件工具顺序与名字必须与冻结的 5 项清单一致：把 read 换成别的名字即被拒绝
+    List<Tool> wrongFileTools =
+        List.of(
+            stubTool("other", ToolRequirements.routed()),
+            stubTool("write", ToolRequirements.routed()),
+            stubTool("edit", ToolRequirements.routed()),
+            stubTool("grep", ToolRequirements.routed()),
+            stubTool("find", ToolRequirements.routed()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                nullDescReadTool, stubTool("task", ToolRequirements.none())));
+                wrongFileTools, stubTool("task", ToolRequirements.none())));
+
+    // 文件工具数量不足同样被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new BuiltinHarnessContributor(
+                List.of(stubTool("read", ToolRequirements.routed())),
+                stubTool("task", ToolRequirements.none())));
 
     // 传错 taskTool 名字
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                stubReadTool(), stubTool("other", ToolRequirements.none())));
+                stubFileTools(), stubTool("other", ToolRequirements.none())));
 
     // taskTool descriptor 为 null
     Tool nullDescTask = mock(Tool.class);
     when(nullDescTask.descriptor()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new BuiltinHarnessContributor(stubReadTool(), nullDescTask));
+        () -> new BuiltinHarnessContributor(stubFileTools(), nullDescTask));
   }
 
   @Test
   void catalogFreezesExactInventoryOf12ToolsAndAssociatedCapabilities() {
-    ReadTool readTool = stubReadTool();
+    List<Tool> fileTools = stubFileTools();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(readTool, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -136,24 +134,39 @@ class BuiltinHarnessContributorTest {
     List<ToolContribution> selectables = catalog.selectableTools();
     assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
 
-    // 统一 read 工具（SELECTABLE, localName=read, name=read, OPTIONAL, ReadTool 实例）
-    assertReadTool(catalog);
-
-    // 8 个 Environment Capability 工具（SELECTABLE, REQUIRED, EnvironmentCapabilityTool 实例）
-    assertEnvironmentTool(
+    // 5 个逐调用路由的文件工具（SELECTABLE, localName=name, ROUTED）
+    assertFileTool(
+        catalog,
+        "read",
+        EnvironmentCapabilityIds.FS_READ,
+        ToolSideEffect.READ_ONLY,
+        Duration.ofMinutes(1));
+    assertFileTool(
         catalog,
         "write",
-        "environment.write",
         EnvironmentCapabilityIds.FS_WRITE,
         ToolSideEffect.IDEMPOTENT,
         Duration.ofMinutes(1));
-    assertEnvironmentTool(
+    assertFileTool(
         catalog,
         "edit",
-        "environment.edit",
         EnvironmentCapabilityIds.FS_EDIT,
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMinutes(1));
+    assertFileTool(
+        catalog,
+        "grep",
+        EnvironmentCapabilityIds.FS_GREP,
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(15));
+    assertFileTool(
+        catalog,
+        "find",
+        EnvironmentCapabilityIds.FS_FIND,
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(15));
+
+    // 4 个只能在环境执行的工具（SELECTABLE, REQUIRED, EnvironmentCapabilityTool 实例）
     assertEnvironmentTool(
         catalog,
         "bash",
@@ -161,20 +174,6 @@ class BuiltinHarnessContributorTest {
         EnvironmentCapabilityIds.PROCESS_EXEC,
         ToolSideEffect.NON_IDEMPOTENT,
         Duration.ofMinutes(5));
-    assertEnvironmentTool(
-        catalog,
-        "grep",
-        "environment.grep",
-        EnvironmentCapabilityIds.FS_GREP,
-        ToolSideEffect.READ_ONLY,
-        Duration.ofSeconds(15));
-    assertEnvironmentTool(
-        catalog,
-        "find",
-        "environment.find",
-        EnvironmentCapabilityIds.FS_FIND,
-        ToolSideEffect.READ_ONLY,
-        Duration.ofSeconds(15));
     assertEnvironmentTool(
         catalog,
         "lsp_goto_definition",
@@ -234,20 +233,19 @@ class BuiltinHarnessContributorTest {
   }
 
   /**
-   * 验证 BuiltinHarnessContributor 只注册固定的环境相关能力工具，绝不泄漏任何 MCP 相关工具身份。
+   * 验证内置 contributor 的模型工具面恰好是 5 个文件工具加 4 个环境专用工具，不泄漏任何 MCP 身份。
    *
-   * <p>环境能力目录本身已不含 MCP：Platform 只通过 Streamable HTTP 在 Backend 内实现 MCP，因此内置 contributor
-   * 的模型工具集合必须恰好等于工作目录与文件读取相关的 9 项能力（统一 read + 8 个宿主能力）。
+   * <p>文件工具不再固定绑定环境能力实现：它们按每次调用的路径在 Platform VFS 与 BoundEnvironment 之间路由。
    */
   @Test
-  void builtinToolsAreExactlyReadPlusTheEightHostCapabilities() {
+  void builtinToolsAreExactlyTheFiveFileToolsPlusFourHostCapabilities() {
     assertTrue(
         EnvironmentCapabilityCatalog.descriptors().stream()
             .noneMatch(descriptor -> descriptor.id().value().contains("mcp")));
 
-    ReadTool readTool = stubReadTool();
+    List<Tool> fileTools = stubFileTools();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(readTool, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -264,11 +262,7 @@ class BuiltinHarnessContributorTest {
 
     Set<EnvironmentCapabilityId> expectedHostCapabilityIds =
         Set.of(
-            EnvironmentCapabilityIds.FS_WRITE,
-            EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.PROCESS_EXEC,
-            EnvironmentCapabilityIds.FS_GREP,
-            EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
@@ -280,14 +274,24 @@ class BuiltinHarnessContributorTest {
             .map(EnvironmentCapabilityTool.class::cast)
             .toList();
 
-    assertEquals(8, envTools.size(), "Environment capability backed tools count must be exactly 8");
+    assertEquals(4, envTools.size(), "Environment capability backed tools count must be exactly 4");
 
     Set<EnvironmentCapabilityId> registeredCapabilityIds =
         envTools.stream().map(tool -> tool.capability().id()).collect(Collectors.toSet());
 
     assertEquals(expectedHostCapabilityIds, registeredCapabilityIds);
 
-    // 2. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置工具名（1 个 read + 8 个宿主能力）
+    // 2. 文件工具的模型可见 name 集合恰好是五个文件工具
+    Set<String> expectedFileToolNames = Set.of("read", "write", "edit", "grep", "find");
+    Set<String> registeredFileToolNames =
+        catalog.tools().stream()
+            .filter(t -> t.tool() instanceof FileTool)
+            .map(t -> t.definition().descriptor().name())
+            .collect(Collectors.toSet());
+
+    assertEquals(expectedFileToolNames, registeredFileToolNames);
+
+    // 3. 两类工具合起来是 9 个带宿主能力语义的工具（5 + 4）
     Set<String> expectedToolNames =
         Set.of(
             "read",
@@ -299,39 +303,45 @@ class BuiltinHarnessContributorTest {
             "lsp_goto_definition",
             "lsp_workspace_symbols",
             "lsp_java_decompile");
-
     Set<String> registeredToolNames =
         catalog.tools().stream()
             .filter(
-                t -> t.tool() instanceof EnvironmentCapabilityTool || t.tool() instanceof ReadTool)
+                t -> t.tool() instanceof EnvironmentCapabilityTool || t.tool() instanceof FileTool)
             .map(t -> t.definition().descriptor().name())
             .collect(Collectors.toSet());
 
     assertEquals(expectedToolNames, registeredToolNames);
   }
 
-  private static void assertReadTool(HarnessCatalog catalog) {
-    ToolContribution tool = catalog.findTool("read").orElseThrow();
+  private static void assertFileTool(
+      HarnessCatalog catalog,
+      String toolName,
+      EnvironmentCapabilityId capabilityId,
+      ToolSideEffect sideEffect,
+      Duration defaultTimeout) {
+    ToolContribution tool = catalog.findTool(toolName).orElseThrow();
     assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
-    assertEquals(new ContributionId(new ContributorId("builtin"), "read"), tool.id());
-    assertEquals(ToolRequirements.optionalEnvironment(), tool.requirements());
-    assertEquals(EnvironmentSupport.OPTIONAL, tool.requirements().environmentSupport());
+    assertEquals(new ContributionId(new ContributorId("builtin"), toolName), tool.id());
+    assertEquals(ToolRequirements.routed(), tool.requirements());
+    assertEquals(EnvironmentSupport.ROUTED, tool.requirements().environmentSupport());
 
-    assertInstanceOf(ReadTool.class, tool.tool());
+    assertInstanceOf(FileTool.class, tool.tool());
 
     ToolDescriptor descriptor = tool.definition().descriptor();
-    assertEquals("read", descriptor.name());
-    assertEquals("read", descriptor.rendererKey());
-    assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
+    assertEquals(toolName, descriptor.name());
+    assertEquals(toolName, descriptor.rendererKey());
+    assertEquals(sideEffect, descriptor.sideEffect());
 
-    EnvironmentCapabilityDescriptor fsRead =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
-    assertEquals(fsRead.inputSchema(), descriptor.inputSchema());
-    assertEquals(fsRead.defaultTimeout(), descriptor.defaultTimeout());
+    EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
+    assertEquals(capability.inputSchema(), descriptor.inputSchema());
+    assertEquals(defaultTimeout, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
     assertFalse(descriptor.description().contains("workdir"));
-    assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
-    assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
+    if ("read".equals(toolName)) {
+      // read 的模型提示词必须声明两种 vfs: 只读形态，避免模型猜测不存在的路径。
+      assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
+      assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
+    }
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
@@ -445,7 +455,7 @@ class BuiltinHarnessContributorTest {
         HarnessCatalog.from(
             List.of(
                 new BuiltinHarnessContributor(
-                    stubReadTool(), stubTool("task", ToolRequirements.none()))));
+                    stubFileTools(), stubTool("task", ToolRequirements.none()))));
 
     String description =
         catalog.findTool("bash").orElseThrow().definition().descriptor().description();
@@ -455,8 +465,45 @@ class BuiltinHarnessContributorTest {
     assertTrue(description.contains("configured shell"), description);
   }
 
-  private static ReadTool stubReadTool() {
-    return new ReadTool((request, listener) -> null);
+  /** 五个真实 FileTool：名字、顺序与 capability 绑定必须与 Contributor 冻结的清单一致。 */
+  private static List<Tool> stubFileTools() {
+    VfsGateway vfsGateway = mock(VfsGateway.class);
+    return List.of(
+        new FileTool(
+            "read",
+            FileTool.Operation.READ,
+            "read.md",
+            EnvironmentCapabilityIds.FS_READ,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway),
+        new FileTool(
+            "write",
+            FileTool.Operation.WRITE,
+            "write.md",
+            EnvironmentCapabilityIds.FS_WRITE,
+            ToolSideEffect.IDEMPOTENT,
+            vfsGateway),
+        new FileTool(
+            "edit",
+            FileTool.Operation.EDIT,
+            "edit.md",
+            EnvironmentCapabilityIds.FS_EDIT,
+            ToolSideEffect.NON_IDEMPOTENT,
+            vfsGateway),
+        new FileTool(
+            "grep",
+            FileTool.Operation.GREP,
+            "grep.md",
+            EnvironmentCapabilityIds.FS_GREP,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway),
+        new FileTool(
+            "find",
+            FileTool.Operation.FIND,
+            "find.md",
+            EnvironmentCapabilityIds.FS_FIND,
+            ToolSideEffect.READ_ONLY,
+            vfsGateway));
   }
 
   private static Tool stubTool(String name, ToolRequirements requirements) {

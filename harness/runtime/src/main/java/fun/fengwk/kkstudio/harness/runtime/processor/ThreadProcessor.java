@@ -32,8 +32,10 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
@@ -457,8 +459,9 @@ public final class ThreadProcessor {
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
           readyRequested = true;
-          EnvironmentId environmentId =
-              invocation.binding() == null ? null : invocation.binding().environmentId();
+          // 只有只能在环境上执行的工具才把 Work 路由到环境：逐调用路由的文件工具由 Platform VFS 与
+          // 执行时的参数决定位置，vfs: 路径不得等待环境上线。
+          EnvironmentId environmentId = requiredEnvironmentId(invocation);
           tx.work().request(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
         }
       }
@@ -932,6 +935,15 @@ public final class ThreadProcessor {
                 : executed,
             accepted == null ? null : accepted.capabilities()),
         entry.createdAt());
+  }
+
+  /** 只有只能在环境上执行的工具才把 Tool Work 路由到环境；逐调用路由的文件工具不等待环境。 */
+  private static EnvironmentId requiredEnvironmentId(ToolInvocation invocation) {
+    ToolBinding binding = invocation.binding();
+    if (binding == null || binding.environmentSupport() != EnvironmentSupport.REQUIRED) {
+      return null;
+    }
+    return binding.environmentId();
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */

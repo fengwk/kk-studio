@@ -406,7 +406,7 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
-`NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
+`NONE`、`ROUTED` 工具保留，未选环境时只过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
@@ -480,6 +480,20 @@ Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Reso
 history materializer 在 mandatory transaction 中锁 READY upload、复验权威媒体事实、
 retain Session 引用并删除 upload owner，整体回滚保留可回收上传。
 Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harness-environment.md)。
+
+## 会话文件与 VFS
+
+文件工具的 `vfs:` 路径由 [`platform/vfs`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/vfs/) 执行；
+命名空间固定为 `vfs:/sessions/<执行根会话>/`（可读写）、`vfs:/resources/<blobId>` 与
+`vfs:/skills/<package>/<skill>/...`（只读）。执行根会话取自工具执行上下文，其他会话 ID 与不存在的路径一样返回不存在；
+`threads/<线程 ID>/` 只接受当前对话的线程。只读前缀的写入与编辑在网关准入（权限评估与 YOLO 之前）与执行入口各判定一次，
+文案说明拒绝原因与可写位置，声明未执行。
+
+会话文件存于 `session_file(session_id, path, blob_id, revision, updated_at)`，目录由路径推导。
+写入先经 `StorageUploadService.stage` 在事务外落新 Blob，再在短事务内 retain Session 引用并按 revision 条件更新；
+成功后释放不再被同会话其他文件引用的旧 Blob。会话文件 Blob 同样进入 `session_blob_ref`，因此 Session 删除沿用既有释放路径，
+`session_file` 行随既有的关系删除回调清理。每会话 2000 个文件、单文件 8 MiB、总计 64 MiB。
+`edit` 用读到的 revision 做条件更新，冲突是确定失败而不是不确定执行。
 
 ## Environment
 

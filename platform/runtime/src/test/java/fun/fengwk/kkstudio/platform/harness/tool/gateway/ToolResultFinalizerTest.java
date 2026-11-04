@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
@@ -520,7 +520,7 @@ class ToolResultFinalizerTest {
   void builtinReadIdentityIsTheTrustedNameTheFinalizerWidens() {
     // 工具身份就是模型可见 name：CompositeRuntimeToolCatalog 对跨源/同源同名 fail-closed，
     // 因此 "read" 只能解析到内置 read 工具，任意 MCP 同名工具无法借此放宽预算。
-    assertEquals("read", ReadTool.NAME);
+    assertEquals("read", FileTool.READ_NAME);
   }
 
   /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不再被 50 KiB 二次外化。 */
@@ -544,7 +544,7 @@ class ToolResultFinalizerTest {
             ToolResultFinalizer.Outcome.Success.class,
             finalizer(store)
                 .finalizeResult(
-                    ReadTool.NAME,
+                    FileTool.READ_NAME,
                     new ToolResult(
                         "call-1", List.of(new TextResultContent(payload)), false, "{}")));
 
@@ -570,7 +570,7 @@ class ToolResultFinalizerTest {
               ToolResultFinalizer.Outcome.Success.class,
               finalizer(store)
                   .finalizeResult(
-                      ReadTool.NAME,
+                      FileTool.READ_NAME,
                       new ToolResult(
                           "call-1", List.of(new TextResultContent(payload)), false, "{}")));
       assertTrue(store.puts.isEmpty());
@@ -589,7 +589,7 @@ class ToolResultFinalizerTest {
             ToolResultFinalizer.Outcome.Success.class,
             finalizer(byteStore)
                 .finalizeResult(
-                    ReadTool.NAME,
+                    FileTool.READ_NAME,
                     new ToolResult(
                         "call-1", List.of(new TextResultContent(oversized)), false, "{}")));
     assertEquals(1, byteStore.puts.size());
@@ -606,7 +606,7 @@ class ToolResultFinalizerTest {
             ToolResultFinalizer.Outcome.Success.class,
             finalizer(lineStore)
                 .finalizeResult(
-                    ReadTool.NAME,
+                    FileTool.READ_NAME,
                     new ToolResult(
                         "call-2", List.of(new TextResultContent(manyLines)), false, "{}")));
     assertEquals(1, lineStore.puts.size());
@@ -627,7 +627,7 @@ class ToolResultFinalizerTest {
         ToolResultFinalizer.Outcome.Success.class,
         finalizer(readStore)
             .finalizeResult(
-                ReadTool.NAME,
+                FileTool.READ_NAME,
                 new ToolResult(
                     "call-1", List.of(new TextResultContent(overDefault)), false, "{}")));
     assertTrue(readStore.puts.isEmpty());
@@ -669,7 +669,7 @@ class ToolResultFinalizerTest {
     ToolResultFinalizer.Outcome.Failed failed =
         assertInstanceOf(
             ToolResultFinalizer.Outcome.Failed.class,
-            finalizer(store).finalizeResult(ReadTool.NAME, result));
+            finalizer(store).finalizeResult(FileTool.READ_NAME, result));
 
     assertEquals(ToolResultFinalizer.INVALID_RESULT_KIND, failed.error().kind());
     assertTrue(store.puts.isEmpty());
@@ -685,7 +685,7 @@ class ToolResultFinalizerTest {
     ToolResultFinalizer.Outcome.Failed failed =
         assertInstanceOf(
             ToolResultFinalizer.Outcome.Failed.class,
-            finalizer(store, 100).finalizeResult(ReadTool.NAME, oversized));
+            finalizer(store, 100).finalizeResult(FileTool.READ_NAME, oversized));
 
     assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.error().kind());
     assertTrue(store.puts.isEmpty());
@@ -702,7 +702,7 @@ class ToolResultFinalizerTest {
             ToolResultFinalizer.Outcome.Success.class,
             finalizer(store)
                 .finalizeResult(
-                    ReadTool.NAME,
+                    FileTool.READ_NAME,
                     new ToolResult(
                         "call-1",
                         List.of(new BinaryResultContent("image/png", png)),

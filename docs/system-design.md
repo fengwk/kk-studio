@@ -142,11 +142,11 @@ Project Run 接受时以显式命令提交 Agent、execution 与阶段 Environme
 | 级别 | 未选择 Environment | 已选择 Environment |
 | --- | --- | --- |
 | `NONE` | 展示，使用 Platform 能力 | 展示，使用 Platform 能力 |
-| `OPTIONAL` | 展示，使用 Platform 能力 | 展示，可使用当前 Environment |
+| `ROUTED` | 展示，按 `vfs:` 路径走 Platform | 展示，按每次调用的路径决定 Platform 或 Environment |
 | `REQUIRED` | 从模型工具声明中过滤 | 展示，绑定当前 Environment |
 
-内置 `read` 使用 `OPTIONAL`，文件写入、命令、搜索和 LSP 使用 `REQUIRED`；
-Platform Tool、MCP 与 `task` 使用 `NONE`。过滤依据 Branch 的环境选择，保留声明顺序；
+内置文件工具 `read`、`write`、`edit`、`grep`、`find` 使用 `ROUTED`：`vfs:` 路径走 Platform VFS 且不等待环境，
+绝对宿主路径走绑定的 Environment；命令与 LSP 使用 `REQUIRED`；Platform Tool、MCP 与 `task` 使用 `NONE`。过滤依据 Branch 的环境选择，保留声明顺序；
 Daemon 在线状态用于实际执行路由。执行入口继续校验绑定，缺失或失效时拒绝调用。
 
 `read.path` 支持当前 Daemon 的本地路径与 Platform 只读 URI：
