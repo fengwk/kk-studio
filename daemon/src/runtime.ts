@@ -14,6 +14,7 @@ import type {
   ResultContent,
 } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
+import { applyNetworkSettings } from './network.js'
 import {
   CancelSchema,
   CancelledSchema,
@@ -604,6 +605,11 @@ export class Runtime {
           }),
         )
       }
+      // 初始 SETTINGS 失败时服务端尚未将会话标为 READY，不能依赖在线变更通知修复。
+      // 关闭握手并重连，下一次从平台重新读取设置；已 READY 的连接仍可接收后续修正。
+      if (envelope.messageType === MessageType.SETTINGS && !connection.ready && this.activeConnection === connection) {
+        this.closeFailedHandshake(connection)
+      }
     }
   }
 
@@ -611,6 +617,9 @@ export class Runtime {
     if (envelope.messageType === MessageType.SETTINGS) {
       if (!envelope.environmentId) {
         throw new Error('SETTINGS must declare non-null environmentId')
+      }
+      if (this.boundEnvironmentId !== null && this.boundEnvironmentId !== envelope.environmentId) {
+        throw new Error('SETTINGS environmentId does not match daemon')
       }
       return
     }
@@ -621,14 +630,21 @@ export class Runtime {
   }
 
   private handleSettings(connection: ActiveConnection, envelope: Envelope): void {
-    if (!connection.markSettingsReceived()) {
-      throw new Error('SETTINGS may only be received once per connection')
-    }
     if (!envelope.environmentId) {
       throw new Error('SETTINGS must declare non-null environmentId')
     }
-    this.boundEnvironmentId = envelope.environmentId
     const settings = envelope.payload.value as Settings
+    if (settings.noProxyHosts === undefined) {
+      throw new Error('settings.noProxyHosts is required')
+    }
+    applyNetworkSettings(settings.proxyUrl ?? null, settings.noProxyHosts)
+    if (connection.ready) {
+      return
+    }
+    if (!connection.markSettingsReceived()) {
+      throw new Error('SETTINGS handshake already started')
+    }
+    this.boundEnvironmentId = envelope.environmentId
     const budgets = settings.resourceBudgets!
     this.maxResourceBytes = Number(budgets.maxResourceBytes)
     const ttl = Number(budgets.temporaryResourceTtlSeconds)

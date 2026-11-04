@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * Windows 原生退出诊断：只有 Windows 且显式设置 `KK_WINDOWS_NATIVE_DIAGNOSTIC=1` 时才包装模块；否则直接返回真实模块。
@@ -37,6 +37,7 @@ import {
   type Ready,
 } from '../src/generated/control_pb.js'
 import * as native from '../src/native/index.js'
+import * as network from '../src/network.js'
 import * as transportModule from '../src/transport/index.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
@@ -66,18 +67,6 @@ import {
  */
 
 const cleans: Array<() => void | Promise<void>> = []
-beforeEach(() => {
-  // 装配测试使用显式直连，不依赖开发机或 CI 用户的桌面代理设置。
-  vi.stubEnv('http_proxy', '')
-  vi.stubEnv('https_proxy', '')
-  vi.stubEnv('no_proxy', '')
-  if (process.platform === 'darwin') {
-    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue({
-      async resolve() { return null },
-      async close() {},
-    })
-  }
-})
 afterEach(async () => {
   for (const clean of cleans.splice(0).reverse()) {
     await clean()
@@ -226,7 +215,7 @@ async function readFileText(file: string): Promise<string> {
 describe('daemon main information commands', () => {
   it('does not initialize network or parse proxy settings for information commands', async () => {
     vi.stubEnv('http_proxy', 'invalid-proxy-credential-marker')
-    const factory = vi.spyOn(native, 'createSystemProxyResolver').mockImplementation(() => {
+    const factory = vi.spyOn(network, 'installOutboundNetwork').mockImplementation(() => {
       throw new Error('network factory must not run for information commands')
     })
     const captured = capture()
@@ -382,27 +371,17 @@ describe('daemon main real assembly', () => {
     await lock.close()
   })
 
-  it('rejects invalid proxies before connecting and closes the resolver and data lock', async () => {
+  it('ignores invalid inherited proxy settings while connecting directly', async () => {
     const fixture = await createControlServer()
     cleans.push(() => fixture.dispose())
     await writeConfig(fixture)
-    const resolver = {
-      resolve: vi.fn(async () => null),
-      close: vi.fn(async () => undefined),
-    }
-    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue(resolver)
     const marker = 'proxy-credential-marker'
     vi.stubEnv('http_proxy', `http://user:${marker}@proxy.invalid:8080`)
     const harness = startMain(fixture.configPath)
-    expect(await harness.run).toBe(1)
-    expect(fixture.received).toEqual([])
-    expect(resolver.resolve).not.toHaveBeenCalled()
-    expect(resolver.close).toHaveBeenCalledTimes(1)
-    expect(harness.stderr.join('')).toContain('Invalid HTTP proxy or bypass configuration')
+    cleans.push(() => harness.stop())
+    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
     expect(harness.stderr.join('')).not.toContain(marker)
-    const lock = await native.acquireDirectoryLock(fixture.dataDir)
-    await lock.close()
-    harness.assertSignalListenersRestored()
+    await harness.stop()
   })
 
   it(

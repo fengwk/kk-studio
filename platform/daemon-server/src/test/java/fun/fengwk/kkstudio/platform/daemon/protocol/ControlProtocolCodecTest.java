@@ -414,6 +414,24 @@ class ControlProtocolCodecTest {
   /** 三条消息的 Java 构造结果必须与 TS 生成的共享 golden 逐字节一致。 */
   @Test
   void encodesFixtureMessagesToSharedGolden() throws IOException {
+    Envelope settings =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SETTINGS)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setSettings(
+                Settings.newBuilder()
+                    .setDisplayName("dev-box")
+                    .setProxyUrl("http://proxy.invalid:8080")
+                    .setNoProxyHosts("localhost,10.0.0.0/8")
+                    .setResourceBudgets(
+                        ResourceBudgets.newBuilder()
+                            .setMaxResourceBytes(1048576)
+                            .setTemporaryResourceTtlSeconds(3600)
+                            .setTemporaryResourceCleanupIntervalSeconds(60)))
+            .build();
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("settings.bin"),
+        ControlProtocolCodec.encodeBinary(settings));
     assertArrayEquals(
         ControlProtocolFixtures.golden("invoke.bin"),
         ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.invokeEnvelope()));

@@ -19,7 +19,6 @@ import {
   UnsupportedPlatformError,
   acquireDirectoryLock,
   createProcessSupervisor,
-  createSystemProxyResolver,
   ensurePrivateDirectory,
   type DirectoryLock,
 } from './native/index.js'
@@ -137,11 +136,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       return outcome
     }
 
-    const systemProxy = createSystemProxyResolver()
-    let closeNetwork = (): Promise<void> => systemProxy.close()
-    closers.push(() => closeNetwork())
-    const network = await installOutboundNetwork(process.env, systemProxy)
-    closeNetwork = () => network.close()
+    const network = await installOutboundNetwork()
+    closers.push(() => network.close())
 
     const lspGroup = createLspCapabilities(config, supervisor)
     closers.push(() => lspGroup.close())

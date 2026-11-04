@@ -58,6 +58,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   private final Object gate = new Object();
   private final Object stateLock = new Object();
+  private final Object networkSettingsLock = new Object();
   private final ArrayDeque<List<Runnable>> pendingCallbacks = new ArrayDeque<>();
   private boolean drainingCallbacks;
 
@@ -86,6 +87,9 @@ final class DaemonConnectionSession implements DaemonSession {
   private DaemonRuntimeSnapshot runtimeStatus;
   private long temporaryResourceTtlSeconds;
   private long temporaryResourceCleanupIntervalSeconds;
+  private String proxyUrl;
+  private String noProxyHosts;
+  private boolean networkSettingsFailed;
 
   DaemonConnectionSession(
       long generation,
@@ -201,6 +205,47 @@ final class DaemonConnectionSession implements DaemonSession {
     this.temporaryResourceTtlSeconds = initial.temporaryResourceTtlSeconds();
     this.temporaryResourceCleanupIntervalSeconds =
         initial.temporaryResourceCleanupIntervalSeconds();
+    this.proxyUrl = initial.proxyUrl();
+    this.noProxyHosts = initial.noProxyHosts();
+  }
+
+  boolean reconcileNetworkSettings() {
+    boolean failed = false;
+    synchronized (networkSettingsLock) {
+      if (networkSettingsFailed || !isReady()) {
+        return false;
+      }
+      EnvironmentServerSettings current = settingsSupplier.get();
+      if (Objects.equals(proxyUrl, current.proxyUrl())
+          && Objects.equals(noProxyHosts, current.noProxyHosts())) {
+        return true;
+      }
+      Envelope update =
+          Envelope.newBuilder()
+              .setMessageType(MessageType.SETTINGS)
+              .setEnvironmentId(environmentId.value().toString())
+              .setSettings(EnvironmentDaemonServer.settingsMessage(current))
+              .build();
+      DaemonOfferResult result;
+      try {
+        // 不持有 stateLock：传输可同步回调 closed()，关闭路径可能访问服务端 inventory。
+        result = control.offer(update);
+      } catch (RuntimeException error) {
+        result = DaemonOfferResult.CLOSED;
+      }
+      if (result == DaemonOfferResult.ACCEPTED) {
+        proxyUrl = current.proxyUrl();
+        noProxyHosts = current.noProxyHosts();
+      } else {
+        networkSettingsFailed = true;
+        failed = true;
+      }
+    }
+    if (failed) {
+      close();
+      return false;
+    }
+    return isReady();
   }
 
   @Override
@@ -334,6 +379,9 @@ final class DaemonConnectionSession implements DaemonSession {
       this.daemonVersion = readyMessage.getDaemonVersion();
       this.daemonOperatingSystem = os;
       this.runtimeStatus = toDomainSnapshot(readyMessage.getRuntimeStatus());
+    }
+    if (!reconcileNetworkSettings()) {
+      return;
     }
     deferred.add(
         () -> {

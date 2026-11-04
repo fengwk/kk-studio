@@ -49,7 +49,7 @@ class SystemSettingsServiceTest {
   private final SystemSettingsSnapshot snapshot =
       new SystemSettingsSnapshot(SystemSettings.DEFAULT);
   private final SystemSettingsChangeHandler changeHandler =
-      new SystemSettingsChangeHandler(repository, snapshot);
+      new SystemSettingsChangeHandler(repository, snapshot, event -> {});
   private final SystemSettingsService service =
       new SystemSettingsService(repository, codec, changeHandler);
 

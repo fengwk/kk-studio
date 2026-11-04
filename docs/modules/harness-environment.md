@@ -168,7 +168,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 载荷通告认证准入后的资源预算（`max_resource_bytes`）与临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`）。Daemon 收到 `SETTINGS` 并回执 `READY` 后连接进入可用状态。
+`SETTINGS` 载荷通告认证准入后的资源预算（`max_resource_bytes`）、临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`）与全局网络设置（`proxy_url` / `no_proxy_hosts`）。Daemon 收到首条 `SETTINGS` 并回执 `READY` 后连接进入可用状态；后续 `SETTINGS` 只应用网络设置而不再回执 READY。系统设置通知和重连回读驱动在线连接对账，READY 时也会补齐握手期间的网络设置变化。
 
 `daemon_instance_id` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Studio 在同实例重连后，对未收敛调用发送 `RECOVER`（已取消的发送 `CANCEL`）而绝不重发 `INVOKE`，Daemon 命中 journal 时重放既有事实，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启的执行恢复。握手失败时 Studio 以 `ERROR` 帧并关闭连接收尾。
 
