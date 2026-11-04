@@ -1,5 +1,5 @@
 /**
- * THREAD / MODEL / TOOL 调度共享的单一 Work 调度邮箱值契约。
+ * THREAD / MODEL / TOOL 调度共享的 Work 邮箱契约与已认领执行骨架。
  *
  * <p>这里是 Work 邮箱的唯一形状来源：{@link fun.fengwk.kkstudio.harness.spi.work.Work}、{@link
  * fun.fengwk.kkstudio.harness.spi.work.WorkTarget} / {@link

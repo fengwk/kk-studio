@@ -170,7 +170,7 @@ Thread claim 只归约一个持久化动作；Model / Agent / Tool claim 驱动�
 
 认领到 `RUNNING` 工具时，若它绑定了 Environment，且当前 attempt 恰好有一条状态为 `UNCONFIRMED` 或 `REMOTE_ACKNOWLEDGED` 的 REMOTE 退出事实，ToolProcessor 通过 `ToolGateway.reattach` 重新挂接这次在途远端调用：不重发 INVOKE，`attempt` 不变，在 `reattachWindow`（默认 10 分钟）内等待终态；超时或远端已找不到该调用时收敛为 `UNKNOWN`。新 owner 以本 claim 登记自己的 TOOL 事实，挂接体退出时确认为 `STUDIO_EXITED`；远端退出确认按库中原始身份确认 REMOTE 事实，原 owner 的 TOOL 事实保持原状。本节点不持有该 Environment 的 READY 路由时短延迟重排，不改变工具状态。其余情况（本地工具、尚未发出远端调用、`NOT_STARTED`、多条 REMOTE 事实）收敛为 `UNKNOWN`（`LEASE_EXPIRED`）。
 
-Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimedExecutionSupport.java)（Driver SPI）：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询只实现一次，Processor 自己只负责请求物化、Gateway 准入与终态提交。具体准入由同一类级强类型 `ClaimAdmissionGuard` 按 invocation 原子协调，事务内最终所有权围栏失败一律抛出唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimLostSignal.java)。准入操作在原子计算中复核数据库 claim 所有权，不同有效 token 可替换旧 execution，捕获后在锁外执行 abandon；相同 token 去重，失权 claim 不得取消当前执行。关闭守卫确保 close 期间迟到准入不创建 slot 执行，未 attach 的 ticket 在 close 或 cancel 后拒绝 attach；准备与外部调用均在准入锁外进行，最终持久化仍须通过 durable ownership fence。
+Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)（Work SPI）：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询只实现一次，Processor 自己只负责请求物化、Gateway 准入与终态提交。具体准入由同一类级强类型 `ClaimAdmissionGuard` 按 invocation 原子协调，事务内最终所有权围栏失败一律抛出唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。准入操作在原子计算中复核数据库 claim 所有权，不同有效 token 可替换旧 execution，捕获后在锁外执行 abandon；相同 token 去重，失权 claim 不得取消当前执行。关闭守卫确保 close 期间迟到准入不创建 slot 执行，未 attach 的 ticket 在 close 或 cancel 后拒绝 attach；准备与外部调用均在准入锁外进行，最终持久化仍须通过 durable ownership fence。
 
 每个具体执行代次在进入 body 或发出远端调用前登记为独立的退出事实，不依赖逻辑 Invocation 行是否仍存在。Studio 本地执行事实类型为 `DRIVER` 与 `TOOL`，退出时均确认为 `STUDIO_EXITED`；远端子执行（`REMOTE`）登记时必须绑定其宿主 `EnvironmentId`，且其父执行代次类型必须为 `TOOL` 或 `DRIVER`。admission 取得的每个 run 在失权、取消或离场时都恰 close 一次；body 返回且本地 admission close 成功后，执行线程才确认 `STUDIO_EXITED`；远端子执行在完整 identity 匹配后确认 `REMOTE_ACKNOWLEDGED`。已登记但确定未进入 body 的代次，只在 close 成功后确认 `NOT_STARTED`；close 失败保留 `UNCONFIRMED`，不得偷偷二次 close 或确认。取消、lease 丢失与逻辑终态本身都不等于退出：body 开始后仍须等待真实返回并完成资源释放，未进入 body 的已排队任务也由统一 finally 收敛。最后一次真正改变退出事实的 ACK 在同一事务递增 Thread version；若普通终态已物化则直接补结算 Join，否则只有存在源命令已应用的未完成 Join 才请求 THREAD Work。重复 ACK 不重复 version、wake 或通知；STOPPED Thread 在 ACK 事务内递归结算已收敛祖先。
 
@@ -186,7 +186,7 @@ Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`Cla
 
 Thread 由轻量 `ThreadAdmissionGuard` 独立防重，旧 action 未结束时同 token 或异 token 均返回 LOST，不抢占。
 
-preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理：Allow、Ask、Deny 的回写失败或启动失败均停止 heartbeat 并释放本地登记；成功移交后由执行线程负责释放，不能再由 preflight 清理。两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
+preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理：Allow、Ask、Deny 的回写失败或启动失败均停止 heartbeat 并释放本地登记；成功移交后由执行线程负责释放，不能再由 preflight 清理。两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
 
 ### 审批与受管文件变更
 
@@ -232,7 +232,7 @@ Session -> Thread -> Commands -> Driver 私有行 -> ToolInvocation -> Work
 
 ### 执行与停止
 
-Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimedExecutionSupport.java)，并为每个执行代次登记 `ExecutionExitKind.DRIVER` 退出事实。Work 有两种键法：
+Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)，并为每个执行代次登记 `ExecutionExitKind.DRIVER` 退出事实。Work 有两种键法：
 
 | Work | 键 | Stop 时如何清理 |
 | --- | --- | --- |
@@ -329,7 +329,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查 owner、Issue 或阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
 
-并发槽位 `ConcurrencyAdmission` 属于平台实现，由 Model 与 Tool 网关各自持有，内核只声明端口；[`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java) 只计算是否允许下一次重试及其延迟（`FIXED` / `EXPONENTIAL`），不读时钟、不写状态，[`InvocationRetryDecision`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryDecision.java) 才把策略、错误可重试性与已消耗 attempt 合成唯一决策。策略对象全部构造注入：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java) 与共用的 [`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java)（heartbeat 间隔必须严格小于租约时长），重试与压缩配置在每个决策点现读。Builtin 的 `ModelProcessorConfig` 与模型重试策略在 [Harness Agent Builtin](harness-agent-builtin.md) 维护。
+并发槽位 `ConcurrencyAdmission` 属于平台实现，由 Model 与 Tool 网关各自持有，内核只声明端口；[`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java) 只计算是否允许下一次重试及其延迟（`FIXED` / `EXPONENTIAL`），不读时钟、不写状态，[`InvocationRetryDecision`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryDecision.java) 才把策略、错误可重试性与已消耗 attempt 合成唯一决策。策略对象全部构造注入：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java) 与共用的 [`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ProcessorLeaseConfig.java)（heartbeat 间隔必须严格小于租约时长），重试与压缩配置在每个决策点现读。Builtin 的 `ModelProcessorConfig` 与模型重试策略在 [Harness Agent Builtin](harness-agent-builtin.md) 维护。
 
 ## Tool 契约
 
@@ -432,10 +432,10 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `spi.compaction` | `CompactionConfigProvider`：Runtime 对部署配置的反向依赖，每个压缩决策点现读 `CompactionConfig`，不缓存快照、不持有订阅；`RequestTokenEstimator`：Turn 解析对请求输入 token 估算的反向依赖，只接收 `EntryPath` 与 system instruction，实现由组合根绑定到 `runtime.compaction.TokenEstimator`，消费方不接触 runtime 实现类型 |
 | `spi.driver` | Agent Driver SPI：`AgentDriver`、`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等；组合根与外部 Driver 依赖此包，Runtime 不读取具体 Driver 私有状态，其投影出的 `GenerationProjection` 在 `api.generation`，见 [Agent Driver](#agent-driver) |
 | `spi.retry` | `InvocationRetryPolicyProvider` 与 `ModelHttpErrorPolicyProvider`：在 retry 判定点现读重试预算与模型 HTTP 状态策略；策略值属于 `api.retry`，判定实现在 `runtime.retry` |
-| `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置；同时向 Driver 暴露公开的已认领执行骨架 `ClaimedExecutionSupport`（所有权校验、准入、租约 margin、取消 / 关闭、唯一的 `ClaimLostSignal`）；Builtin 的 MODEL Work 在 harness/agent-builtin |
+| `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行与 Processor 配置；共用执行骨架在 `spi.work`，Builtin 的 MODEL Work 在 harness/agent-builtin |
 | `runtime.retry` | 调用重试判定 `InvocationRetryDecision`：把 `api.retry` 策略、错误是否可重试与已消耗 attempt 合成唯一决策，只计算可行性与延迟，不读时钟、不写状态；策略值在 `api.retry`，provider 端口在 `spi.retry` |
 | `spi.store` | `HarnessStore` 事务原语，领域模型与物理持久化的唯一边界 |
-| `spi.work` | Work 调度邮箱的持久化与分发值契约：`Work` 的纯函数跃迁、租约与环境亲和标记，`WorkTarget` / `WorkTargetType` 与已认领快照 `ClaimedWork`；被 `spi.store` 与 `spi.driver` 直接引用，不依赖 `runtime.*` |
+| `spi.work` | Work 调度邮箱的持久化与分发值契约，以及已认领执行骨架 `ClaimedExecutionSupport`、准入、租约心跳和失权信号；不依赖 `runtime.*` |
 | `runtime.thread` | Thread 的 live/historical 分类与活动事实评估；`ThreadState`、执行控制与状态投影在 `api.thread` |
 | `runtime.thread.command` | 命令 payload 的 harvest 归约与值校验；payload JSON 编解码与 request hash 在 `codec`，实体与状态派生在 `api.command` |
 | `tool` | Tool 身份、定义、调用、结果、消费者媒体能力（`TurnMediaCapabilities`）与错误文案的值契约 |

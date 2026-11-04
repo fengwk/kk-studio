@@ -1,7 +1,6 @@
-package fun.fengwk.kkstudio.harness.runtime.processor;
+package fun.fengwk.kkstudio.harness.spi.work;
 
 import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 
 import java.util.ArrayList;
 import java.util.List;

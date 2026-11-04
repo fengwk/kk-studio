@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.spi.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 
 import java.time.Duration;
 import java.util.Objects;

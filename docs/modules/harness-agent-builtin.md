@@ -52,7 +52,7 @@ groupExecution?
 
 ## MODEL Work 与流式执行
 
-[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work。进程内执行治理组合复用 Runtime 公开的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只实现 Builtin 语义；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。它先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
+[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work。进程内执行治理组合复用 Work SPI 的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只实现 Builtin 语义；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。它先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
 
 - `Busy` 按 `retryAfter` 重排；
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
