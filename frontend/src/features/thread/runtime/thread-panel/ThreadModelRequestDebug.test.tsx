@@ -37,7 +37,6 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         description: 'Execute shell commands',
         inputSchemaJson: '{"type":"object","properties":{"command":{"type":"string"}}}',
         environmentSupport: 'REQUIRED',
-        requiredEnvironmentId: null,
         provenance: 'builtin:bash',
         state: 'FILTERED',
         filterReason: 'ENVIRONMENT_NOT_SELECTED',
@@ -497,7 +496,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               description: 'Malformed schema tool',
               inputSchemaJson: '{not-valid-json}',
               environmentSupport: 'NONE',
-              requiredEnvironmentId: null,
               provenance: 'custom',
               state: 'SENT',
               filterReason: null,
@@ -521,7 +519,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               description: 'Empty schema tool',
               inputSchemaJson: '',
               environmentSupport: 'NONE',
-              requiredEnvironmentId: null,
               provenance: 'custom',
               state: 'SENT',
               filterReason: null,
@@ -562,7 +559,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'custom',
                 inputSchemaJson: '{}',
                 environmentSupport: 'UNKNOWN_SUPPORT' as unknown as ThreadModelRequestDebugTool['environmentSupport'],
-                requiredEnvironmentId: null,
                 provenance: 'custom',
                 state: 'SENT',
                 filterReason: null,
@@ -572,7 +568,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'none',
                 inputSchemaJson: '{}',
                 environmentSupport: 'NONE',
-                requiredEnvironmentId: null,
                 provenance: 'custom',
                 state: 'FILTERED',
                 filterReason: null,
@@ -591,7 +586,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByTitle('平台独立 · NONE')).toBeInTheDocument()
     })
 
-    it('handles PLATFORM skill delivery, requiredEnvironmentId, and container fallback focus in inspector', () => {
+    it('handles PLATFORM skill delivery, routed environment support, and container fallback focus in inspector', () => {
       render(
         <ThreadDebugInspector
           selection={{
@@ -617,7 +612,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
       expect(screen.getByText('平台')).toBeInTheDocument()
 
-      // 验证 tool 带有 requiredEnvironmentId
+      // 验证 tool 的环境支持按生成契约显示
       render(
         <ThreadDebugInspector
           selection={{
@@ -626,8 +621,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               name: 'env_tool',
               description: 'needs env',
               inputSchemaJson: '{}',
-              environmentSupport: 'REQUIRED',
-              requiredEnvironmentId: 'env-node-123',
+              environmentSupport: 'ROUTED',
               provenance: 'builtin',
               state: 'SENT',
               filterReason: null,
@@ -637,8 +631,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onClose={() => {}}
         />,
       )
-      expect(screen.getByText('所需环境 ID')).toBeInTheDocument()
-      expect(screen.getByText('env-node-123')).toBeInTheDocument()
+      expect(screen.getByText('按调用路由 · ROUTED')).toBeInTheDocument()
     })
 
     it('preserves raw unknown delivery without lowercase conversion', () => {
@@ -676,7 +669,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'Custom filtered tool',
                 inputSchemaJson: '{}',
                 environmentSupport: 'UNKNOWN_ENV' as unknown as 'NONE',
-                requiredEnvironmentId: null,
                 provenance: 'custom:tool',
                 state: 'FILTERED',
                 filterReason: 'RATE_LIMIT_EXCEEDED',

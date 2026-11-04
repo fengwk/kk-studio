@@ -147,7 +147,7 @@ describe('test file matching coverage and exclusivity', () => {
     return true
   }
 
-  // 验证 browser-tests 下全部 42 个测试文件被项目划分且互不重叠
+  // 验证 browser-tests 下全部 43 个测试文件被项目划分且互不重叠
   it('maps every browser test file to exactly one project with zero overlap or omission', () => {
     const browserTestsDir = path.resolve(__dirname, 'browser-tests')
     const allTestFiles = fs
@@ -155,7 +155,7 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(42)
+    expect(allTestFiles.length).toBe(43)
     expect(allTestFiles).toContain('custom-message-queue.pw.ts')
 
     const projects = playwrightConfig.projects ?? []
@@ -219,8 +219,8 @@ describe('browser port contract (KK_BROWSER_PORT)', () => {
 })
 
 describe('vite browser build contract', () => {
-  // 验证所有 HTML 输入（包括补充消息队列）统一被收集为 MPA 入口
-  it('registers all 34 HTML harnesses including custom-message-queue-harness.html', () => {
+  // 验证所有 HTML 输入（包括补充消息队列与会话文件面板）统一被收集为 MPA 入口
+  it('registers all 35 HTML harnesses including custom-message-queue-harness.html', () => {
     const effective = loadViteBrowserConfig(undefined)
     const inputs = effective.inputs
     const keys = Object.keys(inputs)
@@ -233,10 +233,11 @@ describe('vite browser build contract', () => {
     expect(keys).toContain('composer-editor-harness')
     expect(keys).toContain('model-browser-harness')
     expect(keys).toContain('settings-catalog-harness')
+    expect(keys).toContain('session-files-harness')
     expect(inputs['custom-message-queue-harness']).toBe(
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )
-    expect(keys.length).toBe(34)
+    expect(keys.length).toBe(35)
   })
 
   // 验证静态构建目标与 MPA 模式

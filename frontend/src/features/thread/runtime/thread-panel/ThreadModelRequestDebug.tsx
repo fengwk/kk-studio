@@ -10,7 +10,7 @@ import { useI18n } from '@/shared/i18n'
 import { Code, Mono } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 
-function envBadge(support: 'NONE' | 'ROUTED' | 'REQUIRED'): string {
+function envBadge(support: ThreadModelRequestDebugTool['environmentSupport']): string {
   switch (support) {
     case 'NONE':
       return 'P'
@@ -24,7 +24,7 @@ function envBadge(support: 'NONE' | 'ROUTED' | 'REQUIRED'): string {
 }
 
 function envBadgeTitle(
-  support: 'NONE' | 'ROUTED' | 'REQUIRED',
+  support: ThreadModelRequestDebugTool['environmentSupport'],
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (support) {

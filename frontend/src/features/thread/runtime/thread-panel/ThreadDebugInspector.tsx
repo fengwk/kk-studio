@@ -45,7 +45,7 @@ function formatFilterReason(
 }
 
 function formatEnvSupport(
-  support: 'NONE' | 'ROUTED' | 'REQUIRED',
+  support: ThreadModelRequestDebugTool['environmentSupport'],
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (support) {
