@@ -202,7 +202,7 @@ registerCase({
       const projectOwnerBatch = await expectHttpError(
         () =>
           ctx.call('POST', '/api/command-batches', {
-            owner: { type: 'PROJECT' },
+            owner: { kind: 'PROJECT', id: project.id },
             target: {
               type: 'NEW_SESSION',
               sessionId: cid(),
@@ -215,13 +215,13 @@ registerCase({
         { status: 400 },
       )
       assert(
-        /owner\.type must be CHAT or ISSUE_AGENT/.test(JSON.parse(projectOwnerBatch.body).errors?.detail),
+        /Unknown or ambiguous session owner kind: PROJECT/.test(JSON.parse(projectOwnerBatch.body).errors?.detail),
         projectOwnerBatch.body,
       )
       const issueOwnerBatch = await expectHttpError(
         () =>
           ctx.call('POST', '/api/command-batches', {
-            owner: { type: 'ISSUE_AGENT', issueId: cid(), agentName: 'e2e-agent-owner' },
+            owner: { kind: 'ISSUE_AGENT', id: `${cid()}:e2e-agent-owner` },
             target: {
               type: 'NEW_SESSION',
               sessionId: cid(),
@@ -234,7 +234,7 @@ registerCase({
         { status: 409 },
       )
       assert(
-        /Issue agent commands must use the Issue business workflow/.test(
+        /Direct commands are not allowed for this session owner/.test(
           JSON.parse(issueOwnerBatch.body).errors?.detail,
         ),
         issueOwnerBatch.body,

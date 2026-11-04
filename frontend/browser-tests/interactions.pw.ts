@@ -59,8 +59,7 @@ function buildItems(): InteractionDTO[] {
       threadId: 'thread-approval',
       rootThreadId: APPROVAL_ROOT_ID,
       sessionId: 'session-approval',
-      owner: { type: 'CHAT', chatId: 'chat-pending', chatTitle: '迁移审批',
-        issueId: null, issueTitle: null, agentName: null, rootThreadName: '审批执行根' },
+      owner: { kind: 'CHAT', id: 'chat-pending', title: '迁移审批', link: '/chats/chat-pending' },
       environmentId: null,
       environmentName: null,
       waitingCount: null,
@@ -77,8 +76,8 @@ function buildItems(): InteractionDTO[] {
       threadId: 'thread-questionnaire',
       rootThreadId: QUESTIONNAIRE_ROOT_ID,
       sessionId: 'session-questionnaire',
-      owner: { type: 'ISSUE_AGENT', chatId: null, chatTitle: null,
-        issueId: ISSUE_ID, issueTitle: '迁移策略', agentName: 'architect', rootThreadName: '问卷执行根' },
+      owner: { kind: 'ISSUE_AGENT', id: `${ISSUE_ID}:architect`, title: '迁移策略',
+        link: `/projects/${PROJECT_ID}?issue=${ISSUE_ID}` },
       environmentId: null,
       environmentName: null,
       waitingCount: null,
@@ -118,8 +117,7 @@ function buildItems(): InteractionDTO[] {
       threadId: null,
       rootThreadId: ENVIRONMENT_ROOT_ID,
       sessionId: null,
-      owner: { type: 'CHAT', chatId: 'chat-environment', chatTitle: '等待迁移环境',
-        issueId: null, issueTitle: null, agentName: null, rootThreadName: '环境执行根' },
+      owner: { kind: 'CHAT', id: 'chat-environment', title: '等待迁移环境', link: '/chats/chat-environment' },
       toolCallId: null,
       toolName: null,
       argumentsJson: null,
@@ -468,7 +466,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
-    await expect(card.getByTitle('打开对话')).toContainText('环境执行根')
+    await expect(card.getByRole('button', { name: '等待迁移环境' })).toBeVisible()
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
       new URL(response.url()).pathname === '/api/interactions'
@@ -488,9 +486,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').first().getByTitle('打开对话')
+    const source = page.locator('.interaction-feed-item').first().getByRole('button', { name: '迁移审批' })
     await expect(source).toContainText('迁移审批')
-    await expect(source).toContainText('审批执行根')
     await source.click()
     await expect(page).toHaveURL(new RegExp(`/chats/chat-pending\\?thread=${APPROVAL_ROOT_ID}$`))
     expect(approvals).toEqual([])
@@ -503,10 +500,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').nth(1).getByTitle('打开任务对话')
+    const source = page.locator('.interaction-feed-item').nth(1).getByRole('button', { name: '迁移策略' })
     await expect(source).toContainText('迁移策略')
-    await expect(source).toContainText('问卷执行根')
-    await expect(source).toContainText('architect')
     await source.click()
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}\\?issue=${ISSUE_ID}&thread=${QUESTIONNAIRE_ROOT_ID}$`))
     expect(approvals).toEqual([])
@@ -528,7 +523,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     // 只移除本卡，其余待处理项与目标 thread 均不受影响。
     await expect(toolName).toHaveCount(0)
-    await expect(page.getByText('architect')).toBeVisible()
+    await expect(page.getByText('迁移策略')).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
@@ -550,7 +545,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await page.locator('.interaction-feed-item').first().locator('.interaction-deny-btn').click()
 
     await expect(page.locator('.interaction-approval-tool-name')).toHaveCount(0)
-    await expect(page.getByText('architect')).toBeVisible()
+    await expect(page.getByText('迁移策略')).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(

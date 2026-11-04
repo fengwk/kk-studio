@@ -8,6 +8,7 @@ import {
   createBuiltinExecution,
 } from '@/shared/api/contracts/ai-runtime'
 import {
+  acceptanceStorageKey,
   clearBoundPendingMessage,
   clearPendingAcceptance,
   inspectPendingAcceptanceSlot,
@@ -38,7 +39,7 @@ function memoryStorage(): Storage {
 }
 
 describe('pending-request-store', () => {
-  const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-001' }
+  const owner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-001' }
   const threadId = '11111111-2222-4333-8444-555555555555'
 
   const acceptanceRequest: HarnessCommandBatchDTO = {
@@ -126,7 +127,7 @@ describe('pending-request-store', () => {
     expect(samePendingAcceptanceIdentity(loaded!, pendingAcceptance)).toBe(true)
 
     // 不同 owner 或不同 pane 隔离
-    const otherOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-002' }
+    const otherOwner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-002' }
     expect(loadPendingAcceptance(otherOwner, 'pane-1', storage)).toBeNull()
     expect(loadPendingAcceptance(owner, 'pane-2', storage)).toBeNull()
 
@@ -247,7 +248,7 @@ describe('pending-request-store', () => {
     expect(mismatched).toBeNull()
 
     // 槽位损坏（坏 JSON）
-    storage.setItem(`kk-studio.agent-pane-acceptance.${owner.type === 'CHAT' ? `CHAT:${owner.chatId}` : ''}:pane-1`, 'not-json')
+    storage.setItem(acceptanceStorageKey(owner, 'pane-1'), 'not-json')
     const corruptedSlot = inspectPendingAcceptanceSlot(owner, 'pane-1', storage)
     expect(corruptedSlot.status).toBe('invalid')
 
@@ -327,7 +328,7 @@ describe('pending-request-store', () => {
     expect(clearBoundPendingMessage('')).toBe(true)
 
     // 不匹配的 owner 保存拒绝
-    const mismatchOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-other' }
+    const mismatchOwner: AgentRuntimeOwnerDTO = { kind: 'CHAT', id: 'chat-other' }
     expect(savePendingAcceptance(mismatchOwner, 'pane-1', pendingAcceptance, memoryStorage())).toBe(false)
   })
 

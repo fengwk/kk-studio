@@ -24,18 +24,18 @@ const sampleId = () => '00000000-0000-4000-8000-000000000000'
 test('harness owner helpers expose only the Chat owner shape', async () => {
   // Test intent: Canvas 不持有 Harness Session（公共 batch 端点只服务 CHAT）。
   const chat = chatOwner(sampleId())
-  assert.deepEqual(chat, { type: 'CHAT', chatId: sampleId() })
+  assert.deepEqual(chat, { kind: 'CHAT', id: sampleId() })
   await assert.rejects(
     () =>
       acceptCommandBatch(
         { call: async () => ({ status: 202, json: { data: {} } }) },
         {
-          owner: { type: 'CANVAS', id: sampleId() },
+          owner: { kind: 'CANVAS', id: sampleId() },
           target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
           commands: [userMessageCommand('x', sampleId())],
         },
       ),
-    /owner\.type must be CHAT/,
+    /owner\.kind must be CHAT/,
   )
 })
 
@@ -282,27 +282,27 @@ test('thread YOLO wire is an explicit boolean with an immutable execution root',
 })
 
 test('chatOwner/canonicalUuid keep the strict Chat owner wire shape', () => {
-  // Test intent: public command owner is strictly {type,chatId}.
+  // Test intent: public command owner is strictly {kind,id}.
   const id = cid()
-  assert.deepEqual(chatOwner(id), { type: 'CHAT', chatId: id })
+  assert.deepEqual(chatOwner(id), { kind: 'CHAT', id })
   assert.equal(canonicalUuid(id, 'id'), id)
   assert.throws(() => chatOwner('bad'), /canonical UUID/)
 })
 
 test('acceptCommandBatch rejects malformed owner shapes before HTTP', async () => {
-  // Test intent: the backend rejects unknown owner keys, including an id alongside chatId.
+  // Test intent: the helper rejects malformed identity and unexpected fields before HTTP.
   const ctx = { call: async () => { throw new Error('unexpected HTTP call') } }
   const target = newSessionTarget({ sessionId: cid(), threadId: cid(), rootSettings: {} })
-  for (const owner of [{ type: 'CHAT', id: cid() }, { ...chatOwner(cid()), id: cid() }]) {
+  for (const owner of [{ kind: 'CHAT' }, { ...chatOwner(cid()), chatId: cid() }]) {
     await assert.rejects(
       () => acceptCommandBatch(ctx, { owner, target, commands: [userMessageCommand('x', cid())] }),
-      /owner\.chatId|owner must contain only type and chatId/,
+      /owner\.id|owner must contain only kind and id/,
     )
   }
 })
 
-test('acceptCommandBatch rejects an unknown owner type before any HTTP call', async () => {
-  // Test intent: helper 必须在本地就拒绝未知 owner.type，不能把未知 owner 放行给后端。
+test('acceptCommandBatch rejects an unknown owner kind before any HTTP call', async () => {
+  // Test intent: helper 必须在本地拒绝未知 owner.kind，不能把未知 owner 放行给后端。
   const calls = []
   const ctx = {
     call: async (...args) => {
@@ -313,11 +313,11 @@ test('acceptCommandBatch rejects an unknown owner type before any HTTP call', as
   await assert.rejects(
     () =>
       acceptCommandBatch(ctx, {
-        owner: { type: 'UNKNOWN_OWNER', id: sampleId() },
+        owner: { kind: 'UNKNOWN_OWNER', id: sampleId() },
         target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
         commands: [userMessageCommand('plan', sampleId())],
       }),
-    /owner\.type must be CHAT:/,
+    /owner\.kind must be CHAT:/,
   )
   assert.equal(calls.length, 0, 'invalid owner must not reach the HTTP client')
 })

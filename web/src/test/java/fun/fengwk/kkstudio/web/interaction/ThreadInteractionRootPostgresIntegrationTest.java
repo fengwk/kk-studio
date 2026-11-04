@@ -208,8 +208,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(tree.c().toString(), item.getThreadId(), "source thread stays the grandchild");
     assertEquals(tree.cSessionId().toString(), item.getSessionId());
     assertEquals(tree.root().toString(), item.getRootThreadId(), "root is the execution root");
-    assertEquals("CHAT", item.getOwner().getType());
-    assertEquals(chatId.toString(), item.getOwner().getChatId());
+    assertEquals("CHAT", item.getOwner().getKind());
+    assertEquals(chatId.toString(), item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
     assertEquals("ask_user", item.getToolName());
     assertEquals(QUESTIONNAIRE, item.getArgumentsJson());
@@ -244,9 +244,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(cInvocation.toString(), item.getInteractionId());
     assertEquals(tree.c().toString(), item.getThreadId());
     assertEquals(tree.root().toString(), item.getRootThreadId());
-    assertEquals("ISSUE_AGENT", item.getOwner().getType());
-    assertEquals(issue.issueId().toString(), item.getOwner().getIssueId());
-    assertEquals(AGENT, item.getOwner().getAgentName());
+    assertEquals("ISSUE_AGENT", item.getOwner().getKind());
+    assertEquals(issue.issueId() + ":" + AGENT, item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL.name(), item.getStatus());
 
     UUID decisionId = UUID.randomUUID();
@@ -460,8 +459,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(seed.invocationId().toString(), item.getInteractionId());
     assertEquals(seed.threadId().toString(), item.getRootThreadId());
     assertEquals(seed.threadId().toString(), item.getThreadId());
-    assertEquals("CHAT", item.getOwner().getType());
-    assertEquals(chatId.toString(), item.getOwner().getChatId());
+    assertEquals("CHAT", item.getOwner().getKind());
+    assertEquals(chatId.toString(), item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
   }
 
@@ -632,8 +631,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         items.get(1).getInteractionId(),
         "the manual input keeps its operable interaction id");
     assertEquals("INPUT", items.get(1).getType());
-    assertEquals("CHAT", items.get(1).getOwner().getType());
-    assertEquals(manualChatId.toString(), items.get(1).getOwner().getChatId());
+    assertEquals("CHAT", items.get(1).getOwner().getKind());
+    assertEquals(manualChatId.toString(), items.get(1).getOwner().getId());
 
     // 真实 snapshot HTTP 不把聚合页的全局 freshnessAt 复制给每个调用。
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
@@ -750,9 +749,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(expectedEnvironmentId.toString(), item.getEnvironmentId());
     assertEquals(expectedWaitingCount, item.getWaitingCount().intValue());
     assertEquals(expectedRootThreadId.toString(), item.getRootThreadId());
-    assertEquals(expectedOwnerType, item.getOwner().getType());
+    assertEquals(expectedOwnerType, item.getOwner().getKind());
     if (expectedChatId != null) {
-      assertEquals(expectedChatId, item.getOwner().getChatId());
+      assertEquals(expectedChatId, item.getOwner().getId());
     }
     if (expectedCreatedAt != null) {
       assertEquals(expectedCreatedAt, item.getCreateTime());
