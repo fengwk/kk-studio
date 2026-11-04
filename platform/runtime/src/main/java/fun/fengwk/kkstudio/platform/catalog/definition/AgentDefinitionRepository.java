@@ -3,9 +3,16 @@ package fun.fengwk.kkstudio.platform.catalog.definition;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
@@ -17,18 +24,25 @@ import java.util.Objects;
 @Repository
 public class AgentDefinitionRepository {
 
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
   private static final String COLUMNS =
-      "name, type, description, system_prompt, model_name, variant, config,"
+      "name, type, description, system_prompt, execution, config,"
           + " version, created_at as create_time, updated_at as update_time";
 
   private static final String INSERT_SQL =
       """
       insert into agent_definition (
-          name, type, description, system_prompt, model_name, variant, config,
+          name, type, description, system_prompt, execution, config,
           created_at, updated_at, version
       ) values (
-          :name, :type, :description, :systemPrompt, :modelName,
-          :variant, cast(:configJson as jsonb), current_timestamp, current_timestamp, 0
+          :name, :type, :description, :systemPrompt, cast(:executionJson as jsonb),
+          cast(:configJson as jsonb), current_timestamp, current_timestamp, 0
       )
       """;
 
@@ -36,8 +50,7 @@ public class AgentDefinitionRepository {
       """
       update agent_definition
       set description = :description, system_prompt = :systemPrompt,
-          model_name = :modelName,
-          variant = :variant,
+          execution = cast(:executionJson as jsonb),
           config = cast(:configJson as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where name = :name and version = :expectedVersion
@@ -50,8 +63,7 @@ public class AgentDefinitionRepository {
               AgentDefinitionType.valueOf(rs.getString("type")),
               rs.getString("description"),
               rs.getString("system_prompt"),
-              rs.getString("model_name"),
-              rs.getString("variant"),
+              decodeExecution(rs.getString("execution")),
               rs.getString("config"),
               rs.getLong("version"),
               PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)),
@@ -161,8 +173,7 @@ public class AgentDefinitionRepository {
             .param("type", agent.type().name())
             .param("description", agent.description())
             .param("systemPrompt", agent.systemPrompt())
-            .param("modelName", agent.modelName())
-            .param("variant", agent.variant())
+            .param("executionJson", encodeExecution(agent.execution()))
             .param("configJson", agent.configJson())
             .update()
         == 1;
@@ -174,8 +185,7 @@ public class AgentDefinitionRepository {
             .sql(UPDATE_BY_NAME_SQL)
             .param("description", agent.description())
             .param("systemPrompt", agent.systemPrompt())
-            .param("modelName", agent.modelName())
-            .param("variant", agent.variant())
+            .param("executionJson", encodeExecution(agent.execution()))
             .param("configJson", agent.configJson())
             .param("name", agent.name())
             .param("expectedVersion", expectedVersion)
@@ -195,5 +205,17 @@ public class AgentDefinitionRepository {
 
   private AgentDefinition findOne(String sql, String name) {
     return jdbcClient.sql(sql).param("name", name).query(ROW_MAPPER).optional().orElse(null);
+  }
+
+  private static ExecutionSelection decodeExecution(String json) {
+    return json == null
+        ? null
+        : ExecutionSelectionJsonCodec.decode(MAPPER.readTree(json), "agent_definition.execution");
+  }
+
+  private static String encodeExecution(ExecutionSelection selection) {
+    return selection == null
+        ? null
+        : MAPPER.writeValueAsString(ExecutionSelectionJsonCodec.encode(selection));
   }
 }

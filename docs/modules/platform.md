@@ -251,7 +251,7 @@ Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全�
 PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
 路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
 引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
-删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+删除 GROUP 前校验 Agent 入边；Builtin Agent 引用由应用在持有模型行锁的同一事务中校验和更新。
 
 GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
 禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
@@ -283,10 +283,16 @@ TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账�
 非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
 其他模型信息，但保留已有价格，不用零价覆盖。
 
-Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
-（默认 true）；工具候选和 Skill 引用在写入时校验。
+Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 Thread 的
+`ExecutionSelection` 相同。写入和导入预检先根据实际注册的 Driver 校验 settings；
+当前提供 `builtin`，其 settings 精确为 `{modelName, variant}`，`variant: null` 表示
+使用单 MODEL 的默认 Variant，GROUP 不允许指定组级 Variant。Builtin 适配在写事务中
+锁定并校验模型和显式 Variant；模型改名仅更新指向它的 Builtin Agent 并推进其版本，
+模型或 Variant 被引用时阻止删除，不解释其他 Driver 的 settings。
+Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)`、subagents 与
+`inheritParentEnvironment`（默认 true）；工具候选和 Skill 引用在写入时校验。
 
-Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、model、tools、skills 与普通执行配置，但不能删除或改名；内置定义允许显式未配置模型（独立选择，不继承调用 Thread 的模型，也不静默 fallback），用户创建的 Agent 仍要求模型。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
+Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
 
 ### Git Skill Package
 
@@ -588,7 +594,9 @@ YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
-Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
+Agent 使用 `execution: {driver, settings}` 往返，不接受旧的顶层 `model` / `variant`。
+Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
+优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`

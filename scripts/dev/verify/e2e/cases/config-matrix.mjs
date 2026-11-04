@@ -136,8 +136,7 @@ for (const row of agentConfigMatrix()) {
         name: `ag-${row.id}-${cid().slice(0, 4)}`,
         description: row.title,
         systemPrompt: 'e2e',
-        model: sharedModelRefForAgent,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: sharedModelRefForAgent, variant: 'default' } },
         config: row.build(),
       }
       if (row.ok) {

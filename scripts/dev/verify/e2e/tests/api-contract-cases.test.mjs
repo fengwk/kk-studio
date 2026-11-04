@@ -31,8 +31,7 @@ function chatDefaultEnvironmentFixture() {
   const agent = {
     name: 'fixture-agent',
     type: 'USER',
-    model: 'fixture-model',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: 'default' } },
   }
   const environments = new Map()
   const chats = new Map()

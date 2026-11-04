@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -9,8 +12,12 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionConfigValidator;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceResolver;
@@ -37,6 +44,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionValidator;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -114,11 +122,26 @@ final class ConfigSyncFixtures {
       new AgentDefinitionService(
           mock(AgentDefinitionRepository.class),
           mock(AgentDefinitionReferenceResolver.class),
-          mock(AgentModelDefaultVariantResolver.class),
+          builtinDrivers(),
+          new BuiltinAgentExecutionValidator(
+              mock(AgentModelRepository.class), mock(AgentModelDefaultVariantResolver.class)),
           mock(AgentDefinitionConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
           mock(PluginAgentDependencies.class));
+
+  private static DriverRegistry builtinDrivers() {
+    AgentDriver driver = mock(AgentDriver.class);
+    when(driver.id()).thenReturn(BuiltinExecution.DRIVER);
+    doAnswer(
+            invocation -> {
+              BuiltinExecution.parseSettings(invocation.getArgument(0));
+              return null;
+            })
+        .when(driver)
+        .validateSettings(any());
+    return new DriverRegistry(driver);
+  }
 
   /**
    * 真实 {@code SkillCatalogService.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由 {@link
@@ -235,7 +258,7 @@ final class ConfigSyncFixtures {
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(name)
-            .modelName(modelName)
+            .execution(BuiltinExecution.of(new ModelSelection(modelName, null)))
             .configJson(AGENT_CONFIG_CODEC.encode(config))
             .version(0L)
             .build();

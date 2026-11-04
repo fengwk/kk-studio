@@ -415,8 +415,7 @@ async function setupDistributedHarness(ctx, suffix) {
     name: `e2e-dist-agent-${suffix}`,
     description: 'Distributed test agent',
     systemPrompt: 'You are an agent with bash tools.',
-    model: model.name,
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
     config: {
       tools: ['bash'],
       skills: [],

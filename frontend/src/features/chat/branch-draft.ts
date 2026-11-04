@@ -35,10 +35,14 @@ export function materializeBlankBranchDraft(
   models: AgentModelView[],
   environmentName?: string | null,
 ): BranchDraft | null {
-  if (!agent || !agent.model) {
+  if (!agent?.execution) {
     return null
   }
-  const model = models.find((item) => item.name === agent.model)
+  if (agent.execution.driver !== 'builtin') {
+    return { agentName: agent.name, execution: agent.execution, environmentName: environmentName ?? null, yoloEnabled }
+  }
+  const selection = getBuiltinModelSelection(agent.execution)
+  const model = models.find((item) => item.name === selection?.modelName)
   if (!model) {
     return null
   }
@@ -51,7 +55,7 @@ export function materializeBlankBranchDraft(
       yoloEnabled,
     }
   }
-  const variantId = agent.variant || model.config?.defaultVariant || ''
+  const variantId = selection?.variant || model.config?.defaultVariant || ''
   const variant = model.config?.variants.find((item) => item.id === variantId)
   if (!variantId || !variant) {
     return null

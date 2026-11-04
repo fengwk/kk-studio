@@ -397,6 +397,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
+Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
+`{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；这些 case
+不调用真实模型。更改执行选择契约时同步 case、fixture 与生成的前端契约。
+
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
 返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
 

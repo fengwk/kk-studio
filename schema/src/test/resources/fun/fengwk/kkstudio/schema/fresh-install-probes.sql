@@ -140,8 +140,9 @@ insert into agent_provider (name, provider_type, base_url, config, connection_ge
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
 insert into agent_model (name, kind, provider_name, model_id, config)
     values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
-insert into agent_definition (name, model_name, config)
-    values ('designer', 'fixture', '{}'), ('reviewer', 'fixture', '{}');
+insert into agent_definition (name, execution, config)
+    values ('designer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}'),
+           ('reviewer', '{"driver":"builtin","settings":{"modelName":"fixture","variant":null}}', '{}');
 
 -- 名称是跨 MODEL/GROUP 的全局主键；MODEL/GROUP 字段形状由数据库约束保证。
 select pg_temp.rejects('agent model name is globally unique',
@@ -166,22 +167,30 @@ select pg_temp.assert_true('user agent is the default ownership',
     (select type = 'USER' from agent_definition where name = 'designer'));
 insert into agent_definition (name, type, config)
     values ('probe-builtin', 'BUILTIN', '{}');
-select pg_temp.assert_true('built-in agent accepts an unconfigured model',
-    (select model_name is null and variant is null
+select pg_temp.assert_true('built-in agent accepts unconfigured execution',
+    (select execution is null
         from agent_definition where name = 'probe-builtin'));
 select pg_temp.rejects('unknown agent ownership is rejected',
-    $$insert into agent_definition(name,type,model_name,config)
-      values('probe-unknown','ROOT','fixture','{}')$$,
+    $$insert into agent_definition(name,type,execution,config)
+      values('probe-unknown','ROOT','{"driver":"x","settings":{}}','{}')$$,
     '23514', 'ck_agent_definition_type');
-select pg_temp.assert_true('agent binds a globally unique model name',
-    (select model_name = 'fixture' from agent_definition where name = 'designer'));
-select pg_temp.rejects('agent variant requires a model',
-    $$insert into agent_definition(name,type,variant,config)
-      values('probe-variant','BUILTIN','default','{}')$$,
-    '23514', 'ck_agent_definition_variant_requires_model');
-select pg_temp.rejects('user agent requires a model',
+select pg_temp.assert_true('agent stores builtin execution',
+    (select execution -> 'settings' ->> 'modelName' = 'fixture' from agent_definition where name = 'designer'));
+select pg_temp.rejects('execution requires object settings',
+    $$insert into agent_definition(name,type,execution,config)
+      values('probe-invalid','BUILTIN','{"driver":"x","settings":null}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
+select pg_temp.rejects('user agent requires execution',
     $$insert into agent_definition(name,type,config) values('probe-user','USER','{}')$$,
-    '23514', 'ck_agent_definition_user_requires_model');
+    '23514', 'ck_agent_definition_user_requires_execution');
+select pg_temp.rejects('execution rejects extra fields',
+    $$insert into agent_definition(name,execution,config)
+      values('probe-extra','{"driver":"x","settings":{},"extra":true}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
+select pg_temp.rejects('execution requires a driver',
+    $$insert into agent_definition(name,execution,config)
+      values('probe-missing','{"settings":{}}','{}')$$,
+    '23514', 'ck_agent_definition_execution_shape');
 
 insert into project (id, title, description, workflow) values
     (pg_temp.uid(1), 'one', '',

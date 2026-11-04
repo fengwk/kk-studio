@@ -136,7 +136,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         "wire-" + id,
         VALID_MODEL_CONFIG);
     jdbc.update(
-        "insert into agent_definition (name, model_name, config)" + " values (?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, execution, config)"
+            + " values (?, jsonb_build_object('driver', 'builtin', 'settings',"
+            + " jsonb_build_object('modelName', cast(? as text), 'variant', null)), '{}'::jsonb)",
         agentName,
         modelName);
     return agentName;

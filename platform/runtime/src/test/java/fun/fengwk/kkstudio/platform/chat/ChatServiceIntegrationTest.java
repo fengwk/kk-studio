@@ -38,11 +38,13 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 
 import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -167,8 +169,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       String reboundSystemPrompt = "Rebound assistant: resolved from the re-created current row.";
       AgentDefinitionCreateDTO rebound = new AgentDefinitionCreateDTO();
       rebound.setName("default-assistant");
-      rebound.setModel("acceptance-stub");
-      rebound.setVariant("default");
+      HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+      execution.setDriver("builtin");
+      execution.setSettings(Map.of("modelName", "acceptance-stub", "variant", "default"));
+      rebound.setExecution(execution);
       AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
       reboundConfig.setTools(List.of());
       reboundConfig.setSkills(List.of());

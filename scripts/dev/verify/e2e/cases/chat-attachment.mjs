@@ -312,8 +312,7 @@ registerCase({
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
-            model: model.name,
-            variant: 'default',
+            execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
             config: {
               tools: ['get_goal'],
               skills: [],
@@ -342,8 +341,7 @@ registerCase({
         rootSettings: branchSettingsOf(
           agent,
           {
-            modelName: model.name,
-            variant: 'default',
+            ...agent.execution.settings,
           },
         ),
         yoloEnabled: false,
@@ -382,8 +380,7 @@ registerCase({
           await ctx.call('PUT', `/api/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
-            model: agent.model,
-            variant: 'default',
+            execution: agent.execution,
             config: {
               tools: ['get_goal', 'update_goal'],
               skills: [],

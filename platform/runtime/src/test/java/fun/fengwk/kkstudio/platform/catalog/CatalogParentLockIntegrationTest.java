@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
@@ -27,8 +28,10 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -221,8 +224,10 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     config.setSubagents(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName(name);
-    create.setModel(model);
-    create.setVariant("default");
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver(BuiltinExecution.DRIVER);
+    execution.setSettings(Map.of("modelName", model, "variant", "default"));
+    create.setExecution(execution);
     create.setConfig(config);
     return create;
   }
@@ -235,8 +240,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription(current.getDescription());
     update.setSystemPrompt(current.getSystemPrompt());
-    update.setModel(current.getModel());
-    update.setVariant(current.getVariant());
+    update.setExecution(current.getExecution());
     update.setConfig(config);
     update.setExpectedVersion(current.getVersion());
     return update;

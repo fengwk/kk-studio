@@ -189,7 +189,8 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、
 `FORK_SESSION_DRAFT`（携带 `sourceThreadId`、`startEntryId`，会话 fork 为新建的 `sessionId`/`threadId`）、
 `BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
-显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
+显式选 Agent 同步其 execution 并保留环境、YOLO、输入与附件；Builtin 的模型和默认变体由目录解析，
+其他 Driver 的 settings 原样保留；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
@@ -344,7 +345,9 @@ AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作�
 Provider → Model → Agent → Chat 的首次使用引导并链接到对应页面，已有可用 Agent 时不再查询。
 新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
 上游失败时就地展示状态与原因。
-Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护，编辑表单允许其模型留空（未配置），用户创建的 Agent 仍要求模型。
+Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护。
+表单选择 execution Driver，当前提供 Builtin 的模型与 Variant 配置；内置定义允许未配置
+execution，用户创建的 Agent 必须配置。无法编辑的其他 Driver 保留原始 settings，不静默改写。
 Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化

@@ -462,6 +462,10 @@ export const resourcesCatalog = {
     'en-US': 'Context Window',
     'zh-CN': 'Context Window',
   },
+  'ai.catalog.form.executionDriver': {
+    'en-US': 'Execution driver',
+    'zh-CN': '执行驱动',
+  },
   'ai.catalog.form.maxOutputTokens': {
     'en-US': 'Max Output Tokens',
     'zh-CN': 'Max Output Tokens',

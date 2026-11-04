@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
@@ -20,6 +21,8 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinConfigSyncAdapter.VariantIssue;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
@@ -602,22 +605,21 @@ public final class ConfigSyncPlanner {
   private static void rejectUnknownAgentModelVariants(
       List<ConfigSyncParser.AgentSpec> agents, Map<String, ModelAvailability> availableModels) {
     for (ConfigSyncParser.AgentSpec spec : agents) {
-      String variant = spec.properties().getVariant();
-      ModelAvailability model = availableModels.get(spec.modelName());
+      ModelSelection selection = spec.builtinModel();
+      if (selection == null) {
+        continue;
+      }
+      ModelAvailability model = availableModels.get(selection.modelName());
       if (model == null) {
         continue;
       }
-      if (variant == null || variant.isBlank()) {
-        continue;
-      }
-      if (model.kind() == AgentModelKind.GROUP) {
+      VariantIssue issue =
+          BuiltinConfigSyncAdapter.variantIssue(selection, model.kind(), model.config());
+      if (issue == VariantIssue.GROUP_VARIANT) {
         throw new AiValidationException(
             RESOURCE, "agent references a model group with variant: " + spec.name());
       }
-      try {
-        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-            spec.modelName(), variant, model.config());
-      } catch (IllegalArgumentException error) {
+      if (issue == VariantIssue.UNKNOWN_VARIANT) {
         throw new AiValidationException(
             RESOURCE, "agent references unknown model variant: " + spec.name());
       }
@@ -704,8 +706,9 @@ public final class ConfigSyncPlanner {
       Map<String, Set<String>> availableMcpTools,
       Set<String> knownMcpToolNames,
       RuntimeToolCatalog toolCatalog) {
-    String modelKey = spec.modelName();
-    if (!availableModelKeys.contains(modelKey)) {
+    ModelSelection selection = spec.builtinModel();
+    String modelKey = selection == null ? null : selection.modelName();
+    if (modelKey != null && !availableModelKeys.contains(modelKey)) {
       return "missing model: " + modelKey;
     }
     AgentDefinitionConfigDTO config = spec.properties().getConfig();
