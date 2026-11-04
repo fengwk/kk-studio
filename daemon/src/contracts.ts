@@ -124,6 +124,8 @@ export type IdeAction =
   | 'CLOSE_VIEW'
   | 'DETACH_VIEW'
   | 'LIST_VIEWS'
+  | 'LIST_DIRECTORIES'
+  | 'COLLAPSE_MOBILE'
 
 export type IdeOpenMode = 'create' | 'resume'
 export type IdeViewState = 'OPEN' | 'CLOSING'
@@ -165,6 +167,12 @@ export interface IdeReply {
   directory?: string
   workspacePath?: string
   views?: IdeViewSummary[]
+  directoryListing?: {
+    path: string
+    parentPath?: string
+    children: { name: string; path: string }[]
+    truncated: boolean
+  }
   code?: string
   message?: string
 }

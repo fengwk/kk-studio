@@ -252,6 +252,8 @@ const ACTION_ENUM_MAP: Record<string, ProtoIdeAction> = {
   CLOSE_VIEW: ProtoIdeAction.CLOSE_VIEW,
   DETACH_VIEW: ProtoIdeAction.DETACH_VIEW,
   LIST_VIEWS: ProtoIdeAction.LIST_VIEWS,
+  LIST_DIRECTORIES: ProtoIdeAction.LIST_DIRECTORIES,
+  COLLAPSE_MOBILE: ProtoIdeAction.COLLAPSE_MOBILE,
 }
 
 function serverMessage(type: string, options: { environmentId?: string; invocationId?: string; payload?: any } = {}): Envelope {
@@ -2237,6 +2239,127 @@ describe('runtime extension handlers', () => {
 })
 
 describe('runtime IDE commands', () => {
+  it('maps directory listing and mobile collapse commands and returns the listing proto', async () => {
+    const commands: Array<Parameters<IdeService['handle']>[0]> = []
+    const listing = {
+      path: '/workspace', parentPath: '/', truncated: true,
+      children: [{ name: 'project', path: '/workspace/project' }],
+    }
+    const setup = buildRuntime({
+      ide: ideService({
+        async handle(command) {
+          commands.push(command)
+          return command.action === 'LIST_DIRECTORIES' ? { ok: true, directoryListing: listing } : { ok: true }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-directories', payload: { action: 'LIST_DIRECTORIES', directory: '/workspace' },
+      }))
+      await waitFor(() => setup.transport.sent.some((env) => env.invocationId === 'ide-directories'))
+      const result = setup.transport.sent.find((env) => env.invocationId === 'ide-directories')
+      expect(result?.payload.case).toBe('ideResult')
+      if (result?.payload.case !== 'ideResult') throw new Error('missing IDE result')
+      expect(result.payload.value.ok).toBe(true)
+      expect(result.payload.value.directoryListing).toMatchObject(listing)
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-collapse', payload: { action: 'COLLAPSE_MOBILE', viewId: ENV },
+      }))
+      await waitFor(() => setup.transport.sent.some((env) => env.invocationId === 'ide-collapse'))
+      expect(commands).toHaveLength(2)
+      expect(commands[0]).toMatchObject({ action: 'LIST_DIRECTORIES', directory: '/workspace' })
+      expect(commands[1]).toMatchObject({ action: 'COLLAPSE_MOBILE', viewId: ENV })
+      expect(sent(setup.transport).find((env) => env.invocationId === 'ide-collapse')?.payload.ok).toBe(true)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
+  // 人工确认的普通关闭不受短默认超时限制；释放后仍需在原连接交付结果。
+  it('keeps normal close pending past the default timeout and sends its eventual result', async () => {
+    const gate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<AbortSignal>()
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 20,
+      ide: ideService({
+        async handle(command, signal) {
+          expect(command).toMatchObject({ action: 'CLOSE_VIEW', discard: false })
+          started.resolve(signal)
+          await gate.promise
+          return { ok: true, viewId: ENV }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-close-pending', payload: { action: 'CLOSE_VIEW', viewId: ENV, discard: false },
+      }))
+      const signal = await started.promise
+      await vi.advanceTimersByTimeAsync(100)
+      expect(signal.aborted).toBe(false)
+      expect(setup.transport.sent.some((env) => env.invocationId === 'ide-close-pending')).toBe(false)
+      gate.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      const result = setup.transport.sent.filter((env) => env.invocationId === 'ide-close-pending')
+      expect(result).toHaveLength(1)
+      expect(result[0]?.payload.case).toBe('ideResult')
+      if (result[0]?.payload.case !== 'ideResult') throw new Error('missing IDE result')
+      expect(result[0].payload.value).toMatchObject({ ok: true, viewId: ENV })
+    } finally {
+      gate.resolve()
+      vi.useRealTimers()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
+  // 即使 IDE 延迟返回成功，断线中止后的旧请求也不能向新连接发送结果。
+  it('aborts a pending normal close on disconnect and never sends its stale success', async () => {
+    const gate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<AbortSignal>()
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 20,
+      ide: ideService({
+        async handle(_command, signal) {
+          started.resolve(signal)
+          await gate.promise
+          return { ok: true }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-close-disconnect', payload: { action: 'CLOSE_VIEW', viewId: ENV, discard: false },
+      }))
+      const signal = await started.promise
+      await vi.advanceTimersByTimeAsync(100)
+      expect(signal.aborted).toBe(false)
+      const oldConnection = setup.transport.connection!
+      setup.transport.disconnect()
+      expect(signal.aborted).toBe(true)
+      expect(signal.reason).toBe('CONTROL_DISCONNECTED')
+      await vi.advanceTimersByTimeAsync(5)
+      setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV }))
+      expect(setup.runtime.getState()).toBe('READY')
+      gate.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(oldConnection.sent.some((env) => env.invocationId === 'ide-close-disconnect')).toBe(false)
+      expect(setup.transport.sent.some((env) => env.invocationId === 'ide-close-disconnect')).toBe(false)
+    } finally {
+      gate.resolve()
+      vi.useRealTimers()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
   it('dispatches IDE_COMMAND and replies with IDE_RESULT', async () => {
     let handled = 0
     const setup = buildRuntime({

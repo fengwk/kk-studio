@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   IDE_MAX_OPEN_ENVIRONMENTS,
+  IDE_MAX_RECENT_DIRECTORIES,
+  IDE_RECENT_DIRECTORIES_KEY,
   IDE_TAB_LAST_KEY,
   IDE_TAB_SESSION_KEY,
   createDefaultIdePresentation,
   initializeIdeTabState,
+  readRecentDirectories,
+  recordRecentDirectory,
   saveIdePresentation,
   saveIdeSession,
   type IdePresentation,
@@ -268,5 +272,60 @@ describe('ide tab state', () => {
 
     expect(loaded.sessionSaved).toBe(false)
     expect(loaded.source).toBe('default')
+  })
+
+  describe('recent directories', () => {
+    it('records per environment with newest first and no duplicates', () => {
+      const local = new MemoryStorage()
+      const storage = { sessionStorage: new MemoryStorage(), localStorage: local }
+
+      expect(recordRecentDirectory(ENV_A, '/workspace/a', storage)).toEqual(['/workspace/a'])
+      expect(recordRecentDirectory(ENV_A, '/workspace/b', storage)).toEqual([
+        '/workspace/b',
+        '/workspace/a',
+      ])
+      expect(recordRecentDirectory(ENV_A, '/workspace/a', storage)).toEqual([
+        '/workspace/a',
+        '/workspace/b',
+      ])
+      expect(recordRecentDirectory(ENV_B, '/workspace/c', storage)).toEqual(['/workspace/c'])
+
+      // 另一个 Environment 的记录互不影响；读取只返回该 Environment 的列表。
+      expect(readRecentDirectories(ENV_A, storage)).toEqual(['/workspace/a', '/workspace/b'])
+      expect(readRecentDirectories(ENV_B, storage)).toEqual(['/workspace/c'])
+      expect(readRecentDirectories(ENV_A)).toEqual([])
+    })
+
+    it('bounds the list and ignores invalid stored entries', () => {
+      const local = new MemoryStorage()
+      const storage = { localStorage: local }
+      for (let index = 0; index < IDE_MAX_RECENT_DIRECTORIES + 3; index += 1) {
+        recordRecentDirectory(ENV_A, `/workspace/${index}`, storage)
+      }
+      expect(readRecentDirectories(ENV_A, storage)).toHaveLength(IDE_MAX_RECENT_DIRECTORIES)
+      expect(readRecentDirectories(ENV_A, storage)[0]).toBe(
+        `/workspace/${IDE_MAX_RECENT_DIRECTORIES + 2}`,
+      )
+
+      local.values.set(IDE_RECENT_DIRECTORIES_KEY, JSON.stringify({
+        byEnvironment: {
+          [ENV_A]: ['/valid', 7, '', '/valid', '/bad\u0000path'],
+          'not-a-uuid': ['/ignored'],
+        },
+      }))
+      expect(readRecentDirectories(ENV_A, storage)).toEqual(['/valid'])
+
+      local.values.set(IDE_RECENT_DIRECTORIES_KEY, '{"unexpected":true}')
+      expect(readRecentDirectories(ENV_A, storage)).toEqual([])
+    })
+
+    it('still returns the in-memory list when the storage write fails', () => {
+      const local = new MemoryStorage()
+      local.failWrites = true
+      expect(recordRecentDirectory(ENV_A, '/workspace/a', { localStorage: local })).toEqual([
+        '/workspace/a',
+      ])
+      expect(readRecentDirectories(ENV_A, { localStorage: local })).toEqual([])
+    })
   })
 })

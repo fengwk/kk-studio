@@ -26,6 +26,7 @@ import {
   RecoveryQuotaError,
   canonicalDirectory,
   hostHome,
+  listDirectories,
   readRecoveryBackup,
   validateBindingEpoch,
   validateUuid,
@@ -86,7 +87,7 @@ export interface IdeScheduler {
 }
 
 export interface IdeServiceEvent {
-  kind: 'backup-failed' | 'backup-incomplete' | 'cleanup-failed' | 'idle-stop-failed' | 'process-exit'
+  kind: 'backup-failed' | 'backup-incomplete' | 'cleanup-failed' | 'idle-stop-failed' | 'process-exit' | 'expiry-deferred'
   viewId?: string
   message: string
 }
@@ -128,6 +129,8 @@ interface ViewRecord {
   expiryTimer?: unknown
   streams: Set<ActiveStream>
   closePromise?: Promise<IdeReply>
+  forceAllowed?: boolean
+  nativeClosePending?: boolean
   sessionGeneration: number
 }
 
@@ -378,13 +381,13 @@ export async function createIdeService(
     }
   }
 
-  const scheduleExpiry = (view: ViewRecord): void => {
+  const scheduleExpiry = (view: ViewRecord, notBefore = 0): void => {
     clearTimer(view)
-    if (view.state !== 'OPEN' || closed) {
+    if (view.state !== 'OPEN' || view.nativeClosePending || closed) {
       return
     }
     const base = view.detachedAt ?? view.lastProofAt ?? view.createdAt
-    view.expiresAt = base + IDE_VIEW_EXPIRY_MILLIS
+    view.expiresAt = Math.max(base + IDE_VIEW_EXPIRY_MILLIS, notBefore)
     const delay = Math.max(0, view.expiresAt - scheduler.now())
     view.expiryTimer = scheduler.setTimeout(() => {
       view.expiryTimer = undefined
@@ -567,7 +570,8 @@ export async function createIdeService(
       return
     }
     view.state = 'OPEN'
-    scheduleExpiry(view)
+    // A cancellation or lost control connection must not immediately trigger expired cleanup.
+    scheduleExpiry(view, scheduler.now() + IDE_VIEW_EXPIRY_MILLIS)
   }
 
   const performClose = (view: ViewRecord, mode: ManagedViewCloseMode): Promise<IdeReply> => {
@@ -577,68 +581,22 @@ export async function createIdeService(
     const operation = (async (): Promise<IdeReply> => {
       const viewId = view.viewId
       const epoch = view.bindingEpoch
-      // A normal close that can still be rolled back must not abort streams until the bridge has
-      // accepted the final close. Discard, expiry and retry-after-failure are irreversible modes.
-      const rollbackableNormalClose = mode === 'normal' && !view.cleanupFailed
       try {
-        if (!rollbackableNormalClose) {
-          await waitForViewStreams(view)
-        }
+        // Normal close reaches here only after the native confirmation succeeded.
+        await waitForViewStreams(view)
         if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
           return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
         }
-        if (bridge.isConnected(viewId, epoch)) {
-          let bridgeResult: BridgeResult
-          try {
-            bridgeResult = await bridge.request(
-              viewId,
-              { op: 'closeView', ...(mode === 'normal' ? {} : { discard: true }) },
-              lifetime.signal,
-              { expectedEpoch: epoch },
-            )
-          } catch (error) {
-            if (mode === 'normal' && !view.cleanupFailed) {
-              rollbackOpen(view)
-              return failureReply(error)
-            }
-            throw error
-          }
+        if (mode !== 'normal' && bridge.isConnected(viewId, epoch)) {
+          const bridgeResult = await bridge.request(
+            viewId, { op: 'closeView', discard: true }, lifetime.signal, { expectedEpoch: epoch },
+          )
           if (!bridgeResult.ok) {
-            if (mode === 'normal') {
-              if (view.cleanupFailed) {
-                throw new IdeError(bridgeResult.message ?? 'ide window did not confirm close', 'CLEANUP_FAILED')
-              }
-              rollbackOpen(view)
-              return {
-                ok: false,
-                code: bridgeResult.code === 'DIRTY' ? 'DIRTY' : 'UNAVAILABLE',
-                message:
-                  bridgeResult.message ??
-                  'unsaved state is unknown; save or discard unsaved changes before closing the view',
-              }
-            }
             throw new IdeError(bridgeResult.message ?? 'ide window did not confirm close', 'CLEANUP_FAILED')
           }
-        } else if (mode === 'normal' && !view.cleanupFailed) {
-          // A clean observation is needed for a normal close. Losing the window before the
-          // bridge confirms means the dirty state is unknown, so the view returns to OPEN.
-          rollbackOpen(view)
-          return {
-            ok: false,
-            code: 'UNAVAILABLE',
-            message: 'save or discard unsaved changes before closing the view',
-          }
         }
         if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
           return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
-        }
-        if (rollbackableNormalClose) {
-          // The bridge has now accepted the final close; only from this point is aborting the
-          // target view's data streams an accepted, irreversible cleanup step.
-          await waitForViewStreams(view)
-          if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
-            return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
-          }
         }
         const serverMode: ManagedViewCloseMode = mode === 'normal' ? 'discard' : mode
         const result = await manager.closeView(viewId, epoch, serverMode, lifetime.signal)
@@ -925,6 +883,7 @@ export async function createIdeService(
     view.claimId = claimId
     view.state = 'OPEN'
     view.cleanupFailed = false
+    view.forceAllowed = false
     view.lastProofAt = null
     view.detachedAt = null
     view.createdAt = scheduler.now()
@@ -1047,6 +1006,25 @@ export async function createIdeService(
     })
   }
 
+  const collapseMobile = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
+    const viewId = validateViewId(required(command.viewId, 'viewId'))
+    return withViewLock(viewId, async () => {
+      const view = requireBoundView(command, { requireOpen: true })
+      const epoch = view.bindingEpoch
+      if (!bridge.isConnected(viewId, epoch)) {
+        await bridge.waitForConnection(viewId, signal)
+      }
+      if (views.get(viewId) !== view || view.state !== 'OPEN' || view.bindingEpoch !== epoch) {
+        throw new IdeError('view binding changed', 'VIEW_GONE')
+      }
+      const result = await bridge.request(viewId, { op: 'collapseMobile' }, signal, { expectedEpoch: epoch })
+      if (!result.ok) {
+        throw new IdeError(result.message ?? 'mobile layout could not be applied', result.code ?? 'UNAVAILABLE')
+      }
+      return { ok: true, viewId }
+    })
+  }
+
   const closeView = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
     const viewId = validateViewId(required(command.viewId, 'viewId'))
     if (typeof command.discard !== 'boolean') {
@@ -1066,18 +1044,33 @@ export async function createIdeService(
       const mode: ManagedViewCloseMode = command.discard === true ? 'discard' : 'normal'
       const epoch = view.bindingEpoch
       const documentId = view.documentId
-      view.state = 'CLOSING'
+      if (mode === 'discard' && bridge.isConnected(viewId, epoch) && !view.forceAllowed) {
+        throw new IdeError('force close is only available when the window state is unknown', 'BUSY')
+      }
+      // Keep the data plane available while the native dialog awaits the user.
+      view.nativeClosePending = mode === 'normal'
+      if (mode !== 'normal') {
+        view.state = 'CLOSING'
+      }
       clearTimer(view)
       if (mode === 'normal') {
         if (!bridge.isConnected(view.viewId, epoch)) {
+          view.forceAllowed = true
+          view.nativeClosePending = false
           rollbackOpen(view)
-          throw new IdeError('unsaved state is unknown because the IDE window is not connected', 'UNAVAILABLE')
+          throw new IdeError('IDE window is not connected; close outcome is unknown', 'UNAVAILABLE')
         }
-        let inspection: BridgeResult
+        let result: BridgeResult
         try {
-          inspection = await bridge.request(view.viewId, { op: 'inspect' }, signal, { expectedEpoch: epoch })
+          const closeSignal = AbortSignal.any([signal, lifetime.signal])
+          result = await waitWithSignal(
+            bridge.request(view.viewId, { op: 'closeView' }, closeSignal, { expectedEpoch: epoch }),
+            closeSignal,
+          )
         } catch (error) {
           if (views.get(view.viewId) === view && view.bindingEpoch === epoch) {
+            view.forceAllowed = true
+            view.nativeClosePending = false
             rollbackOpen(view)
           }
           throw error
@@ -1085,14 +1078,24 @@ export async function createIdeService(
         if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.documentId !== documentId) {
           throw new IdeError('view binding changed', 'VIEW_GONE')
         }
-        if (!inspection.ok) {
+        if (signal.aborted || lifetime.signal.aborted || !bridge.isConnected(viewId, epoch)) {
+          view.forceAllowed = true
+          view.nativeClosePending = false
           rollbackOpen(view)
-          throw new IdeError(inspection.message ?? 'unsaved state is unknown', inspection.code ?? 'UNAVAILABLE')
+          throw new IdeError('IDE close outcome is unknown', 'UNAVAILABLE')
         }
-        if (inspection.clean !== true) {
+        if (!result.ok) {
+          view.forceAllowed = result.code !== 'CANCELLED'
+          view.nativeClosePending = false
           rollbackOpen(view)
-          throw new IdeError('save or discard unsaved changes before closing the view', 'DIRTY')
+          throw new IdeError(
+            result.message ?? 'IDE close outcome is unknown',
+            result.code === 'CANCELLED' ? 'CANCELLED' : 'UNAVAILABLE',
+          )
         }
+        view.forceAllowed = false
+        view.nativeClosePending = false
+        view.state = 'CLOSING'
       } else {
         await snapshotForClose(view)
       }
@@ -1129,8 +1132,31 @@ export async function createIdeService(
       }
       view.state = 'CLOSING'
       clearTimer(view)
-      await snapshotForClose(view)
-      await performClose(view, 'expired')
+      // An expired lease is not permission to discard a dirty or unobservable editor.
+      // Keep the view for an explicit user decision when the window cannot prove it is clean.
+      let confirmed = false
+      try {
+        if (bridge.isConnected(viewId, epoch)) {
+          const timeout = AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDE_CLOSE_BUDGET_MILLIS)])
+          const inspection = await bridge.request(viewId, { op: 'inspect' }, timeout, { expectedEpoch: epoch })
+          if (inspection.ok && inspection.clean === true && bridge.isConnected(viewId, epoch)) {
+            const result = await bridge.request(viewId, { op: 'closeView' }, timeout, { expectedEpoch: epoch })
+            confirmed = result.ok && bridge.isConnected(viewId, epoch) && !timeout.aborted
+          }
+        }
+      } catch {
+        // No confirmation: retain the view rather than guessing that its content is disposable.
+      }
+      if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
+        return
+      }
+      if (!confirmed) {
+        view.state = 'OPEN'
+        view.forceAllowed = !bridge.isConnected(viewId, epoch)
+        emit({ kind: 'expiry-deferred', viewId, message: 'view expiry requires an explicit close' })
+        return
+      }
+      await performClose(view, 'normal')
     }).then(
       () => undefined,
       () => undefined,
@@ -1156,6 +1182,10 @@ export async function createIdeService(
           return await detachView(command, signal)
         case 'LIST_VIEWS':
           return listViews()
+        case 'LIST_DIRECTORIES':
+          return { ok: true, directoryListing: await listDirectories(boundedText(command.directory, 'directory') ?? hostHome()) }
+        case 'COLLAPSE_MOBILE':
+          return await collapseMobile(command, signal)
         default:
           throw new IdeError('unknown ide action')
       }

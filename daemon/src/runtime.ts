@@ -149,6 +149,10 @@ function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
       return 'DETACH_VIEW'
     case ProtoIdeAction.LIST_VIEWS:
       return 'LIST_VIEWS'
+    case ProtoIdeAction.LIST_DIRECTORIES:
+      return 'LIST_DIRECTORIES'
+    case ProtoIdeAction.COLLAPSE_MOBILE:
+      return 'COLLAPSE_MOBILE'
     default:
       throw new Error(`unsupported IDE action: ${action}`)
   }
@@ -1414,7 +1418,10 @@ export class Runtime {
     }
     const controller = admission.controller
     this.ideInFlight.set(invocationId, controller)
-    const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
+    // Native close waits for a person; disconnect and shutdown still abort the command.
+    const timer = command.action === 'CLOSE_VIEW' && command.discard === false
+      ? null
+      : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
     void this.track(this.runIdeCommand(invocationId, command, controller, timer))
   }
 
@@ -1426,14 +1433,20 @@ export class Runtime {
   ): Promise<void> {
     try {
       const reply = await (this.ide as IdeService).handle(command, controller.signal)
-      this.sendIdeResult(invocationId, toProtoIdeResult(reply))
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.sendIdeResult(invocationId, toProtoIdeResult(reply))
+      }
     } catch (error) {
-      this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
+      }
     } finally {
       if (timer !== null) {
         clearTimeout(timer)
       }
-      this.ideInFlight.delete(invocationId)
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.ideInFlight.delete(invocationId)
+      }
     }
   }
 

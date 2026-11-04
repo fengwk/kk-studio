@@ -51,6 +51,7 @@ function fakeVscode(
     createTerminal: [] as { name: string; cwd?: string }[],
     applyEdit: [] as unknown[],
     closeTabs: [] as unknown[][],
+    commands: [] as string[],
   }
   const terminals: FakeTerminal[] = []
   const openedDocuments = new Map<string, Record<string, unknown>>()
@@ -81,6 +82,7 @@ function fakeVscode(
     constructor(readonly base: unknown, readonly pattern: string) {}
   }
   const vscode = {
+    commands: { async executeCommand(command: string) { calls.commands.push(command) } },
     Uri: { file: (path: string) => ({ fsPath: path, scheme: 'file' }) },
     RelativePattern: FakeRelativePattern,
     Range: FakeRange,
@@ -250,7 +252,7 @@ describe('VS Code bridge extension host', () => {
     expect(fake.calls.closeTabs).toEqual([[first, second]])
     expect(fake.terminals).toHaveLength(1)
     decide(false)
-    expect(await closing).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(await closing).toMatchObject({ ok: false, code: 'CANCELLED' })
     expect(fake.terminals).toHaveLength(1)
   })
 
@@ -267,14 +269,15 @@ describe('VS Code bridge extension host', () => {
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
     await bridge.request(viewId, { op: 'focusTerminal' }, signal())
     expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: true })
-    expect(fake.terminals).toHaveLength(0)
+    // Only the view owner may dispose shells once it commits the close.
+    expect(fake.terminals).toHaveLength(1)
   })
 
   it('rejects closing when native close leaves a hidden dirty document', async () => {
     const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], { closeTabs: async () => true })
     fake.vscode.workspace.textDocuments.push({ isDirty: true })
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
-    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
   })
 
   it('rejects closing if another editor opens during the native prompt', async () => {
@@ -286,7 +289,7 @@ describe('VS Code bridge extension host', () => {
     })
     fake.vscode.window.tabGroups.all = [{ tabs: [{}] }]
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
-    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
   })
 
   it('does not show a native prompt for an explicit discard after the daemon backup', async () => {
@@ -389,7 +392,7 @@ describe('VS Code bridge extension host', () => {
       expect(attempts).toBe(1)
       expect(ptyCalls).toBe(0)
       expect(old.terminals[0]?.disposed).toBe(false)
-      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
       oldHost.dispose()
       expect(old.terminals[0]?.disposed).toBe(false)
     } finally {
@@ -515,7 +518,7 @@ describe('VS Code bridge extension host', () => {
       await vi.advanceTimersByTimeAsync(100)
       expect(attempts).toBe(2)
       expect(terminal.disposed).toBe(false)
-      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
     } finally {
       vi.useRealTimers()
     }
@@ -620,7 +623,7 @@ describe('VS Code bridge extension host', () => {
       expect(attempts).toBe(1)
       expect(oldTerminal.disposed).toBe(false)
       expect(old.terminals).toContain(oldTerminal)
-      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'CANCELLED' })
       expect(oldTerminal.disposed).toBe(false)
       expect(bridge.isConnected(viewId, '1')).toBe(true)
       oldHost.dispose()
@@ -752,13 +755,20 @@ describe('VS Code bridge extension host', () => {
     expect(fake.calls.updateWorkspaceFolders).toHaveLength(0)
   })
 
-  it('disposes its terminal on close view', async () => {
+  it('collapses both native mobile panels', async () => {
+    const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
+    // Both public workbench commands must be invoked in order.
+    expect(await bridge.request(viewId, { op: 'collapseMobile' }, signal())).toMatchObject({ ok: true })
+    expect(fake.calls.commands).toEqual(['workbench.action.closeSidebar', 'workbench.action.closePanel'])
+  })
+
+  it('leaves terminals to the view owner after native close', async () => {
     const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
     await bridge.request(viewId, { op: 'focusTerminal' }, signal())
 
     const result = await bridge.request(viewId, { op: 'closeView' }, signal())
     expect(result.ok).toBe(true)
-    expect(fake.terminals).toHaveLength(0)
+    expect(fake.terminals).toHaveLength(1)
   })
 
   it('refuses to close the view while documents are dirty and keeps its terminals', async () => {
@@ -768,7 +778,7 @@ describe('VS Code bridge extension host', () => {
 
     const result = await bridge.request(viewId, { op: 'closeView' }, signal())
     expect(result.ok).toBe(false)
-    expect(result.code).toBe('DIRTY')
+    expect(result.code).toBe('CANCELLED')
     // A dirty window must not be torn down or lose its shells.
     expect(fake.terminals).toHaveLength(1)
     expect(fake.terminals[0]?.disposed).toBe(false)
@@ -883,7 +893,7 @@ describe('VS Code bridge extension host', () => {
     expect(opaqueSnapshot.complete).toBe(false)
     expect(opaqueSnapshot.omitted).toBeGreaterThan(0)
     const closeResult = await bridge.request(viewId, { op: 'closeView' }, signal())
-    expect(closeResult).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(closeResult).toMatchObject({ ok: false, code: 'CANCELLED' })
   })
 
   it('restores only into clean ordinary text buffers and never saves them', async () => {

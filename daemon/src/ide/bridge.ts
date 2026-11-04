@@ -20,7 +20,7 @@ export interface BridgeDocument {
 }
 
 export interface BridgeCommand {
-  op: 'changeDirectory' | 'focusTerminal' | 'inspect' | 'closeView' | 'snapshot' | 'restore'
+  op: 'changeDirectory' | 'focusTerminal' | 'inspect' | 'closeView' | 'snapshot' | 'restore' | 'collapseMobile'
   directory?: string
   discard?: boolean
   maxBytes?: number
@@ -128,7 +128,7 @@ interface Pending {
   hostId: string
   expectedDirectory?: string
   resolve: (result: BridgeResult) => void
-  timer: NodeJS.Timeout
+  timer: NodeJS.Timeout | null
 }
 
 interface ConnectionWaiter {
@@ -181,7 +181,9 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       return
     }
     pending.delete(id)
-    clearTimeout(entry.timer)
+    if (entry.timer !== null) {
+      clearTimeout(entry.timer)
+    }
     const current = views.get(entry.viewId)
     if (current === undefined || current.bindingEpoch !== entry.bindingEpoch) {
       entry.resolve({ ok: false, code: 'VIEW_GONE', message: 'view binding changed' })
@@ -619,10 +621,10 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       }
       const id = randomUUID()
       return new Promise<BridgeResult>((resolve) => {
-        const timer = setTimeout(() => {
+        const timer = command.op === 'closeView' && command.discard !== true ? null : setTimeout(() => {
           resolvePending(id, { ok: false, message: 'ide window did not respond' })
         }, COMMAND_TIMEOUT_MILLIS)
-        timer.unref()
+        timer?.unref()
         const onAbort = (): void => {
           resolvePending(id, { ok: false, message: 'ide request was cancelled' })
         }
@@ -648,7 +650,9 @@ export async function createIdeBridge(): Promise<IdeBridge> {
         view.stream?.end()
       }
       for (const entry of pending.values()) {
-        clearTimeout(entry.timer)
+        if (entry.timer !== null) {
+          clearTimeout(entry.timer)
+        }
         entry.resolve({ ok: false, message: 'ide bridge closed' })
       }
       pending.clear()

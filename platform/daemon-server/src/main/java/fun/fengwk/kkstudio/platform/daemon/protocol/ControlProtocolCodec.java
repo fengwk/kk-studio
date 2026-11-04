@@ -776,7 +776,7 @@ public final class ControlProtocolCodec {
         requireIdePath(command.getDirectory(), "ideCommand.directory");
         rejectOpenFields(command);
       }
-      case FOCUS_TERMINAL, DETACH_VIEW -> {
+      case FOCUS_TERMINAL, DETACH_VIEW, COLLAPSE_MOBILE -> {
         requireBoundView(command, false);
         if (command.hasDirectory()) {
           throw new ControlProtocolException("ideCommand.directory is not valid for this action");
@@ -790,7 +790,7 @@ public final class ControlProtocolCodec {
         }
         rejectOpenFields(command);
       }
-      case LIST_VIEWS -> {
+      case LIST_VIEWS, LIST_DIRECTORIES -> {
         if (command.hasViewId()
             || command.hasDocumentId()
             || command.hasEventNodeId()
@@ -798,9 +798,12 @@ public final class ControlProtocolCodec {
             || command.hasClaimId()
             || command.hasBindingEpoch()
             || command.getMode() != IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED
-            || command.hasDirectory()
+            || (command.getAction() == IdeAction.LIST_VIEWS && command.hasDirectory())
             || command.hasDiscard()) {
-          throw new ControlProtocolException("LIST_VIEWS must only declare action");
+          throw new ControlProtocolException("IDE list command has invalid fields");
+        }
+        if (command.hasDirectory()) {
+          requireIdePath(command.getDirectory(), "ideCommand.directory");
         }
       }
       default -> throw new ControlProtocolException("ideCommand.action is required");
@@ -843,7 +846,8 @@ public final class ControlProtocolCodec {
           || result.hasBindingEpoch()
           || result.hasDirectory()
           || result.hasWorkspacePath()
-          || result.getViewsCount() > 0) {
+          || result.getViewsCount() > 0
+          || result.hasDirectoryListing()) {
         throw new ControlProtocolException("failed IDE result must only declare code and message");
       }
       requirePattern(result.hasCode(), result.getCode(), "ideResult.code", IDE_CODE_PATTERN);
@@ -857,6 +861,39 @@ public final class ControlProtocolCodec {
     }
     if (result.hasCode() || result.hasMessage()) {
       throw new ControlProtocolException("successful IDE result must not declare code or message");
+    }
+    if (result.hasDirectoryListing()) {
+      if (result.hasViewId()
+          || result.hasDocumentId()
+          || result.hasEventNodeId()
+          || result.hasConnectionId()
+          || result.hasClaimId()
+          || result.hasBindingEpoch()
+          || result.hasDirectory()
+          || result.hasWorkspacePath()
+          || result.getViewsCount() > 0) {
+        throw new ControlProtocolException("directory listing result must not contain view fields");
+      }
+      IdeDirectoryListing listing = result.getDirectoryListing();
+      requireIdePath(
+          requirePresent(listing.hasPath(), listing.getPath(), "directoryListing.path"),
+          "directoryListing.path");
+      if (listing.hasParentPath()) {
+        requireIdePath(listing.getParentPath(), "directoryListing.parentPath");
+      }
+      if (!listing.hasTruncated() || listing.getChildrenCount() > 1000) {
+        throw new ControlProtocolException(
+            "directory listing requires truncated and at most 1000 children");
+      }
+      for (IdeDirectoryEntry child : listing.getChildrenList()) {
+        requireIdePath(
+            requirePresent(child.hasName(), child.getName(), "directoryEntry.name"),
+            "directoryEntry.name");
+        requireIdePath(
+            requirePresent(child.hasPath(), child.getPath(), "directoryEntry.path"),
+            "directoryEntry.path");
+      }
+      return;
     }
     if (result.getViewsCount() > 0) {
       if (result.hasViewId()

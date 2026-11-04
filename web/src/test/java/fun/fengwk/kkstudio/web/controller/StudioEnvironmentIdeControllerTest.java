@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,6 +45,7 @@ import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -52,6 +55,7 @@ import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -86,6 +90,33 @@ class StudioEnvironmentIdeControllerTest {
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ApiResponseStatusAdvice())
             .build();
+  }
+
+  /** 查询与绑定命令映射到对应服务，根目录必须显式返回 null。 */
+  @Test
+  void routesDirectoryListingAndMobileLayout() throws Exception {
+    EnvironmentIdeDirectoryListingDTO listing = new EnvironmentIdeDirectoryListingDTO();
+    listing.setPath("/");
+    listing.setChildren(List.of());
+    when(environmentIdeService.listDirectories(EnvironmentId.of(ENV_ID), "/a b"))
+        .thenReturn(listing);
+    mockMvc
+        .perform(get("/api/environments/" + ENV_ID + "/ide/directories").param("path", "/a b"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.path").value("/"))
+        .andExpect(jsonPath("$.data.parentPath").value(nullValue()));
+    mockMvc
+        .perform(
+            post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/mobile-layout")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
+        .andExpect(status().isNoContent());
+    ArgumentCaptor<EnvironmentIdeViewBindingDTO> body =
+        ArgumentCaptor.forClass(EnvironmentIdeViewBindingDTO.class);
+    verify(environmentIdeService)
+        .collapseMobile(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), body.capture());
+    assertEquals(DOCUMENT_ID, body.getValue().getDocumentId());
+    assertEquals("7", body.getValue().getBindingEpoch());
   }
 
   /** 意图：OPEN_VIEW 返回 200 与受控 entryUrl，并把路径中的 environmentId 与请求体原样转发给服务。 */

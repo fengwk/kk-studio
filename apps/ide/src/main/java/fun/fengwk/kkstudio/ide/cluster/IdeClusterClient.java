@@ -12,12 +12,14 @@ import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -36,9 +38,8 @@ import java.util.concurrent.TimeoutException;
  * <p>每次调用最多一次认证 HTTP 请求，失败即上抛，绝不自动重放。响应体不再用 {@code readNBytes} 读取返回的 {@code InputStream}（{@code
  * HttpRequest.timeout} 不覆盖响应体读取，可在返回响应头后无限阻塞），而是交给一个私有的有界 {@link
  * HttpResponse.BodySubscriber}：按到达字节数真正计数，一旦超过上限就 {@code subscription.cancel()} 并让 completion 异常完成，
- * 同时以 {@code requestTimeout} 作为覆盖响应体的硬截止（{@code CompletableFuture.orTimeout} + {@code
- * get(timeout)}）取消订阅并关闭连接， 绝不整包无界读取。大字节数据面（HTTP/WS 逐 exchange）由 gateway 宿主复用 {@link #signHeaders}
- * 与既有流式客户端实现，不经过本类。
+ * 除等待用户确认的普通关闭外，以 {@code requestTimeout} 作为覆盖响应体的硬截止，取消订阅并关闭连接，绝不整包无界读取。大字节数据面（HTTP/WS 逐 exchange）由
+ * gateway 宿主复用 {@link #signHeaders} 与既有流式客户端实现，不经过本类。
  */
 public class IdeClusterClient {
 
@@ -136,12 +137,40 @@ public class IdeClusterClient {
     exchange("POST", IdeInternalPaths.terminalPath(environmentId, viewId), owner, request, null);
   }
 
+  public void collapseMobile(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request) {
+    exchange(
+        "POST",
+        IdeInternalPaths.viewsPath(environmentId) + "/" + viewId + "/mobile-layout",
+        owner,
+        request,
+        null);
+  }
+
+  public EnvironmentIdeDirectoryListingDTO listDirectories(
+      EnvironmentId environmentId, ClusterOwnerRoute owner, String path) {
+    String target = IdeInternalPaths.environmentPrefix(environmentId) + "/directories";
+    if (path != null) {
+      target += "?path=" + URLEncoder.encode(path, StandardCharsets.UTF_8);
+    }
+    return exchange("GET", target, owner, null, EnvironmentIdeDirectoryListingDTO.class);
+  }
+
   public void closeView(
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,
       String viewId,
       EnvironmentIdeCloseViewDTO request) {
-    exchange("DELETE", IdeInternalPaths.viewPath(environmentId, viewId), owner, request, null);
+    exchange(
+        "DELETE",
+        IdeInternalPaths.viewPath(environmentId, viewId),
+        owner,
+        request,
+        null,
+        !Boolean.FALSE.equals(request.getDiscard()));
   }
 
   public void detachView(
@@ -154,10 +183,22 @@ public class IdeClusterClient {
 
   private <T> T exchange(
       String method, String path, ClusterOwnerRoute owner, Object body, Class<T> type) {
+    return exchange(method, path, owner, body, type, true);
+  }
+
+  private <T> T exchange(
+      String method,
+      String path,
+      ClusterOwnerRoute owner,
+      Object body,
+      Class<T> type,
+      boolean boundedTime) {
     URI uri = owner.internalUrl().resolve(path);
     Map<String, String> authHeaders = authentication.sign(method, path, owner.nodeInstanceId());
-    HttpRequest.Builder builder =
-        HttpRequest.newBuilder(uri).timeout(requestTimeout).header("Accept", "application/json");
+    HttpRequest.Builder builder = HttpRequest.newBuilder(uri).header("Accept", "application/json");
+    if (boundedTime) {
+      builder.timeout(requestTimeout);
+    }
     HttpRequest.BodyPublisher publisher = HttpRequest.BodyPublishers.noBody();
     if (body != null) {
       byte[] payload = writeRequestJson(body);
@@ -184,17 +225,24 @@ public class IdeClusterClient {
             subscriber.cancel();
           }
         });
-    bodyFuture.orTimeout(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+    if (boundedTime) {
+      bodyFuture.orTimeout(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+    }
 
     HttpResponse<byte[]> response;
     try {
-      response = responseFuture.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+      response =
+          boundedTime
+              ? responseFuture.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS)
+              : responseFuture.get();
     } catch (TimeoutException error) {
       subscriber.cancel();
+      responseFuture.cancel(true);
       throw new AiEnvironmentIdeUnavailableException("cluster IDE owner response timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       subscriber.cancel();
+      responseFuture.cancel(true);
       throw new AiEnvironmentIdeUnavailableException("cluster IDE request was interrupted", error);
     } catch (ExecutionException error) {
       throw mapFailure(error.getCause());
@@ -210,7 +258,7 @@ public class IdeClusterClient {
     }
     String message = errorMessage(responseBody);
     if (status == 400) {
-      throw new AiValidationException("environment", message);
+      throw new AiValidationException(errorResource(responseBody), message);
     }
     throw new AiEnvironmentIdeUnavailableException(message);
   }
@@ -268,5 +316,17 @@ public class IdeClusterClient {
       }
     }
     return "cluster IDE owner rejected the request";
+  }
+
+  private String errorResource(String body) {
+    try {
+      JsonNode resource = objectMapper.readTree(body).get("resource");
+      if (resource != null && "ide_close_cancelled".equals(resource.asText())) {
+        return "ide_close_cancelled";
+      }
+    } catch (JacksonException ignored) {
+      // Only the known cancellation resource is propagated from an internal error.
+    }
+    return "environment";
   }
 }
