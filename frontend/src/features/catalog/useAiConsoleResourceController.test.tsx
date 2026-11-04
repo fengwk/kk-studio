@@ -583,7 +583,6 @@ function agent(): AgentDefinitionDTO {
     type: 'USER' as const,
     execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
     config: {
-      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

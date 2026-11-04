@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -57,7 +59,13 @@ class TurnPlanPreviewTest {
 
     EntryPath candidate =
         TurnPlanPreview.inputCandidatePath(
-            baseline.threadId(), source, 1L, List.of(setExecution, setAgent, userMessage), NOW);
+            baseline.threadId(),
+            source,
+            1L,
+            List.of(setExecution, setAgent, userMessage),
+            NOW,
+            false,
+            null);
 
     // source 只有一个 ROOT；候选 = ROOT + TURN_START(INPUT) + 一条 USER 消息（SET_* 不产生消息）。
     assertEquals(3, candidate.entries().size());
@@ -85,7 +93,13 @@ class TurnPlanPreviewTest {
 
     EntryPath candidate =
         TurnPlanPreview.inputCandidatePath(
-            baseline.threadId(), source, 1L, List.of(command(userMessage("do not persist"))), NOW);
+            baseline.threadId(),
+            source,
+            1L,
+            List.of(command(userMessage("do not persist"))),
+            NOW,
+            false,
+            null);
 
     assertEquals(1, source.entries().size());
     assertEquals(1, path(store, baseline.threadId()).entries().size());
@@ -108,15 +122,25 @@ class TurnPlanPreviewTest {
                 source,
                 1L,
                 List.of(command(new SetAgentCommandPayload("agent-2"))),
-                NOW));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> TurnPlanPreview.inputCandidatePath(baseline.threadId(), source, 1L, List.of(), NOW));
+                NOW,
+                false,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             TurnPlanPreview.inputCandidatePath(
-                baseline.threadId(), source, 0L, List.of(command(userMessage("x"))), NOW));
+                baseline.threadId(), source, 1L, List.of(), NOW, false, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            TurnPlanPreview.inputCandidatePath(
+                baseline.threadId(),
+                source,
+                0L,
+                List.of(command(userMessage("x"))),
+                NOW,
+                false,
+                null));
   }
 
   /** 测试意图：临时 ThreadCommand 的合法 seq/hash 由共享命令契约保证（预览不放松任何一条），且 seq 起点由调用方给定。 */
@@ -134,7 +158,42 @@ class TurnPlanPreviewTest {
     assertInstanceOf(
         EntryPath.class,
         TurnPlanPreview.inputCandidatePath(
-            baseline.threadId(), source, 5L, List.of(userMessage), NOW));
+            baseline.threadId(), source, 5L, List.of(userMessage), NOW, false, null));
+  }
+
+  @Test
+  void childUsesRootEnvironmentAndCannotSetItsOwn() {
+    // 子线程冻结当前根环境；只有执行根可在预览中设置环境。
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var baseline = seedBaseline(store);
+    EntryPath source = path(store, baseline.threadId());
+    NewThreadCommand message = command(userMessage("hello"));
+    NewThreadCommand setEnvironment =
+        new NewThreadCommand(new SetEnvironmentCommandPayload("new-env"), IDEMPOTENCY_KEY);
+    EntryPath child =
+        TurnPlanPreview.inputCandidatePath(
+            baseline.threadId(), source, 1L, List.of(message), NOW, true, "root-env");
+    assertEquals("root-env", child.baseSettings().environmentName());
+    assertNull(
+        TurnPlanPreview.inputCandidatePath(
+                baseline.threadId(), source, 1L, List.of(message), NOW, true, null)
+            .baseSettings()
+            .environmentName());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            TurnPlanPreview.inputCandidatePath(
+                baseline.threadId(),
+                source,
+                1L,
+                List.of(setEnvironment, message),
+                NOW,
+                true,
+                "root-env"));
+    EntryPath root =
+        TurnPlanPreview.inputCandidatePath(
+            baseline.threadId(), source, 1L, List.of(setEnvironment, message), NOW, false, null);
+    assertEquals("new-env", root.baseSettings().environmentName());
   }
 
   private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {

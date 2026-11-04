@@ -576,7 +576,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           description: `Temporary text cache agent for ${def.title}.`,
           systemPrompt,
           execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant: resolved.variant } },
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          config: { tools: [], skills: [], subagents: [] },
         })
         agent = envelopeData(agentJson)
         chat = await createChat(ctx, {
@@ -775,7 +775,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         systemPrompt:
           'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
         execution: { driver: 'builtin', settings: { modelName: resolved.modelName, variant } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       varAgent = envelopeData(varAgentJson)
       varChat = await createChat(ctx, {
@@ -912,7 +912,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             tools: ['get_goal'],
             skills: [],
             subagents: [],
-            inheritParentEnvironment: true,
           },
         })
         agent = envelopeData(agentJson)
@@ -1157,7 +1156,7 @@ registerCase({
             systemPrompt:
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
             execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: model.variant } },
-            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+            config: { tools: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -1178,7 +1177,6 @@ registerCase({
               tools: [],
               skills: [],
               subagents: [childAgent.name],
-              inheritParentEnvironment: true,
             },
           })
         ).json,
@@ -1342,7 +1340,7 @@ registerCase({
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       tempAgent = envelopeData(agentJson)
 
@@ -1586,7 +1584,7 @@ registerCase({
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
         execution: { driver: 'builtin', settings: { modelName: minimaxModel.modelName, variant: minimaxModel.variant } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentJson)
       chat = await createChat(ctx, {
@@ -1800,7 +1798,6 @@ registerCase({
         tools: ['read'],
         skills: [],
         subagents: [],
-        inheritParentEnvironment: true,
       },
     })
     const toolAgent = envelopeData(agentJson)
@@ -1828,12 +1825,11 @@ registerCase({
       assert(
         agentConfig
           && Object.keys(agentConfig).sort().join(',')
-            === 'inheritParentEnvironment,skills,subagents,tools'
+            === 'skills,subagents,tools'
           && JSON.stringify(agentConfig.tools) === JSON.stringify(['read'])
           && JSON.stringify(agentConfig.skills) === JSON.stringify([])
-          && JSON.stringify(agentConfig.subagents) === JSON.stringify([])
-          && agentConfig.inheritParentEnvironment === true,
-        `temporary tool Agent config must include tools=[read], skills=[], subagents=[], inheritParentEnvironment=true: ${safeDiagnosticJson(toolAgent)}`,
+          && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
+        `temporary tool Agent config must include tools=[read], skills=[], subagents=[]: ${safeDiagnosticJson(toolAgent)}`,
       )
       const envRoot = process.env.DAEMON_ENV_ROOT
       assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/dev/verify/e2e/lib.sh')

@@ -24,7 +24,7 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 用户 Agent 必填执行选择；内置 Agent 可为空表示显式未配置。 */
   private @Nullable HarnessExecutionSelectionDTO execution;
 
-  /** 必填结构化执行配置（tools/skills/subagents/inheritParentEnvironment），经严格 codec 校验后持久化为 config JSONB。 */
+  /** 必填结构化执行配置（tools/skills/subagents），经严格 codec 校验后持久化为 config JSONB。 */
   private AgentDefinitionConfigDTO config;
 
   @JsonAnySetter

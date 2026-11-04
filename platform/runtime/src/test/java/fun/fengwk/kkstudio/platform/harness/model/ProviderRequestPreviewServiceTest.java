@@ -7,8 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
@@ -200,7 +203,8 @@ class ProviderRequestPreviewServiceTest {
     runtime = mock(HarnessRuntime.class);
     // 预览的只读规划事实由 Runtime 门面承担：mock 直接执行其真实实现（纯委托，不读取 Runtime 状态），
     // 因此预览仍与正式发送同一算法，测试也不复制估算或路径装配逻辑。
-    when(runtime.previewInputCandidatePath(any(), any(), anyLong(), any(), any()))
+    when(runtime.previewInputCandidatePath(
+            any(), any(), anyLong(), any(), any(), anyBoolean(), nullable(String.class)))
         .thenCallRealMethod();
     when(runtime.findCompactionTurnStart(any(), any())).thenCallRealMethod();
     turnResolver = mock(DatabaseTurnResolver.class);
@@ -230,7 +234,9 @@ class ProviderRequestPreviewServiceTest {
     // 预览的下一步压缩判定必须走真实 Runtime/Driver API；stub 返回值只影响判定结果，不绕过调用。
     verify(runtime, atLeast(0)).prepareAutomaticCompaction(any(), any(), any(), any(Boolean.class));
     // 候选路径装配与压缩事实同样只经 Runtime 门面读取，不直接触达实现类。
-    verify(runtime, atLeast(0)).previewInputCandidatePath(any(), any(), anyLong(), any(), any());
+    verify(runtime, atLeast(0))
+        .previewInputCandidatePath(
+            any(), any(), anyLong(), any(), any(), anyBoolean(), nullable(String.class));
     verify(runtime, atLeast(0)).findCompactionTurnStart(any(), any());
     verify(uploadService, atLeast(0)).peekReady(any());
     verify(refManager, atLeast(0)).contains(any(), any());
@@ -455,6 +461,51 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(Reason.PREVIEW_PLANNING_FAILED, planning.reason());
     assertEquals("request cannot be planned for preview", planning.getMessage());
     assertFalse(planning.getMessage().contains("leaked"));
+  }
+
+  /** 子线程预览使用执行根的当前环境，并拒绝子线程修改环境。 */
+  @Test
+  void childPreviewUsesCurrentRootEnvironmentAndRejectsEnvironmentChanges() {
+    // 子历史中的环境不是权威事实；本次候选 turn 必须使用根的当前快照。
+    EntryPath childPath = compactionChildPath();
+    EntryPath rootPath =
+        new EntryPath(
+            List.of(
+                new Entry(
+                    ROOT_ID,
+                    SESSION_ID,
+                    null,
+                    new RootPayload(SETTINGS.withEnvironmentName("current-root")),
+                    NOW)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), childPath, List.of()));
+    when(runtime.getThreadSnapshot(THREAD_ID))
+        .thenReturn(snapshot(thread(ROOT_ID, 1L), rootPath, List.of()));
+    when(turnResolver.planLive(eq(CHILD_THREAD_ID), any(), eq(NOW)))
+        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+    AcceptCommandsTarget target =
+        new AcceptCommandsTarget.Thread(CHILD_THREAD_ID, CHILD_LATER_END_ID, 2L);
+    service.preview(CHILD_THREAD_ID, command(target, userMessage("hello")));
+    ArgumentCaptor<EntryPath> path = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planLive(eq(CHILD_THREAD_ID), path.capture(), eq(NOW));
+    assertEquals("current-root", path.getValue().baseSettings().environmentName());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.preview(
+                CHILD_THREAD_ID,
+                command(
+                    target,
+                    new NewThreadCommand(new SetEnvironmentCommandPayload("other"), id(203L)),
+                    userMessage("hello"))));
   }
 
   /**

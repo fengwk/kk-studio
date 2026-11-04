@@ -607,7 +607,9 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             queued.requireFullPath(),
             queued.thread().nextCommandSequence() - acceptedCommandCount,
             durableCommands,
-            Instant.now(clock));
+            Instant.now(clock),
+            false,
+            null);
     LiveTurnPlan plan = turnResolver.planLive(fixture.threadId(), path);
     ModelRequestSpec spec = assertInstanceOf(LiveTurnPlan.Planned.class, plan).spec();
     ProviderRequest request = new ModelRequestMaterializer().materialize(path, spec);

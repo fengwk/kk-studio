@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.api;
 
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
@@ -74,6 +75,15 @@ public record SpawnRequest(
     }
     if (yoloEnabled && (parentThreadId != null || continuation != null)) {
       throw new IllegalArgumentException("only a new execution root takes the yolo switch");
+    }
+    if (parentThreadId != null) {
+      if (settings.environmentName() != null) {
+        throw new IllegalArgumentException("child settings must not select an environment");
+      }
+      if (commands.stream()
+          .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+        throw new IllegalArgumentException("only the execution root can set an environment");
+      }
     }
   }
 

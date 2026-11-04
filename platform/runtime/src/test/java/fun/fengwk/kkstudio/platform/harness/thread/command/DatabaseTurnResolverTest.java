@@ -2238,7 +2238,7 @@ class DatabaseTurnResolverTest {
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertNull(resolved.childSettings().goal());
-    assertEquals(settings.environmentName(), resolved.childSettings().environmentName());
+    assertNull(resolved.childSettings().environmentName());
   }
 
   @Test

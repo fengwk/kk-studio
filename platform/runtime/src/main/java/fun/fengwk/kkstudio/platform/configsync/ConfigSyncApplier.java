@@ -224,7 +224,6 @@ public class ConfigSyncApplier {
     copy.setTools(config.getTools());
     copy.setSkills(config.getSkills());
     copy.setSubagents(subagents);
-    copy.setInheritParentEnvironment(config.getInheritParentEnvironment());
     return copy;
   }
 }

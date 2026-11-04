@@ -66,7 +66,6 @@ function agent(id: string, model: string): AgentDefinitionDTO {
     type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: model, variant: 'default' } },
     config: {
-      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

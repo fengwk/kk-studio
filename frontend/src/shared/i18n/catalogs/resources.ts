@@ -586,10 +586,6 @@ export const resourcesCatalog = {
     'en-US': 'No candidate Subagents',
     'zh-CN': '暂无候选 Subagents',
   },
-  'ai.catalog.form.inheritParentEnvironment': {
-    'en-US': "Inherit parent session's current Environment when delegated to as a subagent",
-    'zh-CN': '作为子 Agent 被委派时，继承父会话当前 Environment',
-  },
   'ai.catalog.form.needModel': {
     'en-US': 'Create a Model first to configure an Agent.',
     'zh-CN': '需要先创建 Model 才能配置 Agent。',

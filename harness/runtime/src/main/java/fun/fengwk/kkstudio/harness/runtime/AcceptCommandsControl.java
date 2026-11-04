@@ -461,6 +461,7 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight,
       SpawnRequest ticket,
       DriverRegistry driverRegistry) {
+    requireRootForEnvironment(thread, commands);
     boolean genuineUserInput = isGenuineUserInput(commands);
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
@@ -507,6 +508,7 @@ final class AcceptCommandsControl {
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(session, commands, List.of());
     requirePreflightShape(commands, prepared);
+    requireRootForEnvironment(thread, prepared);
     long nextSeq = thread.nextCommandSequence();
     List<ThreadCommand> allInserted = new ArrayList<>(prepared.size());
 
@@ -630,6 +632,7 @@ final class AcceptCommandsControl {
     Session session = tx.sessions().find(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(session, requests, copiedEntries);
     requirePreflightShape(requests, prepared);
+    requireRootForEnvironment(thread, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
     long nextSequence = thread.nextCommandSequence();
     for (int i = 0; i < prepared.size(); i++) {
@@ -850,6 +853,15 @@ final class AcceptCommandsControl {
       return payload.message();
     }
     return ((CustomMessageCommandPayload) command.payload()).message();
+  }
+
+  private static void requireRootForEnvironment(
+      ThreadState thread, List<NewThreadCommand> commands) {
+    if (!thread.id().equals(thread.rootThreadId())
+        && commands.stream()
+            .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+      throw new IllegalArgumentException("only the execution root can set an environment");
+    }
   }
 
   private static void requirePreflightShape(

@@ -312,8 +312,8 @@ Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 T
 使用单 MODEL 的默认 Variant，GROUP 不允许指定组级 Variant。Builtin 适配在写事务中
 锁定并校验模型和显式 Variant；模型改名仅更新指向它的 Builtin Agent 并推进其版本，
 模型或 Variant 被引用时阻止删除，不解释其他 Driver 的 settings。
-Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)`、subagents 与
-`inheritParentEnvironment`（默认 true）；工具候选和 Skill 引用在写入时校验。
+Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)` 和 subagents；工具候选和
+Skill 引用在写入时校验。子 Agent 使用执行根当前 Environment。
 
 Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
 

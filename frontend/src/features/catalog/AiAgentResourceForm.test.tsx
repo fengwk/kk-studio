@@ -72,7 +72,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     systemPrompt: null,
     type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: null } },
-    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    config: { tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: 0,
     updateTime: 0,
@@ -299,30 +299,6 @@ describe('AgentForm current contracts', () => {
     expect(drafts.at(-1)?.subagents).toEqual(['helper', 'reviewer'])
   })
 
-  it('toggles inheritParentEnvironment cleanly', async () => {
-    const user = userEvent.setup()
-    const drafts: AgentDraft[] = []
-    function Harness() {
-      const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft(modelWithVariants()))
-      return (
-        <AgentForm
-          draft={draft}
-          models={[modelWithVariants()]}
-          onChange={(next) => {
-            drafts.push(next)
-            setDraft(next)
-          }}
-        />
-      )
-    }
-    render(<Harness />)
-
-    const checkbox = screen.getByLabelText(/Inherit parent session|作为子 Agent 被委派时/)
-    expect(checkbox).toBeChecked()
-    await user.click(checkbox)
-    expect(drafts.at(-1)?.inheritParentEnvironment).toBe(false)
-  })
-
   it('submits clean payload with skills SkillRefDTO[] and no environmentId', () => {
     const draft: AgentDraft = {
       name: 'assistant',
@@ -330,7 +306,6 @@ describe('AgentForm current contracts', () => {
       systemPrompt: 'my prompt',
       model: 'MiniMax',
       variant: 'fast',
-      inheritParentEnvironment: true,
       tools: ['bash'],
       skills: [
         { packageName: 'core', name: 'dev' },
@@ -346,7 +321,6 @@ describe('AgentForm current contracts', () => {
       systemPrompt: 'my prompt',
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'fast' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['bash'],
         skills: [
           { packageName: 'core', name: 'dev' },

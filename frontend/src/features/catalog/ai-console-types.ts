@@ -86,7 +86,6 @@ export interface AgentDraft {
   model: string
   /** 单 Model 的可选覆盖；组为空。 */
   variant: string
-  inheritParentEnvironment: boolean
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]

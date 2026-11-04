@@ -877,15 +877,19 @@ public final class HarnessRuntime {
    * @param nextCommandSequence batch 第一条命令使用的 sequence
    * @param commands 命令 batch，顺序即产品顺序
    * @param now 规划时间
+   * @param childThread 是否为非执行根线程
+   * @param rootEnvironmentName 执行根当前环境，子线程规划时使用
    */
   public EntryPath previewInputCandidatePath(
       UUID threadId,
       EntryPath sourcePath,
       long nextCommandSequence,
       List<NewThreadCommand> commands,
-      Instant now) {
+      Instant now,
+      boolean childThread,
+      String rootEnvironmentName) {
     return TurnPlanPreview.inputCandidatePath(
-        threadId, sourcePath, nextCommandSequence, commands, now);
+        threadId, sourcePath, nextCommandSequence, commands, now, childThread, rootEnvironmentName);
   }
 
   /**

@@ -88,7 +88,7 @@ const assistantAgent: AgentDefinitionDTO = {
   systemPrompt: null,
   type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
-  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+  config: { tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: 0,
   updateTime: 0,
