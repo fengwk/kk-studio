@@ -39,9 +39,9 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
-import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -83,7 +83,8 @@ class ApplicationEventWebSocketHandlerTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
-  private ProjectInvalidationHub projectInvalidationHub;
+  private NotificationInvalidationSource projectChangeSource;
+  private NotificationInvalidationSource environmentChangeSource;
   private ApplicationEventHub hub;
   private IdeBrowserUseRegistry browserUseRegistry;
   private ApplicationEventWebSocketHandler handler;
@@ -101,20 +102,22 @@ class ApplicationEventWebSocketHandlerTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
-    projectInvalidationHub = mock(ProjectInvalidationHub.class);
+    projectChangeSource = mock(NotificationInvalidationSource.class);
+    environmentChangeSource = mock(NotificationInvalidationSource.class);
     when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
-    when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
+    when(projectChangeSource.subscribe(any(), any())).thenReturn(() -> {});
+    when(environmentChangeSource.subscribe(any(), any())).thenReturn(() -> {});
     hub =
         new ApplicationEventHub(
             harnessChanges,
             realtimeSource,
             realtimeSubscriptions,
             canvasVersionSource,
-            projectInvalidationHub,
-            new EnvironmentChangeHub(),
+            projectChangeSource,
+            environmentChangeSource,
             512);
     browserUseRegistry = new IdeBrowserUseRegistry();
     nowNanos = new AtomicLong(1_000_000_000L);

@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -19,7 +21,8 @@ public class ProjectChangeNotifier {
 
   public void projectChanged(UUID projectId) {
     requireTransaction();
-    jdbc.sql("select pg_notify('project_issue_changed', :projectId)")
+    jdbc.sql("select pg_notify(:channel, :projectId)")
+        .param("channel", ProjectChangeNotifications.CHANNEL)
         .param("projectId", projectId.toString())
         .query(String.class)
         .single();

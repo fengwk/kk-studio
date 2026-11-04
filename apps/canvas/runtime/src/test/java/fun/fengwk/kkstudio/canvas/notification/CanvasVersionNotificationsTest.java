@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Canvas revision 通知 Hub：订阅先注册后读游标、畸形通知与重连 resync、退订与并发注册/释放语义。 */
-class CanvasVersionHubTest {
+class CanvasVersionNotificationsTest {
 
   private static CanvasQueryService createQueryService(UUID canvasId, Long revision) {
     CanvasQueryService queryService = mock(CanvasQueryService.class);
@@ -50,7 +50,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 7L);
     CanvasQueryService queryService = createQueryService(canvasId, 5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     SourceSubscribed subscribed = hub.subscribe(canvasId, received::add);
 
@@ -64,7 +64,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 7L);
     CanvasQueryService queryService = createQueryService(canvasId, 5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     List<CanvasVersionEventSource.Event> staleSubscriber = new ArrayList<>();
     List<CanvasVersionEventSource.Event> currentSubscriber = new ArrayList<>();
     SourceSubscribed stale = hub.subscribe(canvasId, staleSubscriber::add);
@@ -85,7 +85,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 8L);
     CanvasQueryService queryService = createQueryService(canvasId, null);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     assertThrows(IllegalArgumentException.class, () -> hub.subscribe(canvasId, ignored -> {}));
 
     hub.broadcastResync();
@@ -97,7 +97,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 8L);
     when(queryService.findDocument(canvasId)).thenThrow(new IllegalStateException("storage error"));
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> hub.subscribe(canvasId, received::add));
@@ -114,7 +114,7 @@ class CanvasVersionHubTest {
     AssertionError injected = new AssertionError("injected query error");
     when(queryService.findDocument(canvasId)).thenThrow(injected);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     Error failure =
         assertThrows(AssertionError.class, () -> hub.subscribe(canvasId, received::add));
@@ -129,7 +129,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 7L);
     CanvasQueryService queryService = createQueryService(canvasId, 5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     hub.subscribe(
         canvasId,
         ignored -> {
@@ -162,7 +162,7 @@ class CanvasVersionHubTest {
               return Optional.of(document(canvasId, 5L));
             });
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     SourceSubscribed first = hub.subscribe(canvasId, ignored -> {});
     List<CanvasVersionEventSource.Event> secondReceived = new ArrayList<>();
 
@@ -190,7 +190,7 @@ class CanvasVersionHubTest {
     UUID canvasId = new UUID(0L, 7L);
     CanvasQueryService queryService = createQueryService(canvasId, 5L);
 
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
     hub.subscribe(
         canvasId,
         ignored -> {
@@ -222,7 +222,7 @@ class CanvasVersionHubTest {
   @Test
   void validNotificationWithoutLocalSubscriberDoesNotReadDatabase() {
     CanvasQueryService queryService = mock(CanvasQueryService.class);
-    CanvasVersionHub hub = new CanvasVersionHub(queryService);
+    CanvasVersionNotifications hub = new CanvasVersionNotifications(queryService);
 
     hub.onNotification("00000000-0000-0000-0000-000000000007:6");
 
@@ -232,6 +232,6 @@ class CanvasVersionHubTest {
   /** 通道名只有一处定义：写侧 notifier 与宿主 LISTEN 注册都取用 Hub 常量。 */
   @Test
   void channelIsOwnedByTheHub() {
-    assertEquals("canvas_revision", CanvasVersionHub.CHANNEL);
+    assertEquals("canvas_revision", CanvasVersionNotifications.CHANNEL);
   }
 }

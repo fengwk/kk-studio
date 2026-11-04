@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.project.notification.ProjectChangeNotifications;
 import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 
 import javax.sql.DataSource;
@@ -31,7 +32,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
   void committedChangesNotifyOnceAndRollbackDoesNotNotify() throws Exception {
     try (Connection listener = dataSource.getConnection();
         Statement statement = listener.createStatement()) {
-      statement.execute("listen project_issue_changed");
+      statement.execute("listen " + ProjectChangeNotifications.CHANNEL);
       PGConnection pg = listener.unwrap(PGConnection.class);
 
       UUID projectId = createProject();
@@ -83,7 +84,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
     PGNotification[] notifications = pg.getNotifications(2000);
     assertTrue(notifications != null);
     assertEquals(1, notifications.length);
-    assertEquals("project_issue_changed", notifications[0].getName());
+    assertEquals(ProjectChangeNotifications.CHANNEL, notifications[0].getName());
     assertEquals(projectId.toString(), notifications[0].getParameter());
   }
 

@@ -50,6 +50,7 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSuppor
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresqlCanvasResourceRepository;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
 
 import java.sql.Connection;
@@ -591,11 +592,11 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   void startNotifiesRevisionThroughBumpVersion() throws Exception {
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
-    try (Connection listener = listenOn("canvas_revision")) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       startRun(canvasId, nodeId, REQUEST_1);
       PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
-      assertEquals("canvas_revision", notifications[0].getName());
+      assertEquals(CanvasVersionNotifications.CHANNEL, notifications[0].getName());
       assertEquals(canvasId + ":1", notifications[0].getParameter());
     }
   }

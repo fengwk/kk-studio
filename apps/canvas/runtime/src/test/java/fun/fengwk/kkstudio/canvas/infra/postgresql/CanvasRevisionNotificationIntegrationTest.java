@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
-import fun.fengwk.kkstudio.canvas.notification.CanvasVersionHub;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 
 import java.sql.Connection;
 import java.util.List;
@@ -43,7 +43,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void documentInsertNotifiesRevisionZeroOnCommit() throws Exception {
     UUID canvasId = UUID.randomUUID();
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       canvasStore.addDocument(canvasId, "canvas");
       assertRevisionNotification(listener, canvasId + ":0");
     }
@@ -53,7 +53,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void revisionAdvanceNotifiesOnlyOnRealChange() throws Exception {
     UUID canvasId = addDocument();
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       assertTrue(canvasStore.advanceRevision(canvasId, 0L, 1L));
       assertRevisionNotification(listener, canvasId + ":1");
 
@@ -69,7 +69,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void documentDeletionDoesNotFabricateRevision() throws Exception {
     UUID canvasId = addDocument();
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       assertTrue(canvasStore.deleteDocument(canvasId));
       assertNoNotification(listener);
     }
@@ -79,7 +79,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   @Test
   void rolledBackDocumentWriteDoesNotNotify() throws Exception {
     UUID canvasId = UUID.randomUUID();
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       assertThrows(
           IllegalStateException.class,
           () ->
@@ -101,7 +101,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
     CountDownLatch written = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     ExecutorService executor = Executors.newSingleThreadExecutor();
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       Future<?> future =
           executor.submit(
               () ->
@@ -125,7 +125,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
   /** 命令服务创建与真实变更经同一写入口通知；无变化批不推进 revision，必须静默。 */
   @Test
   void commandServiceNotifiesOnCreateAndRealRevisionChange() throws Exception {
-    try (Connection listener = listenOn(CanvasVersionHub.CHANNEL)) {
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
       CanvasDocument document = commandService.createCanvas("canvas");
       UUID canvasId = document.id();
       assertRevisionNotification(listener, canvasId + ":0");
@@ -158,7 +158,7 @@ class CanvasRevisionNotificationIntegrationTest extends PostgresCanvasInfraTestS
       throws Exception {
     PGNotification[] notifications = pollNotifications(listener, 5_000);
     assertEquals(1, notifications.length);
-    assertEquals(CanvasVersionHub.CHANNEL, notifications[0].getName());
+    assertEquals(CanvasVersionNotifications.CHANNEL, notifications[0].getName());
     assertEquals(payload, notifications[0].getParameter());
   }
 
