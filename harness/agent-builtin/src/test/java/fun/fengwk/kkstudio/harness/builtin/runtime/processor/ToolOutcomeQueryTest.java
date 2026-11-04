@@ -41,7 +41,7 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
+import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;

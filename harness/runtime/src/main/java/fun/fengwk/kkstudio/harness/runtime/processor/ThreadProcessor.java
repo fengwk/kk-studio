@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;

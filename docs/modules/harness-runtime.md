@@ -196,6 +196,8 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 
 [`AgentDriver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AgentDriver.java) 是 Runtime 与具体执行后端之间的窄 SPI：Builtin 用它驱动 Studio 进程内的模型调用，进程外的 Agent 后端也以同一契约接入。契约与它使用的中立投影（`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等）同属 `spi.driver`；`LockedDriverState#projection()` 返回的 generation 公开快照定义在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)，消费方读快照不需要依赖 SPI。注册、路由与未安装 Driver 替身是实现细节，留在 `runtime.driver`。
 
+`spi.driver` 也提供供 Driver 和 Runtime 共用的工具构件：[`ToolDeclarationPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/ToolDeclarationPlanner.java) 规划冻结绑定下的工具声明，[`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/ToolOutcomeAppender.java) 将终态工具结果追加到历史。
+
 ### 职责划分
 
 - **Runtime 拥有公共事实**：只追加的 Entry Tree、Thread 状态与命令邮箱、`ToolInvocation` 与审批、`Work` 调度邮箱，以及执行代次的退出事实。
@@ -430,7 +432,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.join` | Join 的持久化推进、历史投影与父通知交付；票据、交付凭据与渲染在 `api.join` |
 | `spi` | 内核对外部设施的窄端口：Tool 网关及其 transient 执行请求 `ToolInvocationRequest`、Tool 结果编码尺寸契约 `ToolResultSizeLimits`、结果物化、历史动作、实时事件与内部 Thread 变更唤醒源；Builtin 的 Model/Turn 端口在 harness/agent-builtin |
 | `spi.compaction` | `CompactionConfigProvider`：Runtime 对部署配置的反向依赖，每个压缩决策点现读 `CompactionConfig`，不缓存快照、不持有订阅；`RequestTokenEstimator`：Turn 解析对请求输入 token 估算的反向依赖，只接收 `EntryPath` 与 system instruction，实现由组合根绑定到 `runtime.compaction.TokenEstimator`，消费方不接触 runtime 实现类型 |
-| `spi.driver` | Agent Driver SPI：`AgentDriver`、`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等；组合根与外部 Driver 依赖此包，Runtime 不读取具体 Driver 私有状态，其投影出的 `GenerationProjection` 在 `api.generation`，见 [Agent Driver](#agent-driver) |
+| `spi.driver` | Agent Driver SPI：`AgentDriver`、`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等，以及共用工具构件 `ToolDeclarationPlanner` / `ToolOutcomeAppender`；组合根与外部 Driver 依赖此包，Runtime 不读取具体 Driver 私有状态，其投影出的 `GenerationProjection` 在 `api.generation`，见 [Agent Driver](#agent-driver) |
 | `spi.retry` | `InvocationRetryPolicyProvider` 与 `ModelHttpErrorPolicyProvider`：在 retry 判定点现读重试预算与模型 HTTP 状态策略；策略值属于 `api.retry`，判定实现在 `runtime.retry` |
 | `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行与 Processor 配置；共用执行骨架在 `spi.work`，Builtin 的 MODEL Work 在 harness/agent-builtin |
 | `runtime.retry` | 调用重试判定 `InvocationRetryDecision`：把 `api.retry` 策略、错误是否可重试与已消耗 attempt 合成唯一决策，只计算可行性与延迟，不读时钟、不写状态；策略值在 `api.retry`，provider 端口在 `spi.retry` |
