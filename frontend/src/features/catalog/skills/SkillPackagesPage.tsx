@@ -20,7 +20,7 @@ import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import type {
   SkillPackageDetailDTO,
   SkillPackageGitCreateDTO,
-  SkillPackageGitEditDTO,
+  SkillPackageEditDTO,
 } from '@/shared/api/generated/contracts'
 
 function formatCommit(commit: string | null | undefined): string {
@@ -517,7 +517,7 @@ function EditPackageModal({
   const [formError, setFormError] = useState<string | null>(null)
 
   const editMutation = useMutation({
-    mutationFn: (data: SkillPackageGitEditDTO) =>
+    mutationFn: (data: SkillPackageEditDTO) =>
       agentService.editSkillPackage(target.packageName, data),
     onSuccess,
     onError: (err: unknown) => {
@@ -540,7 +540,7 @@ function EditPackageModal({
       return
     }
     setFormError(null)
-    const payload: SkillPackageGitEditDTO = {
+    const payload: SkillPackageEditDTO = {
       expectedVersion: target.version,
       description: description.trim() || null,
       branch: branch.trim(),
