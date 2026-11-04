@@ -2,23 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
+source "$SCRIPT_DIR/../../lib/test-stack.sh"
 # Compose、Dockerfile 与 mock 运行时资产属于 deploy/；本脚本只做宿主 smoke 编排。
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
-COMPOSE=(docker compose -f "$COMPOSE_FILE")
+export COMPOSE_PROFILES=canvas-test
+COMPOSE=(docker compose --project-name kk-studio-canvas-test -f "$COMPOSE_FILE")
 APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:canvas-test}
 WITH_APP=false
 
@@ -113,12 +103,10 @@ cleanup() {
   local status=$?
   if ((status != 0)); then
     step "Failure diagnostics"
-    "${COMPOSE[@]}" ps -a || true
-    "${COMPOSE[@]}" logs --no-color || true
   fi
 
   step "Cleaning isolated test stack"
-  "${COMPOSE[@]}" --profile app down --volumes --remove-orphans || true
+  cleanup_test_stack "$status"
 }
 trap cleanup EXIT
 

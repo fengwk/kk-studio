@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HttpError } from '../lib/http.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
 
-import '../cases/config-sync.mjs'
-import { ALL_CASES, getCase } from '../lib/registry.mjs'
+import { ALL_CASES, getCase } from '../run-matrix.mjs'
+import { cases as syncCases } from '../cases/config-sync.mjs'
+import { cases as installCases } from '../cases/environment-install-config.mjs'
 
 const CASE_IDS = [
   'config_sync.inventory_contract',
@@ -19,7 +20,23 @@ const CASE_IDS = [
 
 const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 
-test('config sync cases are registered as free L1 cases and run-matrix imports the module', () => {
+test('case adder normalizes requirements without sharing state between arrays', () => {
+  // 独立数组和输入 requirements 不应因另一个 case 被添加而发生改变。
+  const first = []
+  const second = []
+  const requires = ['real', 'real', 'tools']
+  const addFirst = createCaseAdder(first)
+  const addSecond = createCaseAdder(second)
+  addFirst({ id: 'first', requires })
+  addSecond({ id: 'second' })
+  requires.push('other')
+  assert.deepEqual(first[0].requires, new Set(['real', 'tools']))
+  assert.deepEqual(second[0].requires, new Set())
+  assert.deepEqual(first.map((entry) => entry.id), ['first'])
+  assert.deepEqual(second.map((entry) => entry.id), ['second'])
+})
+
+test('config sync cases are free L1 cases in the matrix', () => {
   // 配置同步用例均无需模型或外部工具，且由矩阵入口注册。
   for (const id of CASE_IDS) {
     const caseDef = getCase(id)
@@ -32,16 +49,12 @@ test('config sync cases are registered as free L1 cases and run-matrix imports t
     assert.deepEqual(Array.from(caseDef.requires), [], `case ${id} requires must be empty array`)
   }
 
-  const runMatrixPath = new URL('../run-matrix.mjs', import.meta.url)
-  const runMatrixSource = readFileSync(runMatrixPath, 'utf8')
-  assert.ok(
-    runMatrixSource.includes("await import('./cases/config-sync.mjs')"),
-    "run-matrix.mjs must contain exact import line: await import('./cases/config-sync.mjs')",
-  )
-  assert.ok(
-    runMatrixSource.includes("await import('./cases/environment-install-config.mjs')"),
-    "run-matrix.mjs must import the environment install-config cases",
-  )
+  // 两个模块的实际数组在汇总中保持原有先后顺序。
+  assert.ok(ALL_CASES.indexOf(installCases.at(-1)) < ALL_CASES.indexOf(syncCases[0]))
+  assert.ok(syncCases.every((entry) => getCase(entry.id) === entry))
+  assert.ok(ALL_CASES.every((entry) => entry.requires instanceof Set))
+  assert.equal(new Set(ALL_CASES.map((entry) => entry.id)).size, ALL_CASES.length)
+  assert.throws(() => getCase('unknown.case'), /unknown case: unknown.case/)
 })
 
 test('config_sync.inventory_contract guards secret leakage and validates exact fields', async () => {

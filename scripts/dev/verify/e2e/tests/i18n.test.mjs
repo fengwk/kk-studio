@@ -3,8 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import test from 'node:test'
 
-import '../cases/i18n.mjs'
-import { getCase } from '../lib/registry.mjs'
+import { getCase } from '../run-matrix.mjs'
 
 const fixtures = JSON.parse(readFileSync(new URL('./resources/i18n-errors.json', import.meta.url), 'utf8'))
 const caseDef = getCase('i18n.error_response_accept_language')

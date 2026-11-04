@@ -3,12 +3,9 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-// 注册副作用：crud / system-settings 模块内新增或扩展了 HTTP 重试覆盖与内置 Agent identity 的免费 L1 契约 case。
-import '../cases/crud.mjs'
-import '../cases/system-settings.mjs'
 import { providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import { HttpError } from '../lib/http.mjs'
-import { ALL_CASES, getCase } from '../lib/registry.mjs'
+import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
 const DEFERRED_OUTPUT_FIXTURE = fileURLToPath(

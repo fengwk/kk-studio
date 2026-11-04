@@ -90,3 +90,31 @@ test('test intent: the E2E scrubber emits every TEST_ name and leaves unrelated 
   assert.ok(pairs.has('-u TEST_API_KEY'))
   assert.ok(!pairs.has('-u UNRELATED_API_KEY'))
 })
+
+test('test intent: shared sync exports shell credentials without passing MiniMax credentials or printing secrets', () => {
+  const shared = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh')
+  const result = runBash(`
+    REPO_ROOT='${REPOSITORY_ROOT}'
+    BACKEND_URL=http://localhost
+    require_cmd() { :; }
+    step() { :; }
+    node() {
+      if [ "\${2-}" = --list-env ]; then
+        command node "$@"
+      else
+        for name in \${EXPECTED_NAMES}; do
+          [ "\${!name-}" = fixture ] || return 1
+          export -p | command grep -q " $name=" || return 2
+        done
+        [ -z "\${TEST_MINIMAX_API_KEY+x}" ] && [ -z "\${TEST_MINIMAX_BASE_URL+x}" ]
+      fi
+    }
+    source '${shared}'
+    for name in $EXPECTED_NAMES; do printf -v "$name" '%s' fixture; done
+    TEST_MINIMAX_API_KEY=secret TEST_MINIMAX_BASE_URL=secret
+    sync_e2e_provider_credentials
+  `, { env: { ...process.env, EXPECTED_NAMES: CREDENTIAL_NAMES.join(' ') } })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stdout, '')
+  assert.ok(!result.stderr.includes('secret'))
+})

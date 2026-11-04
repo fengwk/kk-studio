@@ -8,20 +8,8 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
 NPM_AUDIT_REGISTRY=https://registry.npmjs.org

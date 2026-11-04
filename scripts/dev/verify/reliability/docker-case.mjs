@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 
 const PROJECT_NAME = 'kk-studio-reliability'
-const COMPOSE_FILE = 'deploy/reliability/compose.yaml'
+const COMPOSE_FILE = 'deploy/test/compose.yaml'
 const COMMAND_OUTPUT_LIMIT = 2 * 1024 * 1024
 
 export const CASE_NODE_SCRIPT = String.raw`
@@ -184,7 +184,7 @@ export class DockerCaseHarness {
         'daemon',
         ...command,
       ],
-      { cwd: this.repoRoot, ...options },
+      { cwd: this.repoRoot, ...options, env: { ...process.env, COMPOSE_PROFILES: 'reliability' } },
     )
   }
 
@@ -198,13 +198,13 @@ export class DockerCaseHarness {
 export async function runCommand(
   command,
   args,
-  { cwd, input, timeoutMs = 120_000, outputLimit = COMMAND_OUTPUT_LIMIT } = {},
+  { cwd, input, timeoutMs = 120_000, outputLimit = COMMAND_OUTPUT_LIMIT, env = process.env } = {},
 ) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env,
     })
     const stdout = []
     const stderr = []

@@ -1,32 +1,15 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import { indexMainSources, isExactClassName } from './support/jacoco-source-index.mjs'
 
 /**
  * 官方 JaCoCo 覆盖门禁守护：runtime 与 agent-builtin 各自用 native jacoco:check 校验自己的关键类。
  * 每个 include 必须是当前模块真实存在的精确类名（嵌套类型按 JaCoCo 的 `.` 归一命名），否则空匹配会让门禁静默失效。
  */
-
-function repositoryRoot() {
-  if (process.env.KK_STUDIO_REPO_ROOT) {
-    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-  }
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  for (;;) {
-    if (existsSync(path.join(directory, '.git'))) {
-      return directory
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error('cannot locate the kk-studio worktree root; set KK_STUDIO_REPO_ROOT')
-    }
-    directory = parent
-  }
-}
 
 const REPOSITORY_ROOT = repositoryRoot()
 const RUNTIME_MODULE = 'harness/runtime'
@@ -65,11 +48,11 @@ const RUNTIME_CRITICAL_CLASSES = [
 ]
 
 const BUILTIN_CRITICAL_CLASSES = [
-  'fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation',
+  'fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation',
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution',
   'fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner',
   'fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator',
-  'fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec',
+  'fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec',
 ]
 
 function stripComments(xml) {

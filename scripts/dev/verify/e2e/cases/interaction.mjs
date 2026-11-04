@@ -20,7 +20,10 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 

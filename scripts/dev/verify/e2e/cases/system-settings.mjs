@@ -5,7 +5,10 @@ import {
   envelopeData,
   expectHttpError,
 } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const SECTION_NAMES = [
   'tool',

@@ -39,8 +39,12 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase, getCase } from '../lib/registry.mjs'
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(cases, id)
 
 const PI_MODEL_CATALOG = JSON.parse(
   readFileSync(
