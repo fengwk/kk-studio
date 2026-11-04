@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
+import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;

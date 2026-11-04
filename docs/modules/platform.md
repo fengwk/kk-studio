@@ -291,7 +291,7 @@ Provider credential 在显式写入口接收，常规响应给出安全投影；
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
 `GET /api/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
-模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscovery.java)），
+模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
 MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。

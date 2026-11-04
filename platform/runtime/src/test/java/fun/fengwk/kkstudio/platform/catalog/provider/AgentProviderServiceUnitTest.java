@@ -23,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
+import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;

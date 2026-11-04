@@ -492,7 +492,7 @@ Gemini implicit cache 是机会性能力，零缓存不会导致失败：**Gemin
 尚无后续观测时为 `NOT_EVALUATED`。它与 case PASS/FAIL 独立。每轮成功观测立即写入白名单 artifact，
 强缓存断言前已落盘；失败也保留此前完成轮次的数值，不输出原始 provider 配置、URL、错误或模型回复。
 
-独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
+独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
 用于测量历史断点，而非仅验证 system 前缀命中。它直接调用 Provider，不启动应用或数据库；默认只执行免费 wire 形状检查。
 已授权付费、且 `TEST_ANTHROPIC_BASE_URL` / `TEST_ANTHROPIC_API_KEY` 完整时，可显式运行：
 
