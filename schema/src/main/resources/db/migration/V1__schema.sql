@@ -1498,7 +1498,7 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('MODEL', 'TOOL', 'AGENT') and parent_execution_id is null and environment_id is null)
+        (kind in ('DRIVER', 'TOOL') and parent_execution_id is null and environment_id is null)
         or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
     ),
     constraint ck_harness_execution_exit_state check (
@@ -1508,7 +1508,7 @@ create table harness_execution_exit (
     ),
     constraint ck_harness_execution_exit_kind_state check (
         state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('MODEL', 'TOOL', 'AGENT') and state = 'STUDIO_EXITED')
+        or (kind in ('DRIVER', 'TOOL') and state = 'STUDIO_EXITED')
         or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
     ),
     constraint ck_harness_execution_exit_time check (
@@ -1520,11 +1520,11 @@ create table harness_execution_exit (
 comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
 comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
 comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
-comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
+comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'MODEL、TOOL、AGENT 或挂在本地 TOOL/AGENT 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 AGENT 执行代次；本地执行为空';
+comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';

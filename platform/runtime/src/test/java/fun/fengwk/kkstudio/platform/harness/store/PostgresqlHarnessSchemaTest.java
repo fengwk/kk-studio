@@ -197,28 +197,28 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void executionExitAndDurableWorkAcceptAgentTargetAndKind() {
+  void executionExitAndDurableWorkAcceptDriverKindAndCustomTarget() {
     UUID threadId = seedExecutionExitThread();
     UUID agentExecutionId = UUID.randomUUID();
     UUID invocationId = UUID.randomUUID();
 
-    // 1. harness_execution_exit 接受 kind = 'AGENT'
+    // 1. harness_execution_exit 接受 kind = 'DRIVER'
     jdbc.update(
         "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
             + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
-            + " abandoned_at) values (?, ?, ?, 1, 'lease-agent', 'AGENT', null, 'UNCONFIRMED',"
+            + " abandoned_at) values (?, ?, ?, 1, 'lease-agent', 'DRIVER', null, 'UNCONFIRMED',"
             + " timestamp with time zone '2026-01-01 00:00:00.000+00', null, null)",
         agentExecutionId,
         threadId,
         invocationId);
 
-    // AGENT 支持 STUDIO_EXITED
+    // DRIVER 支持 STUDIO_EXITED
     jdbc.update(
         "update harness_execution_exit set state = 'STUDIO_EXITED', confirmed_at = registered_at"
             + " where execution_id = ?",
         agentExecutionId);
 
-    // AGENT 不支持 REMOTE_ACKNOWLEDGED
+    // DRIVER 不支持 REMOTE_ACKNOWLEDGED
     DataIntegrityViolationException agentAck =
         assertThrows(
             DataIntegrityViolationException.class,
@@ -229,7 +229,7 @@ class PostgresqlHarnessSchemaTest {
                     agentExecutionId));
     assertTrue(agentAck.getMessage().contains("ck_harness_execution_exit_kind_state"));
 
-    // AGENT 不能有 parent_execution_id
+    // DRIVER 不能有 parent_execution_id
     DataIntegrityViolationException agentWithParent =
         assertThrows(
             DataIntegrityViolationException.class,
@@ -241,7 +241,7 @@ class PostgresqlHarnessSchemaTest {
                     agentExecutionId));
     assertTrue(agentWithParent.getMessage().contains("ck_harness_execution_exit_kind"));
 
-    // 2. REMOTE 可以以 AGENT 执行代次为 parent_execution
+    // 2. REMOTE 可以以 DRIVER 执行代次为 parent_execution
     UUID envId = UUID.randomUUID();
     jdbc.update(
         "insert into environment (id, name, registration_token_hash, created_at, updated_at)"

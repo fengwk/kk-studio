@@ -325,7 +325,7 @@ public final class ModelExecution
                             invocationId,
                             attempt,
                             claim.leaseToken(),
-                            ExecutionExitKind.MODEL,
+                            ExecutionExitKind.DRIVER,
                             null);
                     return true;
                   }));
