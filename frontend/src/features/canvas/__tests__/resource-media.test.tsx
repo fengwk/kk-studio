@@ -12,9 +12,9 @@ import {
 import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
   getCanvasResourcePreviewUrl: vi.fn(),
 }))

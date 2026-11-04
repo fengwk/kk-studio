@@ -417,7 +417,7 @@ test('connection check runs only on explicit click and reports the three typed d
   await expect(dialog.getByTestId('plugin-check-authentication')).toHaveText('凭据已接受')
   // 浏览器登录态恒为未知，绝不冒充已登录。
   await expect(dialog.getByTestId('plugin-check-browser-session')).toHaveText(
-    '未知（本检查不核验浏览器登录态）',
+    '未知；本检查不核验浏览器登录态',
   )
   await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Rev 3')
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)

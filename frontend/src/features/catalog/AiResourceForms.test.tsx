@@ -175,7 +175,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByPlaceholderText('minimax')).toHaveAttribute('readonly')
     const labels = Array.from(container.querySelectorAll('label > span')).map((label) => label.textContent)
     expect(labels[0]).toMatch(/^Name(?: \*)?$/)
-    expect(labels[1]).toBe('API Key（可选）')
+    expect(labels[1]).toBe('API Key')
   })
 
   it('edits the new model abilities, pricing, variants, and wire modelId', async () => {
@@ -256,7 +256,7 @@ describe('AiResourceForms', () => {
       expect(providerSelect).toHaveAttribute('data-value', providerName)
       expect(providerSelect).toBeDisabled()
       expect(providerSelect).toHaveAttribute('aria-describedby', 'model-provider-identity-status')
-      expect(providerSelect).toHaveTextContent(`${providerName} (不可用)`)
+      expect(providerSelect).toHaveTextContent(`${providerName} · 不可用`)
       expect(screen.getByRole('status')).toHaveTextContent('不可用；保存其他字段时仍保留原始身份。')
     },
   )

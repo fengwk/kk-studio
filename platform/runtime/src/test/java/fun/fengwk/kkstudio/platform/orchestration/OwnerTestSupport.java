@@ -60,7 +60,9 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
         providerName,
         "wire-" + suffix);
     jdbc.update(
-        "insert into agent_definition (name, model_name, config)" + " values (?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, execution, config)"
+            + " values (?, jsonb_build_object('driver', 'builtin', 'settings',"
+            + " jsonb_build_object('modelName', cast(? as text), 'variant', null)), '{}'::jsonb)",
         agentName,
         modelName);
     return agentName;
@@ -126,8 +128,8 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
     assertEquals(
         1,
         jdbc.update(
-            "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
-                + " values (?, ?, ?)",
+            "insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)"
+                + " select ?, ?, session_id, id from harness_thread where id = ?",
             issueId,
             agentName,
             threadId));

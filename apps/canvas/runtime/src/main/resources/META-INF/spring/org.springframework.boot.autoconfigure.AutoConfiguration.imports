@@ -1,0 +1,3 @@
+fun.fengwk.kkstudio.canvas.http.CanvasHttpAutoConfiguration
+fun.fengwk.kkstudio.canvas.infra.CanvasInfraAutoConfiguration
+fun.fengwk.kkstudio.canvas.infra.platform.CanvasPlatformAutoConfiguration

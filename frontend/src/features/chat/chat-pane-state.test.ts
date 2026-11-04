@@ -18,7 +18,7 @@ import {
   type ChatPaneState,
   type ChatTabStorage,
 } from '@/features/chat/chat-pane-state'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 
 function storage(): Storage {
   const values = new Map<string, string>()

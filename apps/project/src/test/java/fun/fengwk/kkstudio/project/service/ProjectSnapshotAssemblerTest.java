@@ -119,7 +119,7 @@ class ProjectSnapshotAssemblerTest {
     when(issueRunService.listRuns(issue1Id)).thenReturn(List.of());
     when(issueRunService.listRuns(issue2Id)).thenReturn(List.of(run));
     when(issueEditingService.listAgentThreads(issue2Id))
-        .thenReturn(List.of(new IssueAgentThread(issue2Id, "coder", threadId)));
+        .thenReturn(List.of(new IssueAgentThread(issue2Id, "coder", UUID.randomUUID(), threadId)));
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 

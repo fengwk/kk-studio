@@ -103,13 +103,13 @@ describe('AI extension composition architecture', () => {
     expect(aiExtensionSource).toContain("import('@/features/chat/ChatWorkspaceRoute')")
     expect(aiExtensionSource).toContain("import('@/features/chat/thread/ThreadWorkspaceRoute')")
     expect(aiDefinitionSource).not.toContain(
-      "@/features/chat/runtime/thread-panel/messages/TaskToolRenderer'",
+      "@/features/thread/runtime/thread-panel/messages/TaskToolRenderer'",
     )
     expect(aiDefinitionSource).toContain(
       "from '@/app/ai-console/TaskToolRendererLazy'",
     )
     expect(taskRendererSource).toContain(
-      "import('@/features/chat/runtime/thread-panel/messages/TaskToolRenderer')",
+      "import('@/features/thread/runtime/thread-panel/messages/TaskToolRenderer')",
     )
     expect(aiExtensionSource).not.toContain('useCatalogPageController')
   })

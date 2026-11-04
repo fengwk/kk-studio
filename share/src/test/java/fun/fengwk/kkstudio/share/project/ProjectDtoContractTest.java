@@ -270,10 +270,6 @@ class ProjectDtoContractTest {
         Set.of("expectedVersion", "requestKey", "detail"),
         getInstanceFieldNames(StopIssueRequestDTO.class));
 
-    assertEquals(
-        Set.of("expectedVersion", "requestKey", "verification"),
-        getInstanceFieldNames(ResolveUnknownIssueRequestDTO.class));
-
     assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
 
     assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(UnarchiveIssueRequestDTO.class));

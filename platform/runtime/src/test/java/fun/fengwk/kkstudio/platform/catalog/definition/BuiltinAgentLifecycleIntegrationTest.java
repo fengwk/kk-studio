@@ -27,7 +27,9 @@ import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
 
 import java.util.List;
 
-/** 内置 Agent 目录机制的 PostgreSQL 集成测试：add-if-missing 幂等、不覆盖用户编辑、按 type 通用保护、保留名不可被用户覆盖、模型可显式未配置。 */
+/**
+ * 内置 Agent 目录机制的 PostgreSQL 集成测试：add-if-missing 幂等、不覆盖用户编辑、按 type 通用保护、保留名不可被用户覆盖、execution 可显式未配置。
+ */
 public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupport {
 
   private static final String COMPACTION = BuiltinAgentDefinitions.COMPACTION_NAME;
@@ -39,13 +41,12 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
 
   /** 首次初始化写入固定定义；重复启动是 no-op，版本不变。 */
   @Test
-  void initializesCompactionIdempotentlyWithUnconfiguredModel() {
+  void initializesCompactionIdempotentlyWithUnconfiguredExecution() {
     initializer.afterPropertiesSet();
     AgentDefinition first = definitionRepository.getByName(COMPACTION);
     assertNotNull(first);
     assertEquals(AgentDefinitionType.BUILTIN, first.type());
-    assertNull(first.modelName());
-    assertNull(first.variant());
+    assertNull(first.execution());
     assertEquals(BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), first.systemPrompt());
     assertEquals(0L, first.version());
 
@@ -55,7 +56,7 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
 
     AgentDefinitionDTO dto = findPage(COMPACTION);
     assertEquals(AgentDefinitionType.BUILTIN, dto.getType());
-    assertNull(dto.getModel());
+    assertNull(dto.getExecution());
   }
 
   /** 用户对内置 Agent prompt/description 的编辑在重启初始化后保留。 */
@@ -67,12 +68,12 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("edited description");
     update.setSystemPrompt("custom summarization prompt");
-    update.setModel(null);
+    update.setExecution(null);
     update.setConfig(configCodec.decode(current.configJson()));
     update.setExpectedVersion(CatalogVersions.format(current.version()));
     AgentDefinitionDTO updated = definitionService.updateAgent(COMPACTION, update);
     assertEquals("custom summarization prompt", updated.getSystemPrompt());
-    assertNull(updated.getModel());
+    assertNull(updated.getExecution());
 
     initializer.afterPropertiesSet();
     AgentDefinition reloaded = definitionRepository.getByName(COMPACTION);
@@ -112,20 +113,20 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     initializer.afterPropertiesSet();
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName(COMPACTION);
-    create.setModel(null);
+    create.setExecution(null);
     create.setConfig(emptyConfig());
     assertThrows(AiDuplicateException.class, () -> definitionService.createAgent(create));
   }
 
-  /** 内置 Agent 支持显式未配置模型；用户创建仍要求模型。 */
+  /** 内置 Agent 支持显式未配置 execution；用户创建仍要求 execution。 */
   @Test
-  void builtinSupportsUnconfiguredModelWhileUserRequiresIt() {
+  void builtinSupportsUnconfiguredExecutionWhileUserRequiresIt() {
     initializer.afterPropertiesSet();
-    assertNull(definitionRepository.getByName(COMPACTION).modelName());
+    assertNull(definitionRepository.getByName(COMPACTION).execution());
 
     AgentDefinitionCreateDTO user = new AgentDefinitionCreateDTO();
     user.setName("user-agent-without-model");
-    user.setModel(null);
+    user.setExecution(null);
     user.setConfig(emptyConfig());
     assertThrows(AiValidationException.class, () -> definitionService.createAgent(user));
   }

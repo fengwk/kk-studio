@@ -2,27 +2,32 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.ScopedBranchView;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway.ExecutionScope;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.Work;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -47,9 +52,10 @@ import java.util.concurrent.ScheduledExecutorService;
  * Allow（不调用 evaluator / gateway），Allow 在短事务内持久 markApprovalNotRequired（Thread version +1）后进入执行；Ask
  * 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1 + THREAD wake +
  * complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code preflightFailureDelay}
- * reschedule。READY + completed approval 直接进入执行。WAITING_APPROVAL 只 complete TOOL Work；RUNNING 旧
- * lease 恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放 Tool；terminal 行只确保 THREAD
- * Work 后 complete，不重复 bump version。
+ * reschedule。READY prepare 内读取执行上下文事实（会话 / 执行根 / 分支视图 / 冻结媒体能力）抛出异常时事务完整回滚，工具保持 READY 并按 {@code
+ * admitFailureDelay} 有界重排。READY + completed approval 直接进入执行。WAITING_APPROVAL 只 complete TOOL
+ * Work；RUNNING 旧 lease 恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放
+ * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
  *
  * <p>执行：{@link ToolGateway#admit} 做纯本地 admission（Busy 按 retryAfter reschedule、Rejected 转
  * FAILED，两者都肯定无副作用，attempt 不变）， Admitted 后在任何副作用之前持久化 {@code READY -> RUNNING}，再由 {@link
@@ -107,20 +113,20 @@ public final class ToolProcessor implements AutoCloseable {
       return ProcessResult.LOST_OWNERSHIP;
     }
     try (ticket) {
-      Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
+      Prepare prepare;
+      try {
+        prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
+      } catch (ExecutionScopeReadFailure failure) {
+        // 事务已完整回滚：工具未执行、也没有任何外部副作用，按旧 admission 失败路径有界重排。
+        return rescheduleScopeReadFailure(claim, failure);
+      }
       return switch (prepare) {
         case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
         case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
         case Prepare.Input input -> requestInput(claim, input.threadId());
         case Prepare.Preflight preflight -> preflight(claim, preflight, ticket);
         case Prepare.Allowed allowed -> applyPreflightAllow(
-            claim,
-            allowed.threadId(),
-            allowed.assistantEntryId(),
-            allowed.attempt(),
-            allowed.request(),
-            null,
-            ticket);
+            claim, allowed.scope(), allowed.attempt(), allowed.request(), null, ticket);
         case Prepare.Dispatched dispatched -> launch(claim, dispatched, ticket);
         case Prepare.Reattach reattach -> launchReattach(claim, reattach, ticket);
       };
@@ -216,15 +222,90 @@ public final class ToolProcessor implements AutoCloseable {
     executions.ensureLeaseMargin(tx, claim);
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
+    // 执行上下文事实只在锁内读取一次：Thread/会话/执行根取自已锁定行，assistant 分支与媒体能力取该调用的冻结依据。
+    ExecutionScope scope = executionScope(tx, thread, tool);
     if (tool.approval() == null) {
       if (effectiveYoloEnabled(tx, thread)) {
         // YOLO=true：锁内快照直接 Allow，绝不调用 permission evaluator / ToolGateway.preflight。
-        return new Prepare.Allowed(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
+        return new Prepare.Allowed(scope, tool.attempt(), request);
       }
-      return new Prepare.Preflight(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
+      return new Prepare.Preflight(scope, tool.attempt(), request);
     }
-    return new Prepare.Dispatched(
-        thread.id(), tool.assistantEntryId(), tool.attempt(), request, tool.approval());
+    return new Prepare.Dispatched(scope, tool.attempt(), request, tool.approval());
+  }
+
+  /**
+   * 冻结本次执行的上下文事实：Thread 自身会话、不可变执行根与其会话、该调用的 assistant 分支入口、该 Contributor 在该 assistant
+   * 分支上的只读视图，以及该调用 TURN_START 已冻结的消费者媒体能力。
+   *
+   * <p>事实全部来自当前已锁定 Thread 与该调用 assistant path 的同一事务读取，因此 admission 与工具执行都不再查询 Harness 存储。执行根会话
+   * 从真实执行根 Thread 行读取，缺失时显式失败，绝不按当前 Thread 合成。
+   *
+   * <p>任一读取抛出 {@link RuntimeException} 时包装为 {@link ExecutionScopeReadFailure} 重抛，使 prepare
+   * 事务完整回滚，再由 {@link #process} 按旧 admission 失败路径有界重排；事实本身绝不回落默认值。
+   */
+  private static ExecutionScope executionScope(
+      HarnessStore.Transaction tx, ThreadState thread, ToolInvocation tool) {
+    try {
+      return readExecutionScope(tx, thread, tool);
+    } catch (RuntimeException failure) {
+      throw new ExecutionScopeReadFailure(thread.id(), tool.attempt(), failure);
+    }
+  }
+
+  /** 上下文事实的实际读取；读取失败由 {@link #executionScope} 统一包装为回滚信号。 */
+  private static ExecutionScope readExecutionScope(
+      HarnessStore.Transaction tx, ThreadState thread, ToolInvocation tool) {
+    UUID rootThreadId = thread.rootThreadId();
+    UUID rootSessionId =
+        rootThreadId.equals(thread.id())
+            ? thread.sessionId()
+            : tx.threads()
+                .find(rootThreadId)
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException(
+                            "thread " + thread.id() + " lost its execution root " + rootThreadId))
+                .sessionId();
+    return new ExecutionScope(
+        thread.id(),
+        thread.sessionId(),
+        rootThreadId,
+        rootSessionId,
+        tool.assistantEntryId(),
+        branchView(tx, tool.assistantEntryId(), tool.binding().contributor().contributorId()),
+        frozenMediaCapabilities(tx, thread, tool));
+  }
+
+  /** 只读该 Contributor 在当前 assistant 分支上的 custom entries 与生效 Goal：窄查询，绝不物化完整 EntryPath。 */
+  private static ScopedBranchView branchView(
+      HarnessStore.Transaction tx, UUID assistantEntryId, String contributorId) {
+    return new ScopedBranchView(
+        tx.entries().loadContributorCustom(assistantEntryId, contributorId),
+        contributorId,
+        tx.entries().loadBranchSettings(assistantEntryId).goal());
+  }
+
+  /** 消费者媒体能力的唯一来源是该调用 TURN_START 冻结的能力快照；绝不读取 live 模型或 Driver 私有状态。 */
+  private static TurnMediaCapabilities frozenMediaCapabilities(
+      HarnessStore.Transaction tx, ThreadState thread, ToolInvocation tool) {
+    Entry turnStart =
+        tx.entries()
+            .find(tool.turnStartEntryId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "tool invocation "
+                            + tool.id()
+                            + " lost its turn start entry "
+                            + tool.turnStartEntryId()));
+    if (!(turnStart.payload() instanceof TurnStartPayload start)
+        || !start.ownerThreadId().equals(thread.id())
+        || start.capabilities() == null) {
+      throw new IllegalStateException(
+          "tool invocation " + tool.id() + " has no frozen turn capabilities for this thread");
+    }
+    return start.capabilities().mediaCapabilities();
   }
 
   /**
@@ -262,6 +343,7 @@ public final class ToolProcessor implements AutoCloseable {
           }
           executions.ensureLeaseMargin(tx, claim);
           ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
+          // 挂接只连接既有远端执行，不复用 admission 资源、也不使用执行上下文事实：这里不读取分支 / TURN_START / 执行根。
           return new Prepare.Reattach(thread.id(), tool.attempt(), request, remoteFact);
         }
       }
@@ -396,7 +478,7 @@ public final class ToolProcessor implements AutoCloseable {
     ToolExecution execution =
         newExecution(
             claim,
-            preflight.threadId(),
+            preflight.scope().threadId(),
             Math.addExact(preflight.attempt(), 1),
             preflight.request());
     if (!ticket.attach(execution)) {
@@ -437,8 +519,7 @@ public final class ToolProcessor implements AutoCloseable {
           switch (result) {
             case ToolGateway.Allow ignored -> applyPreflightAllow(
                 claim,
-                preflight.threadId(),
-                preflight.assistantEntryId(),
+                preflight.scope(),
                 preflight.attempt(),
                 preflight.request(),
                 execution,
@@ -459,7 +540,10 @@ public final class ToolProcessor implements AutoCloseable {
 
   private ProcessResult bouncePreflight(ClaimedWork claim, Prepare.Preflight preflight) {
     return reschedule(
-            claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
+            claim,
+            preflight.scope().threadId(),
+            preflight.attempt(),
+            config.preflightFailureDelay())
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
@@ -473,21 +557,19 @@ public final class ToolProcessor implements AutoCloseable {
    */
   private ProcessResult applyPreflightAllow(
       ClaimedWork claim,
-      UUID threadId,
-      UUID assistantEntryId,
+      ExecutionScope scope,
       int attempt,
       ToolInvocationRequest request,
       ToolExecution execution,
       ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
     boolean allowed =
         Boolean.TRUE.equals(
-            store.transaction(tx -> allowIntent(tx, claim, threadId, attempt, tx.now())));
+            store.transaction(tx -> allowIntent(tx, claim, scope.threadId(), attempt, tx.now())));
     if (!allowed) {
       return ProcessResult.LOST_OWNERSHIP;
     }
     Prepare.Dispatched dispatched =
-        new Prepare.Dispatched(
-            threadId, assistantEntryId, attempt, request, ToolApproval.notRequired());
+        new Prepare.Dispatched(scope, attempt, request, ToolApproval.notRequired());
     if (execution != null) {
       if (executions.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
         // Allow 意图提交后 close / cancel 获胜：不 admit，保持 READY 并重排。
@@ -532,7 +614,7 @@ public final class ToolProcessor implements AutoCloseable {
             store.transaction(
                 tx -> {
                   Instant now = tx.now();
-                  ThreadState thread = tx.threads().lock(preflight.threadId()).orElse(null);
+                  ThreadState thread = tx.threads().lock(preflight.scope().threadId()).orElse(null);
                   if (thread == null) {
                     return false;
                   }
@@ -557,7 +639,7 @@ public final class ToolProcessor implements AutoCloseable {
   /** Deny：READY -&gt; FAILED(error)，version+1，request THREAD Work，complete。 */
   private ProcessResult applyPreflightDeny(
       ClaimedWork claim, Prepare.Preflight preflight, ToolInvocationError error) {
-    boolean committed = failReady(claim, preflight.threadId(), preflight.attempt(), error);
+    boolean committed = failReady(claim, preflight.scope().threadId(), preflight.attempt(), error);
     return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
   }
 
@@ -622,6 +704,24 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
+   * 执行上下文事实读取失败（例如分支 / TURN_START 查询异常）：prepare 事务已完整回滚，工具未执行、也没有任何外部副作用。沿用引入 scope 之前的 admission
+   * 失败语义，按 {@code admitFailureDelay} 有界重排；锁后重新校验 claim + Thread + READY + attempt， 任一不再成立即完整
+   * no-op（绝不写入、绝不改 attempt）。
+   *
+   * <p>只处理新增 scope 读取的失败：其它 prepare 错误保持原样抛出，绝不被这里捕获或重排。
+   */
+  private ProcessResult rescheduleScopeReadFailure(
+      ClaimedWork claim, ExecutionScopeReadFailure failure) {
+    log.warn(
+        "tool execution scope read failed for invocation {}: {}",
+        claim.target().id(),
+        ProcessorExceptions.describe(failure.getCause()));
+    return reschedule(claim, failure.threadId(), failure.attempt(), config.admitFailureDelay())
+        ? ProcessResult.RESCHEDULED
+        : ProcessResult.LOST_OWNERSHIP;
+  }
+
+  /**
    * 执行段：新建 execution 并启动 heartbeat，随后准入并执行。任何未达 STARTED 的异常与放弃路径统一在 finally 中 abandon 本地
    * execution。Admitted 之后持久化 RUNNING 并启动执行线程，由 {@link ToolExecution} 接管 run 的关闭。
    */
@@ -632,7 +732,7 @@ public final class ToolProcessor implements AutoCloseable {
     ToolExecution execution =
         newExecution(
             claim,
-            dispatched.threadId(),
+            dispatched.scope().threadId(),
             Math.addExact(dispatched.attempt(), 1),
             dispatched.request());
     if (!ticket.attach(execution)) {
@@ -673,8 +773,7 @@ public final class ToolProcessor implements AutoCloseable {
           gateway.admit(
               new ToolGateway.Execution(
                   invocationId,
-                  dispatched.threadId(),
-                  dispatched.assistantEntryId(),
+                  dispatched.scope(),
                   Math.addExact(dispatched.attempt(), 1),
                   dispatched.request(),
                   dispatched.approval(),
@@ -707,7 +806,7 @@ public final class ToolProcessor implements AutoCloseable {
       }
       case ToolGateway.Busy busy -> rescheduleResult(claim, dispatched, busy.retryAfter());
       case ToolGateway.Rejected rejected -> failReady(
-              claim, dispatched.threadId(), dispatched.attempt(), rejected.error())
+              claim, dispatched.scope().threadId(), dispatched.attempt(), rejected.error())
           ? ProcessResult.TERMINATED
           : ProcessResult.LOST_OWNERSHIP;
     };
@@ -715,7 +814,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   private ProcessResult rescheduleResult(
       ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
-    return reschedule(claim, dispatched.threadId(), dispatched.attempt(), delay)
+    return reschedule(claim, dispatched.scope().threadId(), dispatched.attempt(), delay)
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
@@ -853,6 +952,32 @@ public final class ToolProcessor implements AutoCloseable {
 
   private static final HumanInputJsonCodec INPUT_JSON = new HumanInputJsonCodec();
 
+  /**
+   * 执行上下文事实（会话 / 执行根 / 分支视图 / 冻结媒体能力）在 prepare 事务内读取失败的回滚信号。
+   *
+   * <p>只在 {@link #executionScope} 内产生：携带已锁定的 Thread 与 attempt，使 {@link #process} 能在事务回滚后按旧
+   * admission 失败 路径锁后重新校验并重排；它不表达持久事实，原始失败保留为 cause，绝不被吞掉。
+   */
+  private static final class ExecutionScopeReadFailure extends RuntimeException {
+
+    private final UUID threadId;
+    private final int attempt;
+
+    ExecutionScopeReadFailure(UUID threadId, int attempt, RuntimeException cause) {
+      super("tool execution scope read failed", cause);
+      this.threadId = Objects.requireNonNull(threadId, "threadId");
+      this.attempt = attempt;
+    }
+
+    UUID threadId() {
+      return threadId;
+    }
+
+    int attempt() {
+      return attempt;
+    }
+  }
+
   private sealed interface Prepare
       permits Prepare.Lost,
           Prepare.Input,
@@ -868,22 +993,18 @@ public final class ToolProcessor implements AutoCloseable {
     record Input(UUID threadId) implements Prepare {}
 
     /** 普通 gateway preflight（锁内 YOLO 快照为 false）。 */
-    record Preflight(
-        UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
+    record Preflight(ExecutionScope scope, int attempt, ToolInvocationRequest request)
         implements Prepare {}
 
     /** 锁内 YOLO 快照为 true 的直接 Allow：不调用 gateway preflight，transient 决策标志。 */
-    record Allowed(UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
+    record Allowed(ExecutionScope scope, int attempt, ToolInvocationRequest request)
         implements Prepare {}
 
     record Dispatched(
-        UUID threadId,
-        UUID assistantEntryId,
-        int attempt,
-        ToolInvocationRequest request,
-        ToolApproval approval)
+        ExecutionScope scope, int attempt, ToolInvocationRequest request, ToolApproval approval)
         implements Prepare {}
 
+    /** 远端重新挂接：只需要所属 Thread id，不携带执行上下文快照。 */
     record Reattach(
         UUID threadId, int attempt, ToolInvocationRequest request, ExecutionExitFact remoteFact)
         implements Prepare {}

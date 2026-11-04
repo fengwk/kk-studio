@@ -2,20 +2,9 @@
 set -euo pipefail
 
 SCRIPT_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_HOME
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_HOME/lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_HOME"
+source "$SCRIPT_HOME/lib/http-wait.sh"
 WORK_DIR=${DEV_WORK_DIR:-"$REPO_ROOT/runtime/dev"}
 
 # 本机 preview 的外部数据面配置：只有调用方显式给出 SHARED_PREVIEW_ENV_FILE 时才读取（见 usage），
@@ -304,22 +293,7 @@ test_env_unset_args() {
   done < <(compgen -e)
 }
 
-# Synchronize complete real-provider credential pairs after backend readiness.
-sync_e2e_provider_credentials() {
-  require_cmd node
-  step "Syncing provider E2E credentials from env (secrets not printed)"
-  env \
-    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
-    TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
-    TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" \
-    TEST_OPENAI_RESPONSES_BASE_URL="${TEST_OPENAI_RESPONSES_BASE_URL-}" \
-    TEST_OPENAI_RESPONSES_API_KEY="${TEST_OPENAI_RESPONSES_API_KEY-}" \
-    TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
-    TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" \
-    TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
-    TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
-    node "$REPO_ROOT/scripts/dev/verify/e2e/sync-provider-credentials.mjs" --backend-url "$BACKEND_URL"
-}
+source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
 
 stop_pid_file() {
   local pid_file=$1
@@ -408,18 +382,16 @@ wait_http() {
   local url=$1
   local name=$2
   local pid_file=$3
-  local pid
-  for _ in $(seq 1 "$READY_TIMEOUT_SECONDS"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      return 0
-    fi
-    pid=$(cat "$pid_file" 2>/dev/null || true)
-    if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
-      echo "$name exited before becoming ready: $url" >&2
-      return 1
-    fi
-    sleep 1
-  done
+  local status
+  if poll_http "$url" "$READY_TIMEOUT_SECONDS" "" "$pid_file"; then
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 2 ]; then
+    echo "$name exited before becoming ready: $url" >&2
+    return 1
+  fi
   echo "Timed out after ${READY_TIMEOUT_SECONDS}s waiting for $name: $url" >&2
   return 1
 }

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
@@ -9,10 +8,10 @@ import java.util.List;
 import java.util.concurrent.Semaphore;
 
 /**
- * MiniMax Mavis 的运行期实例：启用时提供完整的 15 个模型工具，停用时两域都没有贡献。
+ * MiniMax Mavis 的运行期实例：启用时提供完整的 15 个模型工具，停用时不贡献任何能力。
  *
  * <p>实例不持有需要关闭的资源：工具在调用线程上阻塞执行，capability 缓存、资源访问与并发许可都在 {@code configure} 中装配；调用线程退出前 Runtime
- * 不会释放钉住本实例的目录租用，因此实例关闭时不会有在途调用。两域贡献列表在构造时冻结，不返回 null。
+ * 不会释放钉住本实例的目录租用，因此实例关闭时不会有在途调用。贡献列表在构造时冻结，不返回 null。
  */
 final class MiniMaxMavisInstance implements PluginInstance {
 
@@ -49,8 +48,8 @@ final class MiniMaxMavisInstance implements PluginInstance {
   }
 
   @Override
-  public List<CanvasFunctionAdapter> canvasAdapters() {
-    // MiniMax Mavis 只贡献模型工具，不提供 Canvas Function。
+  public <T> List<T> contributions(Class<T> type) {
+    // MiniMax Mavis 只贡献模型工具，没有其它产品域贡献。
     return List.of();
   }
 

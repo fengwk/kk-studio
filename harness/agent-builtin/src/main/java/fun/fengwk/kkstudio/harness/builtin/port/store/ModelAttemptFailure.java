@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.builtin.port.store;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 
 import java.time.Instant;
 import java.util.Objects;

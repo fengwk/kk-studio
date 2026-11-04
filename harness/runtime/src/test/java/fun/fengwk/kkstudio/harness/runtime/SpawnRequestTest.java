@@ -8,14 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +55,6 @@ class SpawnRequestTest {
     assertEquals(SESSION, root.sessionId());
     assertEquals(SETTINGS, root.settings());
     assertEquals(commands, root.commands());
-    assertEquals(AcceptancePreflight.IDENTITY, root.preflight());
     assertNull(root.parentThreadId());
     assertNull(root.expectedParentHeadEntryId());
     assertNull(root.continuation());
@@ -463,7 +463,6 @@ class SpawnRequestTest {
         sessionId,
         SETTINGS,
         commands,
-        AcceptancePreflight.IDENTITY,
         parentThreadId,
         expectedParentHeadEntryId,
         continuation,

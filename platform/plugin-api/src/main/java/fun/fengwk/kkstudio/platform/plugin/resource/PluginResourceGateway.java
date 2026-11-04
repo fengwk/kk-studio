@@ -12,7 +12,7 @@ import java.util.UUID;
  * <p>这是 Plugin 与 Storage 之间唯一的窄接口，代替「把大媒体塞进 byte[]」或让 Plugin 自己颁发 URL：
  *
  * <ul>
- *   <li>{@link #resolveSessionResource(UUID, String)} 在签发输入前按当前调用线程解析 Session 并校验 {@code
+ *   <li>{@link #resolveSessionResource(UUID, String)} 在签发输入前按执行上下文中的 Session 校验 {@code
  *       session_blob_ref}，只把该 Session 确实有权访问的 Resource 映射为受控短期 HTTPS 下载地址；
  *   <li>{@link #stageRemoteMedia} 把第三方或生成的媒体按有界流式写入全局 Blob 上传，返回 {@code blob-upload:<uploadId>}
  *       瞬态引用，交由统一的 ToolResult finalizer 与 Storage maintenance 完成校验、owner 转移或回收。
@@ -27,18 +27,17 @@ import java.util.UUID;
 public interface PluginResourceGateway {
 
   /**
-   * 把指定 Thread 所属 Session 有权访问的规范 Resource URI 解析为受控短期 HTTPS 下载地址。
+   * 把指定 Session 有权访问的规范 Resource URI 解析为受控短期 HTTPS 下载地址。
    *
-   * <p>授权上下文由调用方**显式**给出（Tool invocation context 里的 {@code threadId}），实现从 durable Thread 行解析
-   * Session 并校验 {@code session_blob_ref}。因此本端口没有任何隐式调用者身份：拿不到 threadId 的调用必须在发送请求前失败，而不是继承
+   * <p>授权上下文由调用方**显式**给出（Tool invocation context 里冻结的 {@code sessionId}），实现只校验该 Session 的 {@code
+   * session_blob_ref}，不查询任何 Harness 存储。因此本端口没有任何隐式调用者身份：拿不到 sessionId 的调用必须在发送请求前失败，而不是继承
    * 某个环境变量或线程局部状态。
    *
-   * @param threadId 本次调用的 Harness Thread id；实现据此解析 Session 并鉴权
+   * @param sessionId 本次调用所属会话；实现据此鉴权
    * @param resourceUri {@code kkstudio:/resources/<blobId>} 形式的会话 Resource URI
-   * @throws PluginResourceUnavailableException threadId 无法解析出 Session、当前 Session 无权访问、Resource
-   *     已删除或无法签发下载
+   * @throws PluginResourceUnavailableException 会话缺失、当前 Session 无权访问、Resource 已删除或无法签发下载
    */
-  URI resolveSessionResource(UUID threadId, String resourceUri);
+  URI resolveSessionResource(UUID sessionId, String resourceUri);
 
   /**
    * 把远端媒体有界流式暂存为全局 Blob 上传，返回 {@code blob-upload:<uploadId>} 瞬态引用。

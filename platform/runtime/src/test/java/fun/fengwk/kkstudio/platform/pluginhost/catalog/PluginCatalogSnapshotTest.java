@@ -9,13 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson;
-import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -41,14 +34,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
  * {@link PluginCatalogSnapshot} 的构建与生命周期契约测试。
  *
- * <p>覆盖真实成功聚合、配置覆盖校验、半途失败/目录冲突全部回收、构建期致命 {@link Error} 传播，以及 close 的幂等、逆序与故障隔离。
+ * <p>覆盖真实成功聚合（Harness 目录 + 产品目录视图）、配置覆盖校验、半途失败/目录校验全部回收、构建期致命 {@link Error} 传播，以及 close
+ * 的幂等、逆序与故障隔离。产品目录由测试自带的投影函数提供，平台测试不接触任何真实产品类型。
  */
 class PluginCatalogSnapshotTest {
 
@@ -57,29 +51,47 @@ class PluginCatalogSnapshotTest {
   private static final String PLUGIN_BETA = "beta.plugin";
   private static final String PLUGIN_GAMMA = "gamma.plugin";
 
-  /** 真实两域聚合：按安装 id 顺序冻结实例，并合并插件贡献与容器内置贡献。 */
+  /** 平台不认识的产品贡献：只有产品模块的投影函数会按该类型读取它。 */
+  private record FakeAdapter(String functionName) {}
+
+  /** 示例产品目录视图：由投影函数在快照构建期一次性冻结。 */
+  private record FakeProductCatalog(List<String> functionNames) {
+
+    private FakeProductCatalog {
+      functionNames = List.copyOf(functionNames);
+    }
+  }
+
+  /** 示例产品目录投影：只读取插件贡献；内置产品贡献由产品模块自己持有，不经过平台。 */
+  private static final Function<PluginCatalogSnapshot, FakeProductCatalog> PRODUCT_CATALOG =
+      snapshot -> {
+        List<String> names = new ArrayList<>();
+        for (PluginCatalogSnapshot.ConfiguredPlugin plugin : snapshot.configuredPlugins()) {
+          for (FakeAdapter adapter : plugin.instance().contributions(FakeAdapter.class)) {
+            names.add(adapter.functionName());
+          }
+        }
+        return new FakeProductCatalog(names);
+      };
+
+  /** 真实聚合：按安装 id 顺序冻结实例，合并插件贡献与容器内置 Harness 贡献，并冻结产品目录视图。 */
   @Test
-  void buildFreezesInstancesInInstallOrderAndAggregatesBothDomains() {
+  void buildFreezesInstancesInInstallOrderAndAggregatesEveryDomain() {
     TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
     alpha.configure =
         () ->
             new RecordingInstance(
-                List.of(contributor("alpha.contrib")), List.of(adapter("alpha.run")));
+                List.of(contributor("alpha.contrib")), List.of(new FakeAdapter("alpha.run")));
     TestPlugin beta = new TestPlugin(PLUGIN_BETA);
     beta.configure =
         () ->
             new RecordingInstance(
-                List.of(contributor("beta.contrib")), List.of(adapter("beta.run")));
+                List.of(contributor("beta.contrib")), List.of(new FakeAdapter("beta.run")));
     // registry 打乱输入顺序，验证快照仍按 pluginId 升序冻结。
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(beta, alpha));
 
     PluginCatalogSnapshot snapshot =
-        PluginCatalogSnapshot.build(
-            registry,
-            initialConfigurations(registry),
-            PluginCatalogSnapshotTest::contexts,
-            List.of(contributor("builtin.contrib")),
-            List.of(adapter("builtin.run")));
+        build(registry, initialConfigurations(registry), List.of(contributor("builtin.contrib")));
 
     assertEquals(
         List.of(PLUGIN_ALPHA, PLUGIN_BETA),
@@ -90,14 +102,32 @@ class PluginCatalogSnapshotTest {
         snapshot.harnessCatalog().findDescriptor(new ContributorId("beta.contrib")).isPresent());
     assertTrue(
         snapshot.harnessCatalog().findDescriptor(new ContributorId("builtin.contrib")).isPresent());
-    assertEquals(Set.of("alpha.run", "beta.run", "builtin.run"), canvasFunctionNames(snapshot));
+    // 产品目录按插件归属冻结，内置 Harness 贡献不进入产品目录。
+    assertEquals(
+        List.of("alpha.run", "beta.run"),
+        snapshot.productCatalog(FakeProductCatalog.class).functionNames());
     // 归属只记录插件贡献，内置贡献不归属任何插件。
     assertEquals(
         Set.of(new ContributorId("alpha.contrib")),
         snapshot.configuredPlugins().get(0).contributorIds());
-    assertEquals(Set.of("beta.run"), snapshot.configuredPlugins().get(1).functionNames());
+    assertEquals(Set.of("beta.contrib"), contributorIds(snapshot.configuredPlugins().get(1)));
     assertEquals(Map.of(PLUGIN_ALPHA, 0L, PLUGIN_BETA, 0L), snapshot.revisions());
     snapshot.close();
+  }
+
+  /** 产品目录视图只按类型读取：请求未冻结的类型时固定失败，绝不返回其它产品的视图。 */
+  @Test
+  void productCatalogIsReadableOnlyThroughItsOwnType() {
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(new TestPlugin(PLUGIN_ALPHA)));
+    try (PluginCatalogSnapshot snapshot =
+        build(registry, initialConfigurations(registry), List.of())) {
+      assertSame(
+          FakeProductCatalog.class, snapshot.productCatalog(FakeProductCatalog.class).getClass());
+      IllegalStateException mismatch =
+          assertThrows(IllegalStateException.class, () -> snapshot.productCatalog(String.class));
+      assertTrue(mismatch.getMessage().contains("String"), mismatch.getMessage());
+      assertThrows(NullPointerException.class, () -> snapshot.productCatalog(null));
+    }
   }
 
   /** configure 只收到 Schema 归一后的配置，修订号在归一化与冻结之间保持不变。 */
@@ -112,12 +142,7 @@ class PluginCatalogSnapshotTest {
             Map.of());
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
     try (PluginCatalogSnapshot snapshot =
-        PluginCatalogSnapshot.build(
-            registry,
-            Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")),
-            PluginCatalogSnapshotTest::contexts,
-            List.of(),
-            List.of())) {
+        build(registry, Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")), List.of())) {
       assertEquals(new PluginConfig(7, "{\"enabled\":true}"), plugin.receivedConfig);
       assertEquals(plugin.receivedConfig, snapshot.configuredPlugins().get(0).config());
     }
@@ -139,7 +164,7 @@ class PluginCatalogSnapshotTest {
                     Map.of(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA)),
                     PluginCatalogSnapshotTest::contexts,
                     List.of(),
-                    List.of()));
+                    PRODUCT_CATALOG));
     assertTrue(missing.getMessage().contains("stage=configure"), missing.getMessage());
   }
 
@@ -153,7 +178,54 @@ class PluginCatalogSnapshotTest {
     TestPlugin beta = new TestPlugin(PLUGIN_BETA);
     RecordingInstance betaInstance =
         new RecordingInstance(List.of(contributor("beta.contrib")), List.of());
-    betaInstance.nullContributors = true;
+    betaInstance.nullContributions = true;
+    beta.configure = () -> betaInstance;
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> build(registry, initialConfigurations(registry), List.of()));
+
+    assertTrue(failure.getMessage().contains("pluginId=" + PLUGIN_BETA), failure.getMessage());
+    assertEquals(1, alphaInstance.closeCount, "already built instance must be reaped");
+    assertEquals(1, betaInstance.closeCount, "instance entering the reap list must be reaped");
+  }
+
+  /** Harness 目录冲突必须先回收全部实例再固定失败，且不挂接原始 cause。 */
+  @Test
+  void buildReapsAllInstancesOnCatalogConflict() {
+    TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
+    RecordingInstance alphaInstance =
+        new RecordingInstance(List.of(contributor("dup.contrib")), List.of());
+    alpha.configure = () -> alphaInstance;
+    TestPlugin beta = new TestPlugin(PLUGIN_BETA);
+    RecordingInstance betaInstance =
+        new RecordingInstance(List.of(contributor("dup.contrib")), List.of());
+    beta.configure = () -> betaInstance;
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
+
+    IllegalStateException conflict =
+        assertThrows(
+            IllegalStateException.class,
+            () -> build(registry, initialConfigurations(registry), List.of()));
+
+    assertTrue(conflict.getMessage().contains("stage=catalog"), conflict.getMessage());
+    assertNull(conflict.getCause(), "build failure must not leak a raw cause");
+    assertEquals(1, alphaInstance.closeCount);
+    assertEquals(1, betaInstance.closeCount);
+  }
+
+  /** 产品目录校验失败同样在发布前失败：候选实例全部回收，错误只暴露 stage。 */
+  @Test
+  void buildReapsAllInstancesWhenProductCatalogRejectsTheCandidate() {
+    TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
+    RecordingInstance alphaInstance =
+        new RecordingInstance(List.of(contributor("alpha.contrib")), List.of());
+    alpha.configure = () -> alphaInstance;
+    TestPlugin beta = new TestPlugin(PLUGIN_BETA);
+    RecordingInstance betaInstance =
+        new RecordingInstance(List.of(), List.of(new FakeAdapter("duplicate.run")));
     beta.configure = () -> betaInstance;
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
 
@@ -166,65 +238,14 @@ class PluginCatalogSnapshotTest {
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
                     List.of(),
-                    List.of()));
+                    snapshot -> {
+                      throw new IllegalArgumentException("duplicate product function name");
+                    }));
 
-    assertTrue(failure.getMessage().contains("pluginId=" + PLUGIN_BETA), failure.getMessage());
-    assertEquals(1, alphaInstance.closeCount, "already built instance must be reaped");
-    assertEquals(1, betaInstance.closeCount, "instance entering the reap list must be reaped");
-  }
-
-  /** 两域目录冲突（重复 contributor id 或重复函数名）必须先回收全部实例再固定失败。 */
-  @Test
-  void buildReapsAllInstancesOnCatalogConflict() {
-    // Harness 目录冲突
-    TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
-    RecordingInstance alphaInstance =
-        new RecordingInstance(List.of(contributor("dup.contrib")), List.of());
-    alpha.configure = () -> alphaInstance;
-    TestPlugin beta = new TestPlugin(PLUGIN_BETA);
-    RecordingInstance betaInstance =
-        new RecordingInstance(List.of(contributor("dup.contrib")), List.of());
-    beta.configure = () -> betaInstance;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha, beta));
-
-    IllegalStateException harnessConflict =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    registry,
-                    initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
-    assertTrue(
-        harnessConflict.getMessage().contains("stage=catalog"), harnessConflict.getMessage());
-    assertNull(harnessConflict.getCause(), "build failure must not leak a raw cause");
+    assertTrue(failure.getMessage().contains("stage=catalog"), failure.getMessage());
+    assertNull(failure.getCause(), "product catalog failure must not leak a raw cause");
     assertEquals(1, alphaInstance.closeCount);
     assertEquals(1, betaInstance.closeCount);
-
-    // Canvas 目录冲突
-    TestPlugin gamma = new TestPlugin(PLUGIN_GAMMA);
-    RecordingInstance gammaInstance =
-        new RecordingInstance(List.of(), List.of(adapter("same.run")));
-    gamma.configure = () -> gammaInstance;
-    TestPlugin delta = new TestPlugin("delta.plugin");
-    RecordingInstance deltaInstance =
-        new RecordingInstance(List.of(), List.of(adapter("same.run")));
-    delta.configure = () -> deltaInstance;
-    StudioPluginRegistry canvasRegistry = new StudioPluginRegistry(List.of(gamma, delta));
-
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            PluginCatalogSnapshot.build(
-                canvasRegistry,
-                initialConfigurations(canvasRegistry),
-                PluginCatalogSnapshotTest::contexts,
-                List.of(),
-                List.of()));
-    assertEquals(1, gammaInstance.closeCount);
-    assertEquals(1, deltaInstance.closeCount);
   }
 
   /** configure 抛普通异常：收敛为只带 stage/id 的固定错误，不带 raw cause，并回收已建实例。 */
@@ -241,13 +262,7 @@ class PluginCatalogSnapshotTest {
     IllegalStateException failure =
         assertThrows(
             IllegalStateException.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    registry,
-                    initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
+            () -> build(registry, initialConfigurations(registry), List.of()));
 
     assertTrue(failure.getMessage().contains("stage=configure"), failure.getMessage());
     assertTrue(failure.getMessage().contains("pluginId=" + PLUGIN_BETA), failure.getMessage());
@@ -269,14 +284,7 @@ class PluginCatalogSnapshotTest {
 
     Error propagated =
         assertThrows(
-            Error.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    registry,
-                    initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
+            Error.class, () -> build(registry, initialConfigurations(registry), List.of()));
     assertSame(fatal, propagated, "original fatal Error must be propagated unchanged");
     assertEquals(1, alphaInstance.closeCount, "created instances must still be reaped on Error");
 
@@ -293,13 +301,7 @@ class PluginCatalogSnapshotTest {
     Error second =
         assertThrows(
             Error.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    secondRegistry,
-                    initialConfigurations(secondRegistry),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
+            () -> build(secondRegistry, initialConfigurations(secondRegistry), List.of()));
     assertSame(original, second, "cleanup Error must not replace the original Error");
     assertEquals(
         1, gammaInstance.closeCount, "cleanup must run after the earlier instance was built");
@@ -317,14 +319,7 @@ class PluginCatalogSnapshotTest {
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(first, failing));
     Error fatal =
         assertThrows(
-            Error.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    registry,
-                    initialConfigurations(registry),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
+            Error.class, () -> build(registry, initialConfigurations(registry), List.of()));
     assertSame(instance.closeError, fatal);
     assertEquals(1, instance.closeCount);
   }
@@ -344,13 +339,7 @@ class PluginCatalogSnapshotTest {
     plugins.put(PLUGIN_GAMMA, new TestPlugin(PLUGIN_GAMMA, () -> gamma));
     StudioPluginRegistry registry = new StudioPluginRegistry(new ArrayList<>(plugins.values()));
 
-    PluginCatalogSnapshot snapshot =
-        PluginCatalogSnapshot.build(
-            registry,
-            initialConfigurations(registry),
-            PluginCatalogSnapshotTest::contexts,
-            List.of(),
-            List.of());
+    PluginCatalogSnapshot snapshot = build(registry, initialConfigurations(registry), List.of());
 
     Error fatal = assertThrows(Error.class, snapshot::close);
     assertSame(gamma.closeError, fatal, "fatal close Error must be propagated");
@@ -364,55 +353,22 @@ class PluginCatalogSnapshotTest {
     assertEquals(1, gamma.closeCount);
   }
 
-  private static Set<String> canvasFunctionNames(PluginCatalogSnapshot snapshot) {
-    return snapshot.canvasFunctionCatalog().list().stream()
-        .map(registered -> registered.function().name())
-        .collect(Collectors.toSet());
+  private static PluginCatalogSnapshot build(
+      StudioPluginRegistry registry,
+      Map<String, PluginConfig> configurations,
+      List<HarnessContributor> builtins) {
+    return PluginCatalogSnapshot.build(
+        registry, configurations, PluginCatalogSnapshotTest::contexts, builtins, PRODUCT_CATALOG);
+  }
+
+  private static Set<String> contributorIds(PluginCatalogSnapshot.ConfiguredPlugin plugin) {
+    return plugin.contributorIds().stream().map(ContributorId::value).collect(Collectors.toSet());
   }
 
   private static HarnessContributor contributor(String id) {
     return HarnessContributor.of(
         new ContributorDescriptor(new ContributorId(id), "contributor " + id, "1.0", Set.of()),
         registrar -> {});
-  }
-
-  private static CanvasFunctionAdapter adapter(String functionName) {
-    CanvasFunctionDefinition definition =
-        CanvasFunctionDefinition.of(
-            functionName,
-            "function " + functionName,
-            CanvasJson.parseObject(
-                "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
-            CanvasResourceKind.IMAGE,
-            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
-    return new CanvasFunctionAdapter() {
-      @Override
-      public List<CanvasFunctionDefinition> functions() {
-        return List.of(definition);
-      }
-
-      @Override
-      public boolean enabled() {
-        return true;
-      }
-
-      @Override
-      public String unavailableReason() {
-        return null;
-      }
-
-      @Override
-      public void preflight(CanvasFunctionFrozenRun run) {}
-
-      @Override
-      public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {}
-
-      @Override
-      public List<UUID> execute(
-          CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
-        return List.of();
-      }
-    };
   }
 
   private static Map<String, PluginConfig> initialConfigurations(StudioPluginRegistry registry) {
@@ -493,39 +449,39 @@ class PluginCatalogSnapshotTest {
   /** 记录 close 次数与顺序，并可注入 RuntimeException / Error 的实例替身。 */
   private static final class RecordingInstance implements PluginInstance {
 
-    private final List<HarnessContributor> contributors;
-    private final List<CanvasFunctionAdapter> adapters;
+    private final List<HarnessContributor> harnessContributors;
+    private final List<Object> contributions;
     private final List<String> closeOrder;
     private final String label;
 
-    private boolean nullContributors;
+    private boolean nullContributions;
     private RuntimeException closeRuntime;
     private Error closeError;
     private int closeCount;
 
-    RecordingInstance(List<HarnessContributor> contributors, List<CanvasFunctionAdapter> adapters) {
-      this(contributors, adapters, null, null);
+    RecordingInstance(List<HarnessContributor> harnessContributors, List<Object> contributions) {
+      this(harnessContributors, contributions, null, null);
     }
 
     RecordingInstance(
-        List<HarnessContributor> contributors,
-        List<CanvasFunctionAdapter> adapters,
+        List<HarnessContributor> harnessContributors,
+        List<Object> contributions,
         List<String> closeOrder,
         String label) {
-      this.contributors = contributors;
-      this.adapters = adapters;
+      this.harnessContributors = harnessContributors;
+      this.contributions = contributions;
       this.closeOrder = closeOrder;
       this.label = label;
     }
 
     @Override
     public List<HarnessContributor> harnessContributors() {
-      return nullContributors ? null : contributors;
+      return nullContributions ? null : harnessContributors;
     }
 
     @Override
-    public List<CanvasFunctionAdapter> canvasAdapters() {
-      return adapters;
+    public <T> List<T> contributions(Class<T> type) {
+      return PluginInstance.contributionsOf(type, contributions);
     }
 
     @Override

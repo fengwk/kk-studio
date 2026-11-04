@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
 
 import java.util.List;
 import java.util.Objects;
@@ -77,5 +78,17 @@ public sealed interface ThreadContext
       calls = List.copyOf(calls);
       siblings = List.copyOf(siblings);
     }
+  }
+
+  /** 统一将纯上下文分类映射为公共 {@link ThreadLiveState}：Runtime 的活动分类不外泄为 API 类型。 */
+  static ThreadLiveState liveStateOf(ThreadContext context) {
+    return switch (context) {
+      case IdleOrHistorical ignored -> ThreadLiveState.IDLE_OR_HISTORICAL;
+      case ContinuationDue ignored -> ThreadLiveState.CONTINUATION_DUE;
+      case GenerationActive ignored -> ThreadLiveState.DRIVER_ACTIVE;
+      case GenerationTerminalPending ignored -> ThreadLiveState.DRIVER_RESPONSE_PENDING;
+      case ToolActive ignored -> ThreadLiveState.TOOL_ACTIVE;
+      case ToolTerminalPending ignored -> ThreadLiveState.TOOL_TERMINAL_PENDING;
+    };
   }
 }

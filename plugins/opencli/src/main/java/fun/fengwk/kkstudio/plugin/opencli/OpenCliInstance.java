@@ -54,8 +54,8 @@ final class OpenCliInstance implements PluginInstance {
   }
 
   @Override
-  public List<CanvasFunctionAdapter> canvasAdapters() {
-    return canvasAdapters;
+  public <T> List<T> contributions(Class<T> type) {
+    return PluginInstance.contributionsOf(type, canvasAdapters);
   }
 
   @Override

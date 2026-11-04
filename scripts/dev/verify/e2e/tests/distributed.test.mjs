@@ -13,7 +13,7 @@ import {
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
 import { HttpError } from '../lib/http.mjs'
-import { ALL_CASES } from '../lib/registry.mjs'
+import { ALL_CASES } from '../run-matrix.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
 test('createBaseUrls requires both node URLs and normalizes trailing slashes', () => {

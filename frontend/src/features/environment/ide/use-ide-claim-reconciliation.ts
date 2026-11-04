@@ -6,7 +6,7 @@ import {
 } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { ApiError } from '@/shared/api/client'
 import type {
   EnvironmentIdeOpenViewDTO,

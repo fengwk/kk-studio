@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { ChevronRight, CornerLeftUp, Folder, HelpCircle } from 'lucide-react'
 import { ApiError } from '@/shared/api/client'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type {
   EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeDirectoryListingEntry,

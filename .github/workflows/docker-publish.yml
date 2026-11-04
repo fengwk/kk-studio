@@ -93,33 +93,7 @@ jobs:
             frontend/package-lock.json
             daemon/package-lock.json
       - name: Set up PostgreSQL client tools
-        run: |
-          set -euo pipefail
-          # Ubuntu's default repositories do not provide every supported PostgreSQL major.
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl --fail --silent --show-error --retry 3 \
-            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          . /etc/os-release
-          printf '%s\n' \
-            'Types: deb' \
-            'URIs: https://apt.postgresql.org/pub/repos/apt' \
-            "Suites: ${VERSION_CODENAME}-pgdg" \
-            "Architectures: $(dpkg --print-architecture)" \
-            'Components: main' \
-            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
-            | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
-          # Match the real PostgreSQL fixture; runner defaults may point pg_dump at an older major.
-          echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
-      - name: Verify PostgreSQL client selection
-        run: |
-          set -euo pipefail
-          for tool in psql pg_dump pg_restore createdb pg_isready; do
-            test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"
-            "${tool}" --version
-          done
+        uses: ./.github/actions/postgres-client
       - name: Install daemon dependencies
         # 仓库脚本 fixture 使用真实 daemon 依赖（含 tar 解析器）与真实 Node 入口。
         run: npm --prefix daemon ci
@@ -127,16 +101,9 @@ jobs:
         # Web 反向流测试启动真实 Node 进程，必须先生成同一提交的 daemon/dist。
         run: npm --prefix daemon run build
       - name: Run repository script tests
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          # 每个能力的测试都放在自己的 tests/ 目录；CI 只发现 *.test.mjs，不维护能力清单。
-          node_files=(scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs deploy/test/mock/*.test.mjs)
-          if [ "${#node_files[@]}" -eq 0 ]; then
-            echo "no script tests discovered below scripts/" >&2
-            exit 1
-          fi
-          node --test "${node_files[@]}"
+        uses: ./.github/actions/repository-script-tests
+        with:
+          globs: scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs deploy/test/mock/*.test.mjs
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。

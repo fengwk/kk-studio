@@ -1,27 +1,8 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-
-/** 仓库根解析：`KK_STUDIO_REPO_ROOT` 优先，否则从本文件位置向上寻找 worktree 根（`.git` 文件
- * 或目录），因此移动本文件不会改变结果。 */
-function repositoryRoot() {
-  if (process.env.KK_STUDIO_REPO_ROOT) {
-    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-  }
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  for (;;) {
-    if (existsSync(path.join(directory, '.git'))) {
-      return directory
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error('cannot locate the kk-studio worktree root; set KK_STUDIO_REPO_ROOT')
-    }
-    directory = parent
-  }
-}
+import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
 
@@ -31,8 +12,17 @@ const WORKFLOWS = [
   '.github/workflows/docker-publish.yml',
 ]
 
-/** 本地可复用工作流（`uses: ./.github/workflows/...`）不是第三方 action，不参与 SHA 固定。 */
-const LOCAL_REUSABLE_WORKFLOW = /^\.\/\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/u
+/** 本地引用必须存在，action 元数据同样扫描。 */
+const LOCAL_REFERENCE = /^\.\/\.github\/(?:workflows\/[A-Za-z0-9._-]+\.ya?ml|actions\/[A-Za-z0-9._/-]+)$/u
+
+function actionMetadata(directory) {
+  if (!existsSync(directory)) return []
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(directory, entry.name)
+    if (entry.isDirectory()) return actionMetadata(full)
+    return entry.isFile() && /^action\.ya?ml$/u.test(entry.name) ? [full] : []
+  })
+}
 
 /**
  * 第三方 GitHub Action 的唯一事实源：每个 major tag 固定到它当前解析出的完整 commit SHA，
@@ -57,7 +47,9 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
   // 逐行扫描全部工作流：tag/branch 引用、缺失 `# vN` 说明、或未登记的 action 都会失败，
   // 避免 CI 静默执行可变代码。
   let pinnedCount = 0
-  for (const relativePath of WORKFLOWS) {
+  const files = [...WORKFLOWS, ...actionMetadata(path.join(REPOSITORY_ROOT, '.github/actions'))
+    .map((file) => path.relative(REPOSITORY_ROOT, file))]
+  for (const relativePath of files) {
     const source = readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
 
     const stepCount = [...source.matchAll(USES_STEP)].length
@@ -69,8 +61,12 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
     )
 
     for (const [, reference, versionComment] of references) {
-      // 本地可复用工作流不是第三方 action：它解析为仓库内文件，不参与 SHA 固定。
-      if (LOCAL_REUSABLE_WORKFLOW.test(reference)) {
+      if (LOCAL_REFERENCE.test(reference) && !reference.split('/').includes('..')) {
+        const target = path.join(REPOSITORY_ROOT, reference)
+        assert.ok(reference.startsWith('./.github/workflows/')
+          ? existsSync(target)
+          : ['action.yml', 'action.yaml'].some((name) => existsSync(path.join(target, name))),
+        `${relativePath}: missing local reference ${reference}`)
         continue
       }
       const separator = reference.lastIndexOf('@')

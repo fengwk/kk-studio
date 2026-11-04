@@ -3,7 +3,7 @@ import {
   normalizePaneTarget,
   samePaneTarget,
   type PaneTarget,
-} from '@/features/chat/runtime/agent-pane/pane-target'
+} from '@/features/thread/runtime/agent-pane/pane-target'
 
 export type ChatLayout =
   | 'single'

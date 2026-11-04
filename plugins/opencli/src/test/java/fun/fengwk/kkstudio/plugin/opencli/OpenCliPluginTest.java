@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -85,7 +86,7 @@ class OpenCliPluginTest {
 
     assertNotNull(instance);
     assertTrue(instance.harnessContributors().isEmpty());
-    assertEquals(2, instance.canvasAdapters().size());
+    assertEquals(2, instance.contributions(CanvasFunctionAdapter.class).size());
 
     // 严密断言：configure 过程绝对不读取或解析凭据（零出网、零解析）
     verifyNoInteractions(credentialAccess);

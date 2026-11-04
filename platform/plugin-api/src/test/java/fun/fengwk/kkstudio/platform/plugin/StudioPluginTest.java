@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
@@ -57,7 +56,7 @@ class StudioPluginTest {
     }
 
     @Override
-    public List<CanvasFunctionAdapter> canvasAdapters() {
+    public <T> List<T> contributions(Class<T> type) {
       return List.of();
     }
 
@@ -92,7 +91,7 @@ class StudioPluginTest {
     assertEquals(Set.of(), plugin.requiredAgentNames(PluginConfig.initial(SCHEMA)));
   }
 
-  /** configure 产出的实例是可关闭的，且两域贡献可以为空列表。 */
+  /** configure 产出的实例是可关闭的，且未贡献任何能力。 */
   @Test
   void configureProducesCloseableInstance() {
     StudioPlugin plugin = new MinimalPlugin();
@@ -104,7 +103,7 @@ class StudioPluginTest {
         (EmptyInstance) plugin.configure(PluginConfig.initial(SCHEMA), context);
 
     assertTrue(instance.harnessContributors().isEmpty());
-    assertTrue(instance.canvasAdapters().isEmpty());
+    assertTrue(instance.contributions(Object.class).isEmpty());
     assertFalse(instance.closed);
     instance.close();
     assertTrue(instance.closed);

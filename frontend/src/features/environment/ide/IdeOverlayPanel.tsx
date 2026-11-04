@@ -141,7 +141,7 @@ export function IdeOverlayPanel({
       value: environment.id,
       label: environment.ready
         ? environment.name
-        : `${environment.name} (${t('ai.ide.offline')})`,
+        : `${environment.name} · ${t('ai.ide.offlineShort')}`,
     }))
     if (
       selectedEnvironmentId != null

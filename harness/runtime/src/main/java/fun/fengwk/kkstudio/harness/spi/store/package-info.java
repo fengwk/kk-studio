@@ -1,0 +1,20 @@
+/**
+ * 单一持久化存储边界。
+ *
+ * <p>{@link fun.fengwk.kkstudio.harness.spi.store.HarnessStore} 是唯一的 Store 根，{@link
+ * fun.fengwk.kkstudio.harness.spi.store.HarnessStore.Transaction} 是唯一的 typed transaction
+ * handle。这里不是 Repository / Specification / generic save / UnitOfWork 框架：没有业务 use-case 方法；Entry 是
+ * append-only 不可变记录，Session 仅 {@code updateSession} 可更新显示名称（id / createdAt 不可变）， Thread / Command /
+ * Invocation / Work 更新只允许修改 current state。事务、锁定与唯一性约定见 {@link
+ * fun.fengwk.kkstudio.harness.spi.store.HarnessStore} 接口 javadoc。
+ *
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：Session -&gt; Thread -&gt; Commands -&gt; Driver 私有行
+ * -&gt; 同 Assistant Entry 的 ToolInvocation siblings（按 callIndex 升序）-&gt; Work；同一事务锁多行 Work 时，同层
+ * Work 必须按 (type, id) 升序（例如先 THREAD Work 再 Driver 声明的 Work 或 TOOL Work）；单实体 heartbeat 类调度事务只锁 Work。
+ *
+ * <p>Thread / ToolInvocation 等更新必须通过 aggregate 共享 transition validation （{@code
+ * ThreadState.validateTransition} / {@code ToolInvocation.validateTransition}，Driver
+ * 私有行由其自身校验保证）：直接 record 构造只允许用于 persistence decode，非法状态机跳跃与 terminal 回退/改写不能进入 store。Work 的 {@code
+ * requiredEnvironmentId} 在首次创建时冻结并在调度状态跃迁中完整保留，claim 阶段由存储实现按节点 READY 租约实施路由围栏。
+ */
+package fun.fengwk.kkstudio.harness.spi.store;
