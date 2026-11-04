@@ -71,13 +71,13 @@ public record EnvironmentConnection(
   }
 
   /**
-   * 指定 Package 在本地可用的稳定安装根：只有状态为 installed 且已安装 commit 与 {@code currentCommit} 完全一致时才返回。
+   * 指定 Package 在本地可用的稳定安装根：只有已安装摘要与 {@code artifactSha256} 完全一致且没有失败记录时才返回。
    *
    * <p>该判定是「精确安装事实」的唯一入口：任何失败、过期或缺失的投影都必须让调用方回退 platform URI。
    */
-  public Optional<String> installedSkillRoot(String packageName, String currentCommit) {
+  public Optional<String> installedSkillRoot(String packageName, String artifactSha256) {
     return skillStateOf(packageName)
-        .filter(state -> state.isInstalledAt(currentCommit))
+        .filter(state -> state.isInstalledAt(artifactSha256))
         .map(EnvironmentSkillState::localPath);
   }
 

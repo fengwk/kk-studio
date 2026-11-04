@@ -1,35 +1,29 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
-import lombok.Builder;
-
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * {@code skill_package} 行：一个 Git Skill Package 的权威事实。
+ * {@code skill_package} 行：一个 Skill Package 当前版本的权威事实。
  *
- * <p>每个 {@code packageName} 恰一行：{@code repositoryUrl} 一经创建不可修改，{@code branch} 只用于检查候选更新，{@code
- * currentCommit}（40 或 64 位小写 hex）与按 name 排序的 {@code skills} manifest 是同一次 CAS
- * 发布的原子组合。检查只更新观察三元组（{@code observedHeadCommit} / {@code headCheckedAt} / {@code
- * headCheckError}），事实未变化的写请求不推进 {@code version}。
+ * <p>技能包是「名称 + 当前版本」：{@code packageVersion}、{@code artifactBlobId}、{@code skills} 与 {@code
+ * publishedAt} 是同一次 CAS 发布的原子组合，发布切换后不保留任何历史版本。{@code artifactBlobId} 指向服务端生成的规范化 ZIP 归档，归档的条目索引保存在
+ * {@code storage_blob.archive_index}。
  *
- * <p>{@code token} 是私有仓库访问令牌，null 表示匿名访问；它绝不回显、绝不进入日志或模型上下文，因此 {@link #toString()} 不输出它。
+ * <p>{@code gitSource} 只有 Git 渠道的包才非 null；上传渠道的包没有这一行。
  */
-@Builder(toBuilder = true)
 public record SkillPackage(
     String packageName,
     String description,
-    String repositoryUrl,
-    String branch,
-    String currentCommit,
-    String observedHeadCommit,
-    Instant headCheckedAt,
-    String headCheckError,
+    String packageVersion,
+    UUID artifactBlobId,
     List<SkillManifestEntry> skills,
-    String token,
+    Instant publishedAt,
     long version,
     Instant createTime,
-    Instant updateTime) {
+    Instant updateTime,
+    SkillPackageGitSource gitSource) {
 
   /** 返回 manifest 中指定名称的元素；不存在返回 null。 */
   public SkillManifestEntry findSkill(String name) {
@@ -44,22 +38,27 @@ public record SkillPackage(
     return null;
   }
 
+  /** 是否为 Git 渠道的包。 */
+  public boolean isGit() {
+    return gitSource != null;
+  }
+
   @Override
   public String toString() {
     return "SkillPackage[packageName="
         + packageName
-        + ", repositoryUrl="
-        + repositoryUrl
-        + ", branch="
-        + branch
-        + ", currentCommit="
-        + currentCommit
-        + ", observedHeadCommit="
-        + observedHeadCommit
+        + ", packageVersion="
+        + packageVersion
+        + ", artifactBlobId="
+        + artifactBlobId
         + ", skills="
         + skills
+        + ", publishedAt="
+        + publishedAt
         + ", version="
         + version
+        + ", gitSource="
+        + gitSource
         + "]";
   }
 }

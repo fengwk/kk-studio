@@ -23,7 +23,7 @@ import { translate, useI18n } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
   AgentDefinitionType,
-  SkillPackageDTO,
+  SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -51,7 +51,7 @@ export function AgentForm({
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
-  skills?: SkillPackageDTO[]
+  skills?: SkillPackageSummaryDTO[]
   skillsLoading?: boolean
   skillsError?: unknown
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>

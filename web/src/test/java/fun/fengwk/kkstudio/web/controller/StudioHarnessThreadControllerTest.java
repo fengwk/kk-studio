@@ -414,7 +414,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.tools[1].state").value("FILTERED"))
         .andExpect(jsonPath("$.data.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
         .andExpect(jsonPath("$.data.skills[0].delivery").value("PLATFORM"))
-        .andExpect(jsonPath("$.data.skills[0].observedHeadCommit").value(nullValue()))
+        .andExpect(jsonPath("$.data.skills[0].headCommit").value(nullValue()))
         .andExpect(jsonPath("$.data.subagents[0].name").value("coder"))
         .andExpect(jsonPath("$.data.subagents[0].tools[0]").value("read"))
         .andExpect(jsonPath("$.data.subagents[0].skills[0].packageName").value("pkg"))
@@ -561,9 +561,10 @@ class StudioHarnessThreadControllerTest {
     skill.setDescription("dev description");
     skill.setPath("vfs:/skills/test-package/dev/SKILL.md");
     skill.setDelivery("PLATFORM");
-    skill.setCurrentCommit("0123456789abcdef0123456789abcdef01234567");
-    skill.setObservedHeadCommit(null);
-    skill.setInstalledCommit(null);
+    skill.setPackageVersion("0123456789abcdef0123456789abcdef01234567");
+    skill.setHeadCommit(null);
+    skill.setArtifactSha256("a".repeat(64));
+    skill.setInstalledSha256(null);
     skill.setPromptXml("  <skill>");
 
     HarnessModelRequestDebugDTO.SubagentDTO subagent =

@@ -11,13 +11,17 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.RemoteExitReconciler;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillTransport;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -40,10 +44,9 @@ public class HarnessEnvironmentConfiguration {
   private static final int SKILL_SYNC_QUEUE_PER_SLOT = 8;
 
   /**
-   * Skill 同步专用 executor：固定并发 + 有界队列 + AbortPolicy。
+   * Skill 期望集合对账专用 executor：固定并发 + 有界队列 + AbortPolicy。
    *
-   * <p>每个任务在等待 capability 终态时阻塞至多一个 Package 的调用超时，因此并发必须受部署级容量约束；容量用尽时显式拒绝， 绝不无界建线程。被拒绝的同步不会重放：下一次
-   * READY 或通知重连对账会重新收敛。
+   * <p>每个任务只做一次目录读取、预签名与一次控制消息下发，容量受部署级配置约束；容量用尽时显式拒绝，绝不无界建线程。被拒绝的对账不会重放：下一次 READY 或通知重连对账会重新收敛。
    */
   @Bean(name = "environmentSkillSyncExecutor", destroyMethod = "shutdown")
   public ExecutorService environmentSkillSyncExecutor(
@@ -59,18 +62,23 @@ public class HarnessEnvironmentConfiguration {
         new ThreadPoolExecutor.AbortPolicy());
   }
 
+  /** 技能期望集合的下发端口：直接由 Environment 会话核心实现。 */
+  @Bean
+  public EnvironmentSkillTransport environmentSkillTransport(EnvironmentDaemonServer daemonServer) {
+    return daemonServer::sendSkillSync;
+  }
+
   /**
-   * Environment Skill Package 同步编排器。
+   * Environment 技能期望集合编排器。
    *
-   * <p>它依赖 {@code EnvironmentCapabilityTransport}（即 Environment 会话核心），因此只在组合根装配：Platform 的 自动配置不参与
-   * Harness 组合，任何只装配 Platform 的上下文都不会因为缺少该传输而启动失败。
+   * <p>它依赖 Environment 会话核心的下发端口，因此只在组合根装配；任何只装配 Platform 的上下文都不会因为缺少该端口而启动失败。
    */
   @Bean
   public EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator(
       EnvironmentSkillSyncOrchestratorFactory orchestratorFactory,
-      EnvironmentCapabilityTransport capabilityTransport,
+      EnvironmentSkillTransport environmentSkillTransport,
       @Qualifier("environmentSkillSyncExecutor") ExecutorService environmentSkillSyncExecutor) {
-    return orchestratorFactory.create(capabilityTransport, environmentSkillSyncExecutor);
+    return orchestratorFactory.create(environmentSkillTransport, environmentSkillSyncExecutor);
   }
 
   /** 跨实例远端退出对账专用 virtual thread executor。 */
@@ -131,6 +139,16 @@ public class HarnessEnvironmentConfiguration {
         try {
           ideLeaseCoordinatorProvider.ifAvailable(
               coordinator -> coordinator.onHeartbeat(environmentId, identity, ideLeaseRound));
+        } catch (RuntimeException ignored) {
+        }
+      }
+
+      @Override
+      public void onSkillState(
+          EnvironmentId environmentId, List<DaemonSkillStatePackage> packages) {
+        try {
+          orchestratorProvider.ifAvailable(
+              orchestrator -> orchestrator.onSkillState(environmentId, packages));
         } catch (RuntimeException ignored) {
         }
       }

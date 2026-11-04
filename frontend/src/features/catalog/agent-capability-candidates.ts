@@ -1,6 +1,6 @@
 import type {
   AgentDefinitionDTO,
-  SkillPackageDTO,
+  SkillPackageSummaryDTO,
   SkillRefDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
@@ -74,7 +74,7 @@ export function buildPermissionToolCandidates(
  * 候选显示格式为 `package / name`。
  */
 export function buildSkillCandidates(
-  packages: SkillPackageDTO[] | null | undefined,
+  packages: SkillPackageSummaryDTO[] | null | undefined,
 ): CapabilityOption[] {
   if (!packages?.length) {
     return []

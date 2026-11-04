@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -31,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
@@ -478,19 +478,11 @@ class ConfigSyncApplierTest {
     return properties;
   }
 
-  /** 意图：Skill 与 MCP 导入按计划直接委托，携带 exact commit manifest 与已发现的工具行。 */
+  /** 意图：Skill 与 MCP 导入按计划直接委托，Skill 委托给 importGitPackage。 */
   @Test
   void skillAndMcpImportsAreDelegatedWithPreparedPayloads() {
-    SkillManifestEntry manifest = new SkillManifestEntry("s", "desc");
     ConfigSyncPlan.SkillImport skill =
-        new ConfigSyncPlan.SkillImport(
-            "pkg",
-            "d",
-            "https://example.com/pkg.git",
-            "main",
-            "a".repeat(40),
-            List.of(manifest),
-            null);
+        new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
     McpTool tool = ConfigSyncFixtures.mcpTool("tool_x", "mcp");
     ConfigSyncPlan.McpImport mcp =
         new ConfigSyncPlan.McpImport(
@@ -505,14 +497,7 @@ class ConfigSyncApplierTest {
         plan(List.of(), List.of(), List.of(skill), List.of(mcp), List.of(), List.of(), null));
 
     verify(skillCatalogService)
-        .importPackage(
-            "pkg",
-            "d",
-            "https://example.com/pkg.git",
-            "main",
-            "a".repeat(40),
-            List.of(manifest),
-            null);
+        .importGitPackage("pkg", "d", "https://example.com/pkg.git", "main", null);
     verify(mcpServerService)
         .importServer(
             "mcp",
@@ -521,6 +506,21 @@ class ConfigSyncApplierTest {
             Boolean.TRUE,
             30_000L,
             List.of(tool));
+  }
+
+  @Test
+  void skillImportFailureBubblesUpAsValidationError() {
+    ConfigSyncPlan.SkillImport skill =
+        new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
+    doThrow(new AiValidationException("skill_package", "git failure"))
+        .when(skillCatalogService)
+        .importGitPackage("pkg", "d", "https://example.com/pkg.git", "main", null);
+
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            applier.apply(
+                plan(List.of(), List.of(), List.of(skill), List.of(), List.of(), List.of(), null)));
   }
 
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */

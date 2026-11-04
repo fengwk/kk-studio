@@ -16,11 +16,13 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Architecture;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Cancel;
 import fun.fengwk.kkstudio.platform.daemon.protocol.CapabilityResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Content;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentInfo;
@@ -318,6 +320,19 @@ final class DaemonConnectionSession implements DaemonSession {
               requireReady();
               UUID invocationId = requireCanonicalInvocationId(envelope);
               ideCoordinator.handleIdeResult(invocationId, envelope.getIdeResult(), this, deferred);
+            }
+            case SKILL_STATE -> {
+              requireReady();
+              List<DaemonSkillStatePackage> packages =
+                  ControlProtocolCodec.toDomainSkillState(envelope.getSkillState());
+              deferred.add(
+                  () -> {
+                    try {
+                      sessionListener.onSkillState(environmentId, packages);
+                    } catch (RuntimeException error) {
+                      logFailure("skill state notification", error);
+                    }
+                  });
             }
             case ERROR -> handleError(envelope);
             default -> throw new ControlProtocolException(

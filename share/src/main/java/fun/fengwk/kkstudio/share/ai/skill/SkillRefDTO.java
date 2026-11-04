@@ -12,10 +12,10 @@ import lombok.Data;
 @Data
 public class SkillRefDTO {
 
-  /** Package 名（不可变路由身份）：非空白、无环绕空白、不含 {@code : / @ \}、≤128。 */
+  /** Package 名：1–64 个小写字母或数字，以单个连字符分隔。 */
   private String packageName;
 
-  /** Package 内的 Skill 名：非空白、无环绕空白、≤128，与 {@code <repository>/<name>/SKILL.md} 的目录名一致。 */
+  /** Skill 名遵循同一短名规则，且与 {@code <repository>/<name>/SKILL.md} 的目录名一致。 */
   private String name;
 
   @JsonAnySetter

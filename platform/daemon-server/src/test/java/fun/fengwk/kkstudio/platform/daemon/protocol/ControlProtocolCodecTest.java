@@ -7,9 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.google.protobuf.UnknownFieldSet;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 
 import java.io.IOException;
+import java.util.List;
 
 /** 控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
@@ -1053,6 +1056,118 @@ class ControlProtocolCodecTest {
   }
 
   /** 应用层校验通过但 protobuf 序列化结果超过 16 MiB 时仍必须拒绝。 */
+  /** 技能期望集合与状态回报可往返，非法包名、摘要、大小、地址与状态配对在编码前被拒绝。 */
+  @Test
+  void roundtripsSkillSyncAndSkillState() {
+    String sha = "a".repeat(64);
+    DaemonSkillPackage pkg =
+        new DaemonSkillPackage("pkg-a", sha, 11L, "https://s3.example.com/a?signature=x");
+    Envelope sync =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SKILL_SYNC)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setSkillSync(ControlProtocolCodec.toProtoSkillSync(List.of(pkg)))
+            .build();
+    assertEquals(
+        List.of(pkg),
+        ControlProtocolCodec.toDomainSkillSync(
+            ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(sync))
+                .getSkillSync()));
+
+    DaemonSkillStatePackage installed =
+        new DaemonSkillStatePackage("pkg-a", sha, "/home/dev/skills/pkg-a", null);
+    DaemonSkillStatePackage failed =
+        new DaemonSkillStatePackage("pkg-b", null, null, "ARCHIVE_DIGEST_MISMATCH");
+    Envelope state =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SKILL_STATE)
+            .setEnvironmentId(ControlProtocolFixtures.ENVIRONMENT_ID)
+            .setSkillState(ControlProtocolCodec.toProtoSkillState(List.of(installed, failed)))
+            .build();
+    assertEquals(
+        List.of(installed, failed),
+        ControlProtocolCodec.toDomainSkillState(
+            ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(state))
+                .getSkillState()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                sync.toBuilder()
+                    .setSkillSync(
+                        ControlProtocolCodec.toProtoSkillSync(
+                            List.of(
+                                new DaemonSkillPackage(
+                                    "pkg-a", sha, 11L, "ftp://s3.example.com/a"))))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                sync.toBuilder()
+                    .setSkillSync(
+                        ControlProtocolCodec.toProtoSkillSync(
+                            List.of(new DaemonSkillPackage("Pkg.A", sha, 11L, "https://x/a"))))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                sync.toBuilder()
+                    .setSkillSync(
+                        ControlProtocolCodec.toProtoSkillSync(
+                            List.of(
+                                new DaemonSkillPackage(
+                                    "pkg-a", sha.toUpperCase(), 11L, "https://x/a"))))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                sync.toBuilder()
+                    .setSkillSync(
+                        SkillSync.newBuilder()
+                            .addPackages(
+                                SkillPackage.newBuilder()
+                                    .setPackageName("pkg-a")
+                                    .setSha256(sha)
+                                    .setSizeBytes(-1)
+                                    .setDownloadUrl("https://x/a")))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                sync.toBuilder()
+                    .setSkillSync(
+                        ControlProtocolCodec.toProtoSkillSync(
+                            List.of(
+                                new DaemonSkillPackage("pkg-a", sha, 1L, "https://x/a"),
+                                new DaemonSkillPackage("pkg-a", sha, 1L, "https://x/b"))))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                state.toBuilder()
+                    .setSkillState(
+                        ControlProtocolCodec.toProtoSkillState(
+                            List.of(new DaemonSkillStatePackage("pkg-a", sha, null, null))))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                state.toBuilder()
+                    .setSkillState(
+                        ControlProtocolCodec.toProtoSkillState(
+                            List.of(
+                                new DaemonSkillStatePackage(
+                                    "pkg-a", sha, "/home/dev/pkg-a", "line\nbreak"))))
+                    .build()));
+  }
+
   @Test
   void rejectsOversizedSerializedEnvelope() {
     String tooLarge = "x".repeat(ControlFraming.MAX_MESSAGE_BYTES);

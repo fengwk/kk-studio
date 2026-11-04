@@ -104,19 +104,22 @@ public class HarnessModelRequestDebugDTO {
     /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code vfs:/skills/...}）。 */
     private String path;
 
-    /** 交付方式：{@code LOCAL}（Daemon 已安装该 commit）或 {@code PLATFORM}（读取 Platform cache）。 */
+    /** 交付方式：{@code LOCAL}（Daemon 已安装该工件摘要）或 {@code PLATFORM}（读取 Platform cache）。 */
     private String delivery;
 
-    /** Package 当前发布 commit。 */
-    private String currentCommit;
+    /** Package 当前发布版本或 Git commit SHA。 */
+    private String packageVersion;
 
     /** Package 最近检查到的 branch HEAD；从未成功检查时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String observedHeadCommit;
+    private @Nullable String headCommit;
 
-    /** 当前 Environment 已安装的 commit；无 Environment 或未安装该 Package 时为 null（required-nullable）。 */
+    /** Package 当前工件包的 SHA-256。 */
+    private String artifactSha256;
+
+    /** 当前 Environment 已安装的工件包 SHA-256；无 Environment 或未安装该 Package 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String installedCommit;
+    private @Nullable String installedSha256;
 
     /** 实际进入 systemInstruction 的 Skill XML 片段。 */
     private String promptXml;

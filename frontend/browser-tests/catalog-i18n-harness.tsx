@@ -10,26 +10,32 @@ import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { agentService } from '@/shared/api/agent-service'
-import type { SkillPackageDTO } from '@/shared/api/generated/contracts'
+import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
-const SAMPLE_PACKAGES: SkillPackageDTO[] = [
+const SAMPLE_PACKAGES: SkillPackageDetailDTO[] = [
   {
     packageName: 'core-tools',
     description: '核心开发技能集',
-    repositoryUrl: 'https://github.com/example/skills.git',
-    branch: 'main',
-    hasToken: false,
-    currentCommit: '1111111111111111111111111111111111111111',
-    observedHeadCommit: null,
-    headCheckedAt: null,
-    headCheckError: null,
-    checkStatus: 'UNCHECKED',
+    packageVersion: '1111111111111111111111111111111111111111',
+    publishedAt: 1784505600,
     skills: [
       { name: 'dev', description: 'developer workflow' },
       { name: 'bash', description: 'bash execution' },
     ],
+    source: 'GIT',
+    git: {
+      repositoryUrl: 'https://github.com/example/skills.git',
+      branch: 'main',
+      hasToken: false,
+    },
+    headCommit: null,
+    headCheckedAt: null,
+    headCheckError: null,
+    updateAvailable: false,
+    artifactSha256: 'mock-sha256-core',
+    artifactSizeBytes: '1024',
     version: '1',
     createTime: 1784505600,
     updateTime: 1784509200,
@@ -37,15 +43,21 @@ const SAMPLE_PACKAGES: SkillPackageDTO[] = [
   {
     packageName: 'browser-skills',
     description: 'Browser automation package',
-    repositoryUrl: 'https://github.com/example/browser.git',
-    branch: 'main',
-    hasToken: true,
-    currentCommit: '2222222222222222222222222222222222222222',
-    observedHeadCommit: '3333333333333333333333333333333333333333',
+    packageVersion: '2222222222222222222222222222222222222222',
+    publishedAt: 1784505600,
+    skills: [{ name: 'opencli', description: 'browser cli' }],
+    source: 'GIT',
+    git: {
+      repositoryUrl: 'https://github.com/example/browser.git',
+      branch: 'main',
+      hasToken: true,
+    },
+    headCommit: '3333333333333333333333333333333333333333',
     headCheckedAt: 1784512800,
     headCheckError: null,
-    checkStatus: 'UPDATE_AVAILABLE',
-    skills: [{ name: 'opencli', description: 'browser cli' }],
+    updateAvailable: true,
+    artifactSha256: 'mock-sha256-browser',
+    artifactSizeBytes: '2048',
     version: '2',
     createTime: 1784505600,
     updateTime: 1784512800,
@@ -53,15 +65,21 @@ const SAMPLE_PACKAGES: SkillPackageDTO[] = [
   {
     packageName: 'diagnostics-kit',
     description: 'Upstream error demo',
-    repositoryUrl: 'https://github.com/example/diag.git',
-    branch: 'main',
-    hasToken: false,
-    currentCommit: '4444444444444444444444444444444444444444',
-    observedHeadCommit: null,
+    packageVersion: '4444444444444444444444444444444444444444',
+    publishedAt: 1784505600,
+    skills: [],
+    source: 'GIT',
+    git: {
+      repositoryUrl: 'https://github.com/example/diag.git',
+      branch: 'main',
+      hasToken: false,
+    },
+    headCommit: null,
     headCheckedAt: 1784516400,
     headCheckError: 'fatal: repository not reachable',
-    checkStatus: 'CHECK_FAILED',
-    skills: [],
+    updateAvailable: false,
+    artifactSha256: 'mock-sha256-diag',
+    artifactSizeBytes: '512',
     version: '1',
     createTime: 1784505600,
     updateTime: 1784516400,

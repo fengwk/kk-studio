@@ -34,6 +34,8 @@ import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -61,6 +63,7 @@ public final class DatabaseAgentTurnContextResolver {
   private final EnvironmentRepository environmentRepository;
   private final SkillPackageRepository skillPackageRepository;
   private final SkillPromptPathResolver skillPromptPathResolver;
+  private final StorageBlobManager blobManager;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
   private final SchemaJsonCodec schemaCodec;
@@ -73,6 +76,7 @@ public final class DatabaseAgentTurnContextResolver {
       EnvironmentRepository environmentRepository,
       SkillPackageRepository skillPackageRepository,
       SkillPromptPathResolver skillPromptPathResolver,
+      StorageBlobManager blobManager,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
@@ -86,6 +90,7 @@ public final class DatabaseAgentTurnContextResolver {
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.skillPromptPathResolver =
         Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.schemaCodec = new SchemaJsonCodec();
@@ -277,8 +282,8 @@ public final class DatabaseAgentTurnContextResolver {
    * <p>通过 {@link SkillPackageRepository#getPackage(String)} 读取 Platform 权威事实，按 (packageName, name)
    * 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    *
-   * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
-   * Package 的 currentCommit 完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedCommit。
+   * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装工件摘要与
+   * Package 的当前工件摘要完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedSha256。
    */
   private List<LiveTurnPlan.PlannedSkill> resolveSkills(
       EnvironmentId environmentId, List<SkillRefDTO> skillRefs) {
@@ -306,9 +311,15 @@ public final class DatabaseAgentTurnContextResolver {
                 + "/"
                 + ref.getName());
       }
+      StorageBlob blob = blobManager.getBlob(pkg.artifactBlobId());
+      if (blob == null) {
+        throw rejection("skill package artifact blob not found: " + ref.getPackageName());
+      }
+      String artifactSha256 = blob.getSha256();
       SkillPromptResolution resolution =
           skillPromptPathResolver.resolveDetails(
-              environmentId, ref.getPackageName(), ref.getName(), pkg.currentCommit());
+              environmentId, ref.getPackageName(), ref.getName(), artifactSha256);
+      String headCommit = pkg.gitSource() == null ? null : pkg.gitSource().headCommit();
       skills.add(
           new LiveTurnPlan.PlannedSkill(
               pkg.packageName(),
@@ -316,9 +327,10 @@ public final class DatabaseAgentTurnContextResolver {
               entry.description(),
               resolution.path(),
               resolution.delivery(),
-              pkg.currentCommit(),
-              pkg.observedHeadCommit(),
-              resolution.installedCommit()));
+              pkg.packageVersion(),
+              headCommit,
+              artifactSha256,
+              resolution.installedSha256()));
     }
     return List.copyOf(skills);
   }

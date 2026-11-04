@@ -49,7 +49,7 @@ test('heartbeat case rejects heartbeat with unexpected fields after a valid iden
 
 const ids = [
   'fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview', 'process.exec', 'fs.grep', 'fs.find',
-  'lsp.goto-definition', 'lsp.workspace-symbols', 'lsp.java-decompile', 'skill.sync',
+  'lsp.goto-definition', 'lsp.workspace-symbols', 'lsp.java-decompile',
 ]
 const card = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,

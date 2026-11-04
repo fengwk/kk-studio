@@ -238,92 +238,108 @@ comment on column agent_model_group_cooldown.group_version is
 -- -----------------------------------------------------------------------------
 -- Platform 全局 Skill Package
 --
--- Skill 正文、references、scripts 与 assets 全部保留在 Git：Platform 每个 packageName 只
--- 保存一行——不可变 repository URL、只用于检查候选更新的 branch、人工确认的 exact current
--- commit、最近观察到的 branch HEAD 与检查结果，以及从 current commit 派生的 Skill
--- manifest JSON。repository URL 创建后不可改，更换仓库要使用新的 Package。
+-- 技能包是「名称 + 当前版本」：当前版本 = 版本号 + 一份服务端规范化归档 + 从归档读出的
+-- Skill 清单。每个包只保留当前版本；发布是短事务内的 CAS 切换，旧归档的引用在同一事务
+-- 内释放。Git 渠道的仓库事实单独一行；上传渠道的包没有 Git 事实行。
 --
--- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
+-- Package 名与 SkillNames 共用 Agent Skills 短名规则。
 -- -----------------------------------------------------------------------------
 
 create table skill_package (
-    package_name         varchar(128)  not null,
-    description          text,
-    repository_url       text          not null,
-    branch               varchar(255)  not null,
-    current_commit       varchar(64)   not null,
-    observed_head_commit varchar(64),
-    head_checked_at      timestamptz(3),
-    head_check_error     text,
-    skills               jsonb         not null default '[]'::jsonb,
-    token                text,
-    version              bigint        not null default 0,
-    create_time          timestamptz(3) not null default current_timestamp,
-    update_time          timestamptz(3) not null default current_timestamp,
+    package_name     varchar(64)    not null,
+    description      text,
+    package_version  varchar(128)   not null,
+    artifact_blob_id uuid           not null,
+    manifest         jsonb          not null,
+    published_at     timestamptz(3) not null,
+    version          bigint         not null default 0,
+    create_time      timestamptz(3) not null default current_timestamp,
+    update_time      timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
-        package_name = btrim(package_name)
-        and char_length(package_name) > 0
-        and package_name !~ '[[:cntrl:]]'
-        and position(':' in package_name) = 0
-        and position('/' in package_name) = 0
-        and position('@' in package_name) = 0
-        and position('\' in package_name) = 0
+        package_name collate "C" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
     ),
     constraint ck_skill_package_description check (
         description is null
-        or (description = btrim(description) and char_length(description) > 0)
+        or (
+            description = btrim(description)
+            and char_length(description) > 0
+            and char_length(description) <= 1024
+        )
     ),
-    constraint ck_skill_package_repository_url check (
+    constraint ck_skill_package_version_text check (
+        package_version = btrim(package_version)
+        and char_length(package_version) between 1 and 128
+        and package_version !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_package_manifest check (jsonb_typeof(manifest) = 'object'),
+    constraint ck_skill_package_published_at check (published_at is not null),
+    constraint ck_skill_package_version check (version >= 0),
+    constraint ck_skill_package_time_order check (update_time >= create_time)
+);
+
+comment on table skill_package is 'Platform 全局 Skill Package 当前版本：每个 packageName 恰一行，保存当前版本号、规范化 ZIP 归档引用、从归档读出的 Skill 清单与发布时刻；不保留历史版本';
+comment on column skill_package.package_name is 'package 名（主键；1–64 个小写字母或数字，以单个连字符分隔）';
+comment on column skill_package.description is '可空 package 描述；去边缘空白后 1–1024 字符，null 表示未填写';
+comment on column skill_package.package_version is '当前版本号：Git 渠道为 commit SHA，上传渠道为用户填写的文本（1–128 字符，无控制字符）';
+comment on column skill_package.artifact_blob_id is '当前版本规范化 ZIP 归档的 storage_blob 引用；发布切换时原子替换并在同一事务释放旧引用';
+comment on column skill_package.manifest is '从最终 ZIP 读出的 Skill 清单（JSON object {skills:[{name,description}]}，按 name 排序）；不信任客户端提交的结构';
+comment on column skill_package.published_at is '当前版本发布时间（毫秒精度）';
+comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
+comment on column skill_package.create_time is '创建时间（毫秒精度）';
+comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+
+create table skill_package_git_source (
+    package_name   varchar(64)   not null,
+    repository_url text          not null,
+    branch         varchar(255)  not null,
+    token          text,
+    head_commit    varchar(64)   not null,
+    checked_at     timestamptz(3) not null,
+    check_error    text,
+    constraint pk_skill_package_git_source primary key (package_name),
+    constraint fk_skill_package_git_source_package foreign key (package_name)
+        references skill_package (package_name) on delete cascade,
+    constraint ck_skill_package_git_source_repository_url check (
         repository_url = btrim(repository_url)
         and repository_url ~ '^[a-z][a-z0-9+.-]*://[^[:space:]]+$'
         and char_length(repository_url) <= 2048
         and repository_url !~ '[[:cntrl:]]'
         and repository_url !~ '://[^/[:space:]]*@'
     ),
-    constraint ck_skill_package_branch check (
+    constraint ck_skill_package_git_source_branch check (
         branch = btrim(branch)
         and char_length(branch) > 0
         and branch !~ '[[:cntrl:]]'
     ),
-    constraint ck_skill_package_current_commit check (
-        current_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
-    ),
-    constraint ck_skill_package_observed_head_commit check (
-        observed_head_commit is null
-        or observed_head_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
-    ),
-    constraint ck_skill_package_head_check_error check (
-        head_check_error is null
-        or (
-            head_check_error = btrim(head_check_error)
-            and char_length(head_check_error) > 0
-            and octet_length(head_check_error) <= 4096
-        )
-    ),
-    constraint ck_skill_package_skills check (jsonb_typeof(skills) = 'array'),
-    constraint ck_skill_package_token check (
+    constraint ck_skill_package_git_source_token check (
         token is null
         or length(token) > 0
     ),
-    constraint ck_skill_package_version check (version >= 0),
-    constraint ck_skill_package_time_order check (update_time >= create_time)
+    constraint ck_skill_package_git_source_head_commit check (
+        head_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
+    ),
+    constraint ck_skill_package_git_source_check_error check (
+        check_error is null
+        or (
+            check_error = btrim(check_error)
+            and char_length(check_error) > 0
+            and octet_length(check_error) <= 4096
+        )
+    )
 );
 
-comment on table skill_package is 'Platform 全局 Skill Package 权威行：每个 packageName 恰一行，内容保存在 Git，数据库只保存不可变仓库事实、人工确认的 exact commit、branch 检查观察值与派生的 Skill manifest';
-comment on column skill_package.package_name is 'package 名（主键与不可变路由身份；非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
-comment on column skill_package.description is '可空 package 描述；null 表示未填写';
-comment on column skill_package.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
-comment on column skill_package.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
-comment on column skill_package.current_commit is '人工确认的 exact Git object id（40 或 64 位小写 hex），与 skills 在同一次 CAS 中原子切换';
-comment on column skill_package.observed_head_commit is '最近一次成功检查到的 branch HEAD（40 或 64 位小写 hex）；从未成功检查时为 null';
-comment on column skill_package.head_checked_at is '最近一次检查时间（毫秒精度）；从未检查时为 null';
-comment on column skill_package.head_check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
-comment on column skill_package.skills is '从 current_commit 派生的 Skill manifest（JSON array，元素为 {name, description} 并按 name 排序）；元素形状由应用严格验证';
-comment on column skill_package.token is '私有仓库访问令牌；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回';
-comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
-comment on column skill_package.create_time is '创建时间（毫秒精度）';
-comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+create index idx_skill_package_git_source_head_commit
+    on skill_package_git_source (head_commit);
+
+comment on table skill_package_git_source is 'Git 渠道 Skill Package 的仓库事实：只有 Git 渠道的包才有这一行；上传渠道的包没有';
+comment on column skill_package_git_source.package_name is '所属 package（主键，随 skill_package 删除级联）';
+comment on column skill_package_git_source.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
+comment on column skill_package_git_source.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
+comment on column skill_package_git_source.token is '私有仓库访问令牌；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回，也不下发给 Daemon';
+comment on column skill_package_git_source.head_commit is '最近一次检查到的 branch HEAD（40 或 64 位小写 hex）；发布该 commit 后与 package_version 一致';
+comment on column skill_package_git_source.checked_at is '最近一次检查时间（毫秒精度）';
+comment on column skill_package_git_source.check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
 
 -- -----------------------------------------------------------------------------
 -- 构建期 Plugin 的普通配置与凭据
@@ -772,7 +788,7 @@ comment on column environment_connection.owner_node_id is '当前持有该连接
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
 comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
-comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建同步投影（JSON array，元素含 installed commit、稳定 path、状态与有界错误）；新的 READY 先清空再全量同步，写回必须命中 owner/lease fence';
+comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
 comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
 comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
@@ -1906,6 +1922,7 @@ create table storage_blob (
     width         integer,
     height        integer,
     duration_ms   bigint,
+    archive_index jsonb,
     ref_count     bigint         not null default 0,
     state         varchar(16)    not null default 'ACTIVE',
     created_at    timestamptz(3) not null default current_timestamp,
@@ -1918,6 +1935,9 @@ create table storage_blob (
         width is null or (width > 0 and height > 0)
     ),
     constraint ck_storage_blob_duration_positive check (duration_ms is null or duration_ms > 0),
+    constraint ck_storage_blob_archive_index check (
+        archive_index is null or jsonb_typeof(archive_index) = 'object'
+    ),
     constraint ck_storage_blob_state_ref_count check (
         (state = 'ACTIVE' and ref_count > 0) or (state = 'DELETING' and ref_count = 0)
     )
@@ -1926,6 +1946,13 @@ create table storage_blob (
 create unique index uk_storage_blob_active_hash
     on storage_blob (sha256, size_bytes)
     where state = 'ACTIVE';
+
+comment on column storage_blob.archive_index is
+    '服务端校验过的 ZIP 归档条目索引（{entries:[{path,size,dataOffset,compressedSize,crc32}]}）；null 表示不是服务端生成的归档';
+
+alter table skill_package
+    add constraint fk_skill_package_artifact
+        foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;
 
 create table storage_upload (
     id                  uuid           primary key,

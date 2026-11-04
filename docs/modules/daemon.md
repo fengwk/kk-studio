@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；能力契约与 Platform 连接服务的协议和会话见 [Harness Environment](harness-environment.md)。
 
-模块运行在 Node.js 24 运行时之上，依赖 `@bufbuild/protobuf`、`@vscode/ripgrep`、`diff`、`isomorphic-git`、`koffi`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。
+模块运行在 Node.js 24 运行时之上，依赖 `@bufbuild/protobuf`、`@vscode/ripgrep`、`diff`、`koffi`、`tar`、`undici`、`vscode-jsonrpc`、`ws`、`yauzl` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。
 
 ## 启动与本地状态
 
@@ -31,10 +31,10 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ## 能力装配与运行时调度
 
-装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务：
+装配阶段冻结 10 项原子能力（9 项模型工具与 1 项内部能力）；IDE 与技能对账是受管服务：
 - 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
+- 受管服务：技能状态对账（`SKILL_SYNC` / `SKILL_STATE` 控制信封）以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`IDE_LEASE` 承载使用证明）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
@@ -55,7 +55,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - 默认文本捕获预算为 1 GiB，达到预算后停止捕获文件并继续排空与统计，结果中显式标记截断。
 - 定时清扫（默认 30 分钟一次）只回收超过保留期（默认 3 天）且未持用租约的 workspace，清扫不跟随符号链接、不越出受控根目录。
 
-技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：在独立 staging 目录按请求的 exact commit 获取，检查整棵 tree 并校验后原子替换 `skills/<package>`，失败时从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。
+技能包由 [`installer.ts`](../../daemon/src/skill/installer.ts) 安装：从下载地址流式下载归档并以 SHA-256 校验，使用 yauzl 在 staging 目录解压，拒绝符号链接、路径穿越与非普通文件，写入 `.kkstudio-sha256` 标记后原子替换 `skills/<package>`，失败时保留旧安装。连接级对账器 [`reconcile.ts`](../../daemon/src/skill/reconcile.ts) 基于 `SKILL_SYNC` 下发的全量期望集单飞对账，清理无期望标记目录并以 `SKILL_STATE` 统一上报受管状态。
 
 ## 编码能力与原生监管
 

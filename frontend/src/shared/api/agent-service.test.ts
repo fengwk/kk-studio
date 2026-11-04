@@ -172,6 +172,12 @@ describe('agentService', () => {
     await service.listSkillPackages()
     expect(client.get).toHaveBeenNthCalledWith(1, '/skill-packages')
 
+    await service.getSkillPackage('core')
+    expect(client.get).toHaveBeenNthCalledWith(2, '/skill-packages/core')
+
+    await service.listSkillPackageEnvironments('core')
+    expect(client.get).toHaveBeenNthCalledWith(3, '/skill-packages/core/environments')
+
     const createPkg = {
       packageName: 'core',
       description: 'Core skills',
@@ -179,7 +185,7 @@ describe('agentService', () => {
       branch: 'main',
     }
     await service.createSkillPackage(createPkg)
-    expect(client.post).toHaveBeenNthCalledWith(1, '/skill-packages', createPkg, { timeout: 0 })
+    expect(client.post).toHaveBeenNthCalledWith(1, '/skill-packages/git', createPkg, { timeout: 0 })
 
     const editPkg = {
       expectedVersion: '1',
@@ -187,20 +193,45 @@ describe('agentService', () => {
       branch: 'main',
     }
     await service.editSkillPackage('core', editPkg)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/skill-packages/core', editPkg)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/skill-packages/git/core', editPkg)
 
     const checkPkg = {
       expectedVersion: '2',
     }
     await service.checkSkillPackage('core', checkPkg)
-    expect(client.post).toHaveBeenNthCalledWith(2, '/skill-packages/core/check', checkPkg, { timeout: 0 })
+    expect(client.post).toHaveBeenNthCalledWith(2, '/skill-packages/git/core/check', checkPkg, { timeout: 0 })
 
     const publishPkg = {
       expectedVersion: '3',
       targetCommit: '0123456789012345678901234567890123456789',
     }
     await service.publishSkillPackage('core', publishPkg)
-    expect(client.post).toHaveBeenNthCalledWith(3, '/skill-packages/core/update', publishPkg, { timeout: 0 })
+    expect(client.post).toHaveBeenNthCalledWith(3, '/skill-packages/git/core/publish', publishPkg, { timeout: 0 })
+
+    await service.getSkillPackageArchiveUrl('core')
+    expect(client.post).toHaveBeenNthCalledWith(4, '/skill-packages/core/archive-url')
+
+    const previewUploadPkg = {
+      uploadId: 'upload-123',
+      packageName: 'uploaded-core',
+      packageVersion: '1.0.0',
+    }
+    await service.previewSkillPackageUpload(previewUploadPkg)
+    expect(client.post).toHaveBeenNthCalledWith(5, '/skill-packages/uploads/preview', previewUploadPkg, { timeout: 0 })
+
+    const publishUploadPkg = {
+      stagingUploadId: 'stage-123',
+      packageName: 'uploaded-core',
+      packageVersion: '1.0.0',
+    }
+    await service.publishSkillPackageUpload(publishUploadPkg)
+    expect(client.post).toHaveBeenNthCalledWith(6, '/skill-packages/uploads/publish', publishUploadPkg, { timeout: 0 })
+
+    await service.cancelSkillPackageUpload('stage-123')
+    expect(client.post).toHaveBeenNthCalledWith(7, '/skill-packages/uploads/stage-123/cancel')
+
+    await service.resyncEnvironmentSkills('env-1')
+    expect(client.post).toHaveBeenNthCalledWith(8, '/environments/env-1/skills/resync')
 
     await service.deleteSkillPackage('core', '4')
     expect(client.delete).toHaveBeenNthCalledWith(1, '/skill-packages/core', {

@@ -217,6 +217,27 @@ class PlatformVfsGatewayTest {
     assertTrue(text(result).contains("1|skill"), text(result));
   }
 
+  /** 技能读取与其它文本读取共用 offset/limit 窗口：只返回请求行段，读取器只被调用一次。 */
+  @Test
+  void skillReadAppliesOffsetAndLimitWindow() throws Exception {
+    when(skillReader.readSkillFile("dev-tools", "review", "SKILL.md"))
+        .thenReturn("a\nb\nc\n".getBytes(StandardCharsets.UTF_8));
+
+    ToolResult result =
+        gateway.read(
+            request(
+                FS_READ,
+                "read",
+                "{\"path\":\"vfs:/skills/dev-tools/review/SKILL.md\",\"offset\":2,\"limit\":1}"),
+            partial -> {});
+
+    assertFalse(result.error(), text(result));
+    assertTrue(text(result).contains("2|b"), text(result));
+    assertFalse(text(result).contains("1|a"), text(result));
+    assertFalse(text(result).contains("3|c"), text(result));
+    verify(skillReader).readSkillFile("dev-tools", "review", "SKILL.md");
+  }
+
   /** edit 用读到的 revision 做条件更新：并发冲突是确定失败，不是不确定执行。 */
   @Test
   void editConflictIsReportedAsFailedNotUncertain() throws Exception {

@@ -30,7 +30,7 @@ public final class EnvironmentStateCodec {
           .build();
 
   private static final Set<String> SKILL_STATE_FIELDS =
-      Set.of("packageName", "status", "installedCommit", "localPath", "error");
+      Set.of("packageName", "installedSha256", "localPath", "error");
   private static final Set<String> EVENT_FIELDS = Set.of("time", "level", "type", "message");
 
   public String encodeSkillState(List<EnvironmentSkillState> states) {
@@ -40,8 +40,7 @@ public final class EnvironmentStateCodec {
       Objects.requireNonNull(state, "states[]");
       ObjectNode node = root.addObject();
       node.put("packageName", state.packageName());
-      node.put("status", state.status());
-      putNullable(node, "installedCommit", state.installedCommit());
+      putNullable(node, "installedSha256", state.installedSha256());
       putNullable(node, "localPath", state.localPath());
       putNullable(node, "error", state.error());
     }
@@ -56,8 +55,7 @@ public final class EnvironmentStateCodec {
       states.add(
           new EnvironmentSkillState(
               text(node, "packageName", true),
-              text(node, "status", true),
-              text(node, "installedCommit", false),
+              text(node, "installedSha256", false),
               text(node, "localPath", false),
               text(node, "error", false)));
     }

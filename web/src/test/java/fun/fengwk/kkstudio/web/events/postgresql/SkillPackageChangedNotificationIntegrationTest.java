@@ -6,17 +6,21 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Skill Package 发布通知到 Skill 同步编排器的端到端接线测试。
@@ -35,6 +39,7 @@ class SkillPackageChangedNotificationIntegrationTest extends WebPostgresTestSupp
 
   @Autowired private SkillPackageRepository skillPackageRepository;
   @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private JdbcTemplate jdbc;
 
   @Test
   void packageChangeNotificationReachesOrchestratorWithPackageName() {
@@ -48,18 +53,22 @@ class SkillPackageChangedNotificationIntegrationTest extends WebPostgresTestSupp
     verify(environmentSkillSyncOrchestrator, after(1_000).times(1)).onPackageChanged(PACKAGE);
   }
 
-  private static SkillPackage packageRow() {
-    SkillPackage skillPackage =
-        SkillPackage.builder()
-            .packageName(PACKAGE)
-            .description("notify package")
-            .repositoryUrl(REPOSITORY_URL)
-            .branch("main")
-            .currentCommit(COMMIT)
-            .observedHeadCommit(COMMIT)
-            .skills(List.of(new SkillManifestEntry("dev", "developer skill")))
-            .version(0L)
-            .build();
-    return skillPackage;
+  private SkillPackage packageRow() {
+    UUID artifactBlobId = UUID.nameUUIDFromBytes("notify-package-blob".getBytes());
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)"
+            + " values (?, repeat('a', 64), 1, 'application/zip', 1, 'ACTIVE')",
+        artifactBlobId);
+    return new SkillPackage(
+        PACKAGE,
+        "notify package",
+        COMMIT,
+        artifactBlobId,
+        List.of(new SkillManifestEntry("dev", "developer skill")),
+        Instant.now(),
+        0L,
+        null,
+        null,
+        new SkillPackageGitSource(REPOSITORY_URL, "main", null, COMMIT, Instant.now(), null));
   }
 }

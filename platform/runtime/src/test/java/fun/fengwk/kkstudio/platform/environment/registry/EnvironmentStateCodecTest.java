@@ -17,7 +17,7 @@ import java.util.List;
  */
 class EnvironmentStateCodecTest {
 
-  private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
+  private static final String COMMIT = "0123456789abcdef".repeat(4);
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
 
   private final EnvironmentStateCodec codec = new EnvironmentStateCodec();
@@ -38,9 +38,9 @@ class EnvironmentStateCodecTest {
 
     assertEquals(states, decoded);
     EnvironmentSkillState fresh = decoded.get(2);
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, fresh.status());
-    assertNull(fresh.installedCommit());
+    assertNull(fresh.installedSha256());
     assertNull(fresh.localPath());
+    assertEquals("skill package sync could not be sent", fresh.error());
   }
 
   /** 测试意图：空数组是两个投影的合法初值。 */
@@ -106,17 +106,14 @@ class EnvironmentStateCodecTest {
   @Test
   void projectionInvariantsAreEnforced() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new EnvironmentSkillState("pkg", "installed", null, "/home/dev/pkg", null));
+        IllegalArgumentException.class, () -> new EnvironmentSkillState("pkg", COMMIT, null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentSkillState("pkg", "installed", "not-a-commit", "/home/dev/pkg", null));
+        () -> new EnvironmentSkillState("pkg", "not-a-sha256", "/home/dev/pkg", null));
+    assertNull(new EnvironmentSkillState("pkg", null, null, null).installedSha256());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentSkillState("pkg", "failed", null, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new EnvironmentSkillState("pkg", "installed", COMMIT, "/home/dev/pkg", "boom"));
+        () -> new EnvironmentSkillState("pkg", COMMIT, "/home/dev/pkg", " ".repeat(1)));
     assertThrows(
         IllegalArgumentException.class,
         () -> new EnvironmentEvent(NOW, "TRACE", EnvironmentEvent.TYPE_READY, "m"));

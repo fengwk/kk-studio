@@ -16,8 +16,10 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonWorkdirSyntax;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ExpectedFile;
@@ -579,6 +581,46 @@ public final class EnvironmentDaemonServer
   public void sendUpdate(EnvironmentId environmentId, DaemonUpdateCommand command) {
     DaemonConnectionSession session = sessionOf(environmentId);
     updateCoordinator.sendUpdate(environmentId, session, command);
+  }
+
+  /**
+   * 向 READY 连接下发完整的技能期望集合。
+   *
+   * <p>消息是幂等的全量快照：重复下发只会让 Daemon 重跑同一轮对账，因此调用方无需操作 id 或重试编排。连接不 READY 或出站队列已满时按 unavailable/busy
+   * 拒绝，由编排器的下一次触发重新收敛。
+   */
+  public void sendSkillSync(EnvironmentId environmentId, List<DaemonSkillPackage> packages) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(packages, "packages");
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null || !session.isReady()) {
+      throw unavailable(environmentId, "skill sync");
+    }
+    if (updateCoordinator.isUpdating(environmentId)) {
+      throw new EnvironmentCapabilityBusyException(
+          "environment " + environmentId + " is being updated");
+    }
+    Envelope envelope =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.SKILL_SYNC)
+            .setEnvironmentId(environmentId.value().toString())
+            .setSkillSync(ControlProtocolCodec.toProtoSkillSync(packages))
+            .build();
+    DaemonOfferResult outcome;
+    synchronized (session.stateLock()) {
+      if (!session.isReady()) {
+        throw unavailable(environmentId, "skill sync");
+      }
+      outcome = session.offerResult(envelope);
+    }
+    if (outcome == DaemonOfferResult.ACCEPTED) {
+      return;
+    }
+    if (outcome == DaemonOfferResult.BUSY) {
+      throw new EnvironmentCapabilityBusyException(
+          "daemon outbound queue is full for environment " + environmentId);
+    }
+    throw unavailable(environmentId, "skill sync");
   }
 
   public DaemonIdeCall requestIde(EnvironmentId environmentId, IdeCommand command) {

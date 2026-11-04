@@ -1,24 +1,17 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.configuration;
 
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.DependsOn;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.git.JGitSkillCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
+import fun.fengwk.kkstudio.platform.catalog.skill.git.JGitSkillRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 
-/**
- * Platform 侧 Git Skill cache 的组合根：bare repository 根目录来自 {@code
- * kk-studio.catalog.skill.cache-root}（缺省 {@code <cwd>/.kkstudio/skills}）。
- */
+/** Platform 侧 Git Skill 访问的组合根：没有本地缓存目录，每次发布使用一次性临时仓库。 */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(SkillCatalogProperties.class)
 public class SkillCatalogConfiguration {
 
   @Bean
-  @DependsOn("systemProxySelector")
-  public SkillGitCache skillGitCache(SkillCatalogProperties properties) {
-    return new JGitSkillCache(properties.resolvedCacheRoot());
+  public SkillGitRepository skillGitRepository() {
+    return new JGitSkillRepository();
   }
 }

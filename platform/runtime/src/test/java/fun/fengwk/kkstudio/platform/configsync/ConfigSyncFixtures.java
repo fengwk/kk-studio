@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
@@ -268,17 +269,46 @@ final class ConfigSyncFixtures {
   }
 
   static SkillPackage skillPackage(String packageName, String... skillNames) {
+    return gitSkillPackage(
+        packageName, "https://example.com/" + packageName + ".git", "main", null, skillNames);
+  }
+
+  static SkillPackage gitSkillPackage(
+      String packageName, String repositoryUrl, String branch, String token, String... skillNames) {
     List<SkillManifestEntry> skills = new ArrayList<>();
     for (String skillName : skillNames) {
       skills.add(new SkillManifestEntry(skillName, "desc " + skillName));
     }
-    return SkillPackage.builder()
-        .packageName(packageName)
-        .repositoryUrl("https://example.com/" + packageName + ".git")
-        .branch("main")
-        .currentCommit("0".repeat(40))
-        .skills(skills)
-        .build();
+    return new SkillPackage(
+        packageName,
+        "desc " + packageName,
+        "1.0.0",
+        UUID.randomUUID(),
+        skills,
+        Instant.EPOCH,
+        0L,
+        Instant.EPOCH,
+        Instant.EPOCH,
+        new SkillPackageGitSource(
+            repositoryUrl, branch, token, "0".repeat(40), Instant.EPOCH, null));
+  }
+
+  static SkillPackage uploadSkillPackage(String packageName, String... skillNames) {
+    List<SkillManifestEntry> skills = new ArrayList<>();
+    for (String skillName : skillNames) {
+      skills.add(new SkillManifestEntry(skillName, "desc " + skillName));
+    }
+    return new SkillPackage(
+        packageName,
+        "desc " + packageName,
+        "1.0.0",
+        UUID.randomUUID(),
+        skills,
+        Instant.EPOCH,
+        0L,
+        Instant.EPOCH,
+        Instant.EPOCH,
+        null);
   }
 
   static Environment environment(String name) {

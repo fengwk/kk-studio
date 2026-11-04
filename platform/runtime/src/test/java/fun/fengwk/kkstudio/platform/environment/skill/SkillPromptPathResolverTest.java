@@ -35,8 +35,8 @@ class SkillPromptPathResolverTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
-  private static final String OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98";
+  private static final String COMMIT = "a".repeat(64);
+  private static final String OTHER_COMMIT = "b".repeat(64);
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
@@ -113,20 +113,20 @@ class SkillPromptPathResolverTest {
     SkillPromptResolution unselected = resolver.resolveDetails(null, "pkg", "dev", COMMIT);
     assertEquals("vfs:/skills/pkg/dev/SKILL.md", unselected.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, unselected.delivery());
-    assertNull(unselected.installedCommit());
+    assertNull(unselected.installedSha256());
 
     // 精确安装：LOCAL，且暴露的已安装 commit 就是 currentCommit。
     bind(List.of(EnvironmentSkillState.installed("pkg", COMMIT, "/home/dev/.kkstudio/skills/pkg")));
     SkillPromptResolution local = resolver.resolveDetails(ENV, "pkg", "dev", COMMIT);
     assertEquals("/home/dev/.kkstudio/skills/pkg/dev/SKILL.md", local.path());
     assertEquals(SkillPromptResolution.Delivery.LOCAL, local.delivery());
-    assertEquals(COMMIT, local.installedCommit());
+    assertEquals(COMMIT, local.installedSha256());
 
     // 提交不一致：仍暴露实际安装的 commit，但交付方式是 PLATFORM。
     SkillPromptResolution outdated = resolver.resolveDetails(ENV, "pkg", "dev", OTHER_COMMIT);
     assertEquals("vfs:/skills/pkg/dev/SKILL.md", outdated.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, outdated.delivery());
-    assertEquals(COMMIT, outdated.installedCommit());
+    assertEquals(COMMIT, outdated.installedSha256());
 
     // 同步失败保留上一次成功安装的事实：如实暴露 installedCommit，交付方式仍是 PLATFORM。
     bind(
@@ -138,7 +138,7 @@ class SkillPromptPathResolverTest {
     SkillPromptResolution failed = resolver.resolveDetails(ENV, "pkg", "dev", COMMIT);
     assertEquals("vfs:/skills/pkg/dev/SKILL.md", failed.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, failed.delivery());
-    assertEquals(OTHER_COMMIT, failed.installedCommit());
+    assertEquals(OTHER_COMMIT, failed.installedSha256());
   }
 
   /** 测试意图：platform URI 是稳定的托管路径，与 registry 状态无关。 */

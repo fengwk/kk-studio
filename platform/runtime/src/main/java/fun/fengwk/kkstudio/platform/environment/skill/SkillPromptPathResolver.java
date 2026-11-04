@@ -34,42 +34,42 @@ public class SkillPromptPathResolver {
    * @param environmentId 当前 branch 选择的 Environment；null 表示未选择环境
    * @param packageName Skill Package 名
    * @param skillName Package 内的 skill 名
-   * @param currentCommit Package 的权威 currentCommit
+   * @param artifactSha256 Package 当前版本归档的权威摘要
    * @return 精确安装成立时返回 Daemon 本地稳定路径，否则返回 platform URI
    */
   public String resolve(
-      EnvironmentId environmentId, String packageName, String skillName, String currentCommit) {
-    return resolveDetails(environmentId, packageName, skillName, currentCommit).path();
+      EnvironmentId environmentId, String packageName, String skillName, String artifactSha256) {
+    return resolveDetails(environmentId, packageName, skillName, artifactSha256).path();
   }
 
   /**
-   * 解析单个 skill 的完整交付细节：稳定路径、当前 Environment 实际安装的 commit 与交付方式。
+   * 解析单个 skill 的完整交付细节：稳定路径、当前 Environment 实际安装的摘要与交付方式。
    *
-   * <p>路径与 {@link #resolve} 是同一次判定；调用方既不能用路径前缀反推交付方式，也不能把 {@code installedCommit} 的存在当成
-   * LOCAL：只有「状态为 installed 且 commit 与 {@code currentCommit} 完全一致」才产生 LOCAL。
+   * <p>路径与 {@link #resolve} 是同一次判定；调用方既不能用路径前缀反推交付方式，也不能把 {@code installedSha256} 的存在当成
+   * LOCAL：只有「没有失败记录且摘要与 {@code artifactSha256} 完全一致」才产生 LOCAL。
    */
   public SkillPromptResolution resolveDetails(
-      EnvironmentId environmentId, String packageName, String skillName, String currentCommit) {
+      EnvironmentId environmentId, String packageName, String skillName, String artifactSha256) {
     Objects.requireNonNull(packageName, "packageName");
     Objects.requireNonNull(skillName, "skillName");
     EnvironmentConnection connection =
         environmentId == null ? null : environmentRegistry.find(environmentId).orElse(null);
     if (connection != null) {
-      String root = connection.installedSkillRoot(packageName, currentCommit).orElse(null);
-      String installedCommit =
+      String root = connection.installedSkillRoot(packageName, artifactSha256).orElse(null);
+      String installedSha256 =
           connection
               .skillStateOf(packageName)
-              .map(EnvironmentSkillState::installedCommit)
+              .map(EnvironmentSkillState::installedSha256)
               .orElse(null);
       if (root != null) {
         return new SkillPromptResolution(
             root + "/" + skillName + "/SKILL.md",
-            installedCommit,
+            installedSha256,
             SkillPromptResolution.Delivery.LOCAL);
       }
       return new SkillPromptResolution(
           platformPath(packageName, skillName),
-          installedCommit,
+          installedSha256,
           SkillPromptResolution.Delivery.PLATFORM);
     }
     return new SkillPromptResolution(

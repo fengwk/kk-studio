@@ -37,8 +37,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
-            EnvironmentCapabilityIds.SKILL_SYNC);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
 
     assertEquals(
         List.of(
@@ -51,8 +50,7 @@ class EnvironmentCapabilityCatalogTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile",
-            "skill.sync"),
+            "lsp.java-decompile"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
@@ -75,7 +73,6 @@ class EnvironmentCapabilityCatalogTest {
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
     assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
-    assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.SKILL_SYNC));
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
       assertEquals(
           descriptor.inputSchema().required().contains("workdir"),
@@ -130,12 +127,6 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC)
             .inputSchema()
             .required());
-    assertEquals(
-        Set.of("packageName", "repositoryUrl", "branch", "targetCommit"),
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
-            .inputSchema()
-            .required());
-
     List<EnvironmentCapabilityId> fileAndLspCapabilities =
         List.of(
             EnvironmentCapabilityIds.FS_READ,
@@ -173,34 +164,17 @@ class EnvironmentCapabilityCatalogTest {
                 new EnvironmentCapabilityId("unknown.capability")));
   }
 
-  /** 模型可见能力保持正超时，仅内部 skill.sync 无 deadline；所有 schema 均不接受额外属性。 */
+  /** 所有能力都有正超时、可执行 schema 且不接受额外属性。 */
   @Test
-  void onlySkillSyncHasUnboundedDeadlineWithExecutableSchema() {
+  void everyCapabilityHasAPositiveDeadlineAndExecutableSchema() {
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
       String id = descriptor.id().value();
       InputSchema schema = descriptor.inputSchema();
       assertFalse(schema.additionalProperties(), id);
       assertFalse(schema.properties().isEmpty(), id);
-      assertEquals(
-          descriptor.id().equals(EnvironmentCapabilityIds.SKILL_SYNC),
-          descriptor.defaultTimeout().isZero(),
-          id);
+      assertFalse(descriptor.defaultTimeout().isZero(), id);
       assertFalse(descriptor.defaultTimeout().isNegative(), id);
     }
-  }
-
-  /** skill.sync 的 targetCommit 文案必须如实声明后端只接受 40 位小写 SHA-1，避免 64 位 SHA-256 的误导。 */
-  @Test
-  void skillSyncSchemaDocumentsFortyCharacterSha1TargetCommit() {
-    String description =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
-            .inputSchema()
-            .properties()
-            .get("targetCommit")
-            .description();
-
-    assertTrue(description.contains("40"), description);
-    assertTrue(description.contains("SHA-1"), description);
   }
 
   /** process.exec 缺少必填 workdir 时在 Capability 调用参数校验边界抛出异常。 */
@@ -295,9 +269,6 @@ class EnvironmentCapabilityCatalogTest {
         Duration.ofSeconds(180),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE)
             .defaultTimeout());
-    assertEquals(
-        Duration.ZERO,
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC).defaultTimeout());
   }
 
   /** 测试意图：验证 fs.grep 与 fs.find 的 schema 文案如实说明默认超时为 15 秒。 */

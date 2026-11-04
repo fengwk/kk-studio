@@ -101,6 +101,7 @@ class ModelRequestDebugServiceTest {
   private static final EnvironmentId ENV_B =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final String CURRENT_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+  private static final String ARTIFACT_SHA256 = "a".repeat(64);
   private static final String LOCAL_PATH = "/data/skills/test-package/dev/SKILL.md";
   private static final GoalSetting GOAL = new GoalSetting(new UUID(0L, 7L), "ship the release");
 
@@ -189,9 +190,10 @@ class ModelRequestDebugServiceTest {
     assertEquals("test-package", skill.getPackageName());
     assertEquals("dev", skill.getName());
     assertEquals("LOCAL", skill.getDelivery());
-    assertEquals(CURRENT_COMMIT, skill.getCurrentCommit());
-    assertEquals(CURRENT_COMMIT, skill.getInstalledCommit());
-    assertEquals("observed-head", skill.getObservedHeadCommit());
+    assertEquals(CURRENT_COMMIT, skill.getPackageVersion());
+    assertEquals("observed-head", skill.getHeadCommit());
+    assertEquals(ARTIFACT_SHA256, skill.getArtifactSha256());
+    assertEquals(ARTIFACT_SHA256, skill.getInstalledSha256());
     assertEquals(
         AgentPromptComposer.skillFragment(
             new SkillPromptEntry("dev", "dev description", LOCAL_PATH)),
@@ -711,7 +713,8 @@ class ModelRequestDebugServiceTest {
                 SkillPromptResolution.Delivery.LOCAL,
                 CURRENT_COMMIT,
                 "observed-head",
-                CURRENT_COMMIT)));
+                ARTIFACT_SHA256,
+                ARTIFACT_SHA256)));
   }
 
   private static ModelRequestSpec requestSpec() {

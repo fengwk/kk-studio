@@ -18,9 +18,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -63,17 +61,12 @@ class ConfigSyncServiceTest {
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncApplier applier = mock(ConfigSyncApplier.class);
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
-  private final SkillGitCache skillGitCache = mock(SkillGitCache.class);
-  private final AgentDefinitionRepository agentDefinitionRepository =
-      mock(AgentDefinitionRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final RuntimeToolCatalog toolCatalog = mock(RuntimeToolCatalog.class);
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
           mcpDiscovery,
-          skillGitCache,
-          agentDefinitionRepository,
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
