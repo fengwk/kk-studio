@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.port.store;
 
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -25,6 +26,9 @@ public interface BuiltinStore {
     Optional<ModelInvocation> lockModelInvocation(UUID id);
 
     Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartEntryId);
+
+    /** 读取 Thread 的全部模型状态行，按 id 升序；Thread 深删的 Driver 生命周期使用。 */
+    List<ModelInvocation> findModelInvocationsByThread(UUID threadId);
 
     void insertModelInvocation(ModelInvocation invocation);
 

@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -168,7 +169,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             Map.of(
                 WorkTargetType.THREAD,
                 threadProcessor::process,
-                WorkTargetType.MODEL,
+                BuiltinWorkType.MODEL,
                 modelProcessor::process,
                 WorkTargetType.TOOL,
                 toolProcessor::process));
@@ -786,13 +787,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   private HarnessWorkDispatcherConfig fixtureDispatcherConfig() {
     return new HarnessWorkDispatcherConfig(
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofHours(1),
-        Duration.ofMillis(50),
-        64);
+        Duration.ofMinutes(1), Duration.ofHours(1), Duration.ofMillis(50), 64);
   }
 
   private long blobRefCount(UUID blobId) {

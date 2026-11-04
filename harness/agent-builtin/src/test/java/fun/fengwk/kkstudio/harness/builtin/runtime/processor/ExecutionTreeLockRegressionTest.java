@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -110,7 +110,7 @@ class ExecutionTreeLockRegressionTest {
     store.transaction(
         tx -> {
           tx.threads().lock(openTurn.threadId());
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
           return null;
         });
 
@@ -119,7 +119,7 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.MODEL, "token-model-1", Duration.ofSeconds(60)))
+                        .claimNext(BuiltinWorkType.MODEL, "token-model-1", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelExecution execution =
@@ -212,7 +212,7 @@ class ExecutionTreeLockRegressionTest {
     store.transaction(
         tx -> {
           tx.threads().lock(openTurn.threadId());
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
           return null;
         });
 
@@ -221,7 +221,7 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.MODEL, "token-model-2", Duration.ofSeconds(60)))
+                        .claimNext(BuiltinWorkType.MODEL, "token-model-2", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelStreamConfig flushConfig =

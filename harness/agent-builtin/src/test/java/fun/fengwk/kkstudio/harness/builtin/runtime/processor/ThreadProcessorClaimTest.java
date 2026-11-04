@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -52,7 +53,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     Fixture fixture = fixture();
     ClaimedWork modelClaim =
         new ClaimedWork(
-            new WorkTarget(WorkTargetType.MODEL, new UUID(0L, 1L)),
+            new WorkTarget(BuiltinWorkType.MODEL, new UUID(0L, 1L)),
             1L,
             "token",
             NOW.plusSeconds(60));

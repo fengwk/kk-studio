@@ -143,7 +143,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             set lease_until = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 
@@ -158,7 +158,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             set available_at = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 
@@ -173,7 +173,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             where target_type = ? and target_id = ?
             """,
             delay.toMillis() + " milliseconds",
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 

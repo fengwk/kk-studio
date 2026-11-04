@@ -19,11 +19,11 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransaction;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver.FakeLockedDriverState;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -67,7 +67,7 @@ class HarnessRuntimeStopDriverWorkTest {
         });
 
     UUID modelWorkId = id(100L);
-    WorkTarget target = new WorkTarget(WorkTargetType.MODEL, modelWorkId);
+    WorkTarget target = new WorkTarget(TestWorkTypes.MODEL, modelWorkId);
 
     // 预先向 Store 写入该 MODEL Work 行
     store.transaction(
@@ -109,7 +109,7 @@ class HarnessRuntimeStopDriverWorkTest {
         });
 
     UUID unrelatedModelWorkId = id(200L);
-    WorkTarget unrelatedTarget = new WorkTarget(WorkTargetType.MODEL, unrelatedModelWorkId);
+    WorkTarget unrelatedTarget = new WorkTarget(TestWorkTypes.MODEL, unrelatedModelWorkId);
 
     // 预先向 Store 写入一条无关的 MODEL Work 行
     store.transaction(

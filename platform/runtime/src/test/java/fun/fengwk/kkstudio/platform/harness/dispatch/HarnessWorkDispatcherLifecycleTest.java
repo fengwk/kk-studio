@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
@@ -35,7 +36,7 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.Threa
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -78,12 +79,12 @@ class HarnessWorkDispatcherLifecycleTest {
     if (store instanceof InMemoryHarnessStore memory) {
       memory.setClock(clock);
     }
-    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new EnumMap<>(WorkTargetType.class);
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new LinkedHashMap<>();
     if (threadHandler != null) {
       handlers.put(WorkTargetType.THREAD, threadHandler);
     }
     if (modelHandler != null) {
-      handlers.put(WorkTargetType.MODEL, modelHandler);
+      handlers.put(BuiltinWorkType.MODEL, modelHandler);
     }
     if (toolHandler != null) {
       handlers.put(WorkTargetType.TOOL, toolHandler);

@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -84,7 +85,7 @@ class PostgresqlModelLeaseRecoveryTest {
   void expiredRunningModelRecoveryKeepsDurableBudgetUntilInstanceExhaustsIt() {
     StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
     UUID modelId = seedRunningModel(turn);
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
     requestWork(modelTarget, turn.threadId());
 
@@ -142,7 +143,7 @@ class PostgresqlModelLeaseRecoveryTest {
   void committedModelResultIsReusedOnRestartWithoutDuplicateEntry() {
     StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
     UUID modelId = seedSucceededMaterializedModel(turn);
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget modelTarget = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     requestWork(modelTarget, turn.threadId());
 
     UUID headBefore =
@@ -304,7 +305,7 @@ class PostgresqlModelLeaseRecoveryTest {
   }
 
   private Optional<ClaimedWork> claimModel(String token) {
-    return store.transaction(tx -> tx.work().claimNext(WorkTargetType.MODEL, token, LEASE));
+    return store.transaction(tx -> tx.work().claimNext(BuiltinWorkType.MODEL, token, LEASE));
   }
 
   private ModelInvocation findModel(UUID modelId) {
@@ -329,7 +330,7 @@ class PostgresqlModelLeaseRecoveryTest {
             set available_at = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 
@@ -343,7 +344,7 @@ class PostgresqlModelLeaseRecoveryTest {
             set lease_until = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
-            target.type().name(),
+            target.type().value(),
             target.id()));
   }
 

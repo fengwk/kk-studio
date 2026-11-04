@@ -86,8 +86,9 @@ Canvas 与 Environment 的失效 hub 也复用它，不经过 Harness 契约。
 在每个回调外层开启 `READ_COMMITTED`、`PROPAGATION_REQUIRED`、名为 `harness-store` 的事务；
 同一 Store 实例用 `ThreadLocal` 拒绝嵌套事务，加入调用方外层事务时由外层决定最终提交。
 [`PostgresqlBuiltinHarnessStore`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/store/PostgresqlBuiltinHarnessStore.java)
-将 Builtin 私有事务视图装配到同一事务核心；Thread 深删除通过 Driver 中立接口先锁私有行和相应 Work，
-再删除 Work 与私有行，不由通用存储解析模型状态。
+将 Builtin 私有事务视图装配到同一事务核心；Thread 深删除由 Driver 中立的 `DriverThreadDeletion`
+两阶段端口协作：第一阶段按 Driver id 稳定排序锁定私有行并声明相应 Work，第二阶段在通用存储删除 Work
+与 ToolInvocation 之后再删除私有行，不由通用存储解析模型状态。
 [`PostgresqlHarnessTransaction`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/PostgresqlHarnessTransaction.java)
 记录已达成的最高锁阶梯，显式拒绝逆序；句柄严格绑定创建它的线程。数据库异常记录为首个故障，
 回调返回前由 `rethrowDatabaseFailure()` 强制重抛，避免污染连接继续提交。
@@ -119,7 +120,8 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 `durable_work` 保存。数据库约束形状和归属，语义由应用层维护，详细列与约束见 [Schema](schema.md)。
 其中 Entry 父子必须同属 Session，每个 Session 至多一个 ROOT；命令以 Thread 与序号为主键、
 幂等键在 Thread 内唯一，Model 按 Thread 与 Turn 唯一，Tool 按 Assistant Entry 与调用序号唯一。
-Work 的租约 token 与 deadline 同空同非空，环境亲和性仅用于 TOOL；Thread 的执行根与父关系创建时固定，
+Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大写格式，环境亲和性由各 Work 类型自己声明
+（当前生产仅 TOOL 使用）；Thread 的执行根与父关系创建时固定，
 只有执行根可设置 `yolo_enabled`。所有时间列使用毫秒精度，版本与业务 ID 由应用生成。
 执行退出事实按具体执行代次登记，`UNCONFIRMED` 可推进为真实退出或显式 `ABANDONED`，
 真实证据可替换放弃；事实保留到 Thread 深删除，不设 TTL。
@@ -142,8 +144,9 @@ INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
 返回完整链并将 `baseEntryId` 置空。head 缺失时拒绝。切片及 CUSTOM 窄查询不回填完整路径缓存。
 
 深删除先排序并锁定目标 Thread，重复 ID、未锁树或仍被引用的目标被拒绝；
-依次锁 Command、Model、Tool、Work，再按 Work、Command、Tool、Model、执行退出事实、
-Thread 的顺序删除。Entry 叶子优先逐层删除，Session 单独删除。
+依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Tool、Driver 私有行、
+执行退出事实、Thread 的顺序删除。Driver 私有行由 `DriverThreadDeletion` 锁定和删除；
+Entry 叶子优先逐层删除，Session 单独删除。
 
 ### Work 的 claim / lease / wake
 
@@ -176,7 +179,7 @@ token/deadline 决定谁仍拥有，三者互不替代。
 
 [`HarnessWorkDispatcher`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/HarnessWorkDispatcher.java)
 只做 claim、类型路由、有界 handoff、wake 合并、周期 poll 和 stop，不读取业务状态或解释 Processor 结果。
-它传递节点身份，以 round-robin 轮转已注册的 `THREAD`、`MODEL`、`AGENT`、`TOOL` 子集，
+它传递节点身份，以 round-robin 轮转已注册的 `THREAD`、`TOOL` 与 Driver 注册的 Work 类型子集，
 必须包含 `THREAD`；CAS 合并 wake 保证同一时刻只有一个 drain。`start()` 注册 fixed-delay poll
 并立即唤醒，运行中重复调用无操作，stop 后不能重启。执行器由调用方管理，stop 取消 poll 并立即返回；
 在途 claim 即使提交也会在 handoff 前归还。
@@ -184,7 +187,7 @@ token/deadline 决定谁仍拥有，三者互不替代。
 调度骨架复用 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)。
 worker 必须使用 fail-fast 拒绝策略；容量拒绝时先校验有效 lease，再按 `executorRejectionDelay`
 重排并结束当前 drain，防止忙循环。Processor 运行时异常只记录日志并保留租约等待到期恢复。
-`HarnessWorkDispatcherConfig` 的各类型 lease、poll 与拒绝延迟必须为正整毫秒，
+`HarnessWorkDispatcherConfig` 的统一 `leaseDuration`、poll 与拒绝延迟必须为正整毫秒，
 `maxDispatchTasks` 只限制本机排队及运行中的 handoff，不限制异步 Model/Tool 执行并发。
 
 ### Realtime source / sink

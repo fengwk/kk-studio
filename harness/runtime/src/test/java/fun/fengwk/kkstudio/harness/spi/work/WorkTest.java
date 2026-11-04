@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -234,12 +235,11 @@ class WorkTest {
   }
 
   @Test
-  void requiredEnvironmentIdAllowedOnlyForToolAndAgentTargets() {
+  void requiredEnvironmentIdAllowedOnlyForEnvironmentAffineTargets() {
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, id(1L));
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, id(2L));
+    WorkTarget modelTarget = new WorkTarget(TestWorkTypes.MODEL, id(2L));
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, id(3L));
-    WorkTarget agentTarget = new WorkTarget(WorkTargetType.AGENT, id(4L));
 
     assertThrows(
         IllegalArgumentException.class, () -> new Work(threadTarget, T0, 1L, null, null, env));
@@ -250,9 +250,6 @@ class WorkTest {
 
     Work toolWork = Work.initial(toolTarget, T0, env);
     assertEquals(env, toolWork.requiredEnvironmentId());
-
-    Work agentWork = Work.initial(agentTarget, T0, env);
-    assertEquals(env, agentWork.requiredEnvironmentId());
   }
 
   @Test

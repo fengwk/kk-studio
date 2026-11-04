@@ -75,6 +75,11 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     }
 
     @Override
+    public List<ModelInvocation> findModelInvocationsByThread(UUID threadId) {
+      return models.findByThread(threadId);
+    }
+
+    @Override
     public void insertModelInvocation(ModelInvocation invocation) {
       models.insert(invocation);
     }

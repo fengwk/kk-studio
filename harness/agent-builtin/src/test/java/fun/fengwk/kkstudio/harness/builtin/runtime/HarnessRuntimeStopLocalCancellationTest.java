@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -75,7 +76,7 @@ class HarnessRuntimeStopLocalCancellationTest {
               assertFalse(
                   store
                       .transaction(
-                          tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, invocationId)))
+                          tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, invocationId)))
                       .isPresent());
             },
             toolCalls::add);

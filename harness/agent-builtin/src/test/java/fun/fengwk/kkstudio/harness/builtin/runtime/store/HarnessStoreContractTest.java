@@ -47,6 +47,7 @@ class HarnessStoreContractTest {
               "findModelInvocation",
               "lockModelInvocation",
               "findModelInvocationByTurn",
+              "findModelInvocationsByThread",
               "insertModelInvocation",
               "updateModelInvocation",
               "deleteModelInvocation"));

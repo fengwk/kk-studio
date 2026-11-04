@@ -17,8 +17,10 @@
 | `completeToolBatch` | 校验 generation 已附着到当前 Assistant head，并删除临时 ModelInvocation |
 | `prepareAutomaticCompaction` | 委托 [`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) |
 | `stop` | 把在途生成收敛为 `ASSISTANT_ERROR(CANCELLED)` 或携带已冻结流式内容的 `ASSISTANT_ABORTED` barrier，并取消 generation；返回的 `executionIds` 是该 generation 的 ModelInvocation id，Stop 事务提交后用于取消本地执行 |
+| `works` / `cancelWork` / `hasActiveWork` | 注册以 `ModelInvocation` id 为键的 MODEL Work 处理器；Stop 提交后取消对应本地执行；节点退出时报告仍活跃的模型执行 |
+| `lockThreadStateForDeletion` / `deleteLockedThreadState` | Thread 深删时先按 id 升序锁定 ModelInvocation 并返回 MODEL Work，待 Work 与 ToolInvocation 删除后再经 BuiltinStore 删除这些私有行 |
 
-Builtin 的私有持久化端口是 [`BuiltinStore`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/BuiltinStore.java)。它只把调用方已有的 Runtime 事务投影为窄 typed 视图，模型状态 CRUD 只存在于该接口；生产实现与 Runtime transaction 共享同一连接、数据库时间与锁序跟踪，视图本身绝不开启事务。
+Builtin 的私有持久化端口是 [`BuiltinStore`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/BuiltinStore.java)。它只把调用方已有的 Runtime 事务投影为窄 typed 视图，模型状态 CRUD 与按 Thread 读取深删行只存在于该接口；生产实现与 Runtime transaction 共享同一连接、数据库时间与锁序跟踪，视图本身绝不开启事务。
 
 ## 模型生成状态
 
@@ -52,7 +54,7 @@ groupExecution?
 
 ## MODEL Work 与流式执行
 
-[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work。进程内执行治理组合复用 Work SPI 的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只实现 Builtin 语义；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。它先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
+[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work；该类型由 `BuiltinAgentDriver.works()` 注册，Web 组合根只把 `DriverRegistry` 汇总的处理器交给 Dispatcher。进程内执行治理组合复用 Work SPI 的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只实现 Builtin 语义；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。它先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
 
 - `Busy` 按 `retryAfter` 重排；
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
@@ -92,7 +94,7 @@ groupExecution?
 | `fun.fengwk.kkstudio.harness.builtin.driver` | `BuiltinAgentDriver`：Turn 解析、generation 锁定、响应物化、ToolBatch 收尾与 Stop |
 | `fun.fengwk.kkstudio.harness.builtin.history` | Builtin 响应到公共历史的投影 |
 | `fun.fengwk.kkstudio.harness.builtin.model` | 从冻结请求与 EntryPath 重建 Provider 请求 |
-| `fun.fengwk.kkstudio.harness.builtin.port` | `TurnResolver` 在调用方事务内同步解析，`ModelGateway` 在调用方事务内访问模型冷却，在事务外执行 Provider I/O |
+| `fun.fengwk.kkstudio.harness.builtin.port` | `TurnResolver` 在调用方事务内同步解析，`ModelGateway` 在调用方事务内访问模型冷却并在事务外执行 Provider I/O，`BuiltinWorkType` 声明 MODEL Work 类型与加锁 rank |
 | `fun.fengwk.kkstudio.harness.builtin.processor` | MODEL Work 的 Processor / Execution、流式节奏、响应校验与规划、结果物化与模型组决策 |
 | `fun.fengwk.kkstudio.harness.builtin.query` | 当前 open Turn 冻结请求的只读 debug 投影 |
 | `fun.fengwk.kkstudio.harness.builtin.request` | Provider 消息投影与解析结果契约校验，都是纯函数 |

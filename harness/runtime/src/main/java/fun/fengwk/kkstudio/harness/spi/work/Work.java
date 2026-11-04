@@ -11,8 +11,8 @@ import java.util.Optional;
  * 一次 Work mailbox target 的持久化当前调度状态。
  *
  * <p>调度跃迁的唯一实现是 {@link WorkState}；本类型只保留 Harness 的 typed target 与 {@link EnvironmentId}
- * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link WorkTargetType#TOOL}
- * 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。
+ * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 声明 {@link
+ * WorkTargetType#environmentAffinity()} 时非空，server-side TOOL 可为空。
  *
  * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
  * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。
@@ -27,9 +27,7 @@ public record Work(
 
   public Work {
     target = Objects.requireNonNull(target, "target");
-    if (requiredEnvironmentId != null
-        && target.type() != WorkTargetType.TOOL
-        && target.type() != WorkTargetType.AGENT) {
+    if (requiredEnvironmentId != null && !target.type().environmentAffinity()) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
@@ -42,7 +40,7 @@ public record Work(
         requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
   }
 
-  /** 5 参数便捷构造：无环境亲和性（THREAD/MODEL/AGENT 或 server-side TOOL）。 */
+  /** 5 参数便捷构造：无环境亲和性（THREAD / Driver Work 或 server-side TOOL）。 */
   public Work(
       WorkTarget target,
       Instant availableAt,

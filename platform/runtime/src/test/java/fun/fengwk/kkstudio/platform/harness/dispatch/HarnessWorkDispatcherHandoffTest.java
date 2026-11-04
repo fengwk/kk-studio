@@ -2,11 +2,8 @@ package fun.fengwk.kkstudio.platform.harness.dispatch;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinRegistry;
-import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.AGENT_LEASE;
-import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.MODEL_LEASE;
+import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.LEASE;
 import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.NOW;
-import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.THREAD_LEASE;
-import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.TOOL_LEASE;
 import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.awaitTrue;
 import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.clock;
 import static fun.fengwk.kkstudio.platform.harness.dispatch.DispatcherTestSupport.config;
@@ -36,6 +33,7 @@ import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -70,7 +68,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -117,12 +115,12 @@ class HarnessWorkDispatcherHandoffTest {
     if (store instanceof InMemoryHarnessStore memory) {
       memory.setClock(clock);
     }
-    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new EnumMap<>(WorkTargetType.class);
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new LinkedHashMap<>();
     if (threadHandler != null) {
       handlers.put(WorkTargetType.THREAD, threadHandler);
     }
     if (modelHandler != null) {
-      handlers.put(WorkTargetType.MODEL, modelHandler);
+      handlers.put(BuiltinWorkType.MODEL, modelHandler);
     }
     if (toolHandler != null) {
       handlers.put(WorkTargetType.TOOL, toolHandler);
@@ -157,7 +155,7 @@ class HarnessWorkDispatcherHandoffTest {
     assertEquals(
         new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId()), threadClaims.get(0).target());
     assertEquals(
-        new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+        new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()),
         modelClaims.get(0).target());
     assertEquals(
         new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId()),
@@ -186,14 +184,7 @@ class HarnessWorkDispatcherHandoffTest {
     dispatcher.start();
     awaitTrue(() -> claims.size() == 3);
     for (ClaimedWork claim : claims) {
-      Duration expectedLease =
-          switch (claim.target().type()) {
-            case THREAD -> THREAD_LEASE;
-            case MODEL -> MODEL_LEASE;
-            case AGENT -> AGENT_LEASE;
-            case TOOL -> TOOL_LEASE;
-          };
-      assertEquals(NOW.plus(expectedLease), claim.leaseUntil());
+      assertEquals(NOW.plus(LEASE), claim.leaseUntil());
       assertTrue(isUuidToken(claim.leaseToken()));
     }
 
@@ -216,12 +207,6 @@ class HarnessWorkDispatcherHandoffTest {
     InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
-    store.transaction(
-        tx -> {
-          tx.threads().lock(threadSeed.threadId());
-          tx.work().request(new WorkTarget(WorkTargetType.AGENT, threadSeed.threadId()));
-          return null;
-        });
     ToolSeed toolSeed = seedTool(store);
 
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -233,22 +218,18 @@ class HarnessWorkDispatcherHandoffTest {
             singleThread(),
             new RecordingScheduler(),
             Map.of(
-                WorkTargetType.AGENT, claims::add,
+                BuiltinWorkType.MODEL, claims::add,
                 WorkTargetType.THREAD, claims::add));
 
     dispatcher.start();
     awaitTrue(() -> claims.size() == 2);
-    // 轮转顺序严格按 WorkTargetType 声明顺序：THREAD 优先于 AGENT，即便注册 Map 的插入顺序相反
+    // 轮转顺序严格按类型 rank：THREAD 优先于 MODEL，即便注册 Map 的插入顺序相反
     assertEquals(WorkTargetType.THREAD, claims.get(0).target().type());
-    assertEquals(WorkTargetType.AGENT, claims.get(1).target().type());
+    assertEquals(BuiltinWorkType.MODEL, claims.get(1).target().type());
 
-    // 未注册的 MODEL 和 TOOL 绝不能被 claim
-    Work modelWork =
-        work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()));
+    // 未注册的 TOOL 绝不能被 claim
     Work toolWork = work(store, new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId()));
-    assertEquals(null, modelWork.leaseToken());
     assertEquals(null, toolWork.leaseToken());
-    assertEquals(NOW, modelWork.availableAt());
     assertEquals(NOW, toolWork.availableAt());
   }
 
@@ -274,7 +255,7 @@ class HarnessWorkDispatcherHandoffTest {
     dispatcher.start();
     awaitTrue(() -> claims.size() == 1);
     Instant truncatedNow = NOW.plusMillis(123);
-    assertEquals(truncatedNow.plus(THREAD_LEASE), claims.get(0).leaseUntil());
+    assertEquals(truncatedNow.plus(LEASE), claims.get(0).leaseUntil());
     assertEquals(0, claims.get(0).leaseUntil().getNano() % 1_000_000);
     assertEquals(seed.threadId(), claims.get(0).target().id());
   }
@@ -310,7 +291,7 @@ class HarnessWorkDispatcherHandoffTest {
     // slot 释放后下一个 due 目标被 claim。
     awaitTrue(() -> claims.size() == 2);
     assertEquals(
-        new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+        new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()),
         claims.get(1).target());
   }
 
@@ -359,7 +340,7 @@ class HarnessWorkDispatcherHandoffTest {
       // 本地 capacity 已释放：下一个 due 目标仍可被 claim（该 claim 晚于失败 handoff 的 ERROR）。
       awaitTrue(() -> claims.size() == 2);
       assertEquals(
-          new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+          new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()),
           claims.get(1).target());
     } finally {
       detachListAppender(HarnessWorkDispatcher.class, logs);
@@ -434,7 +415,7 @@ class HarnessWorkDispatcherHandoffTest {
     // finally 仍然执行：capacity 释放，下一个 due 目标可被 claim。
     awaitTrue(() -> claims.size() == 2);
     assertEquals(
-        new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()),
+        new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()),
         claims.get(1).target());
   }
 
@@ -501,7 +482,7 @@ class HarnessWorkDispatcherHandoffTest {
             Map.of(
                 WorkTargetType.THREAD,
                 threadProcessor::process,
-                WorkTargetType.MODEL,
+                BuiltinWorkType.MODEL,
                 modelProcessor::process,
                 WorkTargetType.TOOL,
                 toolProcessor::process));
@@ -628,7 +609,7 @@ class HarnessWorkDispatcherHandoffTest {
     try {
       awaitTrue(
           () ->
-              work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()))
+              work(store, new WorkTarget(BuiltinWorkType.MODEL, modelSeed.modelInvocationId()))
                       == null
                   && work(store, new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId()))
                       == null
@@ -711,7 +692,7 @@ class HarnessWorkDispatcherHandoffTest {
         Map.of(
             WorkTargetType.THREAD,
             handler,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             handler,
             WorkTargetType.TOOL,
             handler);
@@ -774,7 +755,7 @@ class HarnessWorkDispatcherHandoffTest {
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
-                Map.of(WorkTargetType.MODEL, handler)));
+                Map.of(BuiltinWorkType.MODEL, handler)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -821,7 +802,7 @@ class HarnessWorkDispatcherHandoffTest {
         Map.of(
             WorkTargetType.THREAD,
             handler,
-            WorkTargetType.MODEL,
+            BuiltinWorkType.MODEL,
             handler,
             WorkTargetType.TOOL,
             handler);

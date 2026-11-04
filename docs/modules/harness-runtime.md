@@ -13,7 +13,7 @@ Session ─ Entry Tree        只追加的对话历史；分支 = 从 ROOT 到�
 Thread  ─ head + 邮箱        指向自己的 head，持有执行控制、输入水位与已接受的 Command
 ToolInvocation              工具在途调用、审批记录、结果与副作用批次
 ModelInvocation（Builtin Driver 私有）  当前回合在途模型生成的状态机行，终态物化进历史后删除
-Work                         每个 target（THREAD / MODEL / AGENT / TOOL）至多一行的调度义务与租约
+Work                         每个 target（内核 THREAD / TOOL 与各 Driver 类型）至多一行的调度义务与租约
 Join                         一次子执行委派的票据，只记凭据与冻结的终态坐标
 ```
 
@@ -151,11 +151,11 @@ RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 
 `Work`、`WorkTarget`、`WorkTargetType` 与已认领快照 `ClaimedWork` 是持久化与分发共用的值契约，位于 [`spi.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/)，与 [`spi.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/)、[`spi.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/) 同处 SPI，见[端口与策略](#端口与策略)。
 
-时间只有一个权威域：生产是数据库时钟，内存实现是测试时钟；持久化时间戳都取自事务的 `tx.now()`。时间只记录事实发生的时刻，不承担排序——Entry 顺序由父链表达，推进由 version 与状态机表达。`requiredEnvironmentId` 只在 TOOL 与 AGENT Work 上允许非空，THREAD 与 MODEL Work 必须为空；它在首次创建时冻结、之后不可改变；按当前节点是否持有该 Environment 的 READY 连接租约分发由 Infra 实施。
+时间只有一个权威域：生产是数据库时钟，内存实现是测试时钟；持久化时间戳都取自事务的 `tx.now()`。时间只记录事实发生的时刻，不承担排序——Entry 顺序由父链表达，推进由 version 与状态机表达。`requiredEnvironmentId` 只在 WorkTargetType 自己声明环境亲和性时允许非空（当前生产为 TOOL），THREAD 与 Builtin MODEL Work 必须为空；它在首次创建时冻结、之后不可改变；按当前节点是否持有该 Environment 的 READY 连接租约分发由平台实施。
 
 ## Processor
 
-Thread claim 只归约一个持久化动作；Model / Agent / Tool claim 驱动一次外部调用或外部 Agent Driver，期间续租、提交 checkpoint 与终态。调度器按规范顺序 `THREAD -> MODEL -> AGENT -> TOOL` 中已注册处理器的子集轮转认领，跳过未注册类型的 Work。后续调度由同事务的 `requestWork` 驱动。
+Thread / Tool claim 由内核 Processor 处理；Driver 注册的 Work 处理器驱动一次模型调用或进程外 Agent 执行，期间续租、提交 checkpoint 与终态。调度器按 `WorkTargetType.rank()` 顺序轮转已注册处理器的子集，跳过未注册类型的 Work；内核只固定 THREAD 与 TOOL，Builtin 的 MODEL 由 Driver 注册。后续调度由同事务的 `requestWork` 驱动。
 
 [`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 校验 claim 与准入后取执行树锁，按分类结果行动：
 
@@ -182,7 +182,7 @@ Model / Tool Processor 以组合方式共用公开的已认领执行骨架 [`Cla
 
 `ABANDONED` 是用户显式放弃继续等待确认的独立事实，不是物理退出，也不能伪造 ACK。只有 `UNCONFIRMED` 阻止收敛；首次放弃要求 Thread 已 `STOPPED`、执行属于该 Thread 且 `expectedVersion` 精确匹配，重复放弃或已真实确认是安全 replay，容忍旧 version。真实证据到达后可以把 `ABANDONED` 升级为已确认状态并保留原 `abandonedAt`；两种时刻都不得早于 `registeredAt`，但 `confirmedAt` 可以早于 `abandonedAt`，绝不改写观测时间。退出事实行（包括放弃行）保留到 Thread 深删除，没有 TTL，也不以 lease 到期、`cluster_node` 路由记录或 journal 存在推断宿主已死亡。
 
-跨实例远端退出对账由 [`RemoteExitReconciler`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/execution/RemoteExitReconciler.java) 承载：当目标 Environment 达到 READY 状态时，它在专用虚拟线程 Executor 上异步加载该环境全部未确认的远端退出事实（`loadUnconfirmedRemote(environmentId)`），不阻塞事件回调线程。对账仅处理 TOOL 父执行事实（跳过父执行为 AGENT 的事实，由后续外部 Agent 对账链路处理）：检查其对应的 ToolInvocation 状态，若工具当前为 `RUNNING` 则跳过，留给后续认领该工具的 ToolProcessor 恢复挂接；若工具非 `RUNNING`（包括工具记录已被物理清理），则通过 `EnvironmentCapabilityTransport.attach` 挂接仅确认退出的监听器。监听器在 `onExitConfirmed()` 到达时调用 `ExecutionExitConfirmer.confirm(fact, ExecutionExitState.REMOTE_ACKNOWLEDGED)`，沿用库中既有事实身份入账，不额外发起新的执行代次；终态结果与常规异常（含 `RECOVER_NOT_FOUND`）均被忽略且保持 `UNCONFIRMED`。单条挂接遇 `IllegalArgumentException`（当前节点已存在活跃执行）仅跳过该条继续处理后续事实，遇 `EnvironmentCapabilityUnavailableException`（路由不可用）则中止本轮对账。
+跨实例远端退出对账由 [`RemoteExitReconciler`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/execution/RemoteExitReconciler.java) 承载：当目标 Environment 达到 READY 状态时，它在专用虚拟线程 Executor 上异步加载该环境全部未确认的远端退出事实（`loadUnconfirmedRemote(environmentId)`），不阻塞事件回调线程。对账仅处理 TOOL 父执行事实（跳过父执行为 DRIVER 的事实，由对应 Driver 的对账链路处理）：检查其对应的 ToolInvocation 状态，若工具当前为 `RUNNING` 则跳过，留给后续认领该工具的 ToolProcessor 恢复挂接；若工具非 `RUNNING`（包括工具记录已被物理清理），则通过 `EnvironmentCapabilityTransport.attach` 挂接仅确认退出的监听器。监听器在 `onExitConfirmed()` 到达时调用 `ExecutionExitConfirmer.confirm(fact, ExecutionExitState.REMOTE_ACKNOWLEDGED)`，沿用库中既有事实身份入账，不额外发起新的执行代次；终态结果与常规异常（含 `RECOVER_NOT_FOUND`）均被忽略且保持 `UNCONFIRMED`。单条挂接遇 `IllegalArgumentException`（当前节点已存在活跃执行）仅跳过该条继续处理后续事实，遇 `EnvironmentCapabilityUnavailableException`（路由不可用）则中止本轮对账。
 
 Thread 由轻量 `ThreadAdmissionGuard` 独立防重，旧 action 未结束时同 token 或异 token 均返回 LOST，不抢占。
 
@@ -234,14 +234,9 @@ Session -> Thread -> Commands -> Driver 私有行 -> ToolInvocation -> Work
 
 ### 执行与停止
 
-Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)，并为每个执行代次登记 `ExecutionExitKind.DRIVER` 退出事实。Work 有两种键法：
+Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)，并为每个执行代次登记 `ExecutionExitKind.DRIVER` 退出事实。Driver 经 [`AgentDriver#works()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/AgentDriver.java) 注册自己的 Work 类型与处理器，经 `LockedDriverState.workTarget()` 声明当前 generation 的 Work。Stop 只锁定内核 THREAD、Driver 声明的 Work 与 TOOL，不再写死 Driver 类型。
 
-| Work | 键 | Stop 时如何清理 |
-| --- | --- | --- |
-| Driver 自有 Work（Builtin 的 `MODEL` Work） | Driver 私有身份 | Driver 经 `LockedDriverState.workTarget()` 声明，Stop 锁定并删除 |
-| `AGENT` Work | Thread id，可带 `requiredEnvironmentId` 环境亲和 | Stop 为每个停止的 Thread 统一锁定并删除，不经 `workTarget()` 声明 |
-
-`HarnessWorkDispatcher` 每种 `WorkTargetType` 只注册一个处理器，因此进程外 Driver 共用 AGENT Work 时，由该处理器按 Thread 的 driver 分派。
+`HarnessWorkDispatcher` 每种 `WorkTargetType` 只注册一个处理器；组合根从 `DriverRegistry` 汇总 Driver Work，再与 THREAD / TOOL 合并，不在 Web 手工登记具体 Processor。
 
 `stop` 返回的 `executionIds` 在 Stop 事务提交后，交给组合根提供的 Driver 执行取消函数 best-effort 取消。
 
@@ -256,9 +251,10 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 新增 Driver 不需要修改 Runtime：
 
 1. **模块**：新建 `harness/agent-<id>`，包根 `fun.fengwk.kkstudio.harness.<id>` 只属于该模块；只依赖 `harness-runtime` 的公开 API，需要 Environment 时再依赖 `harness-environment`。在根 POM 登记模块，在仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 中登记该模块允许的内部依赖与模块文档。
-2. **持久化与执行**：私有 Store 视图由 `platform-runtime` 实现；Work 处理器复用 `ClaimedExecutionSupport`。
-3. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集），向 `HarnessWorkDispatcher` 注册 Work 处理器，把本地取消与活跃检查并入 `HarnessRuntime` 与 `HarnessRuntimeLifecycle` 的组合函数，并在 `WebModuleArchitectureTest` 中按文件放行装配所需的导入。
-4. **测试**：复用 `harness-runtime` 的 test-jar：内存 Store、Store 契约基类与 `FakeAgentDriver`。
+2. **持久化与执行**：私有 Store 视图与表由 `platform-runtime` 的对应 Driver 适配包实现；Work 处理器复用 `ClaimedExecutionSupport`，通过 `AgentDriver#works()` 注册；本地取消与活跃检查实现 `cancelWork` / `hasActiveWork`。
+3. **Thread 深删**：实现 `lockThreadStateForDeletion` / `deleteLockedThreadState`，由 `DriverRegistry` 在两阶段生命周期中调用；平台 `PostgresqlThreadStore` 只负责通用锁序、Work/Tool 删除与 Thread 行，不引用具体 Driver 表。
+4. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集）；Dispatcher 从 `DriverRegistry` 取得 Work 处理器，`HarnessRuntime` 与 `HarnessRuntimeLifecycle` 使用同一注册表完成本地取消与活跃检查；在 `WebModuleArchitectureTest` 中按文件放行装配所需的导入。
+5. **测试**：复用 `harness-runtime` 的 test-jar：内存 Store、Store 契约基类与 `FakeAgentDriver`。
 
 ## 压缩
 
@@ -288,7 +284,7 @@ manualMinimum    = min(keepRecentTokens*2, C/2)
 
 ## 停止
 
-Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThreadId` 停止目标及全部后代（目标已空闲或已停止时仍覆盖后代）。事务先物化已提交的 Model/Tool 结果，再闭合在途回合，按规范顺序 `THREAD -> MODEL -> AGENT -> TOOL` 锁定并清理所有关联 Work 邮箱（包括为每个停止的 Thread 围栏 `AGENT` target 以阻断外部 Driver）；只有退出事实与直接子 Join 已收敛时才冻结 Join 结果，否则保留未完成 Join，由后续退出 ACK 推进。无 open 回合时追加 `TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED)` 屏障；已有 open 回合时按真实结果闭合，必要时补齐未知工具结果，绝不嵌套回合或伪造成功。
+Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThreadId` 停止目标及全部后代（目标已空闲或已停止时仍覆盖后代）。事务先物化已提交的 Model/Tool 结果，再闭合在途回合，按类型 rank 顺序锁定并清理 THREAD、Driver 声明的 Work 与 TOOL；只有退出事实与直接子 Join 已收敛时才冻结 Join 结果，否则保留未完成 Join，由后续退出 ACK 推进。无 open 回合时追加 `TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED)` 屏障；已有 open 回合时按真实结果闭合，必要时补齐未知工具结果，绝不嵌套回合或伪造成功。
 
 [`StopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StopResult.java) 返回完整受影响集合；每个 [`StoppedThreadReceipt`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/StoppedThreadReceipt.java) 记录停止边界、取消数量与被退回的人工输入（`USER_MESSAGE` / `GOAL`）。`CUSTOM_MESSAGE` 与设置命令被取消但不退回；`NOTIFICATION` 不取消，而是物化进历史、同步推进 `inputThroughSequence` 且不唤醒模型。整次 Stop 按 `(root_thread_id, root_stop_request_id)` 持久化：精确重放返回原集合、不重停新工作，后代的派生身份被当作新请求复用时为 `STOP_REQUEST_ID_REUSED`。
 
@@ -412,7 +408,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `api.command` | 命令邮箱的公开值类型：`ThreadCommand`、封闭 payload 族与派生的 `ThreadCommandState`；只做不变量校验与纯派生，JSON 形态与 request hash 在 `codec`，harvest 归约在 `runtime.thread.command` |
 | `api.compaction` | 压缩的公开值类型：`CompactionConfig`（只含 `keepRecentTokens` 与阈值换算的纯函数）、`CompactionPhase` / `CompactionTrigger`、切分事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
 | `api.entry` | 分支配置与回合边界值：`BranchSettings`、`ExecutionSelection`、`ModelSelection`、`GoalSetting`、`TurnStartReason` 与 `TurnEndOutcome` |
-| `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
+| `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`（只有 `DRIVER` / `TOOL` / `REMOTE`，Driver 私有模型调用统一归 `DRIVER`）；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |
 | `api.history` | Entry Tree 的公开值类型：`Entry`、sealed payload 家族、`EntryPath` / `EntrySlice` 路径视图、`ScopedBranchView` Contributor 限域视图、`SubagentBinding`、`EntryType` 与 `TurnPathValidator` 回合文法校验；payload 编解码与 payload mapper 在 `codec`，历史归一化与最终回答判定在 `runtime.history` |
 | `api.interaction` | 等待输入/审批的只读投影与 `(createdAt, id)` 稳定分页（`PendingInteraction`、`PendingEnvironmentWait` 及分页），不持有产品归属 |

@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -135,7 +136,7 @@ class HarnessRenameTest {
             .isEmpty());
     assertTrue(
         store
-            .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1))))
+            .transaction(tx -> tx.work().find(new WorkTarget(TestWorkTypes.MODEL, TestIds.id(1))))
             .isEmpty());
     List<Entry> entries = store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId()));
     assertEquals(1, entries.size());

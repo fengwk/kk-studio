@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
@@ -437,7 +438,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     // Model callback 的规范锁序是 Model -> Work；深删必须先等 Model，再锁 Work，不能反向形成数据库死锁。
     TurnBaseline baseline = seedTurnBaseline(store);
     UUID modelId = id(100L);
-    WorkTarget target = new WorkTarget(WorkTargetType.MODEL, modelId);
+    WorkTarget target = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     inTransaction(
         store,
         tx -> {
@@ -459,7 +460,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
             .transaction(
                 tx ->
                     tx.work()
-                        .claimNext(WorkTargetType.MODEL, "lease-delete", Duration.ofSeconds(60)))
+                        .claimNext(BuiltinWorkType.MODEL, "lease-delete", Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch modelLocked = new CountDownLatch(1);

@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -436,7 +437,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx -> {
               tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
               return null;
             });
 
@@ -574,7 +575,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx -> {
               tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
               return null;
             });
     fixture.store.resetUpdateCount();
@@ -703,7 +704,7 @@ class ModelExecutionStreamFlushTest {
             .store
             .delegate()
             .transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)))
             .orElseThrow();
     assertNotNull(work.leaseToken(), "work must remain claimed");
     assertEquals(
@@ -1593,7 +1594,7 @@ class ModelExecutionStreamFlushTest {
                       now,
                       now));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
         });
   }
@@ -1604,7 +1605,7 @@ class ModelExecutionStreamFlushTest {
             tx ->
                 tx.work()
                     .claimNext(
-                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                        BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 

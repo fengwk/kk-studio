@@ -543,8 +543,14 @@ class SessionDeletionTest {
             (proxy, method, args) -> {
               Object result = invoke(target, method, args);
               if (RECORDED_METHODS.contains(method.getName())) {
-                events.add(
-                    line(name + "." + method.getName(), args == null ? new Object[0] : args));
+                Object[] recorded =
+                    name.equals("threads")
+                            && method.getName().equals("delete")
+                            && args != null
+                            && args.length > 1
+                        ? new Object[] {args[0]}
+                        : args == null ? new Object[0] : args;
+                events.add(line(name + "." + method.getName(), recorded));
               }
               if (afterSessionLock != null && "lockForUpdate".equals(method.getName())) {
                 afterSessionLock.run();

@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -32,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -302,7 +302,7 @@ class ModelExecutionDecodeDurationTest {
                             List.of(),
                             NOW,
                             NOW));
-                tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+                tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
                 return id;
               });
       ClaimedWork claim =
@@ -311,7 +311,7 @@ class ModelExecutionDecodeDurationTest {
                   tx ->
                       tx.work()
                           .claimNext(
-                              WorkTargetType.MODEL,
+                              BuiltinWorkType.MODEL,
                               "token-" + invocationId,
                               Duration.ofSeconds(60)))
               .orElseThrow();

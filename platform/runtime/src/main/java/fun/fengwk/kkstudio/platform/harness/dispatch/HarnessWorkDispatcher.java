@@ -10,7 +10,8 @@ import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumMap;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -26,8 +27,8 @@ import java.util.function.Consumer;
  * 生命周期。它绝不解释 Processor 的 typed 结果改写 durable 状态 —— handoff 类型是 {@link Consumer}，Processor 的 complete
  * / reschedule / delete 由 Processor 自己在所有权围栏保护下决定。
  *
- * <p>Work claim 协议：每次 claim 使用新 UUID token 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link
- * #nodeInstanceId}，以驱动 Environment route 亲和性路由围栏； THREAD / MODEL / TOOL 按固定显式列表 round-robin
+ * <p>Work claim 协议：每次 claim 使用新 UUID token 与配置的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link
+ * #nodeInstanceId}，以驱动 Environment route 亲和性路由围栏； THREAD、TOOL 与 Driver 注册的类型按 rank 顺序 round-robin
  * 轮询，cursor 是实例字段并跨 wake / drain 保留（maxDispatchTasks=1 时也不会持续偏爱 THREAD）。 每个 claim 成功后必须二选一：worker
  * executor 已接受 handoff task；或通过所有权围栏归还（同一短事务先由 {@code lockClaimedWork} 确认仍 owned，才按正 {@code
  * executorRejectionDelay} 执行 {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。
@@ -95,19 +96,15 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     if (handlers.isEmpty() || !handlers.containsKey(WorkTargetType.THREAD)) {
       throw new IllegalArgumentException("handlers must be non-empty and contain THREAD processor");
     }
-    Map<WorkTargetType, Consumer<ClaimedWork>> defensive = new EnumMap<>(WorkTargetType.class);
+    Map<WorkTargetType, Consumer<ClaimedWork>> defensive = new LinkedHashMap<>();
     for (Map.Entry<WorkTargetType, Consumer<ClaimedWork>> entry : handlers.entrySet()) {
       Objects.requireNonNull(entry.getKey(), "targetType");
       Objects.requireNonNull(entry.getValue(), "handler for " + entry.getKey());
       defensive.put(entry.getKey(), entry.getValue());
     }
     this.handlers = Collections.unmodifiableMap(defensive);
-    List<WorkTargetType> types = new ArrayList<>();
-    for (WorkTargetType type : WorkTargetType.values()) {
-      if (defensive.containsKey(type)) {
-        types.add(type);
-      }
-    }
+    List<WorkTargetType> types = new ArrayList<>(defensive.keySet());
+    types.sort(Comparator.comparingInt(WorkTargetType::rank).thenComparing(WorkTargetType::value));
     this.registeredTypes = List.copyOf(types);
     this.dispatcher =
         new BoundedWorkDispatcher<>(
@@ -172,9 +169,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     String token = UUID.randomUUID().toString();
     return store.transaction(
         tx ->
-            tx.work()
-                .claimNext(type, token, config.leaseDuration(type), nodeInstanceId)
-                .orElse(null));
+            tx.work().claimNext(type, token, config.leaseDuration(), nodeInstanceId).orElse(null));
   }
 
   private void runHandoff(ClaimedWork claim) {

@@ -66,6 +66,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -161,7 +162,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                         .findModelInvocationByTurn(chain.turn().threadId(), entries.get(7).id()))
             .orElseThrow();
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
   }
 

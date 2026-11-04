@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -97,10 +98,7 @@ final class DispatcherTestSupport {
   private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-  static final Duration THREAD_LEASE = Duration.ofSeconds(30);
-  static final Duration MODEL_LEASE = Duration.ofSeconds(45);
-  static final Duration AGENT_LEASE = Duration.ofSeconds(50);
-  static final Duration TOOL_LEASE = Duration.ofSeconds(60);
+  static final Duration LEASE = Duration.ofSeconds(30);
   static final Duration POLL_INTERVAL = Duration.ofMillis(20);
   static final Duration REJECTION_DELAY = Duration.ofSeconds(2);
   static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
@@ -113,14 +111,7 @@ final class DispatcherTestSupport {
   }
 
   static HarnessWorkDispatcherConfig config(int maxDispatchTasks) {
-    return new HarnessWorkDispatcherConfig(
-        THREAD_LEASE,
-        MODEL_LEASE,
-        AGENT_LEASE,
-        TOOL_LEASE,
-        POLL_INTERVAL,
-        REJECTION_DELAY,
-        maxDispatchTasks);
+    return new HarnessWorkDispatcherConfig(LEASE, POLL_INTERVAL, REJECTION_DELAY, maxDispatchTasks);
   }
 
   static MutableClock clock() {
@@ -183,7 +174,7 @@ final class DispatcherTestSupport {
                       List.of(),
                       NOW,
                       NOW));
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, modelId));
           return new ModelSeed(threadId, modelId);
         });
   }

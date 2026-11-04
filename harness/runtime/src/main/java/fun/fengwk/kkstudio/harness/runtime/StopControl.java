@@ -82,6 +82,7 @@ final class StopControl {
           "USER_STOP_UNCERTAIN", "Stopped by user while the tool execution outcome was uncertain");
   private static final Comparator<WorkTarget> WORK_TARGET_ORDER =
       Comparator.comparingInt((WorkTarget target) -> workTypeRank(target.type()))
+          .thenComparing(target -> target.type().value())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
   private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
@@ -313,7 +314,6 @@ final class StopControl {
       if (ctx.driverState().workTarget() != null) {
         allWorkTargets.add(ctx.driverState().workTarget());
       }
-      allWorkTargets.add(new WorkTarget(WorkTargetType.AGENT, ctx.thread().id()));
       for (ToolInvocation sibling : ctx.toolSiblings()) {
         allWorkTargets.add(new WorkTarget(WorkTargetType.TOOL, sibling.id()));
       }
@@ -479,12 +479,7 @@ final class StopControl {
   }
 
   private static int workTypeRank(WorkTargetType type) {
-    return switch (type) {
-      case THREAD -> 0;
-      case MODEL -> 1;
-      case AGENT -> 2;
-      case TOOL -> 3;
-    };
+    return type.rank();
   }
 
   /**

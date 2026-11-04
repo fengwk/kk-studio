@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -175,7 +176,7 @@ class PostgresqlGroupCooldownTest {
   void cooldownInvocationAndWorkChangesRollbackTogether() {
     var turn = seedTurnBaseline(store);
     var modelId = id(100L);
-    var target = new WorkTarget(WorkTargetType.MODEL, modelId);
+    var target = new WorkTarget(BuiltinWorkType.MODEL, modelId);
     store.transaction(
         tx -> {
           tx.threads().lock(turn.threadId()).orElseThrow();
@@ -195,7 +196,7 @@ class PostgresqlGroupCooldownTest {
     var claim =
         store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.MODEL, "rollback", Duration.ofMinutes(1)))
+                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "rollback", Duration.ofMinutes(1)))
             .orElseThrow();
     var before = store.transaction(tx -> tx.work().find(target).orElseThrow());
     assertThrows(

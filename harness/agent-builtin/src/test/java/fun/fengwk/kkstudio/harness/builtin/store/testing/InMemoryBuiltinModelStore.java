@@ -12,8 +12,10 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterializatio
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransaction;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -151,6 +153,14 @@ final class InMemoryBuiltinModelStore {
       }
     }
     return tx.deleteDriverRow(modelInvocationId);
+  }
+
+  /** 指定 Thread 的 model 行，按 UUID 升序。 */
+  List<ModelInvocation> findByThread(UUID threadId) {
+    return rows().stream()
+        .filter(model -> model.threadId().equals(threadId))
+        .sorted(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR))
+        .toList();
   }
 
   /** 当前快照内已提交的 model 行，按 driver row 的迭代顺序返回。 */

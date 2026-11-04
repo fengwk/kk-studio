@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -1069,23 +1070,13 @@ public final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 请求一条无 lease 的 AGENT Work 行。 */
-  static void seedAgentWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
-    store.transaction(
-        tx -> {
-          tx.threads().lock(threadId).orElseThrow();
-          tx.work().request(new WorkTarget(WorkTargetType.AGENT, threadId));
-          return null;
-        });
-  }
-
   /** 请求一条无 lease 的 MODEL Work 行（在 Model 活跃期间被围栏）。 */
   static void seedModelWork(InMemoryBuiltinHarnessStore store, UUID modelId) {
     store.transaction(
         tx -> {
           ModelInvocation model = builtin(store, tx).findModelInvocation(modelId).orElseThrow();
           tx.threads().lock(model.threadId()).orElseThrow();
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, modelId));
           return null;
         });
   }

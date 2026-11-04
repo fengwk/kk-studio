@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -30,16 +30,12 @@ import java.util.UUID;
 final class PostgresqlWorkStore implements WorkStore {
 
   private final PostgresqlHarnessTransaction tx;
-  private final Map<WorkTargetType, DurableWorkStore> stores;
+  private final PostgresqlDurableWorkJdbc jdbc;
+  private final Map<WorkTargetType, DurableWorkStore> stores = new HashMap<>();
 
   PostgresqlWorkStore(PostgresqlHarnessTransaction tx) {
     this.tx = tx;
-    Map<WorkTargetType, DurableWorkStore> stores = new EnumMap<>(WorkTargetType.class);
-    PostgresqlDurableWorkJdbc jdbc = new PostgresqlDurableWorkJdbc(tx);
-    for (WorkTargetType type : WorkTargetType.values()) {
-      stores.put(type, new DurableWorkStore(type.name(), jdbc));
-    }
-    this.stores = Map.copyOf(stores);
+    this.jdbc = new PostgresqlDurableWorkJdbc(tx);
   }
 
   @Override
@@ -113,9 +109,7 @@ final class PostgresqlWorkStore implements WorkStore {
   public void request(WorkTarget target, EnvironmentId requiredEnvironmentId) {
     tx.checkOpen();
     Objects.requireNonNull(target, "target");
-    if (requiredEnvironmentId != null
-        && target.type() != WorkTargetType.TOOL
-        && target.type() != WorkTargetType.AGENT) {
+    if (requiredEnvironmentId != null && !target.type().environmentAffinity()) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
@@ -234,43 +228,47 @@ final class PostgresqlWorkStore implements WorkStore {
 
   private DurableWorkStore store(WorkTargetType targetType) {
     Objects.requireNonNull(targetType, "targetType");
-    return stores.get(targetType);
+    return stores.computeIfAbsent(targetType, type -> new DurableWorkStore(type.value(), jdbc));
   }
 
   private void requireWorkOwnerLocked(WorkTarget target) {
-    UUID threadId =
-        switch (target.type()) {
-          case THREAD, AGENT -> tx.threads()
+    UUID threadId;
+    if (WorkTargetType.THREAD.equals(target.type())) {
+      threadId =
+          tx.threads()
               .find(target.id())
               .orElseThrow(
                   () -> new IllegalArgumentException("work target does not exist: " + target))
               .id();
-          case MODEL -> tx.driver()
+    } else if (WorkTargetType.TOOL.equals(target.type())) {
+      ToolInvocation tool =
+          tx.tools()
+              .find(target.id())
+              .orElseThrow(
+                  () -> new IllegalArgumentException("work target does not exist: " + target));
+      threadId = tool.threadId();
+    } else {
+      threadId =
+          tx.driverWorkStorage()
               .workOwner(target.id())
               .orElseThrow(
                   () -> new IllegalArgumentException("work target does not exist: " + target));
-          case TOOL -> {
-            ToolInvocation tool =
-                tx.tools()
-                    .find(target.id())
-                    .orElseThrow(
-                        () ->
-                            new IllegalArgumentException("work target does not exist: " + target));
-            yield tool.threadId();
-          }
-        };
+    }
     tx.requireLocked(LockKey.thread(threadId));
   }
 
   private void requireTargetExists(WorkTarget target) {
-    boolean exists =
-        switch (target.type()) {
-          case THREAD, AGENT -> tx.queryExists(
-              "select exists (select 1 from harness_thread where id = ?)", target.id());
-          case MODEL -> tx.driver().workTargetExists(target.id());
-          case TOOL -> tx.queryExists(
+    boolean exists;
+    if (WorkTargetType.THREAD.equals(target.type())) {
+      exists =
+          tx.queryExists("select exists (select 1 from harness_thread where id = ?)", target.id());
+    } else if (WorkTargetType.TOOL.equals(target.type())) {
+      exists =
+          tx.queryExists(
               "select exists (select 1 from harness_tool_invocation where id = ?)", target.id());
-        };
+    } else {
+      exists = tx.driverWorkStorage().workTargetExists(target.id());
+    }
     if (!exists) {
       throw new IllegalArgumentException("work target does not exist: " + target);
     }

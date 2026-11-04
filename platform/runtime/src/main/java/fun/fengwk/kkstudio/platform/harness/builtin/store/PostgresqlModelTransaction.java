@@ -20,9 +20,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
-import fun.fengwk.kkstudio.platform.harness.store.PostgresqlDriverStorage;
+import fun.fengwk.kkstudio.platform.harness.store.PostgresqlDriverWorkStorage;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 
@@ -36,7 +34,7 @@ import java.util.UUID;
 
 /** Builtin 私有模型事务视图；与 Runtime transaction 共享同一连接、时钟、锁序与 poisoning 状态。 */
 final class PostgresqlModelTransaction
-    implements BuiltinStore.Transaction, PostgresqlDriverStorage {
+    implements BuiltinStore.Transaction, PostgresqlDriverWorkStorage {
 
   private final PostgresqlHarnessTransaction tx;
 
@@ -45,29 +43,15 @@ final class PostgresqlModelTransaction
   }
 
   @Override
-  public List<WorkTarget> lockForThreads(List<UUID> threadIds) {
-    List<ModelInvocation> models = new ArrayList<>();
-    for (UUID threadId : threadIds) {
-      models.addAll(
-          tx.queryList(
-              "select * from builtin_model_invocation where thread_id = ?",
-              PostgresqlBuiltinRows.MODEL_INVOCATION,
-              threadId));
-    }
+  public List<ModelInvocation> findModelInvocationsByThread(UUID threadId) {
+    List<ModelInvocation> models =
+        new ArrayList<>(
+            tx.queryList(
+                "select * from builtin_model_invocation where thread_id = ?",
+                PostgresqlBuiltinRows.MODEL_INVOCATION,
+                threadId));
     models.sort(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR));
-    List<WorkTarget> locked = new ArrayList<>(models.size());
-    for (ModelInvocation model : models) {
-      lockModelInvocation(model.id())
-          .ifPresent(value -> locked.add(new WorkTarget(WorkTargetType.MODEL, value.id())));
-    }
-    return List.copyOf(locked);
-  }
-
-  @Override
-  public void deleteLocked(List<WorkTarget> targets) {
-    for (WorkTarget target : targets) {
-      deleteModelInvocation(target.id());
-    }
+    return List.copyOf(models);
   }
 
   @Override

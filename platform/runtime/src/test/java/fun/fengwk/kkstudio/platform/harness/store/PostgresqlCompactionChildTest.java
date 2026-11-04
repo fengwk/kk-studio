@@ -71,6 +71,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -684,7 +685,7 @@ class PostgresqlCompactionChildTest {
             new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded")));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     assertEquals(ModelInvocationStatus.FAILED, findModel(childModelId).status());
-    assertFalse(hasWork(WorkTargetType.MODEL, childModelId));
+    assertFalse(hasWork(BuiltinWorkType.MODEL, childModelId));
 
     // 子结算失败回合：绝不因超限递归规划压缩子，也不残留 Work。
     processNext(child.childThreadId());
@@ -1453,7 +1454,7 @@ class PostgresqlCompactionChildTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.MODEL,
+                            BuiltinWorkType.MODEL,
                             UUID.randomUUID().toString(),
                             Duration.ofSeconds(30)))
             .orElseThrow();

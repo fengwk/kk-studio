@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
@@ -104,7 +105,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.executionExecutor = Objects.requireNonNull(executionExecutor, "executionExecutor");
     this.executions =
-        new ClaimedExecutionSupport<>(store, WorkTargetType.MODEL, config.leaseConfig());
+        new ClaimedExecutionSupport<>(store, BuiltinWorkType.MODEL, config.leaseConfig());
   }
 
   private static BuiltinStore requireBuiltinStore(HarnessStore store) {

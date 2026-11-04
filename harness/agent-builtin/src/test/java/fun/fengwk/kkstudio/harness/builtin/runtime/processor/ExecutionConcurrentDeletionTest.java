@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -33,7 +34,6 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -304,7 +304,7 @@ class ExecutionConcurrentDeletionTest {
                           List.of(),
                           ThreadProcessorTestSupport.NOW,
                           ThreadProcessorTestSupport.NOW));
-              tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+              tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
               return id;
             });
     ClaimedWork claim =
@@ -313,7 +313,7 @@ class ExecutionConcurrentDeletionTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                            BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
