@@ -2,26 +2,19 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import io.micrometer.context.ContextExecutorService;
 import io.micrometer.context.ContextSnapshotFactory;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileWorkHandler;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
-import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 import fun.fengwk.kkstudio.work.WorkDispatcherLifecycle;
 
-import java.time.Duration;
-import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,7 +32,6 @@ import java.util.concurrent.TimeUnit;
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod = "shutdown"} 交给 Spring 持有生命周期； dispatcher 使用
  * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
  */
-@Slf4j
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class IssueReconcileRuntimeConfiguration {
@@ -79,28 +71,21 @@ public class IssueReconcileRuntimeConfiguration {
 
   @Bean(name = "issueReconcileDispatcher")
   public BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher(
-      @Qualifier("issueWorkQueue") DurableWorkStore issueWorkQueue,
-      IssueReconciler reconciler,
+      IssueReconcileWorkHandler handler,
       IssueReconcileProperties properties,
       @Qualifier("issueReconcileDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueReconcileDispatcherWorkerExecutor") Executor workerExecutor,
-      @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
-      PlatformTransactionManager transactionManager) {
-    DurableWorkStore workQueue = Objects.requireNonNull(issueWorkQueue, "workQueue");
-    IssueReconciler reconcile = Objects.requireNonNull(reconciler, "reconciler");
-    IssueReconcileProperties reconcileProperties = Objects.requireNonNull(properties, "properties");
-    TransactionTemplate transactions =
-        new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
+      @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
     return new BoundedWorkDispatcher<>(
         DISPATCHER_NAME,
-        reconcileProperties.getMaxDispatchTasks(),
-        reconcileProperties.getPollInterval(),
+        properties.getMaxDispatchTasks(),
+        properties.getPollInterval(),
         drainExecutor,
         workerExecutor,
         pollScheduler,
-        () -> claimNext(workQueue, reconcileProperties),
-        claim -> runHandoff(reconcile, workQueue, transactions, reconcileProperties, claim),
-        claim -> returnClaim(workQueue, transactions, reconcileProperties, claim));
+        handler::claimNext,
+        handler::runHandoff,
+        handler::returnClaim);
   }
 
   @Bean(name = "issueReconcileRuntimeLifecycle")
@@ -108,74 +93,5 @@ public class IssueReconcileRuntimeConfiguration {
       HarnessRuntimeProperties properties,
       @Qualifier("issueReconcileDispatcher") BoundedWorkDispatcher<WorkClaim> dispatcher) {
     return new WorkDispatcherLifecycle(properties.isWorkersEnabled(), dispatcher);
-  }
-
-  private static WorkClaim claimNext(
-      DurableWorkStore workQueue, IssueReconcileProperties properties) {
-    return workQueue
-        .claimNext(UUID.randomUUID().toString(), properties.getLeaseDuration())
-        .orElse(null);
-  }
-
-  private static void runHandoff(
-      IssueReconciler reconciler,
-      DurableWorkStore workQueue,
-      TransactionTemplate transactions,
-      IssueReconcileProperties properties,
-      WorkClaim claim) {
-    try {
-      reconciler.reconcile(claim);
-    } catch (RuntimeException error) {
-      log.error(
-          "Reconciler failed for issueId={}; failure={}",
-          claim.targetId(),
-          error.getClass().getName());
-      tryRescheduleOnFailure(workQueue, transactions, properties, claim);
-    }
-  }
-
-  /** 归还 claim：延后 rejectionDelay 并交还 lease；归还失败仅留 lease 自愈。 */
-  private static void returnClaim(
-      DurableWorkStore workQueue,
-      TransactionTemplate transactions,
-      IssueReconcileProperties properties,
-      WorkClaim claim) {
-    try {
-      rescheduleOwned(workQueue, transactions, claim, properties.getRejectionDelay());
-    } catch (RuntimeException error) {
-      log.warn(
-          "Failed to return claim for issueId={}; failure={}",
-          claim.targetId(),
-          error.getClass().getName());
-    }
-  }
-
-  /** reconciler 失败重试：延后 retryDelay 后重检；失败则留 lease 过期。 */
-  private static void tryRescheduleOnFailure(
-      DurableWorkStore workQueue,
-      TransactionTemplate transactions,
-      IssueReconcileProperties properties,
-      WorkClaim claim) {
-    try {
-      rescheduleOwned(workQueue, transactions, claim, properties.getRetryDelay());
-    } catch (RuntimeException error) {
-      log.warn(
-          "Failed to reschedule work after reconciler failure for issueId={}; failure={}",
-          claim.targetId(),
-          error.getClass().getName());
-    }
-  }
-
-  private static void rescheduleOwned(
-      DurableWorkStore workQueue,
-      TransactionTemplate transactions,
-      WorkClaim claim,
-      Duration delay) {
-    transactions.executeWithoutResult(
-        status -> {
-          if (workQueue.lockClaimed(claim).isPresent()) {
-            workQueue.reschedule(claim, delay);
-          }
-        });
   }
 }
