@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
 import { EnvironmentInstallModal } from './EnvironmentInstallModal'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { copyTextToClipboard } from './clipboard'
 import { ApiError } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
@@ -13,7 +13,7 @@ import type {
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     getEnvironment: vi.fn(),
     getEnvironmentRuntime: vi.fn(),

@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
   },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { hasThreadNameConflict } from './thread-name-conflict'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
 const summary: HarnessThreadSummaryDTO = {

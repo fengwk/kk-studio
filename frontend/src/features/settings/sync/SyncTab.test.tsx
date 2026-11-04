@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   importConfig: vi.fn(),
 }))
 
-vi.mock('@/shared/api/config-sync-service', () => ({
+vi.mock('@/features/settings/config-sync-service', () => ({
   configSyncService: {
     getInventory: mocks.getInventory,
     exportConfig: mocks.exportConfig,

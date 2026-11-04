@@ -3,11 +3,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPage } from '@/features/catalog/mcp/McpServersPage'
-import { mcpServerService } from '@/shared/api/mcp-server-service'
+import { mcpServerService } from '@/features/catalog/mcp-server-service'
 import { ApiError } from '@/shared/api/client'
 import type { McpServerConfigDTO, McpServerDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/mcp-server-service', () => ({
+vi.mock('@/features/catalog/mcp-server-service', () => ({
   mcpServerService: {
     pageServers: vi.fn(),
     getServer: vi.fn(),

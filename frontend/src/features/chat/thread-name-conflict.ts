@@ -1,5 +1,5 @@
-import { normalizeThreadName } from '@/features/chat/thread-name'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
+import { normalizeThreadName } from '@/features/thread/thread-name'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
 /** Only execution roots and uncommitted drafts occupy the user Thread namespace. */

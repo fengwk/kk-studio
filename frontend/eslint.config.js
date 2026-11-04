@@ -5,11 +5,14 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import path from 'node:path'
 
-// Exact entry points currently shared by features; new dependencies require review.
+// Cross-feature entry points currently allowed; `entry/*` allows the whole feature-owned slice.
+// New dependencies require review.
 const featureDependencies = {
-  projects: ['chat/runtime/AgentPane'],
-  settings: ['chat/runtime/thread-notifications', 'extensions/PluginsTab', 'catalog/agent-capability-candidates'],
-  chat: ['catalog', 'environment/ide/ide-panel-context'],
+  projects: ['thread/runtime/AgentPane', 'environment/environment-service'],
+  settings: ['thread/runtime/thread-notifications', 'extensions/PluginsTab', 'catalog/agent-capability-candidates'],
+  chat: ['thread/*', 'catalog', 'environment/ide/ide-panel-context', 'environment/environment-service'],
+  thread: ['catalog', 'environment/ide/ide-panel-context'],
+  catalog: ['environment/environment-service'],
 }
 
 const featureBoundary = {
@@ -27,7 +30,12 @@ const featureBoundary = {
       if (!target) return
       const entry = path.relative(root, target).split(path.sep).join('/')
       if (entry.startsWith('../') || entry.split('/')[0] === owner) return
-      if (!(featureDependencies[owner] ?? []).includes(entry)) {
+      const allowed = featureDependencies[owner] ?? []
+      if (!allowed.some((dependency) =>
+        dependency.endsWith('/*')
+          ? entry.startsWith(dependency.slice(0, -1))
+          : entry === dependency,
+      )) {
         context.report({ node: source, messageId: 'forbidden', data: { entry } })
       }
     }
@@ -87,8 +95,8 @@ export default tseslint.config(
   },
   {
     files: [
-      'src/features/chat/runtime/thread-panel/**/*.{ts,tsx}',
-      'src/features/chat/runtime/thread-timeline-types.ts',
+      'src/features/thread/runtime/thread-panel/**/*.{ts,tsx}',
+      'src/features/thread/runtime/thread-timeline-types.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -100,7 +108,7 @@ export default tseslint.config(
               message: 'Portable thread presentation must receive data through props.',
             },
             {
-              name: '@/features/chat/runtime/thread-timeline',
+              name: '@/features/thread/runtime/thread-timeline',
               message: 'Import the pure thread-timeline-types contract instead of the Harness adapter barrel.',
             },
           ],
@@ -116,37 +124,20 @@ export default tseslint.config(
             },
             {
               group: [
-                // Backend/Harness API surface — including the raw client + service modules.
-                '@/shared/api',
-                '@/shared/api/*',
-                // Catch-all: any feature dependency (ignore treats `*` as matching `/`).
+                // Backend/Harness API surface: raw client, service and codec modules.
+                '@/shared/api/client',
+                '@/shared/api/*-service',
+                '@/shared/api/*-codec',
+                // Catch-all: feature presentation layers stay outside the portable panel.
                 // Allowed local presentation modules are restored by the leading `!` patterns.
                 '@/features/*',
-                '!@/features/chat',
-                // Allowed: local thread-panel + the pure thread-timeline-types contract.
-                '!@/features/chat/runtime/thread-panel',
-                '!@/features/chat/runtime/thread-panel/*',
-                '!@/features/chat/runtime/thread-timeline-types',
+                '!@/features/thread',
+                '!@/features/thread/*',
+                // Allowed: read-only model/execution label formatting.
+                '!@/features/catalog',
               ],
               message:
-                'Portable thread panel must consume only thread-timeline-types and local thread-panel modules; API, query, controller, realtime, and Entry projection concerns stay outside.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ['src/features/chat/runtime/thread-timeline-types.ts'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['*'],
-              message:
-                'thread-timeline-types is the portable contract root and must remain import-free.',
+                'Portable thread panel must not depend on API clients, query infrastructure, or other product features; pass data through props.',
             },
           ],
         },

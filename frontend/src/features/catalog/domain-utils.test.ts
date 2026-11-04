@@ -7,10 +7,6 @@ import {
   formatCatalogSupportIssue,
   resourceTitle,
 } from '@/features/catalog/catalog-utils'
-import {
-  filterChats,
-  formatBackendDate,
-} from '@/features/chat/chat-utils'
 import { filterEnvironments } from '@/features/environment/environment-utils'
 import {
   includesSearch,
@@ -36,7 +32,6 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-  ChatDTO,
   EnvironmentCardDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -389,43 +384,6 @@ describe('AI domain utilities', () => {
       'platform',
       'tool-e2e',
     ])
-    expect(
-      filterChats(
-        [
-          {
-            id: '2',
-            title: 'beta',
-            agentName: 'missing',
-            environmentName: null,
-            yoloEnabled: false,
-            version: '1',
-            createTime: 1782000000,
-            updateTime: 1782000000,
-          } satisfies ChatDTO,
-          {
-            id: '1',
-            title: 'alpha',
-            agentName: 'missing',
-            environmentName: null,
-            yoloEnabled: false,
-            version: '1',
-            createTime: 1782086400,
-            updateTime: 1781913600,
-          } satisfies ChatDTO,
-        ],
-        '',
-      ).map((item) => item.title),
-    ).toEqual(['alpha', 'beta'])
-      expect(filterChats([{
-        id: '1',
-        title: 'alpha',
-        agentName: 'missing',
-        environmentName: null,
-        yoloEnabled: false,
-        version: '1',
-        createTime: 0,
-        updateTime: 0,
-      } satisfies ChatDTO], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -433,7 +391,6 @@ describe('AI domain utilities', () => {
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
-    expect(formatBackendDate(Number.NaN)).toBe('-')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */

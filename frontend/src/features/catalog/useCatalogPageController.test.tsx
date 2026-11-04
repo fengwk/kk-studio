@@ -7,7 +7,7 @@ import {
   type CatalogPageScope,
 } from '@/features/catalog/useCatalogPageController'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
@@ -32,7 +32,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     deleteAgent: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),

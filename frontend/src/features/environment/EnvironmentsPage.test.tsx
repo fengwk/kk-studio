@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { ApiError } from '@/shared/api/client'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -14,7 +14,7 @@ import type {
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironment: vi.fn(),

@@ -3,11 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { ApiError } from '@/shared/api/client'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/plugins-service', () => ({
+vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },
 }))
 

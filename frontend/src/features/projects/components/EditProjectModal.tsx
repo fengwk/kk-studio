@@ -12,7 +12,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ApiError, isConflictError } from '@/shared/api/client'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'

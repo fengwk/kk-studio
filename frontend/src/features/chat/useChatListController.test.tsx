@@ -4,10 +4,10 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/chat/useChatListController'
-import { chatService } from '@/shared/api/chat-service'
+import { chatService } from '@/features/chat/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     listChats: vi.fn(async () => []),
     createChat: vi.fn(async () => ({

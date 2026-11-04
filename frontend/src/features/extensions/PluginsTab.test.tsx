@@ -3,12 +3,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { PluginConnectionCheckDTO, PluginDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/plugins-service', () => ({
+vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: {
     listPlugins: vi.fn(),
     getPlugin: vi.fn(),

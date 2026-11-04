@@ -9,8 +9,8 @@ import { ProjectsInvalidationBridge } from '@/features/projects/extensions/proje
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
 import { IssueDetailModal } from '@/features/projects/components/IssueDetailModal'
-import { ThreadLink } from '@/features/chat/runtime/ThreadLink'
-import '@/features/chat/runtime/thread-panel/messages/tool-card.css'
+import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 
 setLocale('zh-CN')
 const client = new QueryClient({

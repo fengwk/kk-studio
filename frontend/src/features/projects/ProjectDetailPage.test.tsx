@@ -25,7 +25,7 @@ vi.mock('@/shared/app-events', () => ({
 
 let capturedPaneProps: Record<string, unknown> | undefined
 
-vi.mock('@/features/chat/runtime/AgentPane', () => ({
+vi.mock('@/features/thread/runtime/AgentPane', () => ({
   AgentPane: (props: Record<string, unknown>) => {
     capturedPaneProps = props
     return (

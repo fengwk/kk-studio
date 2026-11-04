@@ -11,7 +11,7 @@ import type {
   AgentProviderDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(async () => []),
     getEnvironmentRuntime: vi.fn(),
