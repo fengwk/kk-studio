@@ -125,7 +125,8 @@ public final class SkillManifestScanner {
     return List.copyOf(entries);
   }
 
-  static SkillManifestEntry parseFrontmatter(String dirName, String content) {
+  /** 解析技能文件的 YAML frontmatter；调用方负责校验目录名和输入大小。 */
+  public static SkillManifestEntry parseFrontmatter(String dirName, String content) {
     if (content == null) {
       throw new SkillGitException("Skill '" + dirName + "/SKILL.md' content is null");
     }
