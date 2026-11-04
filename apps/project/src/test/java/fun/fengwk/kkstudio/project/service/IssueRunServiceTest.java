@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.platform.IssueRunTask;
 import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
@@ -128,15 +127,7 @@ class IssueRunServiceTest {
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
     when(issueRunRepository.lockActiveByIssueId(ISSUE_ID)).thenReturn(null);
     when(stageBudgetRepository.get(ISSUE_ID, "DESIGN"))
-        .thenReturn(
-            IssueStageBudgetRow.builder()
-                .issueId(ISSUE_ID)
-                .state("DESIGN")
-                .maxRuns(5)
-                .budgetAfterOrdinal(0)
-                .build());
-    when(issueRunRepository.countByIssueIdAndStateAfterOrdinal(ISSUE_ID, "DESIGN", 0))
-        .thenReturn(0L);
+        .thenReturn(new StageBudgetView("DESIGN", 5, 0, 0, 5));
     when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, "worker")).thenReturn(null);
     when(agentBranchSettings.materialize("worker")).thenReturn(settings);
     when(rootEntry.id()).thenReturn(rootEntryId);
@@ -229,7 +220,7 @@ class IssueRunServiceTest {
     ProjectValidationException error =
         assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(error.getMessage().contains("no enabled agent"));
-    verify(stageBudgetRepository, never()).insert(any());
+    verify(stageBudgetRepository, never()).insert(any(), any());
     verify(threadExecutions, never()).submitRunTask(any());
   }
 

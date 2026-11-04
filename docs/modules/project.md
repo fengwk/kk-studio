@@ -121,7 +121,7 @@ Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一�
 恢复已接受 Run、工具循环、协议续生成和问答等待沿用原次数。更换 Agent、返工或重开
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由明确授权或重置操作维护。
 
-[`IssueStageBudget`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStageBudget.java)
+[`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
 承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
 `nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
 Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。

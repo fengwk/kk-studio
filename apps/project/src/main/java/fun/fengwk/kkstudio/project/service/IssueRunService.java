@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPay
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -41,7 +40,6 @@ import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.platform.IssueRunTask;
@@ -164,25 +162,14 @@ public class IssueRunService {
       throw new ProjectValidationException("issue_run", "Issue already has an active run");
     }
 
-    IssueStageBudgetRow budgetRow = stageBudgetRepository.get(issueId, issue.getState());
+    StageBudgetView budgetRow = stageBudgetRepository.get(issueId, issue.getState());
     if (budgetRow == null) {
-      IssueStageBudget authorized =
-          IssueStageBudget.authorize(workflow, stateCode, stage.maxRuns());
-      budgetRow =
-          IssueStageBudgetRow.builder()
-              .issueId(issueId)
-              .state(issue.getState())
-              .maxRuns(authorized.maxRuns())
-              .budgetAfterOrdinal(authorized.budgetAfterOrdinal())
-              .build();
-      if (!stageBudgetRepository.insert(budgetRow)) {
+      budgetRow = StageBudgetView.authorize(workflow, stateCode, stage.maxRuns());
+      if (!stageBudgetRepository.insert(issueId, budgetRow)) {
         throw new IllegalStateException("failed to authorize initial stage budget");
       }
     }
-    long used =
-        issueRunRepository.countByIssueIdAndStateAfterOrdinal(
-            issueId, issue.getState(), budgetRow.getBudgetAfterOrdinal());
-    if (used >= budgetRow.getMaxRuns()) {
+    if (budgetRow.usedRuns() >= budgetRow.maxRuns()) {
       throw new ProjectValidationException(
           "issue_run", "Stage budget is exhausted; a human must authorize more runs");
     }
