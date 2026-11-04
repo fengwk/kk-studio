@@ -116,21 +116,6 @@ public class StudioIssueController {
     return ApiResponse.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
   }
 
-  @GetMapping("/api/issues/{issueId}/activities")
-  public ApiResponse<List<IssueActivityDTO>> listActivities(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestParam(value = "afterSequence", required = false, defaultValue = "0")
-          String afterSequenceStr,
-      @RequestParam(value = "limit", required = false, defaultValue = "50") String limitStr) {
-    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
-    long afterSequence = parseActivityCursor(afterSequenceStr);
-    int activityLimit =
-        RequestParameters.limit(limitStr, DEFAULT_ACTIVITY_LIMIT, MAX_ACTIVITY_LIMIT);
-    List<IssueActivity> activities =
-        issueEditingService.listActivities(issueId, afterSequence, activityLimit);
-    return ApiResponse.ok(activities.stream().map(mapper::toDto).toList());
-  }
-
   @PutMapping("/api/issues/{issueId}")
   public ApiResponse<IssueDTO> updateIssue(
       @PathVariable("issueId") String issueIdStr, @RequestBody UpdateIssueRequestDTO request) {

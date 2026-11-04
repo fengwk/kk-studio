@@ -2,7 +2,6 @@ import { apiClient, type HttpClient } from '@/shared/api/client'
 import {
   decodeIssue,
   decodeIssueActivity,
-  decodeIssueActivityList,
   decodeIssueDetail,
   decodeIssueEvidence,
   decodeIssueEvidenceList,
@@ -150,23 +149,6 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
         },
       })
       return decodeIssueDetail(raw)
-    },
-
-    listActivities: async (
-      issueId: string,
-      afterSequence?: string,
-      limit?: number,
-    ): Promise<IssueActivityDTO[]> => {
-      const raw = await client.get<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/activities`,
-        {
-          params: {
-            ...(afterSequence ? { afterSequence } : {}),
-            ...(typeof limit === 'number' ? { limit } : {}),
-          },
-        },
-      )
-      return decodeIssueActivityList(raw)
     },
 
     updateIssue: async (issueId: string, request: UpdateIssueRequestDTO): Promise<IssueDTO> => {

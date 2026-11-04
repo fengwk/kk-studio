@@ -213,7 +213,18 @@ class StudioIssueControllerTest {
   }
 
   @Test
-  void testListActivities() throws Exception {
+  void issueDetailIncludesActivityWindow() throws Exception {
+    Issue issue =
+        Issue.builder()
+            .id(issueId)
+            .projectId(projectId)
+            .number(1L)
+            .title("Task")
+            .state("INIT")
+            .version(0L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
     IssueActivity act =
         IssueActivity.builder()
             .issueId(issueId)
@@ -223,13 +234,18 @@ class StudioIssueControllerTest {
             .body("Hello")
             .createdAt(now)
             .build();
-    when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of(act));
+    when(issueEditingService.getIssue(issueId)).thenReturn(issue);
+    when(issueEditingService.listActivities(issueId, 0L, 1)).thenReturn(List.of(act));
 
     mockMvc
-        .perform(get("/api/issues/" + issueId + "/activities"))
+        .perform(get("/api/issues/" + issueId).param("limit", "1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].sequence").value("1"))
-        .andExpect(jsonPath("$.data[0].body").value("Hello"));
+        .andExpect(jsonPath("$.data.activities[0].sequence").value("1"))
+        .andExpect(jsonPath("$.data.activities[0].body").value("Hello"))
+        .andExpect(jsonPath("$.data.nextActivityCursor").value("1"));
+    mockMvc
+        .perform(get("/api/issues/" + issueId + "/activities"))
+        .andExpect(status().isMethodNotAllowed());
   }
 
   @Test

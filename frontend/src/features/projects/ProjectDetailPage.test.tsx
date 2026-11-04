@@ -188,7 +188,6 @@ describe('ProjectDetailPage', () => {
     stopIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     appendIssueActivity: vi.fn(),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn(),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn().mockResolvedValue(undefined),

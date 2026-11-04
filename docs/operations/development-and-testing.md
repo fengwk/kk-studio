@@ -398,7 +398,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 由 flag 组合和 case 的 `requires` 共同决定。
 
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
-返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
+返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long；
+Issue 活动流通过详情接口的 `afterSequence`、`limit` 和 `nextActivityCursor` 验证有界分页。
 
 Thread 快照增量读取属于免费 L1：`thread_snapshot.incremental_read` 用缺失 Agent 的回合快速收敛，不调用模型，
 验证非法 `afterEntryId` 返回 400、祖先游标只返回其后的 Entry、游标即 head 时为空增量、非祖先游标回退完整历史。

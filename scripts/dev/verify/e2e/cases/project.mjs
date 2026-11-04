@@ -438,11 +438,14 @@ registerCase({
         (
           await ctx.call(
             'GET',
-            `/api/issues/${issue.id}/activities?afterSequence=${encodeURIComponent(comment.sequence)}&limit=50`,
+            `/api/issues/${issue.id}?afterSequence=${encodeURIComponent(comment.sequence)}&limit=50`,
           )
         ).json,
       )
-      assert(Array.isArray(afterComment) && afterComment.length === 0, JSON.stringify(afterComment))
+      assert(
+        Array.isArray(afterComment.activities) && afterComment.activities.length === 0,
+        JSON.stringify(afterComment),
+      )
 
       // 定向指示必须投递给明确的当前 Run：没有活动 Run 时明确拒绝，绝不构造未来阶段队列。
       await expectHttpError(
@@ -934,11 +937,11 @@ async function readActivityPages(ctx, issueId, pageSize = 2) {
   }
 
   const flat = envelopeData(
-    (await ctx.call('GET', `/api/issues/${issueId}/activities?limit=200`)).json,
+    (await ctx.call('GET', `/api/issues/${issueId}?limit=200`)).json,
   )
-  assert(Array.isArray(flat), JSON.stringify(flat))
+  assert(Array.isArray(flat.activities), JSON.stringify(flat))
   assert(
-    flat.map((activity) => activity.sequence).join(',')
+    flat.activities.map((activity) => activity.sequence).join(',')
       === paged.map((activity) => activity.sequence).join(','),
     JSON.stringify({ flat, paged }),
   )

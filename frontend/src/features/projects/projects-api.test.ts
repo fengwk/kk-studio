@@ -167,8 +167,8 @@ describe('projectsApi', () => {
     expect(res.id).toBe(mockIssue.id)
   })
 
-  it('getIssue and listActivities should support pagination', async () => {
-    // 测试意图：验证 Issue 详情和活动列表查询支持游标和分页
+  it('getIssue should support activity pagination', async () => {
+    // 测试意图：验证 Issue 详情查询支持活动游标和分页
     vi.mocked(mockClient.get).mockResolvedValueOnce({
       issue: mockIssue,
       activities: [],
@@ -184,11 +184,6 @@ describe('projectsApi', () => {
       params: { afterSequence: '10', limit: 20 },
     })
 
-    vi.mocked(mockClient.get).mockResolvedValueOnce([])
-    await api.listActivities(mockIssue.id, '5', 50)
-    expect(mockClient.get).toHaveBeenCalledWith(`/issues/${mockIssue.id}/activities`, {
-      params: { afterSequence: '5', limit: 50 },
-    })
   })
 
   it('updateIssue should put to /issues/:id', async () => {

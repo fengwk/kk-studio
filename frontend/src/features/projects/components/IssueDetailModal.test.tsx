@@ -132,7 +132,6 @@ describe('IssueDetailModal', () => {
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     appendIssueActivity: vi.fn().mockResolvedValue(mockActiveIssueDetail.activities[0]),
-    listActivities: vi.fn().mockResolvedValue([]),
     addIssueEvidence: vi.fn().mockResolvedValue({
       issueId,
       blobId: 'blob-1',
