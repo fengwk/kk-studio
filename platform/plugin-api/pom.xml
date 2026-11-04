@@ -18,6 +18,7 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-common</artifactId>
         </dependency>
+        <!-- 实例的 Harness 域贡献直接使用 Contributor 契约。 -->
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-runtime</artifactId>
@@ -51,8 +52,6 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.plugin.*</include>
-                                        <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding</include>
-                                        <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun</include>
                                     </includes>
                                     <limits>
                                         <limit>

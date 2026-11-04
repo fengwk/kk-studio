@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.web.events.InvalidationEventSource.Event;
 
 import java.util.ArrayList;

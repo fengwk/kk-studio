@@ -86,7 +86,7 @@ class WebModuleArchitectureTest {
       List.of(
           "kk-studio-platform-plugin-api",
           "kk-studio-platform-runtime",
-          "kk-studio-canvas-infra",
+          "kk-studio-canvas-runtime",
           "kk-studio-harness-environment",
           "kk-studio-harness-runtime",
           "kk-studio-harness-agent-builtin",

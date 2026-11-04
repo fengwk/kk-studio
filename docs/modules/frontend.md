@@ -55,8 +55,10 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 [`contracts`](../../frontend/src/shared/api/contracts) 只保留前端细化：Java 侧带 `type` 字段的扁平类
 （Harness 命令、交互、上传）写成同名判别联合，前端依赖的封闭取值集合写成常量与类型守卫；
-service 按 Agent、Chat、Harness、Environment、MCP Server、Interaction、Plugins、Studio、Storage、System Settings 与配置同步分组，
-Project codec 在 [Projects feature](../../frontend/src/features/projects) 就近维护。
+service 按 Agent、Chat、Harness、Environment、MCP Server、Interaction、Plugins、Storage、System Settings 与配置同步分组；
+产品自己的接口客户端就近维护：[Projects codec](../../frontend/src/features/projects) 与
+[Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts)，
+Canvas wire codec 仍由 shared 的 [`studio-codec.ts`](../../frontend/src/shared/api/studio-codec.ts) 提供。
 HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
 codec 校验 canonical UUID、十进字符串、枚举、可空性和嵌套结构；
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。

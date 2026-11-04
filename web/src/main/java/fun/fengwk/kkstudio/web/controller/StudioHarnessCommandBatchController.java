@@ -12,11 +12,11 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 

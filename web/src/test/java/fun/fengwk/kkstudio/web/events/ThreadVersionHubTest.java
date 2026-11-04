@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 
 import java.util.ArrayList;
 import java.util.List;

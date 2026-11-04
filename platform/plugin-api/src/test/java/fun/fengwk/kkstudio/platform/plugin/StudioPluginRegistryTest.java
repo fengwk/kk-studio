@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 
@@ -53,7 +52,7 @@ class StudioPluginRegistryTest {
           }
 
           @Override
-          public List<CanvasFunctionAdapter> canvasAdapters() {
+          public <T> List<T> contributions(Class<T> type) {
             return List.of();
           }
 

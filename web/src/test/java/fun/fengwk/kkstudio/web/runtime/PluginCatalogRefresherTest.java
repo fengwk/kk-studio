@@ -258,7 +258,7 @@ class PluginCatalogRefresherTest {
               throw new AssertionError("no plugin is installed");
             },
             List.of(),
-            List.of());
+            snapshot -> new Object());
     repository.resetReads();
     return runtime;
   }

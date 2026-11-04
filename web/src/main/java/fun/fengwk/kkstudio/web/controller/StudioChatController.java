@@ -17,12 +17,12 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.chat.ChatIds;
 import fun.fengwk.kkstudio.platform.chat.ChatService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 import java.util.UUID;

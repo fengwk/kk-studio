@@ -45,6 +45,8 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
 
 ## Harness 持久化与调度
 
@@ -474,12 +476,15 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，
 通过 `AutoConfiguration.imports` 创建 bean。`StudioPluginRegistry` 冻结唯一 pluginId；
 `StudioPlugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
-`PluginInstance`，按需提供独立的 Harness Contributor / Canvas Adapter，两域可为空。
+`PluginInstance`：Harness 贡献由 `harnessContributors()` 直接声明，其它产品域贡献按类型读取
+（`contributions(CanvasFunctionAdapter.class)`），可以都为空。
 安装集合随发行物构建确定；`StudioPlugin`、安装目录以及凭据与资源端口的纯契约见
 [Platform Plugin API](platform-plugin-api.md)。
 
-`PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
-任一配置、贡献或目录失败时释放全部已建实例，错误只携带阶段与 pluginId。Web 从同一快照提供两域 Catalog。
+`PluginCatalogSnapshot` 逐个配置实例，合并内置 Harness 贡献，并在返回前验证完整 Harness 目录；
+平台自身不认识任何产品目录，产品目录视图由产品模块提供的 `Function<PluginCatalogSnapshot, ?>`
+在同一个构建窗口里冻结一次，平台只按视图类型保存与读取。任一配置、Harness 贡献或产品目录校验失败时
+先释放全部已建实例，再以只携带阶段与 pluginId 的错误失败，候选快照因此不会发布。Web 从同一快照提供 Harness 与产品目录。
 
 ### Plugin 配置存储
 
@@ -501,7 +506,9 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
-Canvas 应用经自己的租用适配消费同一份快照里的 Function 目录，冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
+产品目录投影由持有该目录的应用提供：Canvas 在每次快照构建时把内置 adapter 与插件贡献合并校验成唯一目录并冻结，
+再经自己的租用适配提供给执行路径，插件详情里的 `canvasFunctionNames` 也由同一冻结视图投影，因此管理面与执行使用同一份事实；
+冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
 
 ### 新增 Plugin
 

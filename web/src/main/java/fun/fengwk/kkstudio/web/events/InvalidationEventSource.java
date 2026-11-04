@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
+import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
+
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;

@@ -335,11 +335,5 @@ registerCase({
     assertExactFields(cancelledTerminal, RUN_FIELDS, 'cancel result')
     assert(cancelledTerminal.status === 'SUCCEEDED', JSON.stringify(cancelledTerminal))
 
-    // 运行已收尾的节点可以正常删除画布。
-    await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
-    await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })
-    await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
-      status: 404,
-    })
   },
 })

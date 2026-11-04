@@ -43,7 +43,7 @@ CURRENT_ITERATION_SIGNAL=
 
 TARGET_MODULES=(
   web
-  apps/canvas/infra
+  apps/canvas/runtime
   harness/infra
   platform/runtime
 )
@@ -125,7 +125,7 @@ target_module() {
       printf 'web\n'
       ;;
     fun.fengwk.kkstudio.canvas.*)
-      printf 'apps/canvas/infra\n'
+      printf 'apps/canvas/runtime\n'
       ;;
     fun.fengwk.kkstudio.harness.*)
       printf 'harness/infra\n'
@@ -144,7 +144,7 @@ target_area() {
     web)
       printf 'Web\n'
       ;;
-    apps/canvas/infra)
+    apps/canvas/runtime)
       printf 'Canvas\n'
       ;;
     harness/infra)
@@ -895,7 +895,7 @@ MAVEN_TEST_FILTER=$(IFS=,; printf '%s' "${TARGET_FQCNS[*]}")
 MAVEN_ARGS=(
   --batch-mode
   -pl
-  web,apps/canvas/infra,harness/infra,platform/runtime
+  web,apps/canvas/runtime,harness/infra,platform/runtime
   -am
   "-Dtest=$MAVEN_TEST_FILTER"
   -Dsurefire.failIfNoSpecifiedTests=false

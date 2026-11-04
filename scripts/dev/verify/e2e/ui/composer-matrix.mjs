@@ -35,13 +35,13 @@ const COMPOSER_DRAFT_STORAGE_PREFIX = 'kkstudio.ai.composer-draft:'
 const TINY_IMAGE = readFileSync(
   path.join(
     REPO_ROOT,
-    'apps/canvas/infra/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.png',
+    'apps/canvas/runtime/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.png',
   ),
 )
 const TINY_VIDEO = readFileSync(
   path.join(
     REPO_ROOT,
-    'apps/canvas/infra/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.mp4',
+    'apps/canvas/runtime/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.mp4',
   ),
 )
 

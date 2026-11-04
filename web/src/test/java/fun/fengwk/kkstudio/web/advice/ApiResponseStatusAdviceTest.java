@@ -14,7 +14,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.ServerHttpResponse;
 
-import fun.fengwk.kkstudio.web.api.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.lang.reflect.Method;
 import java.util.Map;

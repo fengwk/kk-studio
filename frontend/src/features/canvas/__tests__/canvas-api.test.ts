@@ -1,0 +1,235 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  cancelCanvasFunctionRun,
+  createCanvas,
+  getCanvas,
+  getCanvasFunctionRun,
+  getCanvasResourceOriginalUrl,
+  getCanvasResourcePreviewUrl,
+  listCanvasFunctions,
+  listCanvases,
+  postCanvasCommands,
+  startCanvasFunctionRun,
+} from '@/features/canvas/canvas-api'
+import { ApiError } from '@/shared/api/client'
+
+const ID: string = '11111111-1111-4111-8111-111111111111'
+const CANVAS_ID: string = '22222222-2222-4222-8222-222222222222'
+const NODE_ID: string = '33333333-3333-4333-8333-333333333333'
+const REQUEST_ID: string = '55555555-5555-4555-8555-555555555555'
+/** 目录版本夹具：start 必须回传同形状 expectedVersion，cancel 只发 requestId。 */
+const FUNCTION_VERSION = { definitionFingerprint: 'e'.repeat(64) }
+
+const fetchMock = vi.fn<typeof fetch>()
+
+beforeEach(() => {
+  fetchMock.mockReset()
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+function envelope(data: unknown, overrides: Record<string, unknown> = {}) {
+  return {
+    status: 200,
+    code: 'OK',
+    message: '',
+    data,
+    ...overrides,
+  }
+}
+
+function response(data: unknown, overrides: { ok?: boolean; status?: number } = {}) {
+  return new Response(JSON.stringify(data), {
+    status: overrides.status ?? (overrides.ok === false ? 500 : 200),
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function documentPayload() {
+  return {
+    id: CANVAS_ID,
+    title: 'Canvas',
+    revision: '3',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-02T00:00:00Z',
+  }
+}
+
+function snapshotPayload() {
+  return {
+    document: documentPayload(),
+    nodes: [],
+    groups: [],
+    references: [],
+  }
+}
+
+function patchPayload() {
+  return {
+    revision: '4',
+    groups: [],
+    nodes: [],
+  }
+}
+
+describe('canvas api transport adapter', () => {
+  /**
+   * 测试意图：验证 canvas-api 导出的所有 Canvas 请求均能正常通过 fetch 传输，
+   * 包含画布生命周期、节点命令批应用、资源获取、模型列表、Function Run 生命周期。
+   */
+  it('exercises every exported canvas request through fetch', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(envelope([documentPayload()])))
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+      .mockResolvedValueOnce(response(envelope(snapshotPayload())))
+      .mockResolvedValueOnce(response(envelope(patchPayload())))
+      .mockResolvedValueOnce(response(envelope([{
+        version: FUNCTION_VERSION,
+        name: 'image',
+        description: 'Image',
+        outputs: [{ kind: 'IMAGE', name: null }],
+        argsSchema: { type: 'object' },
+        referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
+        available: true,
+        unavailableReason: null,
+      }])))
+      .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 'later' })))
+      .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 'later' })))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'RUNNING', stage: 'start', error: null, updatedAt: 'now' })))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'CANCELLED', stage: 'cancelled', error: 'stop', updatedAt: 'now' })))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'SUCCEEDED', stage: 'done', error: null, updatedAt: 'now' })))
+
+    expect(await listCanvases()).toHaveLength(1)
+    expect((await createCanvas()).title).toBe('Canvas')
+    expect((await createCanvas('Named')).title).toBe('Canvas')
+    expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
+    expect((await postCanvasCommands(CANVAS_ID, {
+      idempotencyKey: ID,
+      commands: [],
+    })).revision).toBe('4')
+    expect(await listCanvasFunctions()).toHaveLength(1)
+    expect((await getCanvasResourceOriginalUrl(CANVAS_ID, ID)).method).toBe('GET')
+    expect((await getCanvasResourcePreviewUrl(CANVAS_ID, ID)).url).toContain('preview')
+    expect((await startCanvasFunctionRun(CANVAS_ID, NODE_ID, {
+      requestId: REQUEST_ID,
+      expectedVersion: FUNCTION_VERSION,
+    })).status).toBe('RUNNING')
+    expect((await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
+      .toBe('CANCELLED')
+    expect((await getCanvasFunctionRun(CANVAS_ID, NODE_ID)).status).toBe('SUCCEEDED')
+    expect(fetchMock).toHaveBeenCalledTimes(11)
+  })
+
+  /**
+   * 测试意图：验证发出的 HTTP 路径、方法、Body 与 AbortSignal，
+   * 特别保证 Canvas function run 使用单例语义路径 /function-run 与 /cancel。
+   */
+  it('issues the expected endpoints, methods, bodies, and signals', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+      .mockResolvedValueOnce(response(envelope(snapshotPayload())))
+      .mockResolvedValueOnce(response(envelope(patchPayload())))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'RUNNING' })))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'SUCCEEDED' })))
+      .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'CANCELLED' })))
+
+    const controller = new AbortController()
+    await createCanvas('Named', { signal: controller.signal })
+    await getCanvas(CANVAS_ID, { signal: controller.signal })
+    await postCanvasCommands(CANVAS_ID, { idempotencyKey: ID, commands: [] }, { signal: controller.signal })
+    await startCanvasFunctionRun(CANVAS_ID, NODE_ID, {
+      requestId: REQUEST_ID,
+      expectedVersion: FUNCTION_VERSION,
+    }, { signal: controller.signal })
+    await getCanvasFunctionRun(CANVAS_ID, NODE_ID, { signal: controller.signal })
+    await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      return {
+        url,
+        method: init?.method ?? 'GET',
+        body: init?.body,
+        signal: init?.signal,
+      }
+    })
+    expect(calls[0]).toMatchObject({ url: '/api/canvases', method: 'POST', body: JSON.stringify({ title: 'Named' }) })
+    expect(calls[1]).toMatchObject({ url: `/api/canvases/${CANVAS_ID}`, method: 'GET' })
+    expect(calls[2]).toMatchObject({
+      url: `/api/canvases/${CANVAS_ID}/commands`,
+      method: 'POST',
+      body: JSON.stringify({ idempotencyKey: ID, commands: [] }),
+    })
+    expect(calls[3]).toMatchObject({
+      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
+      method: 'POST',
+      body: JSON.stringify({ requestId: REQUEST_ID, expectedVersion: FUNCTION_VERSION }),
+    })
+    expect(calls[4]).toMatchObject({
+      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
+      method: 'GET',
+    })
+    expect(calls[5]).toMatchObject({
+      url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/cancel`,
+      method: 'POST',
+      body: JSON.stringify({ requestId: REQUEST_ID }),
+    })
+    for (const call of calls) {
+      expect(call.signal).toBe(controller.signal)
+    }
+  })
+
+  it('sends Accept/Accept-Language headers and Content-Type only when a body exists', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response(envelope([documentPayload()])))
+      .mockResolvedValueOnce(response(envelope(documentPayload())))
+
+    await listCanvases()
+    await createCanvas('Named')
+
+    const getInit = fetchMock.mock.calls[0]?.[1]
+    expect(getInit?.headers).toEqual({ Accept: 'application/json', 'Accept-Language': 'zh-CN' })
+    expect(getInit?.body).toBeUndefined()
+
+    const postInit = fetchMock.mock.calls[1]?.[1]
+    expect(postInit?.headers).toEqual({
+      Accept: 'application/json',
+      'Accept-Language': 'zh-CN',
+      'Content-Type': 'application/json',
+    })
+  })
+
+  it('handles transport, response envelope, and HTTP failures without weakening errors', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network'))
+    await expect(listCanvases()).rejects.toThrow('network')
+
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+    await expect(listCanvases()).rejects.toThrow('aborted')
+
+    fetchMock.mockRejectedValueOnce('unknown transport')
+    await expect(listCanvases()).rejects.toThrow('请求失败')
+
+    fetchMock.mockResolvedValueOnce(response('not-json', { status: 502 }))
+    await expect(listCanvases()).rejects.toThrow('invalid Result envelope')
+
+    fetchMock.mockResolvedValueOnce(new Response('{'))
+    await expect(listCanvases()).rejects.toThrow('invalid JSON')
+
+    fetchMock.mockResolvedValueOnce(response(envelope([], { status: 400, code: 'BAD', message: 'bad request' }), { ok: false, status: 400 }))
+    await expect(listCanvases()).rejects.toMatchObject({ status: 400, code: 'BAD' })
+
+    fetchMock.mockResolvedValueOnce(response(envelope([], { status: 400, code: 'BAD', message: '' })))
+    await expect(listCanvases()).rejects.toThrow('请求失败')
+  })
+
+  it('fails closed when the envelope is malformed or missing its data field', async () => {
+    fetchMock.mockResolvedValueOnce(response({ status: 200, code: 'OK', message: '' }))
+    await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
+
+    fetchMock.mockResolvedValueOnce(response(envelope(null)))
+    await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
+  })
+})

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 
 import java.util.ArrayList;
 import java.util.List;

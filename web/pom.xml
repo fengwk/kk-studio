@@ -66,11 +66,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-infra</artifactId>
+            <artifactId>kk-studio-canvas-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-core</artifactId>
+            <artifactId>kk-studio-canvas-spi</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
@@ -262,19 +262,6 @@
                         </goals>
                         <configuration>
                             <rules>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.web.events.SubscriptionFanOut</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>

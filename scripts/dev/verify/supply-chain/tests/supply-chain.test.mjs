@@ -39,7 +39,7 @@ function repositoryRoot() {
 const REPOSITORY_ROOT = repositoryRoot()
 const SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/supply-chain/run.sh')
 const POM = path.join(REPOSITORY_ROOT, 'pom.xml')
-const CANVAS_INFRA_POM = path.join(REPOSITORY_ROOT, 'apps/canvas/infra/pom.xml')
+const CANVAS_RUNTIME_POM = path.join(REPOSITORY_ROOT, 'apps/canvas/runtime/pom.xml')
 const PLATFORM_POM = path.join(REPOSITORY_ROOT, 'platform/runtime/pom.xml')
 const WEB_POM = path.join(REPOSITORY_ROOT, 'web/pom.xml')
 const SUPPRESSIONS = path.join(
@@ -398,7 +398,7 @@ test('centralizes security revisions without downgrading the Boot platform', () 
 test('locks tool versions, policy thresholds, and secret indirection', () => {
     // Intent: policy changes must be reviewable as a small static diff and keys must stay out of POM/CLI text.
     const pom = readFileSync(POM, 'utf8')
-    const canvasInfraPom = readFileSync(CANVAS_INFRA_POM, 'utf8')
+    const canvasRuntimePom = readFileSync(CANVAS_RUNTIME_POM, 'utf8')
     const platformPom = readFileSync(PLATFORM_POM, 'utf8')
     const webPom = readFileSync(WEB_POM, 'utf8')
     const script = readFileSync(SCRIPT, 'utf8')
@@ -450,19 +450,19 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.doesNotMatch(pom, /<parent>/)
     assert.doesNotMatch(pom, /convention4j-parent/)
     assert.doesNotMatch(pom, /auto-mapper-processor|mapstruct-processor|auto-service/)
-    assert.doesNotMatch(canvasInfraPom, /spring-boot-starter-aop/)
+    assert.doesNotMatch(canvasRuntimePom, /spring-boot-starter-aop/)
     assert.doesNotMatch(platformPom, /spring-boot-starter-aop/)
     assert.doesNotMatch(webPom, /spring-boot-starter-aop/)
-    assert.doesNotMatch(canvasInfraPom, /spring-boot-starter-aspectj/)
+    assert.doesNotMatch(canvasRuntimePom, /spring-boot-starter-aspectj/)
     assert.doesNotMatch(platformPom, /spring-boot-starter-aspectj/)
     assert.doesNotMatch(pom, /convention4j/)
-    assert.doesNotMatch(canvasInfraPom, /convention4j/)
+    assert.doesNotMatch(canvasRuntimePom, /convention4j/)
     assert.doesNotMatch(platformPom, /convention4j/)
     assert.doesNotMatch(webPom, /convention4j/)
-    for (const source of [pom, canvasInfraPom, platformPom, webPom]) {
+    for (const source of [pom, canvasRuntimePom, platformPom, webPom]) {
         assert.doesNotMatch(source, /mybatis|org\.apache\.ibatis/)
     }
-    assert.match(canvasInfraPom, /<artifactId>spring-boot-starter-jdbc<\/artifactId>/)
+    assert.match(canvasRuntimePom, /<artifactId>spring-boot-starter-jdbc<\/artifactId>/)
     assert.match(platformPom, /<artifactId>spring-boot-starter-jdbc<\/artifactId>/)
     assert.match(
         pom,

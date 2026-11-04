@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionHub;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
@@ -114,7 +116,8 @@ public class ApplicationEventConfiguration {
                 ThreadVersionHub.CHANNEL,
                 threadVersionHub::onNotification,
                 threadVersionHub::broadcastResync),
-            // 3. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
+            // 3. 画布版本失效：Canvas 拥有 canvas_revision 通道与 revision fan-out（CanvasVersionHub）；Web 只建立
+            // LISTEN 并把信号转发给浏览器事件通道以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,

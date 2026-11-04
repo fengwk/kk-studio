@@ -16,15 +16,15 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.canvas.http.CanvasController;
+import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
+import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
-import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
-import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
-import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
@@ -70,9 +70,9 @@ class StudioResponseStatusErrorAdviceTest {
     assertArrayEquals(
         new Class<?>[] {
           StudioAgentTaskController.class,
-          StudioCanvasController.class,
-          StudioCanvasFunctionController.class,
-          StudioCanvasResourceController.class,
+          CanvasController.class,
+          CanvasFunctionController.class,
+          CanvasResourceController.class,
           StudioChatController.class,
           StudioHarnessCommandBatchController.class,
           StudioHarnessProviderRequestPreviewController.class,
