@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -52,6 +53,7 @@ public class AgentDefinitionService {
   private final AgentDefinitionConfigCodec configCodec;
   private final AgentEditableSupport editableSupport;
   private final PluginAgentDependencies pluginAgentDependencies;
+  private final List<AgentReferenceCheck> productReferences;
 
   public AgentDefinitionService(
       AgentDefinitionRepository repository,
@@ -60,7 +62,8 @@ public class AgentDefinitionService {
       AgentDefinitionConfigValidator configValidator,
       AgentDefinitionConfigCodec configCodec,
       AgentEditableSupport editableSupport,
-      PluginAgentDependencies pluginAgentDependencies) {
+      PluginAgentDependencies pluginAgentDependencies,
+      List<AgentReferenceCheck> productReferences) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.referenceResolver = Objects.requireNonNull(referenceResolver, "referenceResolver");
     this.variantResolver = Objects.requireNonNull(variantResolver, "variantResolver");
@@ -69,6 +72,7 @@ public class AgentDefinitionService {
     this.editableSupport = Objects.requireNonNull(editableSupport, "editableSupport");
     this.pluginAgentDependencies =
         Objects.requireNonNull(pluginAgentDependencies, "pluginAgentDependencies");
+    this.productReferences = List.copyOf(productReferences);
   }
 
   public Page<AgentDefinitionDTO> pageAgents(PageQuery pageQuery) {
@@ -158,10 +162,10 @@ public class AgentDefinitionService {
     }
     ensureExpectedVersion(definition, expectedVersion, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
-    // Project 工作流阶段按名称指定执行 Agent；删除它会让后台 Issue Run 在下一次调度时失败，因此先拒绝，由用户改阶段配置或归档 Project。
-    if (repository.existsReferencingProjectWorkflow(name)) {
-      throw new AiInUseException(
-          RESOURCE, RESOURCE + " is referenced by a project workflow stage: " + name);
+    for (AgentReferenceCheck reference : productReferences) {
+      if (reference.isReferenced(name)) {
+        throw new AiInUseException(RESOURCE, RESOURCE + " is referenced by a product: " + name);
+      }
     }
     // 权威 desired manifest 中任一已安装插件的普通配置声明引用该 Agent 即不可删除：删除先持自身行锁，引用方保存先持同锁，
     // 因此并发两侧最多一方成功；只读 desired 事实，不读取已应用状态、不解密秘密、不猜字段。

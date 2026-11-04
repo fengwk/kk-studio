@@ -278,7 +278,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
 `config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
 能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
-Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的工作流阶段引用时不能删除；Chat 只按名称软引用 Agent，
+Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自

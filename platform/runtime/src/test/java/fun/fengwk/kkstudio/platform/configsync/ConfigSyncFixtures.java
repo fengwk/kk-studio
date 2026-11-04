@@ -118,7 +118,8 @@ final class ConfigSyncFixtures {
           mock(AgentDefinitionConfigValidator.class),
           AGENT_CONFIG_CODEC,
           EDITABLE_SUPPORT,
-          mock(PluginAgentDependencies.class));
+          mock(PluginAgentDependencies.class),
+          List.of());
 
   /**
    * 真实 {@code SkillCatalogService.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由 {@link
