@@ -17,6 +17,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
@@ -25,8 +27,6 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeEnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeEnvironmentTunnels;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeTunnelExchange;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.events;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -12,8 +13,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
 
 import java.time.Clock;
@@ -70,6 +71,7 @@ class RealtimePayloadInternalControllerTest {
         mockMvc
             .perform(get(ClusterInternalPaths.realtimePayloadPath(payloadId)))
             .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
             .andReturn()
             .getResponse()
             .getContentAsString();

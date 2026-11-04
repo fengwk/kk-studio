@@ -1,11 +1,20 @@
 package fun.fengwk.kkstudio.ide;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
@@ -16,13 +25,6 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -42,6 +44,7 @@ import java.util.concurrent.TimeoutException;
  * <p>绑定身份命令必须匹配 owner 缓存的 document+epoch，且缓存缺失/漂移时先用 {@code LIST_VIEWS} 重建再重判；旧 epoch 的关闭、目录与终端请求不得
  * 作用于新绑定。命令超时/断线映射为不可用；Daemon 的 VIEW_GONE 立即拒绝并撤销本地授权，其它拒绝保留安全文案。所有失败路径都不重放副作用。
  */
+@Slf4j
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   /** 除普通关闭外，单条 IDE 命令的默认等待上限。 */
@@ -120,19 +123,20 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     long bindingEpoch = result.reply().getBindingEpoch();
     String confirmedDirectory = requirePath(result.reply().getDirectory(), "directory");
     String workspacePath = requirePath(result.reply().getWorkspacePath(), "workspacePath");
-    IdeViewBindingRegistry.Binding binding =
-        new IdeViewBindingRegistry.Binding(
-            result.identity(),
-            viewId,
-            documentId,
-            eventNodeId,
-            connectionId,
-            claimId,
-            bindingEpoch,
+    ViewSnapshot view =
+        new ViewSnapshot(
+            new IdeViewBindingRegistry.Binding(
+                result.identity(),
+                viewId,
+                documentId,
+                eventNodeId,
+                connectionId,
+                claimId,
+                bindingEpoch),
             confirmedDirectory,
             workspacePath,
             IdeViewState.OPEN);
-    return publishOpen(binding);
+    return publishOpen(view);
   }
 
   /**
@@ -148,29 +152,30 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       UUID connectionId,
       UUID claimId,
       IdeOutcomeUnknownException unknown) {
-    List<IdeViewBindingRegistry.Binding> current;
+    List<ViewSnapshot> current;
     try {
       current = loadViews(environmentId);
     } catch (RuntimeException error) {
       unknown.addSuppressed(error);
       throw unknown;
     }
-    IdeViewBindingRegistry.Binding binding =
+    ViewSnapshot view =
         current.stream()
-            .filter(candidate -> candidate.viewId().equals(viewId))
-            .filter(candidate -> candidate.documentId().equals(documentId))
-            .filter(candidate -> candidate.eventNodeId().equals(eventNodeId))
-            .filter(candidate -> candidate.connectionId().equals(connectionId))
-            .filter(candidate -> candidate.claimId().equals(claimId))
+            .filter(candidate -> candidate.binding().viewId().equals(viewId))
+            .filter(candidate -> candidate.binding().documentId().equals(documentId))
+            .filter(candidate -> candidate.binding().eventNodeId().equals(eventNodeId))
+            .filter(candidate -> candidate.binding().connectionId().equals(connectionId))
+            .filter(candidate -> candidate.binding().claimId().equals(claimId))
             .findFirst()
             .orElseThrow(() -> unknown);
     requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
-    return publishOpen(binding);
+    return publishOpen(view);
   }
 
   /** 落实本地授权、路由缓存与一次性入口票据；任何一步失败都不得留下可被命令命中的半绑定。 */
-  private EnvironmentIdeViewDTO publishOpen(IdeViewBindingRegistry.Binding binding) {
-    recordAuthorized(binding);
+  private EnvironmentIdeViewDTO publishOpen(ViewSnapshot view) {
+    IdeViewBindingRegistry.Binding binding = view.binding();
+    recordAuthorized(view);
     UUID viewId = binding.viewId();
     EnvironmentId environmentId = binding.environmentId();
     bootstrapTickets.revokeView(environmentId, viewId.toString());
@@ -181,14 +186,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
               binding.daemonIdentity(),
               viewId.toString(),
               binding.bindingEpoch(),
-              binding.workspacePath());
+              view.workspacePath());
     } catch (RuntimeException error) {
       // 出票失败时回滚本地授权/路由；Daemon 视图留给其正常过期回收，不伪造成功入口。
       revokeLocal(binding);
       throw new AiEnvironmentIdeUnavailableException(
           "environment IDE bootstrap ticket could not be issued", error);
     }
-    EnvironmentIdeViewDTO dto = toDto(binding);
+    EnvironmentIdeViewDTO dto = toDto(view);
     dto.setEntryUrl(
         IDE_ROUTE_PREFIX
             + environmentId
@@ -202,14 +207,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   /** 授权与路由缓存只能成对发布；授权失败时该视图不得出现在任何后续命令的缓存中。 */
-  private void recordAuthorized(IdeViewBindingRegistry.Binding binding) {
+  private void recordAuthorized(ViewSnapshot view) {
+    IdeViewBindingRegistry.Binding binding = view.binding();
     if (viewAuthorization != null) {
       try {
         viewAuthorization.viewOpened(
             binding.daemonIdentity(),
             binding.viewId().toString(),
             binding.bindingEpoch(),
-            binding.workspacePath());
+            view.workspacePath());
       } catch (IllegalStateException error) {
         throw new AiEnvironmentIdeUnavailableException(
             "environment IDE view capacity is exhausted", error);
@@ -246,16 +252,31 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     requireReplyView(result.reply(), parsedViewId);
     String confirmed = requirePath(result.reply().getDirectory(), "directory");
-    if (!bindings.updateDirectory(
-        environmentId, parsedViewId, documentId, bindingEpoch, confirmed)) {
-      throw viewGone();
+    ViewSnapshot current = readBackBinding(environmentId, binding);
+    EnvironmentIdeViewDTO dto = current == null ? toDto(binding) : toDto(current);
+    dto.setDirectory(confirmed);
+    return dto;
+  }
+
+  /**
+   * 命令确认后回读 Daemon 快照刷新绑定缓存。
+   *
+   * <p>回读只用于刷新缓存与补充响应：回读本身失败时保留已确认的切换结果并记录告警，不能把成功的目录切换报成失败；回读成功但绑定已不在快照中， 说明视图已换代或关闭，仍按 {@code
+   * VIEW_GONE} 拒绝。
+   */
+  private ViewSnapshot readBackBinding(
+      EnvironmentId environmentId, IdeViewBindingRegistry.Binding binding) {
+    List<ViewSnapshot> current;
+    try {
+      current = loadViews(environmentId);
+    } catch (RuntimeException error) {
+      log.warn("failed to read back IDE views after changing directory", error);
+      return null;
     }
-    IdeViewBindingRegistry.Binding current =
-        bindings
-            .find(environmentId, parsedViewId)
-            .filter(candidate -> candidate.matches(documentId, bindingEpoch))
-            .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
-    return toDto(current);
+    return current.stream()
+        .filter(candidate -> candidate.binding().equals(binding))
+        .findFirst()
+        .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
   }
 
   @Override
@@ -326,35 +347,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   @Override
-  public void detachView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(request, "request");
-    UUID parsedViewId = parseViewId(viewId);
-    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
-    long bindingEpoch = parseEpoch(request.getBindingEpoch());
-    IdeViewBindingRegistry.Binding binding =
-        requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
-    IdeCommand command =
-        IdeCommand.newBuilder()
-            .setAction(IdeAction.DETACH_VIEW)
-            .setViewId(parsedViewId.toString())
-            .setDocumentId(documentId.toString())
-            .setBindingEpoch(bindingEpoch)
-            .build();
-    IdeCall result = call(environmentId, command);
-    if (!result.reply().getOk()) {
-      if (isViewGone(result.reply())) {
-        revokeLocal(binding);
-      }
-      throw rejection(result.reply());
-    }
-    requireReplyView(result.reply(), parsedViewId);
-    // detach 冻结该 epoch 的使用证明：本地不得再允许旧 cookie/旧请求进入；视图资源在 Daemon 恢复窗口内保留。
-    revokeLocal(binding);
-  }
-
-  @Override
   public EnvironmentIdeDirectoryListingDTO listDirectories(
       EnvironmentId environmentId, String path) {
     Objects.requireNonNull(environmentId, "environmentId");
@@ -392,53 +384,58 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   @Override
   public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
-    List<IdeViewBindingRegistry.Binding> current = loadViews(environmentId);
+    List<ViewSnapshot> current = loadViews(environmentId);
     EnvironmentIdeViewsDTO dto = new EnvironmentIdeViewsDTO();
     dto.setViews(current.stream().map(EnvironmentIdeServiceImpl::toDto).toList());
     return dto;
   }
 
-  private List<IdeViewBindingRegistry.Binding> loadViews(EnvironmentId environmentId) {
+  private List<ViewSnapshot> loadViews(EnvironmentId environmentId) {
     IdeCommand command = IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS).build();
     IdeCall result = call(environmentId, command);
     if (!result.reply().getOk()) {
       throw rejection(result.reply());
     }
     List<IdeViewSummary> views = result.reply().getViewsList();
-    List<IdeViewBindingRegistry.Binding> authorized = new ArrayList<>(views.size());
+    List<ViewSnapshot> authorized = new ArrayList<>(views.size());
     for (IdeViewSummary view : views) {
-      IdeViewBindingRegistry.Binding binding =
-          new IdeViewBindingRegistry.Binding(
-              result.identity(),
-              UUID.fromString(view.getViewId()),
-              UUID.fromString(view.getDocumentId()),
-              UUID.fromString(view.getEventNodeId()),
-              UUID.fromString(view.getConnectionId()),
-              UUID.fromString(view.getClaimId()),
-              view.getBindingEpoch(),
+      ViewSnapshot snapshot =
+          new ViewSnapshot(
+              new IdeViewBindingRegistry.Binding(
+                  result.identity(),
+                  UUID.fromString(view.getViewId()),
+                  UUID.fromString(view.getDocumentId()),
+                  UUID.fromString(view.getEventNodeId()),
+                  UUID.fromString(view.getConnectionId()),
+                  UUID.fromString(view.getClaimId()),
+                  view.getBindingEpoch()),
               view.getDirectory(),
               view.getWorkspacePath(),
               view.getState());
       // 权威快照同样必须先取得本地授权才能进入路由缓存；容量失败时该视图不参与任何后续命令。
-      if (authorizeForRouting(binding)) {
-        authorized.add(binding);
+      if (authorizeForRouting(snapshot)) {
+        authorized.add(snapshot);
       }
     }
-    revokeStaleAuthorizations(environmentId, authorized);
-    return bindings.replaceEnvironment(environmentId, authorized);
+    List<IdeViewBindingRegistry.Binding> current =
+        authorized.stream().map(ViewSnapshot::binding).toList();
+    revokeStaleAuthorizations(environmentId, current);
+    bindings.replaceEnvironment(environmentId, current);
+    return authorized;
   }
 
   /** 快照重建时对仍存在的视图补授权；失败只拒绝该视图，不影响其它视图与快照读取。 */
-  private boolean authorizeForRouting(IdeViewBindingRegistry.Binding binding) {
+  private boolean authorizeForRouting(ViewSnapshot view) {
     if (viewAuthorization == null) {
       return true;
     }
     try {
+      IdeViewBindingRegistry.Binding binding = view.binding();
       viewAuthorization.viewOpened(
           binding.daemonIdentity(),
           binding.viewId().toString(),
           binding.bindingEpoch(),
-          binding.workspacePath());
+          view.workspacePath());
       return true;
     } catch (IllegalStateException error) {
       return false;
@@ -646,6 +643,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return new AiEnvironmentIdeUnavailableException(message);
   }
 
+  private static EnvironmentIdeViewDTO toDto(ViewSnapshot view) {
+    EnvironmentIdeViewDTO dto = toDto(view.binding());
+    dto.setDirectory(view.directory());
+    dto.setWorkspacePath(view.workspacePath());
+    dto.setState(view.state().name());
+    return dto;
+  }
+
+  /** 只用已确认的绑定身份构造响应；Daemon 未回读到的 workspace 与 state 保持为空，不伪造。 */
   private static EnvironmentIdeViewDTO toDto(IdeViewBindingRegistry.Binding binding) {
     EnvironmentIdeViewDTO dto = new EnvironmentIdeViewDTO();
     dto.setViewId(binding.viewId().toString());
@@ -656,9 +662,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     dto.setClaimId(binding.claimId().toString());
     dto.setDaemonInstanceId(binding.daemonIdentity().daemonInstanceId());
     dto.setBindingEpoch(Long.toString(binding.bindingEpoch()));
-    dto.setDirectory(binding.directory());
-    dto.setWorkspacePath(binding.workspacePath());
-    dto.setState(binding.state().name());
     return dto;
   }
 
@@ -723,6 +726,13 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private record IdeCall(IdeResult reply, DaemonConnectionIdentity identity) {}
+
+  /** 单次 Daemon 回执的权威视图状态；只把绑定身份留在路由缓存。 */
+  private record ViewSnapshot(
+      IdeViewBindingRegistry.Binding binding,
+      String directory,
+      String workspacePath,
+      IdeViewState state) {}
 
   /** 命令可能已到达 Daemon 但未收到确定回执；只允许 claim 按原身份对账，其它副作用不得重放。 */
   private static final class IdeOutcomeUnknownException

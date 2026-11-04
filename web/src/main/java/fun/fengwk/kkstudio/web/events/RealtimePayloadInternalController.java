@@ -11,13 +11,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
-import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -60,9 +61,8 @@ public class RealtimePayloadInternalController {
   }
 
   @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<Map<String, String>> handleAuthentication(
+  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
       ClusterInternalAuthenticationException error) {
-    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-        .body(Map.of("message", "internal authentication failed"));
+    return ClusterInternalErrors.unauthorized();
   }
 }

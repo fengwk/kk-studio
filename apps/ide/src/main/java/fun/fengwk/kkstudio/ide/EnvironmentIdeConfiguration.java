@@ -19,13 +19,13 @@ public class EnvironmentIdeConfiguration {
 
   @Bean
   public IdeCommandTransport ideCommandTransport(EnvironmentDaemonServer server) {
-    return new DaemonIdeCommandTransport(server);
+    return new IdeCommandTransport(server);
   }
 
   @Bean
   @ConditionalOnMissingBean
   public IdeBootstrapTicketService ideBootstrapTicketService() {
-    return new InMemoryIdeBootstrapTicketService();
+    return new IdeBootstrapTicketService();
   }
 
   @Bean

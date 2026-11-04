@@ -14,6 +14,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-plugin-api</artifactId>
         </dependency>
@@ -210,7 +214,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService</include>
+                                        <include>fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService</include>
                                         <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
                                         <include>fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut</include>

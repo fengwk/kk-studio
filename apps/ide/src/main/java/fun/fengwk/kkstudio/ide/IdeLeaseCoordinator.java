@@ -1,12 +1,15 @@
 package fun.fengwk.kkstudio.ide;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,6 +32,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>每个 Environment 至多一个在途轮次；同一轮不会重放，下一轮由下一次正常心跳触发。回调只投递到有界执行器，不阻塞会话核心。
  */
 public final class IdeLeaseCoordinator {
+
+  private static final Logger log = LoggerFactory.getLogger(IdeLeaseCoordinator.class);
 
   private final EnvironmentIdeService localEnvironmentIdeService;
   private final IdeCommandTransport transport;
@@ -71,6 +76,11 @@ public final class IdeLeaseCoordinator {
           });
     } catch (RejectedExecutionException error) {
       active.set(false);
+      log.warn(
+          "IDE lease renewal rejected for environment {} round {}",
+          environmentId,
+          ideLeaseRound,
+          error);
     }
   }
 
@@ -84,6 +94,11 @@ public final class IdeLeaseCoordinator {
       snapshot = localEnvironmentIdeService.listViews(environmentId);
     } catch (RuntimeException error) {
       // LIST_VIEWS 失败时这一轮不写任何证明；等下一次正常心跳，绝不重放旧轮次。
+      log.warn(
+          "IDE lease snapshot failed for environment {} round {}",
+          environmentId,
+          ideLeaseRound,
+          error);
       return;
     }
     List<EnvironmentIdeViewDTO> views = snapshot.getViews();
@@ -99,8 +114,9 @@ public final class IdeLeaseCoordinator {
                 Uuids.parseCanonical(view.getConnectionId(), "connectionId"),
                 Uuids.parseCanonical(view.getDocumentId(), "documentId"));
         groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(view);
-      } catch (IllegalArgumentException ignored) {
+      } catch (IllegalArgumentException error) {
         // UI 服务返回的 DTO 已在写入时校验；这里仍然 fail-closed 地跳过坏条目。
+        log.warn("Invalid IDE lease snapshot binding for environment {}", environmentId, error);
       }
     }
 
@@ -113,6 +129,11 @@ public final class IdeLeaseCoordinator {
             browserUse.activeBoundProofs(group.eventNodeId, group.connectionId, group.documentId);
       } catch (RuntimeException error) {
         // 事件节点不可达/查询失败：该组不续租，不把失败当成不活跃以外的任何事实。
+        log.warn(
+            "IDE lease proof query failed for environment {} event node {}",
+            environmentId,
+            group.eventNodeId,
+            error);
         continue;
       }
       if (proofs.isEmpty()) {
@@ -126,8 +147,9 @@ public final class IdeLeaseCoordinator {
           if (hasExactProof(proofs.get(), environmentId, viewId, documentId, epoch)) {
             bindings.add(new DaemonIdeLease.Binding(viewId, documentId, epoch));
           }
-        } catch (IllegalArgumentException ignored) {
+        } catch (IllegalArgumentException error) {
           // 无有效 epoch 的意图不构成使用证明。
+          log.warn("Invalid IDE lease proof binding for environment {}", environmentId, error);
         }
       }
     }
@@ -139,6 +161,8 @@ public final class IdeLeaseCoordinator {
       transport.sendIdeLease(environmentId, identity, new DaemonIdeLease(ideLeaseRound, bindings));
     } catch (RuntimeException error) {
       // 发送失败只影响本轮；下一次正常心跳重新核对，不自动重试旧轮次。
+      log.warn(
+          "IDE lease send failed for environment {} round {}", environmentId, ideLeaseRound, error);
     }
   }
 

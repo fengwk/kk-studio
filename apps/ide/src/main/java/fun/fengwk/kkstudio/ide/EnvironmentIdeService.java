@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 
 /**
  * IDE 视图控制服务：把 Studio API 的 view 请求翻译为 {@code IDE_COMMAND}，经既有 lease/READY 围栏下发到 owner。
@@ -31,9 +31,6 @@ public interface EnvironmentIdeService {
   EnvironmentIdeDirectoryListingDTO listDirectories(EnvironmentId environmentId, String path);
 
   void closeView(EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request);
-
-  /** 显式分离当前 epoch 的使用证明；视图资源保留在 Daemon 的恢复窗口内。 */
-  void detachView(EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
 
   /** owner 的当前视图快照；不创建视图，也不续租。 */
   EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId);

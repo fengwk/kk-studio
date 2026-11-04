@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
 
 import java.util.Objects;
 import java.util.UUID;

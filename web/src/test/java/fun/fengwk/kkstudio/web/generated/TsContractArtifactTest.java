@@ -36,7 +36,10 @@ class TsContractArtifactTest {
   static final String ARTIFACT_RELATIVE_PATH = "frontend/src/shared/api/generated/contracts.ts";
 
   private static final List<String> CONTRACT_PACKAGES =
-      List.of("fun.fengwk.kkstudio.share", "fun.fengwk.kkstudio.canvas.dto");
+      List.of(
+          "fun.fengwk.kkstudio.share",
+          "fun.fengwk.kkstudio.canvas.dto",
+          "fun.fengwk.kkstudio.ide.dto");
 
   /** 嵌在错误响应 {@code errors} 上下文里、无法从处理方法签名发现的结构化载荷。 */
   private static final List<Class<?>> ERROR_PAYLOAD_TYPES = List.of(CanvasConflictDTO.class);

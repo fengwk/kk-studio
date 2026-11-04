@@ -9,11 +9,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterRealtimePayloadClient;
+import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotificationCodec;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSink;

@@ -13,6 +13,6 @@ public class IdeBrowserUseGatewayConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public IdeBrowserUseGateway ideBrowserUseGateway(IdeBrowserUseClient client) {
-    return new IdeBrowserUseClientGateway(client);
+    return new IdeBrowserUseGateway(client);
   }
 }

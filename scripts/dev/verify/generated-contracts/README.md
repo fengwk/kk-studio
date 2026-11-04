@@ -1,12 +1,12 @@
 # 传输契约生成
 
 前端的全部 HTTP 传输类型由
-[contracts.ts](../../../../frontend/src/shared/api/generated/contracts.ts) 提供，它从 Web 控制器签名与生产
+[contracts.ts](../../../../frontend/src/shared/api/generated/contracts.ts) 提供，它从各模块控制器签名与生产
 HTTP Jackson 3 mapper 生成，漂移在 CI 中失败。生成器与产物测试在
 [web/src/test/java/fun/fengwk/kkstudio/web/generated/](../../../../web/src/test/java/fun/fengwk/kkstudio/web/generated/)。
 
 生成器以 `@RestController` 处理方法的 `@RequestBody` 参数（请求方向）、返回值（响应方向）和错误响应上下文里的
-结构化载荷为根，沿属性闭包收集 share 包下的 DTO 与枚举：
+结构化载荷为根，沿属性闭包收集 share、Canvas 与 IDE 契约包下的 DTO 与枚举：
 
 - 属性名、顺序与枚举 wire 值来自真实 mapper；未标 jspecify `@Nullable` 的属性必填且非空。
 - 写出方向 `@JsonInclude(ALWAYS)` 的可空属性写作 `T | null`，其它可空属性写作 `?: T | null`。

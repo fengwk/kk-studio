@@ -42,7 +42,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
 
 import java.sql.PreparedStatement;
 import java.time.Instant;

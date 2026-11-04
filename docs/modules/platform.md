@@ -46,11 +46,12 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
+| [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值/错误信封约定，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：响应信封 `ApiResponse`、路径与分页参数的共同翻译 `RequestParameters`、领域错误到状态的唯一映射 `DomainErrorStatus`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
 
 ## Harness 持久化与调度
 

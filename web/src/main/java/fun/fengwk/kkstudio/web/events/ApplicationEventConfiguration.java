@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionHub;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
-import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
