@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 

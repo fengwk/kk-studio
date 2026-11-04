@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.runtime;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import org.springframework.stereotype.Component;
