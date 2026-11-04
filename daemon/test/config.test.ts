@@ -253,6 +253,14 @@ describe('config field validation branches', () => {
     expect(() => loadDaemonConfig(dir)).toThrow(/cannot read valid JSON/)
   })
 
+  it('rejects oversized config before reading it into memory', () => {
+    const { root } = createDaemonRoot()
+    const path = join(root, 'daemon.json')
+    writeFileSync(path, `{"studioUrl":"https://a.example.com","note":"${'x'.repeat(1024 * 1024)}"}`, 'utf8')
+    chmodSync(path, 0o600)
+    expect(() => loadDaemonConfig(path)).toThrow(/cannot read valid JSON/)
+  })
+
   it('rejects non-object documents, non-string and blank fields', () => {
     const { root } = createDaemonRoot()
     expect(() => loadDaemonConfig(rawConfig(root, '[1,2]'))).toThrow(/must be an object/)

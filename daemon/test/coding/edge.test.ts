@@ -15,14 +15,14 @@ import {
   spoolLargeTextResult,
   type PrivateFs,
 } from '../../src/coding/output.js'
-import { commitTextFile, pathExists } from '../../src/coding/commit.js'
+import { commitTextFile } from '../../src/coding/commit.js'
 import {
   createUtf16Decoder,
   decodeText,
   encodeText,
   forEachLine,
 } from '../../src/coding/text.js'
-import { toPosix } from '../../src/coding/support.js'
+import { toPosix, exists } from '../../src/coding/support.js'
 import { callCapability, makeContext, openTestStore, textOf } from './helpers.js'
 import { ensurePrivateDirectory } from '../../src/native/index.js'
 
@@ -249,7 +249,7 @@ describe('fs.write / commit 边界', () => {
     expect(await readFile(file, 'utf8')).toBe('x')
   })
 
-  it('commitTextFile 拒绝符号链接目标并报告 pathExists', async () => {
+  it('commitTextFile 拒绝符号链接目标并报告路径存在性', async () => {
     const dir = await tempDir()
     const target = join(dir, 'real.txt')
     await writeFile(target, 'x')
@@ -259,8 +259,8 @@ describe('fs.write / commit 边界', () => {
     const subDir = join(dir, 'sub')
     await mkdir(subDir)
     await expect(commitTextFile(subDir, utf8('y'))).rejects.toThrowError(/not a regular file/)
-    expect(await pathExists(target)).toBe(true)
-    expect(await pathExists(join(dir, 'nope'))).toBe(false)
+    expect(await exists(target)).toBe(true)
+    expect(await exists(join(dir, 'nope'))).toBe(false)
   })
 })
 

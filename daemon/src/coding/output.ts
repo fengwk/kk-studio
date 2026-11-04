@@ -1,4 +1,5 @@
 import { lstat, open, readdir, rename, rm } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CapabilityResult, ResultContent } from '../contracts.js'
@@ -334,7 +335,7 @@ export class TemporaryResourceStore {
 
   private async requireControlledRoot(): Promise<void> {
     const info = await lstat(this.rootDir)
-    if (!info.isDirectory() || info.isSymbolicLink()) {
+    if (!isRealDirectory(info)) {
       throw new Error(`temporary workspace root is not a real directory: ${this.rootDir}`)
     }
   }
@@ -346,7 +347,7 @@ export class TemporaryResourceStore {
     } catch {
       return false
     }
-    if (!info.isDirectory() || info.isSymbolicLink()) {
+    if (!isRealDirectory(info)) {
       return false
     }
     if (!isUuid(entry.slice(entry.lastIndexOf(sep) + 1))) {
@@ -354,6 +355,10 @@ export class TemporaryResourceStore {
     }
     return (await readCreatedAt(entry)) !== null
   }
+}
+
+function isRealDirectory(info: Stats): boolean {
+  return info.isDirectory() && !info.isSymbolicLink()
 }
 
 /** 活动 workspace 句柄：持有 in-use lease，{@link Workspace.close()} 幂等释放且保证恰好一次。 */
@@ -551,7 +556,7 @@ export class TextOutputStore {
       } catch {
         continue
       }
-      if (!info.isDirectory() || info.isSymbolicLink()) {
+      if (!isRealDirectory(info)) {
         continue
       }
       for (const file of await readdir(workspace)) {

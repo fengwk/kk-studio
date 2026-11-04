@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { Stats } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { diffArrays } from 'diff'
 import type {
@@ -14,6 +15,7 @@ import {
   ToolInputRejectedError,
   ToolRunFailureError,
   classifyFileSystemError,
+  classifyTarget,
   displayPath,
   isSymbolicLink,
   optionalBoolean,
@@ -112,12 +114,13 @@ async function readExisting(
 ): Promise<CapabilityResult> {
   const info = await statOrNull(path)
   requireActive(context)
-  if (info !== null && info.isDirectory()) {
+  const kind = classifyTarget(info)
+  if (kind === 'directory') {
     const result = await directoryResponse(call.invocationId, path, display, offset, limit)
     requireActive(context)
     return result
   }
-  if (info === null || !info.isFile()) {
+  if (kind !== 'file') {
     // 字符设备、FIFO、socket、块设备等非普通节点必须在任何 I/O 之前拒绝。
     throw new ToolRunFailureError(`not a regular file: ${display}`, 'INVALID_ARGUMENT')
   }
@@ -247,11 +250,11 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
       let charset: 'UTF-8' | 'UTF-16LE' | 'UTF-16BE' = 'UTF-8'
       let bomLength = 0
       if (existed) {
-        const info = await statOrNull(path)
-        if (info !== null && info.isDirectory()) {
+        const kind = classifyTarget(await statOrNull(path))
+        if (kind === 'directory') {
           throw new ToolInputRejectedError(`path is a directory: ${display}`)
         }
-        if (info === null || !info.isFile()) {
+        if (kind !== 'file') {
           throw new ToolInputRejectedError(`path is not a regular file: ${display}`)
         }
         const decoded = decodeText(await readAllBytes(path))
@@ -308,11 +311,11 @@ async function editFile(
 
     const path = await resolveExistingPath(rawPath)
     const display = displayPath(path, rawPath)
-    const info = await statOrNull(path)
-    if (info !== null && info.isDirectory()) {
+    const kind = classifyTarget(await statOrNull(path))
+    if (kind === 'directory') {
       throw new ToolInputRejectedError(`path must be a file: ${display}`)
     }
-    if (info === null || !info.isFile()) {
+    if (kind !== 'file') {
       throw new ToolInputRejectedError(`path is not a regular file: ${display}`)
     }
 
@@ -412,7 +415,7 @@ async function editFile(
   }
 }
 
-async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
+async function statOrNull(path: string): Promise<Stats | null> {
   try {
     return await stat(path)
   } catch (error) {

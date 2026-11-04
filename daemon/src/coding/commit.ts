@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, rename, rm, stat } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isWindows } from '../native/host.js'
@@ -94,14 +94,4 @@ async function createStagingFile(parent: string, ownerOnly: boolean): Promise<st
   const handle = await open(candidate, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, mode)
   await handle.close()
   return candidate
-}
-
-/** 目标是否存在于文件系统（不跟随符号链接的最终分量）。 */
-export async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
 }

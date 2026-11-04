@@ -1,9 +1,13 @@
-import { visit } from 'jsonc-parser'
+import {
+  scanStrictJson,
+  utf8ByteLength as strictUtf8ByteLength,
+  type StrictJsonViolation,
+} from '../strict-json.js'
 
 export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 export const MAX_SAFE_BIGINT = 9007199254740991n
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+export const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
 
@@ -16,27 +20,7 @@ export interface TextOptions {
 
 /** Counts UTF-8 bytes and rejects unpaired surrogates instead of replacing them. */
 function utf8ByteLength(value: string, name: string): number {
-  let bytes = 0
-  for (let index = 0; index < value.length; index++) {
-    const code = value.charCodeAt(index)
-    if (code < 0x80) {
-      bytes += 1
-    } else if (code < 0x800) {
-      bytes += 2
-    } else if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1)
-      if (!(next >= 0xdc00 && next <= 0xdfff)) {
-        throw new Error(`${name} must be valid Unicode`)
-      }
-      bytes += 4
-      index++
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      throw new Error(`${name} must be valid Unicode`)
-    } else {
-      bytes += 3
-    }
-  }
-  return bytes
+  return strictUtf8ByteLength(value, name)
 }
 
 export function requireText(value: unknown, name: string, options: TextOptions = {}): string {
@@ -60,7 +44,7 @@ export function requireText(value: unknown, name: string, options: TextOptions =
 }
 
 export function requireUuid(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+  if (typeof value !== 'string' || !CANONICAL_UUID_PATTERN.test(value)) {
     throw new Error(`${name} must be a canonical lowercase UUID`)
   }
   return value
@@ -127,39 +111,22 @@ function requireJsonText(value: unknown, name: string, maxBytes: number): string
   if (text.trim() === '') {
     throw new Error(`${name} is required`)
   }
-  detectJsonViolations(text, name)
+  const violation = scanStrictJson(text)
+  if (violation !== null) {
+    throw new Error(`${name} ${violationMessage(violation)}`)
+  }
   return text
 }
 
-function detectJsonViolations(text: string, name: string): void {
-  const seen = new Map<string, Set<string>>()
-  let violation: string | null = null
-  visit(
-    text,
-    {
-      onObjectProperty(property, _offset, _length, _line, _character, pathSupplier) {
-        if (violation !== null) {
-          return
-        }
-        const path = JSON.stringify(pathSupplier())
-        let properties = seen.get(path)
-        if (properties === undefined) {
-          properties = new Set()
-          seen.set(path, properties)
-        }
-        if (properties.has(property)) {
-          violation = `contains duplicate field: ${property}`
-          return
-        }
-        properties.add(property)
-      },
-      onError() {
-        violation ??= 'must be valid JSON'
-      },
-    },
-    { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false },
-  )
-  if (violation !== null) {
-    throw new Error(`${name} ${violation}`)
+function violationMessage(violation: StrictJsonViolation): string {
+  switch (violation.kind) {
+    case 'duplicate':
+      return `contains duplicate field: ${violation.key}`
+    case 'nesting':
+      return `exceeds maximum nesting depth ${violation.limit}`
+    case 'numberLength':
+      return `number exceeds ${violation.limit} characters`
+    case 'syntax':
+      return 'must be valid JSON'
   }
 }

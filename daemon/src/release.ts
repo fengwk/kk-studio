@@ -43,6 +43,9 @@ export interface ReleaseArtifact {
   arch: ReleaseArch
 }
 
+/** Daemon 版本字符集；wire 校验、UPDATE 目标与运行版本共用。 */
+export const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
+
 /** 官方制品名：版本字符集与协议 daemonVersion 一致，平台只能是五个已发布组合之一。 */
 const ARTIFACT_NAME_PATTERN =
   /^kk-studio-daemon-v([0-9A-Za-z._+-]{1,64})-(linux|macos|windows)-(amd64|arm64)\.tar\.gz$/

@@ -36,6 +36,7 @@ import {
   type UpdateResult,
   type UpgradeRequired,
 } from '../../generated/control_pb.js'
+import { DAEMON_VERSION_PATTERN, parseReleaseArtifactUrl } from '../../release.js'
 import { frame, unframe } from './framing.js'
 import {
   MAX_MESSAGE_BYTES,
@@ -74,12 +75,9 @@ export const MAX_PRESIGNED_HEADER_CHARS = 1024
 export const MAX_POSITIVE_BIGINT = 9223372036854775807n
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
-const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 const SHA256_ANY_PATTERN = /^[0-9a-fA-F]{64}$/
 const IDE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/
-const ARTIFACT_URL_PATTERN =
-  /^https:\/\/github\.com\/fengwk\/kk-studio\/releases\/download\/v([0-9A-Za-z._+-]{1,64})\/kk-studio-daemon-v\1-((linux|macos)-(amd64|arm64)|windows-amd64)\.tar\.gz$/
 
 const BOUND = new Set<MessageType>([
   MessageType.SETTINGS,
@@ -179,7 +177,7 @@ export function validateUpgrade(upgrade: UpgradeRequired): UpgradeRequired {
   }
   if (hasUrl) {
     const url = requireText(upgrade.artifactUrl, 'upgradeRequired.artifactUrl', { nonBlank: true })
-    if (!ARTIFACT_URL_PATTERN.test(url)) {
+    if (parseReleaseArtifactUrl(url) === null) {
       throw new Error('upgradeRequired.artifactUrl must be the official platform release archive')
     }
     const sha = requireText(upgrade.artifactSha256, 'upgradeRequired.artifactSha256', { nonBlank: true })

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
-import { parseReleaseArtifactUrl } from './release.js'
+import { DAEMON_VERSION_PATTERN, parseReleaseArtifactUrl } from './release.js'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -88,6 +88,7 @@ import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from './run
 import { createResourceRuntime, type UploadedResource } from './runtime-resources.js'
 import { collectDiagnosticFailure, recordShutdownFailure, releaseStep } from './runtime-shutdown.js'
 import {
+  acceptedReceipt,
   decideUpdate,
   executeUpdateAttempt,
   executionFailureReceipt,
@@ -133,7 +134,6 @@ const DEFAULT_INITIAL_RECONNECT_DELAY_MILLIS = 1_000
 const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
-const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 
 function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
   switch (action) {
@@ -433,7 +433,6 @@ export class Runtime {
       const target = upgradeRequired?.artifactUrl ? parseReleaseArtifactUrl(upgradeRequired.artifactUrl) : null
       if (target !== null && upgradeRequired?.artifactSha256 && this.update !== null) {
         const operationId = randomUUID()
-        const commandKey = JSON.stringify([target.targetVersion])
         const updateCommand = create(EnvelopeSchema, {
           messageType: MessageType.UPDATE,
           environmentId: this.boundEnvironmentId ?? undefined,
@@ -446,18 +445,14 @@ export class Runtime {
             },
           },
         })
+        const command = updateCommand.payload.value as Update
+        const receipt = acceptedReceipt(command)
         const active: ActiveUpdate = {
           operationId,
-          commandKey,
+          commandKey: receipt.commandKey,
           targetVersion: target.targetVersion,
           controller: new AbortController(),
-          receipt: {
-            commandKey,
-            result: create(UpdateResultSchema, {
-              operationId,
-              phase: 1, // UPDATE_ACCEPTED
-            }),
-          },
+          receipt,
           prepared: false,
         }
         this.activeUpdate = active

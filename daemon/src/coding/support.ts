@@ -1,4 +1,5 @@
 import { lstat, realpath, stat } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { dirname, join, posix, relative, win32 } from 'node:path'
 import type { CapabilityResult } from '../contracts.js'
 import { errorResult } from '../contracts.js'
@@ -293,6 +294,19 @@ export async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/** 把 stat 结果归为目录、普通文件或其它；不把设备/FIFO/socket 当作普通文件。 */
+export type TargetKind = 'directory' | 'file' | 'other'
+
+export function classifyTarget(info: Stats | null): TargetKind {
+  if (info === null) {
+    return 'other'
+  }
+  if (info.isDirectory()) {
+    return 'directory'
+  }
+  return info.isFile() ? 'file' : 'other'
 }
 
 /** 最终分量是否为符号链接（不跟随）。 */

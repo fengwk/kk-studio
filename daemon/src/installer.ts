@@ -9,13 +9,12 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { DaemonConfig } from './contracts.js'
 import { getOutboundNetwork, subprocessEnvironment, type OutboundNetwork } from './network.js'
 import { ensurePrivateDirectory, writePrivateFile } from './native/index.js'
-import { currentPlatformKey } from './release.js'
+import { DAEMON_VERSION_PATTERN, currentPlatformKey } from './release.js'
+import { CANONICAL_UUID_PATTERN } from './protocol/control/runtime.js'
 import type { UpdateOutcomeLike } from './runtime-ports.js'
 
 const exec = promisify(execFile)
 const MAX_INSTALLER_BYTES = 1024 * 1024
-const VERSION = /^[0-9A-Za-z._+-]{1,64}$/
-const OPERATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // The independent job only waits for the receipt and invokes the official installer.
 // It never downloads or replaces the daemon itself.
@@ -66,8 +65,8 @@ export async function prepareInstaller(
 ): Promise<UpdateOutcomeLike> {
   const { operationId, targetVersion } = command
   if (Object.keys(command).some(key => key !== 'operationId' && key !== 'targetVersion') ||
-      typeof operationId !== 'string' || !OPERATION.test(operationId) ||
-      typeof targetVersion !== 'string' || !VERSION.test(targetVersion)) {
+      typeof operationId !== 'string' || !CANONICAL_UUID_PATTERN.test(operationId) ||
+      typeof targetVersion !== 'string' || !DAEMON_VERSION_PATTERN.test(targetVersion)) {
     throw new Error('invalid update command')
   }
   currentPlatformKey(deps.platform, deps.arch)
