@@ -49,7 +49,7 @@ class ToolExecutionGatewayVfsReadOnlyTest {
             request(catalog, "write", "{\"path\":\"" + SKILL_PATH + "\",\"content\":\"x\"}"));
 
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
-    assertEquals(ToolExecutionGateway.VFS_READ_ONLY_KIND, deny.error().kind());
+    assertEquals(ToolErrorClassifier.VFS_READ_ONLY_KIND, deny.error().kind());
     assertTrue(
         deny.error().message().contains("Cannot write " + SKILL_PATH), deny.error().message());
     assertTrue(deny.error().message().contains("vfs:/skills is read-only"), deny.error().message());
@@ -81,7 +81,7 @@ class ToolExecutionGatewayVfsReadOnlyTest {
                     "{\"path\":\""
                         + RESOURCE_PATH
                         + "\",\"old_string\":\"a\",\"new_string\":\"b\"}")));
-    assertEquals(ToolExecutionGateway.VFS_READ_ONLY_KIND, deny.error().kind());
+    assertEquals(ToolErrorClassifier.VFS_READ_ONLY_KIND, deny.error().kind());
     assertTrue(
         deny.error().message().contains("vfs:/resources is read-only"), deny.error().message());
     verifyNoInteractions(evaluator);
@@ -105,7 +105,7 @@ class ToolExecutionGatewayVfsReadOnlyTest {
                 request(catalog, "write", "{\"path\":\"" + SKILL_PATH + "\",\"content\":\"x\"}")));
 
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, admission);
-    assertEquals(ToolExecutionGateway.VFS_READ_ONLY_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.VFS_READ_ONLY_KIND, rejected.error().kind());
     assertTrue(
         rejected.error().message().contains("Write under vfs:/sessions/"),
         rejected.error().message());

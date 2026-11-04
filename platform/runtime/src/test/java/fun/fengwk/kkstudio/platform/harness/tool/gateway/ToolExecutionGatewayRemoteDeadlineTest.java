@@ -118,7 +118,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
         ToolGateway.Completion result = completion.get();
         assertNotNull(result, "completion must be delivered upon timeout");
         ToolGateway.Unknown unknown = assertInstanceOf(ToolGateway.Unknown.class, result);
-        assertEquals(ToolExecutionGateway.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
+        assertEquals(ToolErrorClassifier.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
         assertTrue(
             unknown.error().message().contains("cannot be confirmed"),
             "deadline timeout outcome is uncertain and must not claim not executed");
@@ -227,7 +227,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
 
       ToolGateway.Completion result = completion.get();
       ToolGateway.Unknown unknown = assertInstanceOf(ToolGateway.Unknown.class, result);
-      assertEquals(ToolExecutionGateway.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
+      assertEquals(ToolErrorClassifier.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
       assertFalse(
           partials.isEmpty(), "at least one partial must have been observed before timeout");
 
@@ -390,7 +390,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     try {
       ToolGateway.Unknown unknown =
           assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
-      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, unknown.error().kind());
       assertEquals(
           List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
           transport.delegate.returnedHandles.get(0).terminations(),
@@ -415,7 +415,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     try {
       ToolGateway.Unknown unknown =
           assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
-      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, unknown.error().kind());
       assertEquals(
           1,
           transport.delegate.returnedHandles.get(0).terminateAttempts(),
@@ -449,7 +449,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     try {
       ToolGateway.Unknown unknown =
           assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
-      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, unknown.error().kind());
       assertEquals(
           List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
           transport.delegate.returnedHandles.get(0).terminations(),
@@ -487,7 +487,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
       worker.join(3_000);
       assertFalse(worker.isAlive(), "worker must complete on the real terminal");
       ToolGateway.Failed failed = assertInstanceOf(ToolGateway.Failed.class, completion.get());
-      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, failed.error().kind());
+      assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, failed.error().kind());
       assertTrue(failed.error().message().contains("exit 1"));
       assertFalse(failed.retryable());
       assertTrue(

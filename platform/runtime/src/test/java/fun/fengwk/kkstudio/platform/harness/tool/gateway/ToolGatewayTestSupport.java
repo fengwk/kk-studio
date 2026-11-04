@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
@@ -203,26 +201,6 @@ final class ToolGatewayTestSupport {
             EnvironmentSupport.REQUIRED,
             environmentId,
             "test-env"));
-  }
-
-  /** branch 未选择 Environment 的环境工具请求：environmentRequired=true 但路由身份为 null。 */
-  static ToolInvocationRequest unselectedEnvironmentRequest(String callId) {
-    HarnessCatalog catalog = defaultCatalog();
-    ToolContribution bashContribution = catalog.findTool("bash").orElseThrow();
-    ContributorBinding contributor =
-        new ContributorBinding(
-            bashContribution.id().contributorId().value(),
-            bashContribution.id().localName(),
-            List.of());
-    ToolBinding binding = mock(ToolBinding.class);
-    when(binding.definition()).thenReturn(bashContribution.definition());
-    when(binding.descriptor()).thenReturn(bashContribution.definition().descriptor());
-    when(binding.contributor()).thenReturn(contributor);
-    when(binding.environmentSupport()).thenReturn(EnvironmentSupport.REQUIRED);
-    when(binding.environmentId()).thenReturn(null);
-    when(binding.environmentName()).thenReturn(null);
-    return new ToolInvocationRequest(
-        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"), binding);
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {

@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
@@ -264,7 +265,7 @@ class ToolExecutionGatewayRunTest {
               forwarded);
 
       ToolGateway.Failed failed = assertInstanceOf(ToolGateway.Failed.class, completion);
-      assertEquals(ToolExecutionGateway.INVALID_PARTIAL_KIND, failed.error().kind());
+      assertEquals(ToolErrorClassifier.INVALID_PARTIAL_KIND, failed.error().kind());
       assertFalse(failed.retryable());
       assertTrue(forwarded.isEmpty());
     }
@@ -300,7 +301,7 @@ class ToolExecutionGatewayRunTest {
 
     ToolGateway.Cancelled cancelled =
         assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
-    assertEquals(ToolExecutionGateway.CANCELLED_KIND, cancelled.error().kind());
+    assertEquals(ToolErrorClassifier.CANCELLED_KIND, cancelled.error().kind());
     assertTrue(cancelled.error().message().contains("cannot be confirmed"));
   }
 
@@ -314,7 +315,7 @@ class ToolExecutionGatewayRunTest {
                   throw new IllegalStateException("secret internal detail");
                 }));
 
-    assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+    assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, unknown.error().kind());
     assertFalse(unknown.error().message().contains("secret internal detail"));
   }
 
@@ -493,7 +494,7 @@ class ToolExecutionGatewayRunTest {
         new ToolGatewayTestSupport.RecordingRemoteExecutions();
     String secret = "synthetic-secret-not-started-ledger-details";
     remoteExecutions.confirmNotStartedFailure = new IllegalStateException(secret);
-    Logger logger = (Logger) LoggerFactory.getLogger(ToolExecutionGateway.class);
+    Logger logger = (Logger) LoggerFactory.getLogger(ToolErrorClassifier.class);
     Level previousLevel = logger.getLevel();
     boolean previousAdditivity = logger.isAdditive();
     ListAppender<ILoggingEvent> logs = new ListAppender<>();
@@ -1010,6 +1011,86 @@ class ToolExecutionGatewayRunTest {
         assertEquals(0, transport.returnedHandles.get(0).terminations().size());
       }
     }
+  }
+
+  /** 挂接到执行体启动之间到达的 partial 不丢失：execute 开始时按到达顺序补发并映射模型 call id。 */
+  @Test
+  void reattachBuffersPartialsUntilExecuteStarts() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    UUID remoteExecutionId = UUID.randomUUID();
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            ToolGatewayTestSupport.ENV_A,
+            remoteExecutionId,
+            Duration.ofSeconds(5),
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
+
+    ToolGateway.Run run = gateway.reattach(reattach);
+    ToolGatewayTestSupport.FakeTransport.AttachRecord attach = transport.attaches.get(0);
+    attach
+        .listener()
+        .onPartial(
+            new EnvironmentCapabilityResult(
+                remoteExecutionId.toString(),
+                List.of(new TextResultContent("early")),
+                false,
+                "{}"));
+    attach
+        .listener()
+        .onComplete(
+            new EnvironmentCapabilityResult(
+                remoteExecutionId.toString(), List.of(new TextResultContent("done")), false, "{}"));
+    List<ToolResult> partials = new ArrayList<>();
+    try {
+      assertInstanceOf(ToolGateway.Succeeded.class, run.execute(partials::add));
+    } finally {
+      run.close();
+    }
+
+    assertEquals(1, partials.size());
+    assertEquals("call-1", partials.get(0).toolCallId());
+    assertEquals(List.of(new TextResultContent("early")), partials.get(0).contents());
+  }
+
+  /** 挂接的远端执行以错误结束：按发送后失败分类，声明可能已产生副作用而不是未执行。 */
+  @Test
+  void reattachRemoteErrorIsClassifiedAsFailed() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolGateway.ReattachExecution reattach =
+        new ToolGateway.ReattachExecution(
+            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            ToolGatewayTestSupport.ENV_A,
+            UUID.randomUUID(),
+            Duration.ofSeconds(5),
+            new ToolGatewayTestSupport.RecordingRemoteExecutions());
+
+    ToolGateway.Run run = gateway.reattach(reattach);
+    transport
+        .attaches
+        .get(0)
+        .listener()
+        .onError(new EnvironmentCapabilityFailedException("exit 1"));
+    ToolGateway.Completion completion;
+    try {
+      completion = run.execute(partial -> {});
+    } finally {
+      run.close();
+    }
+
+    ToolGateway.Failed failed = assertInstanceOf(ToolGateway.Failed.class, completion);
+    assertEquals(ToolErrorClassifier.EXECUTION_FAILED_KIND, failed.error().kind());
+    assertFalse(failed.retryable());
+    assertTrue(failed.error().message().contains("exit 1"));
+    assertTrue(failed.error().message().contains(ToolErrorGuidance.ExecutionFact.FAILED.fact()));
   }
 
   @Test

@@ -137,7 +137,7 @@ class ToolExecutionGatewayEffectsTest {
             ToolGateway.Rejected.class,
             fixture.gateway.admit(fixture.execution("other", StateAccess.WRITE)));
 
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
   }
 
   @Test
@@ -149,7 +149,7 @@ class ToolExecutionGatewayEffectsTest {
             ToolGateway.Rejected.class,
             fixture.gateway.admit(fixture.execution("write", StateAccess.READ)));
 
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
   }
 
   /** effects 指向未注册的 customType：契约违反，在资源外部化之前以确定性失败收敛。 */
@@ -169,7 +169,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolGateway.Failed failed =
         assertInstanceOf(ToolGateway.Failed.class, fixture.run("write", StateAccess.WRITE));
 
-    assertEquals(ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
+    assertEquals(ToolErrorClassifier.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
     assertTrue(fixture.stager.puts.isEmpty(), "must not stage any resource");
   }
 
@@ -190,7 +190,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolGateway.Failed failed =
         assertInstanceOf(ToolGateway.Failed.class, fixture.run("write", StateAccess.READ));
 
-    assertEquals(ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
+    assertEquals(ToolErrorClassifier.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
     assertTrue(fixture.stager.puts.isEmpty(), "must not stage any resource");
   }
 

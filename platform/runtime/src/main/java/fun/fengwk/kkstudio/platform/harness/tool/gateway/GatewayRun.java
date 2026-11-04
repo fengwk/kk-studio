@@ -1,0 +1,111 @@
+package fun.fengwk.kkstudio.platform.harness.tool.gateway;
+
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
+
+/**
+ * 一次已准入的本地工具执行：在调用方线程上阻塞调用 {@link Tool#execute}，并把结果与异常交给共享终态装配。
+ *
+ * <p>本 Run 独占目录租用与并发租约，二者只由 {@link #close()} 释放。执行体返回的成功结果携带该工具声明的 durable effects；只有已注册且由冻结
+ * binding 声明 WRITE 的自定义条目才允许进入 Runtime。
+ */
+final class GatewayRun extends AbstractToolRun {
+
+  private final Tool tool;
+  private final ToolExecutionRequest request;
+  private final HarnessCatalog harnessCatalog;
+  private final ToolContribution contribution;
+  private final ToolBinding binding;
+  private final RuntimeToolCatalogSource.Lease catalogLease;
+  private final ConcurrencyAdmission.Lease admissionLease;
+
+  GatewayRun(
+      Tool tool,
+      ToolExecutionRequest request,
+      ToolResultFinalizer finalizer,
+      ToolContribution contribution,
+      ToolBinding binding,
+      RuntimeToolCatalogSource.Lease catalogLease,
+      ConcurrencyAdmission.Lease admissionLease) {
+    super(finalizer, binding.descriptor().name(), request.call().id());
+    this.tool = Objects.requireNonNull(tool, "tool");
+    this.request = Objects.requireNonNull(request, "request");
+    this.catalogLease = Objects.requireNonNull(catalogLease, "catalogLease");
+    this.harnessCatalog = catalogLease.harnessCatalog();
+    this.contribution = Objects.requireNonNull(contribution, "contribution");
+    this.binding = Objects.requireNonNull(binding, "binding");
+    this.admissionLease = Objects.requireNonNull(admissionLease, "admissionLease");
+  }
+
+  @Override
+  protected ToolGateway.Completion invoke(Consumer<ToolResult> progress) {
+    try {
+      return complete(tool.execute(request, progress));
+    } catch (InterruptedException interrupted) {
+      return ToolErrorClassifier.cancelled();
+    } catch (RuntimeException error) {
+      return ToolErrorClassifier.classify(toolName(), error);
+    }
+  }
+
+  @Override
+  protected void release() {
+    AdmissionLeases.release(catalogLease, admissionLease);
+  }
+
+  private ToolGateway.Completion complete(ToolOutcome outcome) {
+    ToolResult result = outcome == null ? null : outcome.result();
+    return completion(result, () -> mapEffects(outcome));
+  }
+
+  /** 仅接受已注册且由当前工具声明 WRITE 权限的自定义条目。 */
+  private ToolEffectBatch mapEffects(ToolOutcome outcome) {
+    // ToolOutcome 已保证 error 结果不携带 effects。
+    if (outcome.customEntries().isEmpty()) {
+      return ToolEffectBatch.EMPTY;
+    }
+    String contributorId = contribution.id().contributorId().value();
+    List<CustomEntryPayload> payloads = new ArrayList<>(outcome.customEntries().size());
+    for (AppendCustomEntry entry : outcome.customEntries()) {
+      if (harnessCatalog
+          .findCustomEntryType(contribution.id().contributorId(), entry.customType())
+          .isEmpty()) {
+        throw new IllegalArgumentException(
+            "tool custom entry targets an unregistered custom entry type: " + entry.customType());
+      }
+      boolean declaredWrite = false;
+      for (ContributorStateAccess access : binding.contributor().stateAccesses()) {
+        if (access.customType().equals(entry.customType())
+            && access.mode() == ContributorStateAccessMode.WRITE) {
+          declaredWrite = true;
+          break;
+        }
+      }
+      if (!declaredWrite) {
+        throw new IllegalArgumentException(
+            "tool custom entry targets state without a declared WRITE access: "
+                + entry.customType());
+      }
+      payloads.add(new CustomEntryPayload(contributorId, entry.customType(), entry.dataJson()));
+    }
+    return new ToolEffectBatch(payloads);
+  }
+}
