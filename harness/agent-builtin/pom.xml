@@ -91,6 +91,9 @@
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamPublisher</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelCheckpointCommitter</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelTerminalCommitter</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec</include>

@@ -60,7 +60,7 @@ groupExecution?
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
 - `Admitted` 后先持久化 `READY -> RUNNING`，这一步同时是陈旧启动围栏。
 
-随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
+随后 [`ModelExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后提交终态；Stop、租约丢失与关闭只需 interrupt。原类只做编排：增量接收、推送窗口与追帧节奏归 [`ModelStreamPublisher`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamPublisher.java)，累计 text/thinking 的 checkpoint 落库与 RUNNING + attempt + claim 围栏归 [`ModelCheckpointCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelCheckpointCommitter.java)，成功 / 重试 / 失败 / UNKNOWN / 模型组终态的唯一提交事务归 [`ModelTerminalCommitter`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelTerminalCommitter.java)。三者仍共享同一把锁，checkpoint 与终态提交保持串行，所有权围栏与推送节奏不变。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 `READY`，预算耗尽才终止，同一 attempt 绝不重放。
 
 流式增量在内存合并，按 [`ModelStreamConfig`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelStreamConfig.java) 的窗口推送有损增量；累计文本按独立节奏落库为 checkpoint，提交成功后才发布 checkpoint 事件，集成方也可以请求当前 owner 立即追帧。默认值为 50ms 推送窗口、256 个事件、64 KiB 增量载荷与 1500ms checkpoint 间隔。旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交批次。
 
@@ -105,8 +105,9 @@ groupExecution?
 ## 源码与测试
 
 - 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
+- ModelProcessor 的行为测试按关注点拆为 `ModelProcessorAdmissionTest`、`ModelProcessorStreamTest`、`ModelProcessorTerminalTest`、`ModelProcessorLifecycleTest` 与 `ModelProcessorGroupTest`；共享 fixture、Seed 和 fake 集中在 `ModelProcessorTestSupport`，Store 记录与失败注入统一使用 `RecordingStore`。
 - 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 Platform 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
-- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 5 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 29 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
+- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 8 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 29 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
 
 ---
 
