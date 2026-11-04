@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.controller;
+package fun.fengwk.kkstudio.ide.web;
 
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -12,14 +12,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 /**
  * Environment IDE 视图控制 API：把 Studio pane 的 view 生命周期翻译为对 Daemon 的 IDE 命令。

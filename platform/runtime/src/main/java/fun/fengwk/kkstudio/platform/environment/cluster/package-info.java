@@ -10,6 +10,10 @@
  *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication} 为内部
  *       HTTP/WS 请求提供 HMAC 头签名与校验（绑定 method、canonical requestPath、目标实例 UUID、timestamp、nonce 与 30s
  *       重放窗口）。
+ *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests}
+ *       是内部端点共用的请求取值约定（认证头 恰好一次、canonical path 逐字取原始 URI），{@link
+ *       fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors} 是它们共用的错误信封，与 Web 全局
+ *       advice 同一种 {@code ApiResponse} 格式和同一张领域状态映射。
  *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService} 按
  *       Thread 维护本机订阅租约，并在发布路径判定其它节点是否存在订阅租约与 {@code cluster_node} 租约同时有效的订阅。
  *   <li>{@link fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeService} 是既有 {@code

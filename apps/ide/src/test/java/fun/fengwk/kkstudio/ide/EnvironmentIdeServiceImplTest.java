@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -11,6 +12,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -21,12 +28,6 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -352,6 +353,44 @@ class EnvironmentIdeServiceImplTest {
                 command ->
                     command.getAction() == IdeAction.FOCUS_TERMINAL
                         && command.getBindingEpoch() == 7L));
+  }
+
+  /**
+   * 意图：切目录已被 Daemon 确认后，刷新缓存的回读失败不能把成功结果改成失败。
+   *
+   * <p>响应只使用命令确认的目录与已知绑定身份，不伪造 workspace/state；缓存中的绑定保持原值，已执行的目录命令不重放。
+   */
+  @Test
+  void changeDirectorySucceedsWhenReadbackFailsAfterConfirmation() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/daemon/next");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(true)
+            .setViewId(VIEW.toString())
+            .setDirectory("/daemon/next")
+            .build());
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(false)
+            .setCode("UNAVAILABLE")
+            .setMessage("daemon restarted")
+            .build());
+
+    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
+
+    assertEquals("/daemon/next", changed.getDirectory());
+    assertEquals(VIEW.toString(), changed.getViewId());
+    assertEquals(DOCUMENT.toString(), changed.getDocumentId());
+    assertEquals("7", changed.getBindingEpoch());
+    assertNull(changed.getWorkspacePath(), "回读失败时不得伪造 Daemon workspace");
+    assertNull(changed.getState(), "回读失败时不得伪造 Daemon 视图状态");
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertEquals(
+        List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY, IdeAction.LIST_VIEWS), actions());
   }
 
   @Test

@@ -887,21 +887,21 @@ export interface EnvironmentEventDTO {
   message: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO */
 export interface EnvironmentIdeChangeDirectoryDTO {
   documentId: string
   bindingEpoch: string
   directory: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO */
 export interface EnvironmentIdeCloseViewDTO {
   documentId: string
   bindingEpoch: string
   discard: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO */
 export interface EnvironmentIdeDirectoryListingDTO {
   path: string
   parentPath: string | null
@@ -909,13 +909,13 @@ export interface EnvironmentIdeDirectoryListingDTO {
   truncated: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO.Entry */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO.Entry */
 export interface EnvironmentIdeDirectoryListingEntry {
   name: string
   path: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
   documentId: string
@@ -926,13 +926,13 @@ export interface EnvironmentIdeOpenViewDTO {
   directory?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO */
 export interface EnvironmentIdeViewBindingDTO {
   documentId: string
   bindingEpoch: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO */
 export interface EnvironmentIdeViewDTO {
   viewId: string
   environmentId: string
@@ -948,7 +948,7 @@ export interface EnvironmentIdeViewDTO {
   entryUrl?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO */
 export interface EnvironmentIdeViewsDTO {
   views: EnvironmentIdeViewDTO[]
 }

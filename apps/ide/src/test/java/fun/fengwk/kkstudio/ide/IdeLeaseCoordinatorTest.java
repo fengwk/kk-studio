@@ -12,17 +12,17 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

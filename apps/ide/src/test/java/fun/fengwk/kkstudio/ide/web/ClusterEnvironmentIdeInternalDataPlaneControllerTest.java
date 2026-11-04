@@ -1,9 +1,12 @@
-package fun.fengwk.kkstudio.web.environment.cluster;
+package fun.fengwk.kkstudio.ide.web;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,8 +16,10 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 
 import java.net.URI;
 import java.util.Optional;
@@ -72,8 +77,9 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     verify(dataPlane).handleInternalDataPlane(eq(ENV), eq(VIEW), eq("/ws"), any(), eq(res));
   }
 
+  /** 非 owner 不再直接写容器错误页：抛出领域错误，由统一内部错误信封映射为 409。 */
   @Test
-  void nonOwnerReturns409Conflict() throws Exception {
+  void nonOwnerFailsWithIdeUnavailableBeforeForwarding() throws Exception {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
     ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
     ClusterInternalAuthentication auth = mock(ClusterInternalAuthentication.class);
@@ -91,7 +97,33 @@ class ClusterEnvironmentIdeInternalDataPlaneControllerTest {
     when(req.getMethod()).thenReturn("GET");
     HttpServletResponse res = mock(HttpServletResponse.class);
 
-    controller.dataHttp(ENV.toString(), VIEW.toString(), "/path", req, res);
-    verify(res).sendError(HttpServletResponse.SC_CONFLICT);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> controller.dataHttp(ENV.toString(), VIEW.toString(), "/path", req, res));
+    verifyNoInteractions(dataPlane);
+  }
+
+  /** 认证失败按认证异常上抛，由统一内部错误信封映射为 401。 */
+  @Test
+  void authenticationFailureFailsBeforeForwarding() throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    ClusterNodeRegistry registry = mock(ClusterNodeRegistry.class);
+    ClusterInternalAuthentication auth = mock(ClusterInternalAuthentication.class);
+    doThrow(new ClusterInternalAuthenticationException("bad signature"))
+        .when(auth)
+        .verify(any(), any(), any());
+
+    ClusterEnvironmentIdeInternalDataPlaneController controller =
+        new ClusterEnvironmentIdeInternalDataPlaneController(dataPlane, registry, auth);
+
+    HttpServletRequest req = mock(HttpServletRequest.class);
+    when(req.getMethod()).thenReturn("GET");
+    HttpServletResponse res = mock(HttpServletResponse.class);
+
+    assertThrows(
+        ClusterInternalAuthenticationException.class,
+        () -> controller.dataWebSocket(ENV.toString(), VIEW.toString(), "/ws", req, res));
+    verifyNoInteractions(dataPlane);
+    verifyNoInteractions(registry);
   }
 }

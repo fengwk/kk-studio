@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.events;
+package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -25,8 +25,10 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseSnapshot;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -151,24 +153,21 @@ public class IdeBrowserUseInternalController {
   }
 
   @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<Map<String, String>> handleAuthentication(
+  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
       ClusterInternalAuthenticationException error) {
     log.debug("rejected internal browser-use request: {}", error.getMessage());
-    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-        .body(Map.of("message", "internal authentication failed"));
+    return ClusterInternalErrors.unauthorized();
   }
 
   @ExceptionHandler(AiValidationException.class)
-  public ResponseEntity<Map<String, String>> handleValidation(AiValidationException error) {
-    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-        .body(Map.of("message", "browser-use request is invalid"));
+  public ResponseEntity<ApiResponse<Void>> handleValidation(AiValidationException error) {
+    return ClusterInternalErrors.domain(error);
   }
 
   @ExceptionHandler(BrowserUsePayloadTooLargeException.class)
-  public ResponseEntity<Map<String, String>> handlePayloadTooLarge(
+  public ResponseEntity<ApiResponse<Void>> handlePayloadTooLarge(
       BrowserUsePayloadTooLargeException error) {
-    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-        .body(Map.of("message", "browser-use request body is too large"));
+    return ClusterInternalErrors.payloadTooLarge("browser-use request body is too large");
   }
 
   private static final class BrowserUsePayloadTooLargeException extends RuntimeException {

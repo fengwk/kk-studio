@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.environment.ide;
+package fun.fengwk.kkstudio.ide.web;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;

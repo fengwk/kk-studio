@@ -1,8 +1,10 @@
-package fun.fengwk.kkstudio.web.environment.cluster;
+package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,9 +17,15 @@ import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.gateway.IdeForwardedRequest;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
+import fun.fengwk.kkstudio.platform.error.AiDomainException;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -55,10 +63,7 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
-    EnvironmentId envId = authenticateAndAuthorize(request, response, environmentId);
-    if (envId == null) {
-      return;
-    }
+    EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
     UUID viewId = Uuids.parseCanonical(viewIdStr, "viewId");
     HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
@@ -72,39 +77,36 @@ public class ClusterEnvironmentIdeInternalDataPlaneController {
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
-    EnvironmentId envId = authenticateAndAuthorize(request, response, environmentId);
-    if (envId == null) {
-      return;
-    }
+    EnvironmentId envId = authenticateAndAuthorize(request, environmentId);
     UUID viewId = Uuids.parseCanonical(viewIdStr, "viewId");
     HttpServletRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
     dataPlane.handleInternalDataPlane(envId, viewId, rawPathAndQuery, forwarded, response);
   }
 
-  private EnvironmentId authenticateAndAuthorize(
-      HttpServletRequest request, HttpServletResponse response, String environmentId)
-      throws IOException {
-    try {
-      authentication.verify(
-          request.getMethod(),
-          ClusterInternalRequests.canonicalPath(request),
-          ClusterInternalRequests.authHeaders(request));
-    } catch (Exception error) {
-      response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-      return null;
-    }
-    EnvironmentId envId;
-    try {
-      envId = RequestParameters.environmentId(environmentId);
-    } catch (Exception error) {
-      response.sendError(HttpServletResponse.SC_BAD_REQUEST);
-      return null;
-    }
+  /** 认证与 owner 核对先于任何转发；失败按内部错误信封抛出，绝不进入数据面。 */
+  private EnvironmentId authenticateAndAuthorize(HttpServletRequest request, String environmentId) {
+    authentication.verify(
+        request.getMethod(),
+        ClusterInternalRequests.canonicalPath(request),
+        ClusterInternalRequests.authHeaders(request));
+    EnvironmentId envId = RequestParameters.environmentId(environmentId);
     boolean local = clusterNodeRegistry.route(envId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
-      response.sendError(HttpServletResponse.SC_CONFLICT);
-      return null;
+      throw new AiEnvironmentIdeUnavailableException(
+          "internal IDE data request does not match this node's READY owner route");
     }
     return envId;
+  }
+
+  @ExceptionHandler(ClusterInternalAuthenticationException.class)
+  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
+      ClusterInternalAuthenticationException error) {
+    log.debug("rejected internal IDE data request: {}", error.getMessage());
+    return ClusterInternalErrors.unauthorized();
+  }
+
+  @ExceptionHandler(AiDomainException.class)
+  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+    return ClusterInternalErrors.domain(error);
   }
 }

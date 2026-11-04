@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.environment.ide;
+package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

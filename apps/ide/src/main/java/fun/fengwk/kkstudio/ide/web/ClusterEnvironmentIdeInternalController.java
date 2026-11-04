@@ -1,9 +1,8 @@
-package fun.fengwk.kkstudio.web.environment.cluster;
+package fun.fengwk.kkstudio.ide.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -22,25 +21,27 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Map;
 
 /**
  * 跨节点 IDE 元数据命令的内部 REST 入口。
@@ -182,35 +183,21 @@ public class ClusterEnvironmentIdeInternalController {
   }
 
   @ExceptionHandler(ClusterInternalAuthenticationException.class)
-  public ResponseEntity<Map<String, String>> handleAuthentication(
+  public ResponseEntity<ApiResponse<Void>> handleAuthentication(
       ClusterInternalAuthenticationException error) {
     log.debug("rejected internal IDE request: {}", error.getMessage());
-    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-        .body(Map.of("message", "internal authentication failed"));
+    return ClusterInternalErrors.unauthorized();
   }
 
   @ExceptionHandler(ClusterInternalPayloadTooLargeException.class)
-  public ResponseEntity<Map<String, String>> handlePayloadTooLarge(
+  public ResponseEntity<ApiResponse<Void>> handlePayloadTooLarge(
       ClusterInternalPayloadTooLargeException error) {
-    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-        .body(Map.of("message", "internal IDE request body is too large"));
+    return ClusterInternalErrors.payloadTooLarge("internal IDE request body is too large");
   }
 
   @ExceptionHandler(AiDomainException.class)
-  public ResponseEntity<Map<String, String>> handleDomain(AiDomainException error) {
-    HttpStatus status =
-        error instanceof AiValidationException
-            ? HttpStatus.BAD_REQUEST
-            : error instanceof AiEnvironmentIdeUnavailableException
-                ? HttpStatus.CONFLICT
-                : HttpStatus.INTERNAL_SERVER_ERROR;
-    return ResponseEntity.status(status)
-        .body(Map.of("message", message(error), "resource", error.resource()));
-  }
-
-  private static String message(AiDomainException error) {
-    String text = error.getMessage();
-    return text == null || text.isBlank() ? "internal IDE request failed" : text;
+  public ResponseEntity<ApiResponse<Void>> handleDomain(AiDomainException error) {
+    return ClusterInternalErrors.domain(error);
   }
 
   /** 内部 metadata 请求体超出硬上限；映射为 413。 */

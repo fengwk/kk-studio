@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.environment.cluster;
+package fun.fengwk.kkstudio.ide.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,13 +31,13 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -236,7 +236,9 @@ class ClusterEnvironmentIdeInternalControllerTest {
             post(IdeInternalPaths.viewsPath(ENV))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
-        .andExpect(status().isUnauthorized());
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+        .andExpect(jsonPath("$.errors.detail").value("internal authentication failed"));
     verifyNoInteractions(localEnvironmentIdeService);
     verifyNoInteractions(clusterNodeRegistry);
   }
@@ -268,7 +270,9 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
-        .andExpect(status().isConflict());
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ide_unavailable"))
+        .andExpect(jsonPath("$.errors.resource").value("environment"));
     verifyNoInteractions(localEnvironmentIdeService);
   }
 
@@ -349,7 +353,8 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
-        .andExpect(status().isPayloadTooLarge());
+        .andExpect(status().isPayloadTooLarge())
+        .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"));
     verifyNoInteractions(localEnvironmentIdeService);
   }
 
@@ -363,7 +368,8 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{not-json"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
     verifyNoInteractions(localEnvironmentIdeService);
   }
 

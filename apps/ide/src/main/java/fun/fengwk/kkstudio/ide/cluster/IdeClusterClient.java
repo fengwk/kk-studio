@@ -5,18 +5,18 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.environment.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -289,36 +289,42 @@ public class IdeClusterClient {
     }
   }
 
+  /** 只读取内部端点统一错误信封（{@code ApiResponse}）的顶层 {@code message}，回退 {@code errors.detail}。 */
   private String errorMessage(String body) {
-    if (body != null && !body.isBlank()) {
-      try {
-        JsonNode root = objectMapper.readTree(body);
-        JsonNode message = root.get("message");
-        if (message == null) {
-          message = root.get("detail");
-        }
-        if (message != null && !message.asText().isBlank()) {
-          String text = message.asText();
-          return text.length() > MAX_ERROR_MESSAGE_LENGTH
-              ? text.substring(0, MAX_ERROR_MESSAGE_LENGTH)
-              : text;
-        }
-      } catch (JacksonException ignored) {
-        // 非 JSON 错误体不是可信来源：退回固定安全文案，绝不回显原始内容。
-      }
+    JsonNode root = errorEnvelope(body);
+    JsonNode message = root == null ? null : root.get("message");
+    if (message == null || message.asText().isBlank()) {
+      JsonNode errors = root == null ? null : root.get("errors");
+      message = errors == null ? null : errors.get("detail");
+    }
+    if (message != null && !message.asText().isBlank()) {
+      String text = message.asText();
+      return text.length() > MAX_ERROR_MESSAGE_LENGTH
+          ? text.substring(0, MAX_ERROR_MESSAGE_LENGTH)
+          : text;
     }
     return "cluster IDE owner rejected the request";
   }
 
+  /** 只把已知的取消资源从错误信封的 {@code errors.resource} 穿透出来。 */
   private String errorResource(String body) {
-    try {
-      JsonNode resource = objectMapper.readTree(body).get("resource");
-      if (resource != null && "ide_close_cancelled".equals(resource.asText())) {
-        return "ide_close_cancelled";
-      }
-    } catch (JacksonException ignored) {
-      // Only the known cancellation resource is propagated from an internal error.
+    JsonNode root = errorEnvelope(body);
+    JsonNode errors = root == null ? null : root.get("errors");
+    JsonNode resource = errors == null ? null : errors.get("resource");
+    return resource != null && "ide_close_cancelled".equals(resource.asText())
+        ? "ide_close_cancelled"
+        : "environment";
+  }
+
+  /** 非 JSON 错误体不是可信来源：解析失败一律按无结构错误处理，绝不回显原始内容。 */
+  private JsonNode errorEnvelope(String body) {
+    if (body == null || body.isBlank()) {
+      return null;
     }
-    return "environment";
+    try {
+      return objectMapper.readTree(body);
+    } catch (JacksonException error) {
+      return null;
+    }
   }
 }

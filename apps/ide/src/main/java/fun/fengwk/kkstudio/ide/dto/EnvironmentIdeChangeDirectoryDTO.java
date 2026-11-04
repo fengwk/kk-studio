@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.share.ai.environment;
+package fun.fengwk.kkstudio.ide.dto;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.events;
+package fun.fengwk.kkstudio.ide.web;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -63,7 +63,8 @@ class IdeBrowserUseInternalControllerTest {
             post(IdeBrowserUsePaths.INTERNAL_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(intentBody()))
-        .andExpect(status().isUnauthorized());
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
   }
 
   @Test
@@ -136,7 +137,9 @@ class IdeBrowserUseInternalControllerTest {
     for (String path : List.of(duplicate, base + "&extra=true")) {
       mockMvc
           .perform(get(path).headers(headers(authentication.sign("GET", path, NODE))))
-          .andExpect(status().isBadRequest());
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"))
+          .andExpect(jsonPath("$.errors.resource").value("browserUse"));
     }
   }
 
@@ -159,7 +162,8 @@ class IdeBrowserUseInternalControllerTest {
                     headers(authentication.sign("POST", IdeBrowserUsePaths.INTERNAL_PATH, NODE)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(intentBody() + " trailing"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
   }
 
   @Test
@@ -190,7 +194,24 @@ class IdeBrowserUseInternalControllerTest {
             post(IdeBrowserUsePaths.INTERNAL_PATH)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(IdeBrowserUsePaths.MAX_BODY_BYTES + 1) + "\"}"))
-        .andExpect(status().isUnauthorized());
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+  }
+
+  /** 认证通过后超限的请求体仍按内部信封返回 413，不与认证失败混用状态或格式。 */
+  @Test
+  void authenticatedOversizedBodyIsRejectedWithPayloadTooLarge() throws Exception {
+    String path = IdeBrowserUsePaths.intentPath();
+
+    mockMvc
+        .perform(
+            post(path)
+                .headers(headers(authentication.sign("POST", path, NODE)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pad\":\"" + "a".repeat(IdeBrowserUsePaths.MAX_BODY_BYTES + 1) + "\"}"))
+        .andExpect(status().isPayloadTooLarge())
+        .andExpect(jsonPath("$.code").value("PAYLOAD_TOO_LARGE"))
+        .andExpect(jsonPath("$.errors.detail").value("browser-use request body is too large"));
   }
 
   private long registerUsage(long revision, IdeBrowserUseView... views) {

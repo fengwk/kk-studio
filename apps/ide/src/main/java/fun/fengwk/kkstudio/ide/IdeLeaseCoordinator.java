@@ -6,10 +6,10 @@ import org.slf4j.LoggerFactory;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

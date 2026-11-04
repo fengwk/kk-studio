@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
@@ -19,13 +20,13 @@ import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.DomainErrorStatus;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
-import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -75,44 +76,44 @@ public class StudioDomainErrorAdvice {
 
   @ExceptionHandler(AiValidationException.class)
   public ResponseEntity<ApiResponse<Void>> handleValidation(AiValidationException error) {
-    return build(HttpStatus.BAD_REQUEST, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiResourceNotFoundException.class)
   public ResponseEntity<ApiResponse<Void>> handleNotFound(AiResourceNotFoundException error) {
-    return build(HttpStatus.NOT_FOUND, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiVersionConflictException.class)
   public ResponseEntity<ApiResponse<Void>> handleVersionConflict(AiVersionConflictException error) {
-    return build(HttpStatus.CONFLICT, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiDuplicateException.class)
   public ResponseEntity<ApiResponse<Void>> handleDuplicate(AiDuplicateException error) {
-    return build(HttpStatus.CONFLICT, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiInUseException.class)
   public ResponseEntity<ApiResponse<Void>> handleInUse(AiInUseException error) {
-    return build(HttpStatus.CONFLICT, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiEnvironmentIdeUnavailableException.class)
   public ResponseEntity<ApiResponse<Void>> handleIdeUnavailable(
       AiEnvironmentIdeUnavailableException error) {
-    return build(HttpStatus.CONFLICT, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiEnvironmentUnavailableException.class)
   public ResponseEntity<ApiResponse<Void>> handleEnvironmentUnavailable(
       AiEnvironmentUnavailableException error) {
-    return build(HttpStatus.CONFLICT, error);
+    return build(error);
   }
 
   @ExceptionHandler(AiUpstreamException.class)
   public ResponseEntity<ApiResponse<Void>> handleUpstream(AiUpstreamException error) {
-    return build(HttpStatus.BAD_GATEWAY, error);
+    return build(error);
   }
 
   @ExceptionHandler(MissingServletRequestParameterException.class)
@@ -137,9 +138,10 @@ public class StudioDomainErrorAdvice {
         HttpStatus.BAD_REQUEST, wrapped, messageService.validationTypeMismatch(error.getName()));
   }
 
-  private ResponseEntity<ApiResponse<Void>> build(HttpStatus status, AiDomainException error) {
+  /** 状态统一取自 {@link DomainErrorStatus}：与集群内部端点共用同一张映射表。 */
+  private ResponseEntity<ApiResponse<Void>> build(AiDomainException error) {
     return build(
-        status,
+        DomainErrorStatus.of(error),
         error,
         messageService.domainMessage(error.code(), Map.of("resource", error.resource())));
   }

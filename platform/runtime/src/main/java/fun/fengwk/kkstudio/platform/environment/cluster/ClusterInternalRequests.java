@@ -1,9 +1,6 @@
-package fun.fengwk.kkstudio.web.environment.cluster;
+package fun.fengwk.kkstudio.platform.environment.cluster;
 
 import jakarta.servlet.http.HttpServletRequest;
-
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 
 import java.util.Enumeration;
 import java.util.HashMap;

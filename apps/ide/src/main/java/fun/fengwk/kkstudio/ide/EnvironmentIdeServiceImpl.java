@@ -1,11 +1,20 @@
 package fun.fengwk.kkstudio.ide;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
@@ -16,13 +25,6 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -42,6 +44,7 @@ import java.util.concurrent.TimeoutException;
  * <p>绑定身份命令必须匹配 owner 缓存的 document+epoch，且缓存缺失/漂移时先用 {@code LIST_VIEWS} 重建再重判；旧 epoch 的关闭、目录与终端请求不得
  * 作用于新绑定。命令超时/断线映射为不可用；Daemon 的 VIEW_GONE 立即拒绝并撤销本地授权，其它拒绝保留安全文案。所有失败路径都不重放副作用。
  */
+@Slf4j
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   /** 除普通关闭外，单条 IDE 命令的默认等待上限。 */
@@ -249,14 +252,31 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     requireReplyView(result.reply(), parsedViewId);
     String confirmed = requirePath(result.reply().getDirectory(), "directory");
-    ViewSnapshot current =
-        loadViews(environmentId).stream()
-            .filter(candidate -> candidate.binding().equals(binding))
-            .findFirst()
-            .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
-    EnvironmentIdeViewDTO dto = toDto(current);
+    ViewSnapshot current = readBackBinding(environmentId, binding);
+    EnvironmentIdeViewDTO dto = current == null ? toDto(binding) : toDto(current);
     dto.setDirectory(confirmed);
     return dto;
+  }
+
+  /**
+   * 命令确认后回读 Daemon 快照刷新绑定缓存。
+   *
+   * <p>回读只用于刷新缓存与补充响应：回读本身失败时保留已确认的切换结果并记录告警，不能把成功的目录切换报成失败；回读成功但绑定已不在快照中， 说明视图已换代或关闭，仍按 {@code
+   * VIEW_GONE} 拒绝。
+   */
+  private ViewSnapshot readBackBinding(
+      EnvironmentId environmentId, IdeViewBindingRegistry.Binding binding) {
+    List<ViewSnapshot> current;
+    try {
+      current = loadViews(environmentId);
+    } catch (RuntimeException error) {
+      log.warn("failed to read back IDE views after changing directory", error);
+      return null;
+    }
+    return current.stream()
+        .filter(candidate -> candidate.binding().equals(binding))
+        .findFirst()
+        .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
   }
 
   @Override
@@ -624,7 +644,15 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private static EnvironmentIdeViewDTO toDto(ViewSnapshot view) {
-    IdeViewBindingRegistry.Binding binding = view.binding();
+    EnvironmentIdeViewDTO dto = toDto(view.binding());
+    dto.setDirectory(view.directory());
+    dto.setWorkspacePath(view.workspacePath());
+    dto.setState(view.state().name());
+    return dto;
+  }
+
+  /** 只用已确认的绑定身份构造响应；Daemon 未回读到的 workspace 与 state 保持为空，不伪造。 */
+  private static EnvironmentIdeViewDTO toDto(IdeViewBindingRegistry.Binding binding) {
     EnvironmentIdeViewDTO dto = new EnvironmentIdeViewDTO();
     dto.setViewId(binding.viewId().toString());
     dto.setEnvironmentId(binding.environmentId().toString());
@@ -634,9 +662,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     dto.setClaimId(binding.claimId().toString());
     dto.setDaemonInstanceId(binding.daemonIdentity().daemonInstanceId());
     dto.setBindingEpoch(Long.toString(binding.bindingEpoch()));
-    dto.setDirectory(view.directory());
-    dto.setWorkspacePath(view.workspacePath());
-    dto.setState(view.state().name());
     return dto;
   }
 
