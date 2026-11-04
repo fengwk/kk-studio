@@ -18,7 +18,9 @@ param(
     [AllowEmptyString()]
     [string] $ConfigFile,
     [AllowEmptyString()]
-    [string] $TokenFile
+    [string] $TokenFile,
+    [AllowEmptyString()]
+    [string] $Version
 )
 
 Set-StrictMode -Version Latest
@@ -30,7 +32,7 @@ foreach ($key in $PSBoundParameters.Keys) {
 }
 
 $script:ManagedBy = "scripts/daemon/install.ps1"
-$script:InstallParameterNames = @("ConfigFile", "TokenFile")
+$script:InstallParameterNames = @("ConfigFile", "TokenFile", "Version")
 $script:VerifyTimeoutSeconds = 30
 $script:VerifyStableSeconds = 3
 $script:HomePath = $null
@@ -54,10 +56,10 @@ $script:ConfigFailureMaxLength = 512
 
 function Write-Usage {
     @'
-Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
+Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-Version <version>]
        .\install.ps1 status|uninstall|help
 
-Only the latest official fengwk/kk-studio GitHub release is installed.
+The specified or latest official fengwk/kk-studio GitHub release is installed.
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs.
 Token bytes are copied only; they never enter task arguments or environment variables.
 No user Node is required: the release archive bundles a frozen node.exe runtime.
@@ -600,27 +602,47 @@ function Prepare-StagedArchive {
 
 function Assert-ReleaseTag {
     param([AllowEmptyString()][string] $Tag)
-    if ($Tag -cnotmatch "\Av[0-9A-Za-z._-]+\z") {
-        Throw-Failure "release tag must match ^v[0-9A-Za-z._-]+$"
+    if ($Tag -cnotmatch "\Av[0-9A-Za-z._+-]{1,64}\z") {
+        Throw-Failure "invalid release tag"
     }
 }
 
 function Get-ReleaseArchive {
     # PS 5.1 otherwise negotiates obsolete TLS on some Windows installations.
     $savedProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $savedProxy = [Net.WebRequest]::DefaultWebProxy
+    $proxyArguments = @{}
     try {
         [Net.ServicePointManager]::SecurityProtocol =
             $savedProtocol -bor [Net.SecurityProtocolType]::Tls12
-        try {
-            $release = Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
-                -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" }
+        # Windows PowerShell 5.1 does not consistently honor HTTPS_PROXY. The managed
+        # update job supplies an explicit decision, including direct, without credentials.
+        if ($env:KK_DAEMON_INSTALL_PROXY_ENV -eq "1") {
+            if ([string]::IsNullOrEmpty($env:HTTPS_PROXY)) {
+                [Net.WebRequest]::DefaultWebProxy = $null
+                if ($PSVersionTable.PSVersion.Major -ge 6) {
+                    $proxyArguments.NoProxy = $true
+                }
+            }
+            else {
+                $proxyArguments.Proxy = $env:HTTPS_PROXY
+            }
         }
-        catch {
-            if ($_.Exception -is [System.InvalidOperationException]) { throw }
-            Throw-Failure "无法下载：不能解析最新正式版本。请检查网络后重试。"
+        if ($script:InvocationParameters.ContainsKey("Version")) {
+            $tag = "v$Version"
         }
-        $tag = $release.tag_name
+        else {
+            try {
+                $release = Invoke-RestMethod `
+                    -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
+                    -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" } @proxyArguments
+            }
+            catch {
+                if ($_.Exception -is [System.InvalidOperationException]) { throw }
+                Throw-Failure "无法下载：不能解析最新正式版本。请检查网络后重试。"
+            }
+            $tag = $release.tag_name
+        }
         Assert-ReleaseTag -Tag $tag
         $script:ResolvedReleaseTag = $tag
         # The release matrix publishes windows for amd64 only; the fixed asset name is the
@@ -636,9 +658,9 @@ function Get-ReleaseArchive {
         $checksumPath = "$($script:DownloadedArchive).sha256"
         try {
             Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset" `
-                -OutFile $script:DownloadedArchive | Out-Null
+                -OutFile $script:DownloadedArchive @proxyArguments | Out-Null
             Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset.sha256" `
-                -OutFile $checksumPath | Out-Null
+                -OutFile $checksumPath @proxyArguments | Out-Null
         }
         catch {
             if ($_.Exception -is [System.InvalidOperationException]) { throw }
@@ -657,6 +679,7 @@ function Get-ReleaseArchive {
     }
     finally {
         [Net.ServicePointManager]::SecurityProtocol = $savedProtocol
+        [Net.WebRequest]::DefaultWebProxy = $savedProxy
     }
 }
 
@@ -840,6 +863,9 @@ function Assert-NoInstallOptions {
 }
 
 function Invoke-Install {
+    if ($script:InvocationParameters.ContainsKey("Version")) {
+        Assert-ReleaseTag -Tag "v$Version"
+    }
     Initialize-HostContext
     $script:BackupDirectory = $null
     $existing = Find-DaemonTask

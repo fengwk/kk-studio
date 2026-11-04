@@ -338,35 +338,6 @@ test('current startup artifact-mode reuses the distribution JAR and stays a requ
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true|--passWithNoTests|-DskipTests/u)
 })
 
-test('Java update commands are replayed through the built Node decoder as a required gate', () => {
-  // Java producer 产物必须由同 job 构建出的生产 Node decoder 真实解码：依赖 daemon 构建，且不得条件化或忽略失败。
-  const steps = validationSteps()
-  const verify = steps.findIndex(
-    (step) => stepField(step, 'run') === 'env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify',
-  )
-  assert.ok(verify >= 0, 'missing the distribution Java verify step')
-  const matching = steps.filter((step) => stepField(step, 'run')?.includes('scripts/daemon/verify-java-update-commands.mjs'))
-  assert.equal(matching.length, 1, 'expected exactly one Java-to-Node update decoder step')
-  const step = matching[0]
-  const index = steps.indexOf(step)
-  assert.ok(index > verify, 'the Java-to-Node decoder step must run after the Java producer verify')
-  const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
-  const builds = steps.filter((step) => stepField(step, 'run') === 'npm --prefix daemon run build')
-  assert.equal(builds.length, 1, 'expected exactly one same-commit daemon build')
-  const build = builds[0]
-  const buildIndex = steps.indexOf(build)
-  assert.ok(
-    install >= 0 && install < buildIndex && buildIndex < verify,
-    'install dependencies and build the Node transport before Java integration tests and decoder replay',
-  )
-  assert.equal(stepField(build, 'if'), undefined, 'the daemon build must not be conditional')
-  assert.doesNotMatch(build, /continue-on-error:|\|\|\s*true/u)
-  const run = stepField(step, 'run')
-  assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs platform\/daemon-server\/target\/daemon-update-java-commands\.json/u)
-  assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
-  assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)
-})
-
 test('publish reuses only the same-run, same-SHA verified artifact', () => {
   // The producer uploads a closed artifact; the consumer downloads it from this run and verifies it
   // before selecting the Dockerfile's verified-artifact target. No plain verify JAR or latest-run lookup.

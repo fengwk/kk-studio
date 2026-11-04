@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { accessSync, chmodSync, constants, existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
@@ -41,6 +41,47 @@ const libDir = (fixture) => path.join(fixture.installRoot, 'lib')
 const tokenRejection = 'daemon failed: environment registration is rejected: invalid registration token'
 
 describe('install.sh on Linux', () => {
+  it('installs the exact requested version without resolving latest and preserves private inputs', () =>
+    withInstall(({ fixture, configFile, tokenFile, install }) => {
+      assert.equal(install().status, 0)
+      const version = '1.1.1+build'
+      const asset = `kk-studio-daemon-v${version}-linux-amd64.tar.gz`
+      const archive = path.join(fixture.httpDir, asset)
+      copyFileSync(path.join(fixture.httpDir, fixture.asset), archive)
+      writeFileSync(`${archive}.sha256`, `${sha256Of(archive)}  ${asset}\n`)
+      const log = path.join(fixture.state, 'version-curl')
+      const result = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile, '--version', version], {
+        extraEnv: { FAKE_CURL_LOG: log, FAKE_NODE_VERSION: version },
+      })
+      assert.equal(result.status, 0, result.stderr)
+      const urls = text(log).trim().split('\n').map(line => JSON.parse(line).at(-1))
+      const base = `https://github.com/fengwk/kk-studio/releases/download/v${version}/${asset}`
+      assert.deepEqual(urls, [base, `${base}.sha256`])
+      for (const name of ['daemon.json', 'daemon.token']) {
+        assert.equal(text(path.join(fixture.installRoot, name)), text(path.join(path.dirname(configFile), name)))
+      }
+      assert.doesNotMatch(result.stdout + result.stderr + text(unitPath(fixture)), /token-value/)
+      assert.match(text(path.join(fixture.state, 'commands')), /--user stop/)
+      assert.ok(readdirSync(path.join(fixture.installRoot, 'backups')).length > 0)
+    }))
+
+  it('rejects unsafe, missing, duplicate and non-install versions before network access', () =>
+    withInstall(({ fixture, configFile, tokenFile }) => {
+      const log = path.join(fixture.state, 'invalid-curl')
+      const args = ['install', '--config-file', configFile, '--token-file', tokenFile]
+      for (const suffix of [
+        ['--version', ''], ['--version', '../bad'], ['--version', 'a'.repeat(65)],
+        ['--version', 'bad\n'], ['--version'], ['--version', '1', '--version', '2'],
+      ]) {
+        const result = fixture.run([...args, ...suffix], { extraEnv: { FAKE_CURL_LOG: log } })
+        assert.notEqual(result.status, 0, JSON.stringify(suffix))
+      }
+      for (const command of ['help', 'status', 'uninstall']) {
+        assert.notEqual(fixture.run([command, '--version', '1']).status, 0)
+      }
+      assert.equal(existsSync(log), false)
+    }))
+
   it('preserves the child failure with redirected stdin and real terminal stderr', () =>
     withTempDir((tmp) => {
       const fixture = new InstallFixture(tmp)

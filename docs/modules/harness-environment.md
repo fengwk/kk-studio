@@ -323,7 +323,7 @@ COMPLETED
 - `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
 
 「一个 Environment 同一时刻至多一次更新」由核心内存准入保证：`UPDATE` / `UPDATE_RESULT` 不落任务表，Server 只保留当前命令的有界回执，不提供更新历史查询。更新期间对旧二进制的
-任何替换都由 Daemon 与独立 OS 更新器完成，核心只负责准入、下发与回执转发。
+任何替换都由独立 OS 作业调用官方安装器完成，核心只负责准入、下发与回执转发。
 
 ### 终态唯一与迟到帧
 

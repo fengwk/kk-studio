@@ -169,8 +169,6 @@ Windows 原生验收分别运行两个 host：
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_update_windows.ps1
-pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_update_windows.ps1
 ```
 
 该套件检查真实 ScheduledTasks 定义、ACL、Node argv 和进程捕获，但不注册任务。
@@ -178,11 +176,6 @@ Windows 计划任务以发行归档内的冻结运行时直接执行 `main.js`�
 `--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、note、
 bashExecutable 与 lsp 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
 套件在非 ASCII 工作目录下真实运行安装器，并覆盖非零退出、双流大输出与选项环境恢复。
-
-更新套件真实执行已打包的更新脚本，以隔离文件和服务管理桩验证所有权、停止、备份、替换和重启，
-以及失败回执或诊断输出失败后仍独立清理一次性任务。替换后重启失败不自动回滚；成功后的回执写入失败
-只报告警告，不把已完成的替换改报失败。Windows 套件分别在 PowerShell 5.1/7 上运行，
-Unix 套件在系统 Bash 上运行；均不注册、启停或移除宿主真实服务。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
@@ -194,22 +187,9 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
-### 跨语言 UPDATE 命令串联
+### 跨语言 UPDATE 命令
 
-Java 制品生产方与 Node 协议入口共享
-[official-artifact-fixtures.json](../../daemon/test/resources/update/official-artifact-fixtures.json)，
-因此本地按顺序验证两端对同一批 UPDATE 命令的接受与拒绝一致：
-
-```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl platform/daemon-server -am test \
-  -Dtest=OfficialUpdateArtifactFixtureTest -Dsurefire.failIfNoSpecifiedTests=false
-npm --prefix daemon ci && npm --prefix daemon run build
-node scripts/daemon/verify-java-update-commands.mjs platform/daemon-server/target/daemon-update-java-commands.json
-```
-
-Java producer 把生产 codec 的结果（accepted 包含 protobuf 长度前缀编码帧，rejected 包含 artifactUrl）写入 `platform/daemon-server/target/daemon-update-java-commands.json`，
-CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十一条错配必须被拒。
-CI 在 `mvn -Pdistribution verify` 之后以同样的顺序运行这两步。
+Java 与 Node 使用共享控制协议 golden fixture 验证 UPDATE 编码；命令只包含操作 ID 和目标版本。
 
 ## Java 质量检查
 

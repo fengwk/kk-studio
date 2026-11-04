@@ -570,16 +570,7 @@ function validatePolicy(policy: TemporaryResourcePolicy): void {
 function validateUpdate(update: Update): void {
   assertNoUnknown(update, 'update')
   requireUuid(update.operationId, 'update.operationId')
-  const targetVersion = requireDaemonVersion(update.targetVersion, 'update.targetVersion')
-  const url = requireText(update.artifactUrl, 'update.artifactUrl', { nonBlank: true })
-  const match = ARTIFACT_URL_PATTERN.exec(url)
-  if (match === null || match[1] !== targetVersion) {
-    throw new Error('update.artifactUrl must be the official archive for targetVersion')
-  }
-  const sha = requireText(update.artifactSha256, 'update.artifactSha256', { nonBlank: true })
-  if (!SHA256_ANY_PATTERN.test(sha)) {
-    throw new Error('update.artifactSha256 has invalid syntax')
-  }
+  requireDaemonVersion(update.targetVersion, 'update.targetVersion')
 }
 
 function validateUpdateResult(result: UpdateResult): void {

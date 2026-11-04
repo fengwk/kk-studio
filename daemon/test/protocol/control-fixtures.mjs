@@ -343,8 +343,6 @@ export function updateEnvelope() {
       value: create(UpdateSchema, {
         operationId: OPERATION,
         targetVersion: '1.2.3',
-        artifactUrl: ARTIFACT,
-        artifactSha256: 'A'.repeat(64),
       }),
     },
   })

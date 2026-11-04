@@ -723,14 +723,12 @@ describe('control binary codec', () => {
             case: 'update',
             value: create(UpdateSchema, {
               operationId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              targetVersion: '1.0.0',
-              artifactUrl: 'https://attacker.com/evil.tar.gz',
-              artifactSha256: 'a'.repeat(64),
+              targetVersion: '../invalid',
             }),
           },
         }),
       ),
-    ).toThrow(/official archive/)
+    ).toThrow(/targetVersion/)
 
     expect(() =>
       encodeBinary(

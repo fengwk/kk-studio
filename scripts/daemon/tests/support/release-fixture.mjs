@@ -37,8 +37,6 @@ export const SYSTEM_BASH = process.env.TEST_BASH || '/bin/bash'
 export const REPOSITORY_ROOT = repositoryRoot()
 const TESTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon/tests')
 const PTY_RUN = path.join(TESTS_DIR, 'support/pty_run.py')
-export const UPDATE_SCRIPTS_TS = path.join(REPOSITORY_ROOT, 'daemon/src/update-scripts.ts')
-export const EXPORT_UPDATE_SCRIPT_MJS = path.join(TESTS_DIR, 'export-update-script.mjs')
 const SCRIPTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon')
 
 const MAIN_JS = `console.log("kk-studio-daemon ${DAEMON_VERSION}")\n`
@@ -81,32 +79,6 @@ export function writeText(file, content, mode = 0o600) {
 }
 
 export const sha256Of = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
-
-/**
- * Import one constant from the shipped `update-scripts.ts` through Node.
- *
- * The module has no imports and contains only exported template strings, so Node can load it
- * directly with type stripping. Requiring a Java build or `dist` here would let the tests drift
- * from the real source. The export travels as a UTF-8 file produced by the same exporter the
- * PowerShell fixtures use: Windows PowerShell 5.1 corrupts an inline `-e` script and decodes native
- * stdout with the console code page, so neither command-line source nor stdout is used.
- */
-export function nodeExport(name) {
-  const work = mkdtempSync(path.join(tmpdir(), 'kk-update-export-'))
-  try {
-    const exported = path.join(work, 'update-script.txt')
-    const result = spawnSync(process.execPath, [EXPORT_UPDATE_SCRIPT_MJS, UPDATE_SCRIPTS_TS, name, exported], {
-      encoding: 'utf8',
-    })
-    if (result.status !== 0) {
-      throw new Error(`cannot import ${name} from ${UPDATE_SCRIPTS_TS}: exit ${result.status}: ${result.stderr}`)
-    }
-    // Decoded byte for byte as UTF-8: this is the production script text itself.
-    return readFileSync(exported, 'utf8')
-  } finally {
-    rmSync(work, { recursive: true, force: true })
-  }
-}
 
 /** Build a minimal stand-in for one frozen fork code-server archive. */
 export function codeServerTar(file, platform) {
