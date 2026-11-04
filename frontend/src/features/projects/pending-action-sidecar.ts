@@ -7,12 +7,11 @@ export type IssueActionKind =
   | 'RECOVER'
   | 'REOPEN'
   | 'BLOCK'
-  | 'RESOLVE_UNKNOWN'
   | 'STOP'
   | 'RESET_BUDGET'
   | 'ACTIVITY'
 
-// 1. 严格 discriminated union 定义 8 种操作的精确 payload 与结构
+// 1. 严格 discriminated union 定义 7 种操作的精确 payload 与结构
 export interface TransitionPendingAction {
   issueId: string
   kind: 'TRANSITION'
@@ -53,16 +52,6 @@ export interface BlockPendingAction {
   isUnknown: boolean
 }
 
-export interface ResolveUnknownPendingAction {
-  issueId: string
-  kind: 'RESOLVE_UNKNOWN'
-  requestKey: string
-  expectedVersion: string
-  payload: { verification: string }
-  createdAt: string
-  isUnknown: boolean
-}
-
 export interface StopPendingAction {
   issueId: string
   kind: 'STOP'
@@ -98,7 +87,6 @@ export type PendingIssueAction =
   | RecoverPendingAction
   | ReopenPendingAction
   | BlockPendingAction
-  | ResolveUnknownPendingAction
   | StopPendingAction
   | ResetBudgetPendingAction
   | ActivityPendingAction
@@ -450,8 +438,6 @@ export function validAction(value: unknown, expectedIssueId?: string): value is 
       return true
     case 'BLOCK':
       return nonBlank(p.reason)
-    case 'RESOLVE_UNKNOWN':
-      return nonBlank(p.verification)
     case 'STOP':
       return p.detail === null || typeof p.detail === 'string'
     case 'RESET_BUDGET':

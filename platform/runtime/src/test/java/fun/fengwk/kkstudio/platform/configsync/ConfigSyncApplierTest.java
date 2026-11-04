@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
@@ -50,6 +51,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -161,10 +163,14 @@ class ConfigSyncApplierTest {
 
     ConfigSyncParser.AgentSpec specA =
         new ConfigSyncParser.AgentSpec(
-            "a", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("b"))));
+            "a",
+            new ModelSelection("m", "default"),
+            agentProperties(agentConfig(List.of(), List.of(), List.of("b"))));
     ConfigSyncParser.AgentSpec specB =
         new ConfigSyncParser.AgentSpec(
-            "b", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("a"))));
+            "b",
+            new ModelSelection("m", "default"),
+            agentProperties(agentConfig(List.of(), List.of(), List.of("a"))));
 
     applier.apply(
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(specA, specB), null));
@@ -175,6 +181,9 @@ class ConfigSyncApplierTest {
     // 阶段一创建时 subagents 必须为空，否则循环引用无目标行。
     for (AgentDefinitionCreateDTO created : createCaptor.getAllValues()) {
       assertTrue(created.getConfig().getSubagents().isEmpty());
+      assertEquals("builtin", created.getExecution().getDriver());
+      assertEquals(
+          Map.of("modelName", "m", "variant", "default"), created.getExecution().getSettings());
     }
 
     ArgumentCaptor<AgentDefinitionUpdateDTO> updateCaptor =
@@ -184,6 +193,11 @@ class ConfigSyncApplierTest {
         updateCaptor.getAllValues().stream().map(dto -> dto.getConfig().getSubagents()).toList();
     assertTrue(subagents.contains(List.of("b")));
     assertTrue(subagents.contains(List.of("a")));
+    for (AgentDefinitionUpdateDTO updated : updateCaptor.getAllValues()) {
+      assertEquals("builtin", updated.getExecution().getDriver());
+      assertEquals(
+          Map.of("modelName", "m", "variant", "default"), updated.getExecution().getSettings());
+    }
   }
 
   @Test
@@ -393,7 +407,7 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncParser.AgentSpec(
                     "dep-agent",
-                    "m",
+                    new ModelSelection("m", "default"),
                     agentProperties(agentConfig(List.of(), List.of(), List.of())))),
             List.of(
                 new ConfigSyncPlan.PluginImport(
@@ -456,7 +470,10 @@ class ConfigSyncApplierTest {
   private static AgentDefinitionEditablePropertiesDTO agentProperties(
       AgentDefinitionConfigDTO config) {
     AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
-    properties.setModel("m");
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver("builtin");
+    execution.setSettings(Map.of("modelName", "m", "variant", "default"));
+    properties.setExecution(execution);
     properties.setConfig(config);
     return properties;
   }
@@ -540,7 +557,9 @@ class ConfigSyncApplierTest {
     when(definitionRepository.getByName("a")).thenReturn(existing);
     ConfigSyncParser.AgentSpec spec =
         new ConfigSyncParser.AgentSpec(
-            "a", "m", agentProperties(agentConfig(List.of(), List.of(), List.of())));
+            "a",
+            new ModelSelection("m", "default"),
+            agentProperties(agentConfig(List.of(), List.of(), List.of())));
 
     applier.apply(plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(spec), null));
 

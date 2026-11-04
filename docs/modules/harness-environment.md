@@ -168,7 +168,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 载荷通告认证准入后的资源预算（`max_resource_bytes`）与临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`）。Daemon 收到 `SETTINGS` 并回执 `READY` 后连接进入可用状态。
+`SETTINGS` 载荷通告认证准入后的资源预算（`max_resource_bytes`）、临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`）与全局网络设置（`proxy_url` / `no_proxy_hosts`）。Daemon 收到首条 `SETTINGS` 并回执 `READY` 后连接进入可用状态；后续 `SETTINGS` 只应用网络设置而不再回执 READY。系统设置通知和重连回读驱动在线连接对账，READY 时也会补齐握手期间的网络设置变化。
 
 `daemon_instance_id` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Studio 在同实例重连后，对未收敛调用发送 `RECOVER`（已取消的发送 `CANCEL`）而绝不重发 `INVOKE`，Daemon 命中 journal 时重放既有事实，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启的执行恢复。握手失败时 Studio 以 `ERROR` 帧并关闭连接收尾。
 
@@ -323,7 +323,7 @@ COMPLETED
 - `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
 
 「一个 Environment 同一时刻至多一次更新」由核心内存准入保证：`UPDATE` / `UPDATE_RESULT` 不落任务表，Server 只保留当前命令的有界回执，不提供更新历史查询。更新期间对旧二进制的
-任何替换都由 Daemon 与独立 OS 更新器完成，核心只负责准入、下发与回执转发。
+任何替换都由独立 OS 作业调用官方安装器完成，核心只负责准入、下发与回执转发。
 
 ### 终态唯一与迟到帧
 
@@ -396,7 +396,6 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 
 测试守卫：
 
-- [`EnvironmentDependencyBoundaryTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentDependencyBoundaryTest.java)：契约模块运行时类路径不包含 Jetty 与 Protobuf。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。

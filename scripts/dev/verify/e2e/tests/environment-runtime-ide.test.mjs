@@ -3,10 +3,7 @@ import test from 'node:test'
 
 import { HttpError } from '../lib/http.mjs'
 import { createEnvironmentFixture, deleteEnvironmentFixture } from '../lib/fixtures.mjs'
-import { ALL_CASES, getCase } from '../lib/registry.mjs'
-
-// 注册副作用：新 case 模块必须被 import 才会进入 inventory。
-import '../cases/environment-runtime-ide.mjs'
+import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUNTIME_CASE_ID = 'environment.runtime_absent_unavailable'
 const IDE_CASE_ID = 'environment.ide_view_no_ready_owner_rejected'
@@ -57,7 +54,7 @@ function environmentWithoutDaemon() {
           path,
         )
       }
-      if (path.includes('/ide/views')) {
+      if (path.includes('/ide/views') || path.endsWith('/ide/directories')) {
         throw new HttpError(
           409,
           canonicalErrorBody(409, 'ide_unavailable', 'environment IDE owner route is unavailable'),
@@ -109,7 +106,7 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
   await getCase(IDE_CASE_ID).run(ctx)
 
   const ideCalls = calls.filter((call) => call.path.includes('/ide/views'))
-  assert.equal(ideCalls.length, 5, `IDE case must exercise five view requests: ${JSON.stringify(ideCalls)}`)
+  assert.equal(ideCalls.length, 6, `IDE case must exercise six view requests: ${JSON.stringify(ideCalls)}`)
   const viewsPath = `/api/environments/${ENVIRONMENT_ID}/ide/views`
   const open = ideCalls.find((call) => call.method === 'POST' && call.path === viewsPath)
   for (const field of ['viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId']) {
@@ -128,6 +125,14 @@ test('IDE view case checks no-READY-owner rejection for canonical view commands'
   assert.ok(
     ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/terminal')),
     'IDE case must attempt a terminal focus',
+  )
+  assert.ok(
+    ideCalls.some((call) => call.method === 'POST' && call.path.endsWith('/mobile-layout')),
+    'IDE case must attempt mobile layout',
+  )
+  assert.ok(
+    calls.some((call) => call.method === 'GET' && call.path.endsWith('/ide/directories')),
+    'IDE case must attempt a directory listing',
   )
   assert.ok(
     ideCalls.some((call) => call.method === 'DELETE'),

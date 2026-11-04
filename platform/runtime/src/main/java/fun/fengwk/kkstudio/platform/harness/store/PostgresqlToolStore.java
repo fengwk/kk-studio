@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
@@ -41,9 +42,9 @@ final class PostgresqlToolStore implements ToolStore {
   /**
    * 「等待环境」只读聚合查询：按 {@code (真实执行根, 冻结的所需环境)} 分组，代表取组内最早 {@code (created_at, id)}。
    *
-   * <p>候选是「调用已 READY、其 TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效
-   * READY 连接租约」的调用；时间条件统一使用数据库时钟 {@code statement_timestamp()}，与 Work claim 的 due / lease
-   * 判定同一时间域。根取自 Thread 不可变的 {@code root_thread_id}，分组后按代表 keyset 过滤并升序输出。查询只读，不产生锁。
+   * <p>候选是「调用已 READY、其 TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}」的调用；
+   * 时间条件统一使用数据库时钟 {@code statement_timestamp()}，与 Work claim 的 due / lease 判定同一时间域。根取自 Thread 不可变的
+   * {@code root_thread_id}，分组后按代表 keyset 过滤并升序输出。查询只读，不产生锁。
    */
   private static final String LIST_PENDING_ENVIRONMENT_WAITS =
       """
@@ -59,13 +60,6 @@ final class PostgresqlToolStore implements ToolStore {
             and w.required_environment_id is not null
             and w.available_at <= statement_timestamp()
             and (w.lease_until is null or w.lease_until <= statement_timestamp())
-            and not exists (
-                select 1
-                from environment_connection ec
-                where ec.environment_id = w.required_environment_id
-                  and ec.status = 'READY'
-                  and ec.lease_until > statement_timestamp()
-            )
       ),
       grouped as (
           select root_thread_id,
@@ -88,18 +82,15 @@ final class PostgresqlToolStore implements ToolStore {
       limit ?
       """;
 
-  /** 待处理读模型仅因时间推移最早可能改变的权威时刻（见 {@link ToolStore#findNextEnvironmentWaitChange}）。 */
-  private static final String NEXT_ENVIRONMENT_WAIT_CHANGE =
+  /** 环境 Work 可领取性仅因时间推移最早可能改变的权威时刻。 */
+  private static final String NEXT_ENVIRONMENT_WORK_CHANGE =
       """
       select least(
-                 min(case when ec.lease_until > statement_timestamp() then ec.lease_until end),
                  min(case when w.available_at > statement_timestamp() then w.available_at end),
                  min(case when w.lease_until > statement_timestamp() then w.lease_until end)
              ) as next_change_at
       from harness_tool_invocation i
       join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-      left join environment_connection ec
-        on ec.environment_id = w.required_environment_id and ec.status = 'READY'
       where i.status = 'READY'
         and w.required_environment_id is not null
       """;
@@ -199,7 +190,7 @@ final class PostgresqlToolStore implements ToolStore {
   }
 
   @Override
-  public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+  public List<PendingEnvironmentWaitRow> listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
     tx.checkOpen();
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
@@ -227,33 +218,21 @@ final class PostgresqlToolStore implements ToolStore {
         """
         select i.id as invocation_id,
                w.required_environment_id,
-               e.name as environment_name,
+               i.status = 'READY' as invocation_ready,
                case when i.status = 'READY' and w.required_environment_id is not null then
                  least(
-                   (select min(ec.lease_until)
-                    from environment_connection ec
-                    where ec.environment_id = w.required_environment_id
-                      and ec.status = 'READY'
-                      and ec.lease_until > statement_timestamp()),
                    case when w.available_at > statement_timestamp() then w.available_at end,
                    case when w.lease_until > statement_timestamp() then w.lease_until end
                  )
-               end as freshness_at,
+               end as work_freshness_at,
                i.status = 'READY'
                  and w.target_id is not null
                  and w.required_environment_id is not null
                  and w.available_at <= statement_timestamp()
                  and (w.lease_until is null or w.lease_until <= statement_timestamp())
-                 and not exists (
-                     select 1
-                     from environment_connection ec
-                     where ec.environment_id = w.required_environment_id
-                       and ec.status = 'READY'
-                       and ec.lease_until > statement_timestamp()
-                 ) as waiting_for_environment
+                 as work_available
         from harness_tool_invocation i
         left join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-        left join environment e on e.id = w.required_environment_id
         where i.id in (%s)
         """
             .formatted(PostgresqlHarnessTransaction.placeholders(ids.size())),
@@ -262,9 +241,22 @@ final class PostgresqlToolStore implements ToolStore {
   }
 
   @Override
-  public Optional<Instant> findNextEnvironmentWaitChange() {
+  public List<EnvironmentId> listReadyToolEnvironments() {
     tx.checkOpen();
-    Timestamp nextChangeAt = tx.queryForObject(NEXT_ENVIRONMENT_WAIT_CHANGE, Timestamp.class);
+    return tx.queryList(
+        """
+        select distinct w.required_environment_id
+        from harness_tool_invocation i
+        join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
+        where i.status = 'READY' and w.required_environment_id is not null
+        """,
+        (rs, rowNumber) -> EnvironmentId.of(rs.getObject("required_environment_id", UUID.class)));
+  }
+
+  @Override
+  public Optional<Instant> findNextEnvironmentWorkChange() {
+    tx.checkOpen();
+    Timestamp nextChangeAt = tx.queryForObject(NEXT_ENVIRONMENT_WORK_CHANGE, Timestamp.class);
     return Optional.ofNullable(nextChangeAt).map(Timestamp::toInstant);
   }
 

@@ -310,7 +310,7 @@ class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSup
     try (MockedStatic<EnvironmentInstallScripts> mocked =
         Mockito.mockStatic(EnvironmentInstallScripts.class)) {
       mocked
-          .when(() -> EnvironmentInstallScripts.install(any(), any()))
+          .when(() -> EnvironmentInstallScripts.install(any(), any(), any()))
           .thenThrow(new IllegalStateException("simulated render failure"));
 
       assertThrows(

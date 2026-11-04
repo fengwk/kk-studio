@@ -222,10 +222,6 @@
   border-left: 3px solid var(--danger);
 }
 
-.issue-card.is-unknown {
-  border-left: 3px solid var(--info);
-}
-
 .issue-card-header {
   display: flex;
   align-items: flex-start;

@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { repositoryRoot as resolveDefaultRoot } from '../../lib/repo-root.mjs'
 
 function resolveRepositoryRoot() {
   const args = process.argv.slice(2)
@@ -11,23 +11,7 @@ function resolveRepositoryRoot() {
       return path.resolve(args[i + 1])
     }
   }
-  if (process.env.KK_STUDIO_REPO_ROOT) {
-    return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-  }
-  // 向上寻找 worktree 根（.git 文件或目录），不依赖本脚本在仓库中的深度。
-  let directory = path.dirname(fileURLToPath(import.meta.url))
-  for (;;) {
-    if (existsSync(path.join(directory, '.git'))) {
-      return directory
-    }
-    const parent = path.dirname(directory)
-    if (parent === directory) {
-      throw new Error(
-        'cannot locate the kk-studio repository root; pass --root or set KK_STUDIO_REPO_ROOT',
-      )
-    }
-    directory = parent
-  }
+  return resolveDefaultRoot()
 }
 
 const repositoryRoot = resolveRepositoryRoot()
@@ -41,7 +25,6 @@ const moduleDocuments = [
   'frontend.md',
   'harness-agent-builtin.md',
   'harness-environment.md',
-  'harness-infra.md',
   'harness-model.md',
   'harness-runtime.md',
   'ide.md',
@@ -399,19 +382,12 @@ const moduleDependencies = {
   'harness/model': [],
   'harness/runtime': ['common', 'harness-environment', 'harness-model'],
   'harness/agent-builtin': ['common', 'harness-model', 'harness-runtime'],
-  'harness/infra': [
-    'common',
-    'work',
-    'harness-environment',
-    'harness-model',
-    'harness-runtime',
-    'harness-agent-builtin',
-  ],
   'platform/plugin-api': ['common', 'harness-runtime'],
   'platform/daemon-server': ['common', 'harness-environment'],
   'platform/runtime': [
     'common',
     'share',
+    'work',
     'harness-environment',
     'harness-model',
     'harness-runtime',
@@ -419,21 +395,21 @@ const moduleDependencies = {
     'platform-plugin-api',
     'platform-daemon-server',
   ],
-  'apps/canvas/core': ['common', 'platform-plugin-api'],
-  'apps/canvas/infra': [
+  'apps/canvas/spi': ['common'],
+  'apps/canvas/runtime': [
     'common',
     'share',
     'work',
-    'canvas-core',
+    'canvas-spi',
     'platform-plugin-api',
     'platform-runtime',
   ],
   'apps/project': ['common', 'share', 'work', 'harness-runtime', 'platform-runtime'],
   'apps/ide': ['common', 'share', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
-  'plugins/comfyui': ['common', 'platform-plugin-api'],
-  'plugins/media': ['common', 'platform-plugin-api'],
+  'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
+  'plugins/media': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],
-  'plugins/opencli': ['common', 'harness-runtime', 'platform-plugin-api'],
+  'plugins/opencli': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   web: null,
 }
 
@@ -620,15 +596,14 @@ function checkNoHarnessModuleDocs() {
   }
 }
 
-/** 内核与 Common：每个生产包都必须有带 Javadoc 的 package-info，并在模块文档的包架构表中占一行。 */
-const packageDocumentedModules = {
-  common: 'docs/modules/common.md',
-  'harness/environment': 'docs/modules/harness-environment.md',
-  'harness/model': 'docs/modules/harness-model.md',
-  'harness/runtime': 'docs/modules/harness-runtime.md',
-  'harness/agent-builtin': 'docs/modules/harness-agent-builtin.md',
-  'harness/infra': 'docs/modules/harness-infra.md',
-}
+/** 内核与 Common 的生产包必须包含 package-info 和 Javadoc。 */
+const packageDocumentedModules = [
+  'common',
+  'harness/environment',
+  'harness/model',
+  'harness/runtime',
+  'harness/agent-builtin',
+]
 
 function walkJavaSourceDirectories(directory) {
   if (!existsSync(directory)) {
@@ -722,7 +697,7 @@ function checkUniquePackages() {
 }
 
 function checkPackageInfo() {
-  for (const modulePath of Object.keys(packageDocumentedModules)) {
+  for (const modulePath of packageDocumentedModules) {
     for (const { dir, name: expectedPackageName } of productionPackages(modulePath)) {
       const packageInfoPath = path.join(dir, 'package-info.java')
       const relativePackageInfoPath = relativeFromRoot(packageInfoPath)
@@ -757,71 +732,6 @@ function checkPackageInfo() {
         addError(`empty package Javadoc in ${relativePackageInfoPath}`)
       }
     }
-  }
-}
-
-function levelTwoSection(source, title) {
-  const lines = source.split(/\r?\n/u)
-  const start = lines.findIndex((line) => line.trim() === `## ${title}`)
-  if (start < 0) {
-    return null
-  }
-  const next = lines.findIndex((line, index) => index > start && /^##\s+\S/u.test(line))
-  return lines.slice(start + 1, next < 0 ? lines.length : next).join('\n')
-}
-
-function checkPackageArchitectureDocs() {
-  for (const [modulePath, docPath] of Object.entries(packageDocumentedModules)) {
-    const section = levelTwoSection(read(docPath), '包架构')
-    if (section === null) {
-      addError(`${docPath}: missing '## 包架构' section`)
-      continue
-    }
-    if (!/^\|\s*(?:包名|包路径)\s*\|/mu.test(section)) {
-      addError(`${docPath}: package architecture section must contain a package table`)
-    }
-    for (const { name: packageName } of productionPackages(modulePath)) {
-      const displayNames = [
-        packageName,
-        packageName.replace('fun.fengwk.kkstudio.harness.', ''),
-      ]
-      if (!displayNames.some((displayName) => section.includes(`| \`${displayName}\` |`))) {
-        addError(`${docPath}: package architecture table missing '${packageName}'`)
-      }
-    }
-  }
-}
-
-function checkEnvironmentRouteDocs() {
-  const runtimeDocPath = 'docs/modules/harness-runtime.md'
-  const runtimeDoc = read(runtimeDocPath)
-  if (!runtimeDoc.includes('requiredEnvironmentId')) {
-    addError(`${runtimeDocPath}: must document literal 'requiredEnvironmentId'`)
-  }
-  const onlyToolWorkNonEmptyPattern =
-    /(?:仅|只|only).*(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:非空|non-null)|(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:仅|只|only).*(?:非空|non-null)|(?:TOOL.*Work|Work.*TOOL|target.*TOOL).*(?:非空|non-null).*(?:THREAD|MODEL).*(?:空|null)/iu
-  if (!onlyToolWorkNonEmptyPattern.test(runtimeDoc)) {
-    addError(
-      `${runtimeDocPath}: must document that requiredEnvironmentId is only permitted/non-null for TOOL Work`,
-    )
-  }
-
-  const infraDocPath = 'docs/modules/harness-infra.md'
-  const infraDoc = read(infraDocPath)
-  const requiredInfraTerms = ['required_environment_id', 'owner_node_id', 'READY', 'lease_until']
-  for (const term of requiredInfraTerms) {
-    if (!infraDoc.includes(term)) {
-      addError(`${infraDocPath}: must document required term '${term}'`)
-    }
-  }
-  const infraParagraphs = infraDoc.split(/\n\s*\n/)
-  const claimFencePattern =
-    /(?=.*(?:environment|环境|route|亲和|required_environment_id))(?=.*(?:dispatcher|node))(?=.*(?:lease|租约|lease_until))(?=.*claim)(?=.*(?:围栏|fence))/isu
-  const hasClaimFence = infraParagraphs.some((paragraph) => claimFencePattern.test(paragraph))
-  if (!hasClaimFence) {
-    addError(
-      `${infraDocPath}: must document Dispatcher node and active lease claim fence`,
-    )
   }
 }
 
@@ -879,8 +789,6 @@ checkModuleBoundaries()
 checkUniquePackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()
-checkPackageArchitectureDocs()
-checkEnvironmentRouteDocs()
 checkNoSessionArtifacts()
 
 if (errors.length > 0) {

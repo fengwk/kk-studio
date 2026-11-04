@@ -154,7 +154,7 @@ describe('ai-resource-form-validation additional branches', () => {
       { modelDraft: model({ inputModalities: ['TEXT', 'IMAGE', 'TEXT'] }) },
     )
     expect(result.ok).toBe(false)
-    expect(result.fields.general).toBe('请至少选择一种输入类型（建议保留 TEXT）')
+    expect(result.fields.general).toBe('请至少选择一种输入类型，建议保留 TEXT')
   })
 
   it('rejects one blank variant among valid ones', () => {

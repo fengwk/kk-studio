@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
@@ -27,8 +28,11 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Agent 定义全局唯一并引用当前模型名称；记录存续期间名称不可变，硬删除后可同名重建。 */
 public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
@@ -48,11 +52,10 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(AgentModelKind.MODEL, model.getKind());
 
     AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(modelRef, name));
-    assertEquals(modelRef, definition.getModel());
+    assertEquals(execution(modelRef, "default"), definition.getExecution());
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
-    assertEquals(Boolean.TRUE, definition.getConfig().getInheritParentEnvironment());
     assertEquals("0", definition.getVersion());
     assertThrows(
         AiDuplicateException.class,
@@ -62,13 +65,12 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
     update.setSystemPrompt(definition.getSystemPrompt());
-    update.setModel(definition.getModel());
-    update.setVariant(definition.getVariant());
+    update.setExecution(definition.getExecution());
     update.setConfig(definition.getConfig());
     update.setExpectedVersion(definition.getVersion());
     AgentDefinitionDTO updated = agentDefinitionService.updateAgent(name, update);
     assertEquals(name, updated.getName());
-    assertEquals(modelRef, updated.getModel());
+    assertEquals(modelRef, updated.getExecution().getSettings().get("modelName"));
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
@@ -77,7 +79,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     AgentDefinitionUpdateDTO stale = new AgentDefinitionUpdateDTO();
     stale.setDescription("stale");
-    stale.setModel(definition.getModel());
+    stale.setExecution(definition.getExecution());
     stale.setConfig(definition.getConfig());
     stale.setExpectedVersion(definition.getVersion());
     assertThrows(
@@ -119,8 +121,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       AgentDefinitionUpdateDTO removeReference = new AgentDefinitionUpdateDTO();
       removeReference.setDescription(parent.getDescription());
       removeReference.setSystemPrompt(parent.getSystemPrompt());
-      removeReference.setModel(parent.getModel());
-      removeReference.setVariant(parent.getVariant());
+      removeReference.setExecution(parent.getExecution());
       removeReference.setConfig(parent.getConfig());
       removeReference.getConfig().setSubagents(List.of());
       removeReference.setExpectedVersion(parent.getVersion());
@@ -168,8 +169,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO closeCycle = new AgentDefinitionUpdateDTO();
     closeCycle.setDescription(left.getDescription());
     closeCycle.setSystemPrompt(left.getSystemPrompt());
-    closeCycle.setModel(left.getModel());
-    closeCycle.setVariant(left.getVariant());
+    closeCycle.setExecution(left.getExecution());
     closeCycle.setConfig(left.getConfig());
     closeCycle.getConfig().setSubagents(List.of(rightName));
     closeCycle.setExpectedVersion(left.getVersion());
@@ -184,8 +184,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO openCycle = new AgentDefinitionUpdateDTO();
     openCycle.setDescription(left.getDescription());
     openCycle.setSystemPrompt(left.getSystemPrompt());
-    openCycle.setModel(left.getModel());
-    openCycle.setVariant(left.getVariant());
+    openCycle.setExecution(left.getExecution());
     openCycle.setConfig(left.getConfig());
     openCycle.getConfig().setSubagents(List.of());
     openCycle.setExpectedVersion(left.getVersion());
@@ -204,19 +203,18 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentModelDTO model = model(provider.getName(), "agent-variant-model-" + suffix);
     String modelRef = model.getName();
     AgentDefinitionCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
-    invalid.setVariant("missing");
+    invalid.setExecution(execution(modelRef, "missing"));
 
     assertThrows(AiValidationException.class, () -> agentDefinitionService.createAgent(invalid));
 
     AgentDefinitionCreateDTO valid = agent(modelRef, "agent-valid-variant-" + suffix);
-    valid.setVariant(null);
+    valid.setExecution(execution(modelRef, null));
     AgentDefinitionDTO created = agentDefinitionService.createAgent(valid);
     try {
-      assertNull(created.getVariant());
+      assertNull(created.getExecution().getSettings().get("variant"));
       AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
       invalidUpdate.setDescription(created.getDescription());
-      invalidUpdate.setModel(created.getModel());
-      invalidUpdate.setVariant("missing");
+      invalidUpdate.setExecution(execution(modelRef, "missing"));
       invalidUpdate.setConfig(created.getConfig());
       invalidUpdate.setExpectedVersion(created.getVersion());
       assertThrows(
@@ -243,17 +241,16 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       AgentDefinitionUpdateDTO rebind = new AgentDefinitionUpdateDTO();
       rebind.setDescription(definition.getDescription());
       rebind.setSystemPrompt(definition.getSystemPrompt());
-      rebind.setModel(nextRef);
-      rebind.setVariant(null);
+      rebind.setExecution(execution(nextRef, null));
       rebind.setConfig(definition.getConfig());
       rebind.setExpectedVersion(definition.getVersion());
       AgentDefinitionDTO updated = agentDefinitionService.updateAgent(definition.getName(), rebind);
-      assertEquals(nextRef, updated.getModel());
-      assertNull(updated.getVariant());
+      assertEquals(nextRef, updated.getExecution().getSettings().get("modelName"));
+      assertNull(updated.getExecution().getSettings().get("variant"));
 
       AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();
       missing.setDescription(updated.getDescription());
-      missing.setModel("missing-" + suffix);
+      missing.setExecution(execution("missing-" + suffix, null));
       missing.setConfig(updated.getConfig());
       missing.setExpectedVersion(updated.getVersion());
       assertThrows(
@@ -291,9 +288,18 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     config.setSubagents(List.of());
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
-    dto.setModel(model);
-    dto.setVariant("default");
+    dto.setExecution(execution(model, "default"));
     dto.setConfig(config);
     return dto;
+  }
+
+  private static HarnessExecutionSelectionDTO execution(String model, String variant) {
+    Map<String, Object> settings = new HashMap<>();
+    settings.put("modelName", model);
+    settings.put("variant", variant);
+    HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
+    selection.setDriver(BuiltinExecution.DRIVER);
+    selection.setSettings(settings);
+    return selection;
   }
 }

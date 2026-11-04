@@ -261,7 +261,7 @@ class MiniMaxMavisToolExecutionTest {
   }
 
   /** 记录所有 HTTP 请求并在匹配 MCP 契约时返回成功 JSON 的假传输。 */
-  static final class FakeMavisTransport implements MavisHttpTransport {
+  static final class FakeMavisTransport extends MavisHttpTransport {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
     @Override

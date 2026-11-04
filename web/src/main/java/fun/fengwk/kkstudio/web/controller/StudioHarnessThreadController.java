@@ -24,8 +24,10 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
@@ -43,12 +45,10 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.security.Principal;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,19 +73,24 @@ public class StudioHarnessThreadController {
   private final ModelRequestDebugService modelRequestDebugService;
   private final InteractionService interactionService;
   private final UsageCostProjectionService usageCostProjectionService;
+  private final EnvironmentWaitProjectionService environmentWaitProjectionService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
       ModelRequestDebugService modelRequestDebugService,
       InteractionService interactionService,
-      UsageCostProjectionService usageCostProjectionService) {
+      UsageCostProjectionService usageCostProjectionService,
+      EnvironmentWaitProjectionService environmentWaitProjectionService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
     this.usageCostProjectionService =
         Objects.requireNonNull(usageCostProjectionService, "usageCostProjectionService");
+    this.environmentWaitProjectionService =
+        Objects.requireNonNull(
+            environmentWaitProjectionService, "environmentWaitProjectionService");
   }
 
   /**
@@ -165,18 +170,7 @@ public class StudioHarnessThreadController {
     Map<UUID, HarnessUsageCostDTO> usageCosts =
         usageCostProjectionService.project(snapshot.entrySlice().entries());
     HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
-    Map<UUID, ToolInvocationDTO> tools = new HashMap<>();
-    for (ToolInvocationDTO tool : dto.getToolInvocations()) {
-      tools.put(UUID.fromString(tool.getId()), tool);
-    }
-    for (var wait : runtime.listEnvironmentToolWaits(tools.keySet())) {
-      ToolInvocationDTO tool = tools.get(wait.invocationId());
-      tool.setRequiredEnvironmentId(
-          wait.environmentId() == null ? null : wait.environmentId().toString());
-      tool.setWaitingForEnvironment(wait.waitingForEnvironment());
-      tool.setRequiredEnvironmentName(wait.environmentName());
-      tool.setEnvironmentWaitFreshnessAt(wait.freshnessAt());
-    }
+    environmentWaitProjectionService.project(dto);
     return dto;
   }
 

@@ -64,10 +64,8 @@ function agent(id: string, model: string): AgentDefinitionDTO {
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model,
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: model, variant: 'default' } },
     config: {
-      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],
@@ -143,7 +141,7 @@ describe('ai-resource-editor-open-plans', () => {
     const builtin: AgentDefinitionDTO = {
       ...agent('summarizer', 'MiniMax'),
       type: 'BUILTIN',
-      model: null,
+      execution: null,
     }
     const plan = editAgentEditorPlan([builtin], models, 'summarizer')
     expect(plan).not.toBeNull()

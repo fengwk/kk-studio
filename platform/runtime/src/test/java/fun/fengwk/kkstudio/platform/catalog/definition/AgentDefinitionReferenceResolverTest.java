@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
@@ -34,16 +33,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Agent 引用解析必须在写入前校验全局 Agent、Model 与 Skill 引用。 */
+/** Agent 引用解析必须在写入前校验全局 Agent 与 Skill 引用。 */
 class AgentDefinitionReferenceResolverTest {
 
   @Test
-  void rejectsMissingAgentAndModelReferences() {
+  void rejectsMissingAgentReference() {
     AgentDefinitionReferenceResolver resolver = resolver();
 
     assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent("missing"));
-    assertThrows(
-        AiResourceNotFoundException.class, () -> resolver.requireModelForUpdate("missing"));
   }
 
   @Test
@@ -58,7 +55,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             definitions,
-            mock(AgentModelRepository.class),
             mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -80,7 +76,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -128,7 +123,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -168,11 +162,7 @@ class AgentDefinitionReferenceResolverTest {
     when(servers.lockForShare("zulu")).thenReturn(Optional.of(mcpServer("zulu")));
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
-            definitions,
-            mock(AgentModelRepository.class),
-            skills,
-            servers,
-            TestCatalogSources.singleLease(tools));
+            definitions, skills, servers, TestCatalogSources.singleLease(tools));
 
     assertDoesNotThrow(
         () ->
@@ -203,7 +193,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -224,7 +213,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             skills,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
@@ -254,7 +242,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -277,7 +264,6 @@ class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
-            mock(AgentModelRepository.class),
             mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
@@ -291,7 +277,6 @@ class AgentDefinitionReferenceResolverTest {
   private static AgentDefinitionReferenceResolver resolver() {
     return new AgentDefinitionReferenceResolver(
         mock(AgentDefinitionRepository.class),
-        mock(AgentModelRepository.class),
         mock(SkillPackageRepository.class),
         mock(McpServerRepository.class),
         TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));

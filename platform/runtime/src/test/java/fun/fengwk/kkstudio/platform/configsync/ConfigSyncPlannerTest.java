@@ -111,7 +111,12 @@ class ConfigSyncPlannerTest {
 
   /** 拼接一个 document 内的 Agent 条目；configLines 使用 6 空格缩进。 */
   private static String agent(String name, String model, String configLines) {
-    return "  - name: " + name + "\n    model: " + model + "\n    config:\n" + configLines;
+    return "  - name: "
+        + name
+        + "\n    execution:\n      driver: builtin\n      settings:\n        modelName: "
+        + model
+        + "\n        variant: null\n    config:\n"
+        + configLines;
   }
 
   private static String agentConfigLines() {
@@ -600,7 +605,7 @@ class ConfigSyncPlannerTest {
     assertEquals("missing model: x", reason(plan.skipped(), "agents", "b"));
   }
 
-  /** 无 variant 或仅空白的 Agent 不触发声明校验，维持既有“不覆盖 default”语义。 */
+  /** null variant 不触发声明校验；空白 variant 不符合新执行选择契约，必须硬拒绝。 */
   @Test
   void agentWithoutVariantIsNotDeclaredChecked() {
     when(snapshotReader.read())
@@ -615,32 +620,17 @@ class ConfigSyncPlannerTest {
                 List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    Map<String, Object> doc = new LinkedHashMap<>();
-    doc.put(
-        "agents",
-        List.of(
-            ConfigSyncFixtures.mapOf(
-                "name",
-                "no_variant",
-                "model",
-                "m",
-                "config",
-                ConfigSyncFixtures.agentConfigMap(
-                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
-            ConfigSyncFixtures.mapOf(
-                "name",
-                "blank_variant",
-                "model",
-                "m",
-                "variant",
-                "   ",
-                "config",
-                ConfigSyncFixtures.agentConfigMap(
-                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())))));
-    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(doc));
-
+    AgentDefinitionConfigDTO config =
+        ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of());
+    ConfigSyncPlan plan =
+        plan(ConfigSyncFixtures.documentYaml(document(agent("no_variant", "m", null, config))));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "no_variant")));
-    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "blank_variant")));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            plan(
+                ConfigSyncFixtures.documentYaml(
+                    document(agent("blank_variant", "m", "   ", config)))));
   }
 
   /** 文件顺序 Group 先于 Model：计划仍先写 Model 再写 Group，且组成员按全局 Model 名解析。 */
@@ -691,6 +681,15 @@ class ConfigSyncPlannerTest {
         List.of("m", "g"), plan.models().stream().map(ConfigSyncParser.ModelSpec::name).toList());
     assertEquals(
         "m", plan.models().get(1).properties().getGroup().getMembers().get(0).getModelName());
+    // 即便组及成员都将被导入，组级 Variant 仍必须在预检中拒绝。
+    document.put(
+        "agents",
+        List.of(
+            agent("group-agent", "g", "default", agentConfig(List.of(), List.of(), List.of()))));
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(document)));
+    assertTrue(error.getMessage().contains("model group with variant"));
   }
 
   /** 文件内同名 Model config 覆盖快照：文件新增的 variant 通过，快照独有而被移除的 variant 被拒。 */
@@ -760,8 +759,13 @@ class ConfigSyncPlannerTest {
       String name, String model, String variant, AgentDefinitionConfigDTO config) {
     Map<String, Object> entry = new LinkedHashMap<>();
     entry.put("name", name);
-    entry.put("model", model);
-    entry.put("variant", variant);
+    entry.put(
+        "execution",
+        ConfigSyncFixtures.mapOf(
+            "driver",
+            "builtin",
+            "settings",
+            ConfigSyncFixtures.mapOf("modelName", model, "variant", variant)));
     entry.put("config", ConfigSyncFixtures.agentConfigMap(config));
     return entry;
   }

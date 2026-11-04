@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+
+import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
 
 import java.time.Instant;
 
@@ -22,7 +24,7 @@ public record MiniMaxMavisCredentialPayload(
   private static final String OBTAINED_AT_FIELD = "obtainedAt";
 
   private static final ObjectMapper MAPPER =
-      JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+      PluginHttpSupport.strictJson(JsonMapper.builder().build());
 
   public MiniMaxMavisCredentialPayload {
     if (accessToken == null || accessToken.isBlank()) {
@@ -98,7 +100,7 @@ public record MiniMaxMavisCredentialPayload(
         + ", obtainedAt="
         + obtainedAt
         + ", accessToken="
-        + MavisRedaction.REDACTED
+        + PluginRedaction.REDACTED
         + "]";
   }
 }

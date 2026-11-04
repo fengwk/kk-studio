@@ -106,6 +106,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 日常改动先做静态检查与受影响模块的编译/定向测试，再按风险选择更接近真实环境的验证。
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
+Canvas E2E 创建的画布不会通过 HTTP 删除，应使用可丢弃的测试数据环境。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -169,8 +170,6 @@ Windows 原生验收分别运行两个 host：
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_update_windows.ps1
-pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_update_windows.ps1
 ```
 
 该套件检查真实 ScheduledTasks 定义、ACL、Node argv 和进程捕获，但不注册任务。
@@ -178,11 +177,6 @@ Windows 计划任务以发行归档内的冻结运行时直接执行 `main.js`�
 `--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、note、
 bashExecutable 与 lsp 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
 套件在非 ASCII 工作目录下真实运行安装器，并覆盖非零退出、双流大输出与选项环境恢复。
-
-更新套件真实执行已打包的更新脚本，以隔离文件和服务管理桩验证所有权、停止、备份、替换和重启，
-以及失败回执或诊断输出失败后仍独立清理一次性任务。替换后重启失败不自动回滚；成功后的回执写入失败
-只报告警告，不把已完成的替换改报失败。Windows 套件分别在 PowerShell 5.1/7 上运行，
-Unix 套件在系统 Bash 上运行；均不注册、启停或移除宿主真实服务。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
@@ -194,22 +188,9 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
-### 跨语言 UPDATE 命令串联
+### 跨语言 UPDATE 命令
 
-Java 制品生产方与 Node 协议入口共享
-[official-artifact-fixtures.json](../../daemon/test/resources/update/official-artifact-fixtures.json)，
-因此本地按顺序验证两端对同一批 UPDATE 命令的接受与拒绝一致：
-
-```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl platform/daemon-server -am test \
-  -Dtest=OfficialUpdateArtifactFixtureTest -Dsurefire.failIfNoSpecifiedTests=false
-npm --prefix daemon ci && npm --prefix daemon run build
-node scripts/daemon/verify-java-update-commands.mjs platform/daemon-server/target/daemon-update-java-commands.json
-```
-
-Java producer 把生产 codec 的结果（accepted 包含 protobuf 长度前缀编码帧，rejected 包含 artifactUrl）写入 `platform/daemon-server/target/daemon-update-java-commands.json`，
-CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十一条错配必须被拒。
-CI 在 `mvn -Pdistribution verify` 之后以同样的顺序运行这两步。
+Java 与 Node 使用共享控制协议 golden fixture 验证 UPDATE 编码；命令只包含操作 ID 和目标版本。
 
 ## Java 质量检查
 
@@ -327,9 +308,9 @@ inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` �
 
 ```bash
 docker compose -f deploy/local/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml --profile app config --quiet
-docker compose -f deploy/reliability/compose.yaml config --quiet
+COMPOSE_PROFILES=canvas-test docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/test/compose.yaml config --quiet
 ./scripts/dev/verify/e2e/distributed.sh verify
 ```
 
@@ -338,7 +319,7 @@ docker compose -f deploy/reliability/compose.yaml config --quiet
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
 `compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
 变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
-Chat command batch 使用 `owner.type=CHAT` 与 `owner.chatId`；画布使用 `CREATE_NODE`、
+Chat command batch 使用 `owner.kind=CHAT` 与 `owner.id`；画布使用 `CREATE_NODE`、
 `SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
@@ -397,6 +378,11 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
+Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
+`{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；Agent config
+矩阵检查 `tools`、`skills`、`subagents` 的形状及未知字段拒绝。这些 case 不调用真实模型。
+更改 Agent 契约时同步 case、fixture 与生成的前端契约。
+
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
 返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
 
@@ -413,7 +399,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 运行快照与 IDE 拒绝路径也属于免费 L1：
 `environment.runtime_absent_unavailable` 验证无本代 READY 时返回 canonical
 `409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_no_ready_owner_rejected`
-使用合法视图命令输入验证无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
+使用合法视图命令输入验证打开、目录列举与切换、终端、移动布局及关闭在无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
 返回 `400 validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
@@ -635,15 +621,17 @@ Daemon。
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
 | `catalog` | 16 | `GET /api/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
-| `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/规范十进制 revision | 0 | `<=1500ms` | `>=5` | 20 |
+| `canvas` | 4 | `POST /api/canvases`，验证创建结果，测量创建事务 | 0 | `<=1500ms` | `>=5` | 20 |
 
 阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。
 这是本机免费回归基线，不是容量规划；以本次 `reports/performance/latest/report.md` 的样本、
-错误、延迟、吞吐与清理结果判断是否通过，字段契约失败应先按正确性问题处理。
+错误、延迟与吞吐判断是否通过，字段契约失败应先按正确性问题处理。
 
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
-fail closed。Canvas worker 按 run title prefix 清理已知和扫描出的资源；正常、失败、超时、INT、
-TERM 都执行 `down --volumes --remove-orphans`。
+fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
+runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
+TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
+create+delete 工作负载结果比较。
 
 ## 供应链门禁
 
@@ -853,7 +841,7 @@ Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名�
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；
 导入期间应避免并发编辑，同名配置按文件覆盖。未授权部分导入时，执行发现跳过项也会拒绝，
 数据库写入失败整体回滚。设置页的未保存草稿不会被自动覆盖，可在导入结果中明确重新加载。
-网络代理设置参与同步，导入后新发起的 Backend HTTP 请求即使用新路由，正在执行的请求不受影响。
+网络代理设置参与同步，导入后 Backend 的新 HTTP 请求以及 Daemon 收到更新后的新请求使用新路由，正在执行的请求不受影响。
 
 Skill Package 文件保存仓库地址、分支和已发布的 exact commit，不包含 Git 文件内容；
 目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。检查与执行都会准备 Git commit
@@ -1085,7 +1073,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 先确认监听者归属；换端口或设 `DEV_KILL_PORTS=false`，不要默认强杀不属于本次开发的服务 |
 | 本机 preview 启动即失败 | `./scripts/dev/shared-preview.sh status`；核对 `SHARED_PREVIEW_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
-| Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
+| Canvas test 健康失败 | `COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml ps`；同参数执行 `logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |

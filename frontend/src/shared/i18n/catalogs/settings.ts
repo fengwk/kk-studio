@@ -78,8 +78,8 @@ export const settingsCatalog = {
     'zh-CN': '刷新失败',
   },
   'plugins.status.REFRESH_UNCERTAIN': {
-    'en-US': 'Refresh Uncertain (Reauth Required)',
-    'zh-CN': '刷新状态不确定（需重新认证）',
+    'en-US': 'Refresh Uncertain · Reauth Required',
+    'zh-CN': '刷新状态不确定 · 需重新认证',
   },
   'plugins.status.REAUTH_REQUIRED': {
     'en-US': 'Reauth Required',
@@ -122,8 +122,8 @@ export const settingsCatalog = {
     'zh-CN': '2. 粘贴回调 Deep Link',
   },
   'plugins.connectDialog.callbackPlaceholder': {
-    'en-US': 'Paste callback URL (e.g. minimax-cn://auth-callback?...)',
-    'zh-CN': '粘贴回调地址（例如 minimax-cn://auth-callback?...）',
+    'en-US': 'Paste callback URL, for example minimax-cn://auth-callback?...',
+    'zh-CN': '粘贴回调地址，例如 minimax-cn://auth-callback?...',
   },
   'plugins.connectDialog.complete': {
     'en-US': 'Complete Connection',
@@ -190,8 +190,8 @@ export const settingsCatalog = {
     'zh-CN': '取消',
   },
   'plugins.configDialog.conflict': {
-    'en-US': 'Configuration was modified by another operation (version conflict). Please refresh and review latest changes.',
-    'zh-CN': '配置已被其他操作修改（版本冲突），请刷新并查看最新改动。',
+    'en-US': 'Configuration was modified by another operation because of a version conflict. Please refresh and review latest changes.',
+    'zh-CN': '配置已被其他操作修改，发生版本冲突。请刷新并查看最新改动。',
   },
   'plugins.configDialog.unsupportedSchema': {
     'en-US': 'Schema contains unsupported keywords: {{error}}. Switched to JSON editor mode.',
@@ -459,8 +459,8 @@ export const settingsCatalog = {
     'zh-CN': '未检查',
   },
   'plugins.connectionCheck.browserSession.UNKNOWN': {
-    'en-US': 'Unknown (this check does not verify browser sign-in)',
-    'zh-CN': '未知（本检查不核验浏览器登录态）',
+    'en-US': 'Unknown; this check does not verify browser sign-in',
+    'zh-CN': '未知；本检查不核验浏览器登录态',
   },
   'plugins.connectionCheck.mismatch': {
     'en-US': 'The result does not match this request and was discarded.',

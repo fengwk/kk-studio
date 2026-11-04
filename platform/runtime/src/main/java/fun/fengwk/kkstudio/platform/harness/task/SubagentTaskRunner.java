@@ -90,7 +90,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     if (request.resumeThreadId() != null) {
       requireResumeOwnership(runtime, request);
     }
-    BranchSettings settings = materializeTarget(request, parent);
+    BranchSettings settings = materializeTarget(request);
     // 默认 maxTurns 是软预算默认值：一次接受内只物化一次，避免重试/回放改写既有 join 的预算。
     int maxTurns =
         request.maxTurns() != null
@@ -180,9 +180,8 @@ public class SubagentTaskRunner implements SubagentRunner {
   /**
    * 把委派翻译成 Agent 任务：新建时一次性携带 root settings、父关系与源 prompt；续接既有子 Thread 时只校验永久父关系后追加命令，忙碌子线程照常入队。
    *
-   * <p>续接只追加 SET_AGENT + SET_MODEL + CUSTOM_MESSAGE，绝不重发 SET_ENVIRONMENT：既有子 Thread 保留其既有运行环境，agent
-   * 变更按 {@code /agent} 设置语义在本批生效；新子 Thread 仍通过 root settings 继承父环境。SET_* 前缀按固定顺序发出，batch
-   * 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或其可变运行时环境无关；因此同一次调用在任何重试 /
+   * <p>续接只追加 SET_AGENT + SET_EXECUTION + CUSTOM_MESSAGE；环境由执行根持有，新建与续接均不向子 Thread 写入环境。 SET_*
+   * 前缀按固定顺序发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或执行根环境无关；因此同一次调用在任何重试 /
    * 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
    */
   private static AgentTaskRequest task(
@@ -310,16 +309,12 @@ public class SubagentTaskRunner implements SubagentRunner {
               + availableNames(allowed));
     }
     return new ParentInvocation(
-        request.parentThreadId(),
-        parent.thread().headEntryId(),
-        parent.entryState().baseSettings().environmentName(),
-        configProvider.subagentConfig());
+        request.parentThreadId(), parent.thread().headEntryId(), configProvider.subagentConfig());
   }
 
-  private BranchSettings materializeTarget(SubagentTaskRequest request, ParentInvocation parent) {
+  private BranchSettings materializeTarget(SubagentTaskRequest request) {
     try {
-      return settingsMaterializer.materializeSubagent(
-          request.subagentType(), parent.environmentName());
+      return settingsMaterializer.materialize(request.subagentType());
     } catch (RuntimeException failure) {
       throw reject(message(failure), failure);
     }
@@ -415,6 +410,5 @@ public class SubagentTaskRunner implements SubagentRunner {
   }
 
   /** 校验并冻结的父调用上下文：允许的 subagent 已由调用方校验，这里冻结 settings 事实与当前额度参数。 */
-  private record ParentInvocation(
-      UUID threadId, UUID headEntryId, String environmentName, SubagentConfig config) {}
+  private record ParentInvocation(UUID threadId, UUID headEntryId, SubagentConfig config) {}
 }

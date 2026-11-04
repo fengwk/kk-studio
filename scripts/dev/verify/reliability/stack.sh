@@ -3,21 +3,10 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
-COMPOSE_FILE="$REPO_ROOT/deploy/reliability/compose.yaml"
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
+source "$SCRIPT_DIR/../../lib/http-wait.sh"
+COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
 RELIABILITY_APP_PORT=${RELIABILITY_APP_PORT:-18091}
 RELIABILITY_MINIO_PORT=${RELIABILITY_MINIO_PORT:-19002}
@@ -26,6 +15,7 @@ RELIABILITY_REGISTRATION_TOKEN=${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-relia
 APP_URL="http://127.0.0.1:$RELIABILITY_APP_PORT"
 TMP_DIR=
 
+export COMPOSE_PROFILES=reliability
 export RELIABILITY_APP_PORT RELIABILITY_MINIO_PORT RELIABILITY_ENV_NAME
 export RELIABILITY_REGISTRATION_TOKEN
 
@@ -104,15 +94,8 @@ daemon_container_id() {
 }
 
 wait_app() {
-  local attempt
-  for attempt in $(seq 1 180); do
-    if curl -fsS "$APP_URL/actuator/health" >/dev/null 2>&1; then
-      step "app healthy at $APP_URL"
-      return
-    fi
-    sleep 1
-  done
-  die "timed out waiting for app health at $APP_URL"
+  poll_http "$APP_URL/actuator/health" 180 || die "timed out waiting for app health at $APP_URL"
+  step "app healthy at $APP_URL"
 }
 
 environment_is_ready() {
@@ -448,13 +431,15 @@ status_stack() {
 logs_stack() {
   require_cmd docker
   local service
+  local -a services=()
   for service in "$@"; do
     case "$service" in
-      postgres | app | workspace-init | daemon) ;;
+      postgres | app) services+=("reliability-$service") ;;
+      workspace-init | daemon) services+=("$service") ;;
       *) die "invalid service '$service'" ;;
     esac
   done
-  compose logs --no-color --tail "${RELIABILITY_LOG_TAIL:-200}" "$@"
+  compose logs --no-color --tail "${RELIABILITY_LOG_TAIL:-200}" "${services[@]}"
 }
 
 down_stack() {

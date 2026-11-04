@@ -36,16 +36,13 @@ public final class HarnessCatalog {
   private final Map<String, ToolContribution> toolsByName;
   private final Map<ContributionId, ToolContribution> toolsById;
   private final List<CustomEntryTypeContribution> customEntryTypes;
-  private final List<ContextProjectorContribution> contextProjectors;
   private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
-  private final Map<ContributionId, ContextProjectorContribution> contextProjectorsById;
   private final Map<ContributorId, Set<ContributorId>> transitiveRequirementsById;
 
   private HarnessCatalog(
       List<ContributorDescriptor> descriptors,
       List<ToolContribution> tools,
       List<CustomEntryTypeContribution> customEntryTypes,
-      List<ContextProjectorContribution> contextProjectors,
       Map<ContributorId, Set<ContributorId>> transitiveRequirementsById) {
     this.descriptors = List.copyOf(descriptors);
     Map<ContributorId, ContributorDescriptor> descriptorIndex = new LinkedHashMap<>();
@@ -78,12 +75,6 @@ public final class HarnessCatalog {
           contribution);
     }
     this.customEntryTypesByKey = Map.copyOf(customEntryTypeIndex);
-    this.contextProjectors = List.copyOf(contextProjectors);
-    Map<ContributionId, ContextProjectorContribution> projectorIndex = new LinkedHashMap<>();
-    for (ContextProjectorContribution contribution : contextProjectors) {
-      projectorIndex.put(contribution.id(), contribution);
-    }
-    this.contextProjectorsById = Map.copyOf(projectorIndex);
     Map<ContributorId, Set<ContributorId>> immutableRequirements = new LinkedHashMap<>();
     transitiveRequirementsById.forEach(
         (contributorId, requirements) ->
@@ -147,11 +138,6 @@ public final class HarnessCatalog {
     return customEntryTypes;
   }
 
-  /** 按 requires 传递闭包偏序、priority 降序和 ContributionId 字典序冻结的 projector 列表。 */
-  public List<ContextProjectorContribution> contextProjectors() {
-    return contextProjectors;
-  }
-
   /** 按结构化 ownership 键 {@code (contributorId, customType)} 查找贡献；未注册返回 empty。 */
   public Optional<CustomEntryTypeContribution> findCustomEntryType(
       ContributorId contributorId, String customType) {
@@ -161,11 +147,6 @@ public final class HarnessCatalog {
         customEntryTypesByKey.get(new CustomTypeKey(contributorId, customType)));
   }
 
-  /** 按 ContributionId 查找 context projector 贡献；未注册返回 empty。 */
-  public Optional<ContextProjectorContribution> findContextProjector(ContributionId id) {
-    return Optional.ofNullable(contextProjectorsById.get(Objects.requireNonNull(id, "id")));
-  }
-
   /** 构建期收集器：先验证静态 descriptor，再实现 {@link HarnessRegistrar} 收集贡献。 */
   private static final class Collector implements HarnessRegistrar {
 
@@ -173,7 +154,6 @@ public final class HarnessCatalog {
     private final List<ToolContribution> tools = new ArrayList<>();
     private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypes =
         new LinkedHashMap<>();
-    private final List<ContextProjectorContribution> contextProjectors = new ArrayList<>();
     private final Set<ContributorId> contributorIds = new HashSet<>();
     private final Set<ContributionId> contributionIds = new HashSet<>();
     private final Map<String, ContributionId> toolOwners = new HashMap<>();
@@ -231,11 +211,6 @@ public final class HarnessCatalog {
               CustomEntryTypeContribution::id,
               CustomEntryTypeContribution::priority,
               transitiveRequirements),
-          sortContributions(
-              contextProjectors,
-              ContextProjectorContribution::id,
-              ContextProjectorContribution::priority,
-              transitiveRequirements),
           transitiveRequirements);
     }
 
@@ -268,14 +243,6 @@ public final class HarnessCatalog {
         throw new IllegalArgumentException(
             "duplicate custom entry type " + key + " in contributor " + id.contributorId());
       }
-    }
-
-    @Override
-    public void registerContextProjector(
-        String localName, ContextProjector projector, int priority) {
-      Objects.requireNonNull(projector, "projector");
-      ContributionId id = requireNewContributionId(localName);
-      contextProjectors.add(new ContextProjectorContribution(id, projector, priority));
     }
 
     private void validateRequirements() {

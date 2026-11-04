@@ -268,9 +268,9 @@ async function installPreviewApiMock(
       if (path === '/api/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
-          model: name === 'coder' ? 'Claude' : 'missing-model',
-          variant: 'fast',
-          config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+          type: 'USER',
+          execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'Claude' : 'missing-model', variant: 'fast' } },
+          config: { tools: [], skills: [], subagents: [] },
           version: '1',
         })) : []
         await route.fulfill({

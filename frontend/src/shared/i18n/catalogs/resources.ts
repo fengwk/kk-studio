@@ -83,8 +83,8 @@ export const resourcesCatalog = {
     'zh-CN': '生效 Model',
   },
   'ai.catalog.card.modelDefaultSuffix': {
-    'en-US': ' (model default)',
-    'zh-CN': '（模型默认）',
+    'en-US': ' · model default',
+    'zh-CN': ' · 模型默认',
   },
   'ai.catalog.card.unknownVariant': {
     'en-US': 'unresolved',
@@ -167,8 +167,8 @@ export const resourcesCatalog = {
     'zh-CN': '已配置',
   },
   'ai.catalog.card.unconfiguredApiKey': {
-    'en-US': 'No API key (unauthenticated request)',
-    'zh-CN': '无 API Key（无认证请求）',
+    'en-US': 'No API key; requests are unauthenticated',
+    'zh-CN': '无 API Key，请求不认证',
   },
   'ai.catalog.card.emptyValue': {
     'en-US': '—',
@@ -415,8 +415,8 @@ export const resourcesCatalog = {
     'zh-CN': '系统提示词',
   },
   'ai.catalog.form.apiKeyOptional': {
-    'en-US': 'API Key (optional)',
-    'zh-CN': 'API Key（可选）',
+    'en-US': 'API Key',
+    'zh-CN': 'API Key',
   },
   'ai.catalog.form.provider': {
     'en-US': 'Provider',
@@ -461,6 +461,10 @@ export const resourcesCatalog = {
   'ai.catalog.form.contextWindow': {
     'en-US': 'Context Window',
     'zh-CN': 'Context Window',
+  },
+  'ai.catalog.form.executionDriver': {
+    'en-US': 'Execution driver',
+    'zh-CN': '执行驱动',
   },
   'ai.catalog.form.maxOutputTokens': {
     'en-US': 'Max Output Tokens',
@@ -551,8 +555,8 @@ export const resourcesCatalog = {
     'zh-CN': '可留空；JSON 对象最多 65536 UTF-8 字节。保存时拒绝重复键，数字文本原样保留。',
   },
   'ai.catalog.form.useModelDefault': {
-    'en-US': '(Use model default)',
-    'zh-CN': '（使用模型默认）',
+    'en-US': 'Use model default',
+    'zh-CN': '使用模型默认',
   },
   'ai.catalog.form.optionalCredential': {
     'en-US': 'Optional',
@@ -581,10 +585,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.noCandidateSubagents': {
     'en-US': 'No candidate Subagents',
     'zh-CN': '暂无候选 Subagents',
-  },
-  'ai.catalog.form.inheritParentEnvironment': {
-    'en-US': "Inherit parent session's current Environment when delegated to as a subagent",
-    'zh-CN': '作为子 Agent 被委派时，继承父会话当前 Environment',
   },
   'ai.catalog.form.needModel': {
     'en-US': 'Create a Model first to configure an Agent.',
@@ -640,8 +640,8 @@ export const resourcesCatalog = {
     'zh-CN': '模型级输出预算；每次请求还会按剩余上下文收敛。',
   },
   'ai.catalog.form.inputModalityHint': {
-    'en-US': 'Input modalities accepted by the model; keep at least one (do not clear all).',
-    'zh-CN': '模型可接受的输入模态；至少保留一种（不能全部取消）。',
+    'en-US': 'Input modalities accepted by the model; keep at least one.',
+    'zh-CN': '模型可接受的输入模态；至少保留一种。',
   },
   'ai.catalog.form.priceHint': {
     'en-US': 'Price is USD per million tokens. Missing prices default to 0; rules use inheritance when left blank.',
@@ -848,8 +848,8 @@ export const resourcesCatalog = {
     'zh-CN': '起始日期',
   },
   'ai.catalog.form.dateBefore': {
-    'en-US': 'Before date',
-    'zh-CN': '截止日期（不含）',
+    'en-US': 'Exclusive end date',
+    'zh-CN': '截止日期，不含当天',
   },
   'ai.catalog.form.timeStart': {
     'en-US': 'Start time',
@@ -993,16 +993,16 @@ export const resourcesCatalog = {
     'zh-CN': '最大输出长度不能超过上下文窗口',
   },
   'ai.catalog.validation.contextWindow': {
-    'en-US': 'Enter a valid context window (a positive integer)',
-    'zh-CN': '请填写有效的上下文窗口（正整数）',
+    'en-US': 'Enter a valid context window; it must be a positive integer',
+    'zh-CN': '请填写有效的上下文窗口，必须为正整数',
   },
   'ai.catalog.validation.maxOutput': {
-    'en-US': 'Enter a valid max output length (a positive integer)',
-    'zh-CN': '请填写有效的最大输出长度（正整数）',
+    'en-US': 'Enter a valid max output length; it must be a positive integer',
+    'zh-CN': '请填写有效的最大输出长度，必须为正整数',
   },
   'ai.catalog.validation.inputModality': {
-    'en-US': 'Select at least one input type (TEXT is recommended)',
-    'zh-CN': '请至少选择一种输入类型（建议保留 TEXT）',
+    'en-US': 'Select at least one input type; TEXT is recommended',
+    'zh-CN': '请至少选择一种输入类型，建议保留 TEXT',
   },
   'ai.catalog.validation.modelId': {
     'en-US': 'Enter a Model ID',
@@ -1161,12 +1161,12 @@ export const resourcesCatalog = {
     'zh-CN': '访问令牌',
   },
   'ai.skillPackages.tokenPlaceholder': {
-    'en-US': 'Personal Access Token (optional)',
-    'zh-CN': 'Personal Access Token（可选）',
+    'en-US': 'Personal Access Token',
+    'zh-CN': 'Personal Access Token',
   },
   'ai.skillPackages.tokenCreateHint': {
-    'en-US': 'Optional Personal Access Token (PAT) for private repositories. Stored encrypted and never echoed.',
-    'zh-CN': '私有仓库的访问令牌（PAT），可选。加密存储且绝不回显。',
+    'en-US': 'Optional personal access token for private repositories. Stored encrypted and never echoed.',
+    'zh-CN': '私有仓库的访问令牌，可选。加密存储且绝不回显。',
   },
   'ai.skillPackages.tokenEditPlaceholder': {
     'en-US': 'Leave blank to keep existing token',
@@ -1266,11 +1266,11 @@ export const resourcesCatalog = {
   },
   'ai.mcp.url': {
     'en-US': 'Endpoint URL',
-    'zh-CN': '服务地址 (URL)',
+    'zh-CN': '服务地址',
   },
   'ai.mcp.headers': {
-    'en-US': 'Headers (JSON)',
-    'zh-CN': '自定义请求头 (JSON)',
+    'en-US': 'JSON headers',
+    'zh-CN': 'JSON 请求头',
   },
   'ai.mcp.headersHint': {
     'en-US': 'JSON object of request headers. Values may contain ${VAR} placeholders.',

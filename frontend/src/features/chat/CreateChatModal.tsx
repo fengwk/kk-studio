@@ -5,7 +5,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
@@ -65,7 +65,7 @@ export function CreateChatModal({
       list.push({
         value: selectedEnvironmentName,
         label: environmentsQuery.isSuccess
-          ? `${selectedEnvironmentName} ${t('ai.chat.environmentUnavailable')}`
+          ? `${selectedEnvironmentName} · ${t('ai.chat.environmentUnavailable')}`
           : selectedEnvironmentName,
       })
     }
@@ -82,7 +82,7 @@ export function CreateChatModal({
 
   return (
     <Dialog
-      className="create-chat-modal-card"
+      className="create-chat-modal-card modal-touch-target"
       title={modalTitle}
       pending={pending}
       onClose={onClose}

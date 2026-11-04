@@ -130,13 +130,13 @@ select
 from model_seed;
 
 insert into agent_definition (
-    name, description, system_prompt, model_name, variant, config,
+    name, description, system_prompt, execution, config,
     created_at, updated_at, version
 ) values (
     'default-assistant', 'Default e2e assistant.',
     '你是 kk-studio 的本地开发助手。',
-    'MiniMax-M2.7', 'high',
-    '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
+    '{"driver":"builtin","settings":{"modelName":"MiniMax-M2.7","variant":"high"}}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 );
 

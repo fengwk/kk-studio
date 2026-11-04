@@ -12,7 +12,10 @@ import {
   userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 registerCase({
   id: 'crud.provider.invalid_name',
@@ -131,9 +134,8 @@ registerCase({
             name,
             description: 'd',
             systemPrompt: 's',
-            model: modelRef(model),
-            variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+            execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
+            config: { tools: [], skills: [], subagents: [] },
           }),
         { status: 400, messageIncludes },
       )
@@ -154,9 +156,8 @@ registerCase({
           name: `e2e-invalid-variant-${cid().slice(0, 8)}`,
           description: 'd',
           systemPrompt: 's',
-          model: modelRef(model),
-          variant: '__missing_variant__',
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: '__missing_variant__' } },
+          config: { tools: [], skills: [], subagents: [] },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -467,31 +468,29 @@ registerCase({
           name,
           description: 'create',
           systemPrompt: 'you are e2e',
-          model: modelRef(model),
-          variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
-    assert(agent?.name === name && agent.model === modelRef(model) && !('id' in agent), JSON.stringify(agent))
+    assert(agent?.name === name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === modelRef(model) && !('id' in agent), JSON.stringify(agent))
     const updated = envelopeData(
       (
         await ctx.call('PUT', `/api/agents/${encodeURIComponent(name)}`, {
           description: 'updated',
           systemPrompt: 'updated prompt',
-          model: modelRef(updatedModel),
-          variant: updatedModel.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: false },
+          execution: { driver: 'builtin', settings: { modelName: modelRef(updatedModel), variant: updatedModel.config.defaultVariant } },
+          config: { tools: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
       ).json,
     )
     assert(
-      updated.name === name && updated.model === modelRef(updatedModel),
+      updated.name === name && updated.execution?.driver === 'builtin' && updated.execution.settings?.modelName === modelRef(updatedModel),
       JSON.stringify(updated),
     )
     assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
-    assert(updated.config?.inheritParentEnvironment === false, JSON.stringify(updated))
+    assert(Object.keys(updated.config ?? {}).sort().join(',') === 'skills,subagents,tools', JSON.stringify(updated))
     await ctx.call(
       'DELETE',
       `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
@@ -508,13 +507,12 @@ registerCase({
           name,
           description: 'recreated',
           systemPrompt: 'recreated prompt',
-          model: modelRef(model),
-          variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
-    assert(recreated.name === name && recreated.model === modelRef(model), JSON.stringify(recreated))
+    assert(recreated.name === name && recreated.execution?.driver === 'builtin' && recreated.execution.settings?.modelName === modelRef(model), JSON.stringify(recreated))
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
     const relisted = pageResults(
@@ -532,7 +530,7 @@ registerCase({
   id: 'crud.agent.subagent_reference_lifecycle',
   level: 'L1',
   title: 'Agent subagents 名称引用与删除保护',
-  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents/inheritParentEnvironment',
+  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents',
   async run(ctx) {
     const model = await firstModel(ctx)
     const suffix = cid().slice(0, 8)
@@ -545,9 +543,8 @@ registerCase({
             name: `e2e-child-${suffix}`,
             description: 'subagent child',
             systemPrompt: 'return a concise report',
-            model: modelRef(model),
-            variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+            execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
+            config: { tools: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -557,13 +554,11 @@ registerCase({
             name: `e2e-parent-${suffix}`,
             description: 'subagent parent',
             systemPrompt: 'delegate when needed',
-            model: modelRef(model),
-            variant: model.config.defaultVariant,
+            execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
             config: {
               tools: [],
               skills: [],
               subagents: [child.name],
-              inheritParentEnvironment: false,
             },
           })
         ).json,
@@ -574,7 +569,7 @@ registerCase({
           && Array.isArray(parent.config?.skills)
           && parent.config.skills.length === 0
           && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name])
-          && parent.config?.inheritParentEnvironment === false,
+          && Object.keys(parent.config).sort().join(',') === 'skills,subagents,tools',
         JSON.stringify(parent),
       )
       await expectHttpError(
@@ -593,13 +588,11 @@ registerCase({
             {
               description: parent.description,
               systemPrompt: parent.systemPrompt,
-              model: parent.model,
-              variant: parent.variant,
+              execution: parent.execution,
               config: {
                 tools: [],
                 skills: [],
                 subagents: [],
-                inheritParentEnvironment: true,
               },
               expectedVersion: parent.version,
             },
@@ -1098,7 +1091,7 @@ registerCase({
   id: 'crud.agent.builtin_identity',
   level: 'L1',
   title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为全局逻辑模型名，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  docs: 'GET /api/agents 必含内置 Compaction：type=BUILTIN，execution 字段显式输出；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
     const agents = pageResults(
       (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
@@ -1109,12 +1102,12 @@ registerCase({
       `builtin Compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
     )
     assert(compaction.type === 'BUILTIN', JSON.stringify(compaction))
-    // model 字段恒在：未配置时显式 null，已配置时是全局逻辑模型名。
+    // execution 字段恒在；已配置时检查 builtin 模型引用。
     assert(
-      Object.hasOwn(compaction, 'model'),
-      `builtin model field must be present: ${JSON.stringify(compaction)}`,
+      Object.hasOwn(compaction, 'execution'),
+      `builtin execution field must be present: ${JSON.stringify(compaction)}`,
     )
-    if (compaction.model !== null) {
+    if (compaction.execution?.driver === 'builtin') {
       modelSelectionFor(compaction)
     }
     // 改名：name 由系统持有，不在可编辑请求体中，携带即被严格反序列化拒绝（写入前失败）。
@@ -1125,8 +1118,7 @@ registerCase({
           ...identity,
           description: compaction.description,
           systemPrompt: compaction.systemPrompt,
-          model: compaction.model,
-          variant: compaction.variant,
+          execution: compaction.execution,
           config: compaction.config,
           expectedVersion: String(compaction.version),
         }),
@@ -1154,13 +1146,13 @@ registerCase({
 })
 
 
-/** 由 Agent 的全局逻辑模型名构造 selection；variant 缺省时使用 default。 */
+/** 由 builtin Agent execution 构造 selection。 */
 function modelSelectionFor(agent) {
-  const modelName = String(agent.model)
-  if (!modelName) {
-    throw new Error(`agent.model must be a logical model name: ${JSON.stringify(agent)}`)
+  const { modelName, variant } = agent.execution?.settings || {}
+  if (agent.execution?.driver !== 'builtin' || !modelName || (variant !== null && typeof variant !== 'string')) {
+    throw new Error(`invalid agent execution: ${JSON.stringify(agent)}`)
   }
-  return { modelName, variant: agent.variant || 'default' }
+  return { modelName, variant }
 }
 
 async function firstModel(ctx) {
@@ -1189,7 +1181,7 @@ async function firstAgent(ctx) {
   const agents = pageResults(
     (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=10')).json,
   )
-  const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.model)
+  const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
   assert(agent?.name, 'need a configured USER Agent')
   return agent
 }

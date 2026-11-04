@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -73,6 +74,31 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
       return;
     }
     client.focusTerminal(environmentId, route, parsedViewId, request);
+  }
+
+  @Override
+  public void collapseMobile(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    String parsedViewId = parseViewId(viewId);
+    ClusterOwnerRoute route = requireRoute(environmentId);
+    if (route.local()) {
+      local.collapseMobile(environmentId, parsedViewId, request);
+    } else {
+      client.collapseMobile(environmentId, route, parsedViewId, request);
+    }
+  }
+
+  @Override
+  public EnvironmentIdeDirectoryListingDTO listDirectories(
+      EnvironmentId environmentId, String path) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    EnvironmentIdeServiceImpl.parseDirectory(path);
+    ClusterOwnerRoute route = requireRoute(environmentId);
+    return route.local()
+        ? local.listDirectories(environmentId, path)
+        : client.listDirectories(environmentId, route, path);
   }
 
   @Override

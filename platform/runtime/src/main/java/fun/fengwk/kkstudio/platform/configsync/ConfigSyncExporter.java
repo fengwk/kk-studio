@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -170,8 +172,16 @@ public final class ConfigSyncExporter {
     map.put("name", agent.name());
     putIfNotNull(map, "description", agent.description());
     putIfNotNull(map, "systemPrompt", agent.systemPrompt());
-    map.put("model", agent.modelName());
-    putIfNotNull(map, "variant", agent.variant());
+    ExecutionSelection execution = agent.execution();
+    if (execution == null) {
+      throw new IllegalStateException("agent execution is missing: " + agent.name());
+    }
+    Map<String, Object> executionMap = new LinkedHashMap<>();
+    executionMap.put("driver", execution.driver());
+    executionMap.put(
+        "settings",
+        StrictJson.standard().read(execution.settingsJson(), Map.class, "execution.settings"));
+    map.put("execution", executionMap);
     map.put("config", yaml.toMap(agentConfigCodec.decode(agent.configJson()), "agent.config"));
     return map;
   }

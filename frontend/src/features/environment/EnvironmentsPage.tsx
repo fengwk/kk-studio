@@ -21,7 +21,7 @@ import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
@@ -426,6 +426,7 @@ export function EnvironmentsPage() {
 
       {createModalOpen && (
         <Dialog
+          className="modal-touch-target"
           title={t('ai.environment.create')}
           onClose={() => setCreateModalOpen(false)}
           pending={createMutation.isPending}
@@ -466,6 +467,7 @@ export function EnvironmentsPage() {
 
       {updateTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.update'),
             description: t('ai.environment.updateConfirm', { name: updateTarget.name }),
@@ -484,6 +486,7 @@ export function EnvironmentsPage() {
 
       {rotateTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.rotateToken'),
             description: t('ai.environment.rotateTokenConfirm', { name: rotateTarget.name }),
@@ -506,6 +509,7 @@ export function EnvironmentsPage() {
 
       {deleteTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('ai.environment.delete'),
             description: t('ai.environment.deleteConfirm', { name: deleteTarget.name }),
@@ -538,6 +542,7 @@ export function EnvironmentsPage() {
       )}
 
       <ConflictPresenter
+        className="modal-touch-target"
         conflict={conflict}
         onRefresh={() => {
           setConflict(null)

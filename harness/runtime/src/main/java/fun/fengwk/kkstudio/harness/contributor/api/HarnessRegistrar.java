@@ -32,12 +32,4 @@ public interface HarnessRegistrar {
   default void registerCustomEntryType(String localName, String customType) {
     registerCustomEntryType(localName, customType, 0);
   }
-
-  /** 注册一个上下文投影器；投影器身份即其 scoped {@link ContributionId}。 */
-  void registerContextProjector(String localName, ContextProjector projector, int priority);
-
-  /** 注册 priority 为 0 的上下文投影器。 */
-  default void registerContextProjector(String localName, ContextProjector projector) {
-    registerContextProjector(localName, projector, 0);
-  }
 }

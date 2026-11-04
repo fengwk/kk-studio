@@ -130,6 +130,26 @@ class StrictJacksonConfigurationTest {
         });
   }
 
+  /** Driver settings 中的 null 与键的缺失不同，嵌套对象也不能被响应 mapper 裁剪。 */
+  @Test
+  void preservesNullsInsideExecutionSettings() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+          Map<String, Object> nested = new LinkedHashMap<>();
+          nested.put("optional", null);
+          Map<String, Object> values = new LinkedHashMap<>();
+          values.put("variant", null);
+          values.put("nested", nested);
+          HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+          execution.setDriver("custom");
+          execution.setSettings(values);
+          assertEquals(
+              "{\"driver\":\"custom\",\"settings\":{\"variant\":null,\"nested\":{\"optional\":null}}}",
+              mapper.writeValueAsString(execution));
+        });
+  }
+
   /** 测试意图：SET_ENVIRONMENT 命令的显式 null 必须在 wire 上保留，且请求字段出现性可被精确判定。 */
   @Test
   void shouldPreserveExplicitNullEnvironmentNameOnCommandDto() {

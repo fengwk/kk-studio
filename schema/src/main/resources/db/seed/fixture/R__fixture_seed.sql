@@ -32,13 +32,13 @@ insert into agent_model (
 );
 
 insert into agent_definition (
-    name, description, system_prompt, model_name, variant, config,
+    name, description, system_prompt, execution, config,
     created_at, updated_at, version
 ) values (
     'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.',
-    'acceptance-stub', 'default',
-    '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
+    '{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 );
 

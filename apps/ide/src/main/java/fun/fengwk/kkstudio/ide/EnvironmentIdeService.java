@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.ide;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -23,6 +24,11 @@ public interface EnvironmentIdeService {
 
   void focusTerminal(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
+
+  void collapseMobile(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
+
+  EnvironmentIdeDirectoryListingDTO listDirectories(EnvironmentId environmentId, String path);
 
   void closeView(EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request);
 

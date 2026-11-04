@@ -16,15 +16,13 @@ export interface AgentDefinitionConfigDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
-  inheritParentEnvironment: boolean
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO */
 export interface AgentDefinitionCreateDTO {
   description?: string | null
   systemPrompt?: string | null
-  model?: string | null
-  variant?: string | null
+  execution?: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   name: string
 }
@@ -35,8 +33,7 @@ export interface AgentDefinitionDTO {
   type: AgentDefinitionType
   description?: string | null
   systemPrompt?: string | null
-  model: string | null
-  variant?: string | null
+  execution: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   version: string
   createTime: number
@@ -57,8 +54,7 @@ export const AGENT_DEFINITION_TYPE_VALUES: readonly AgentDefinitionType[] = [
 export interface AgentDefinitionUpdateDTO {
   description?: string | null
   systemPrompt?: string | null
-  model?: string | null
-  variant?: string | null
+  execution?: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   expectedVersion: string
 }
@@ -324,7 +320,7 @@ export interface AppendIssueActivityRequestDTO {
   body: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.ApplyCanvasCommandsRequestDTO */
 export interface ApplyCanvasCommandsRequestDTO {
   idempotencyKey: string
   commands: CanvasCommandDTO[]
@@ -342,7 +338,7 @@ export interface BlockIssueRequestDTO {
   reason: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.CreateNode */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.CreateNode */
 export interface CanvasCommandCreateNode {
   type: 'CREATE_NODE'
   nodeId: string
@@ -351,7 +347,7 @@ export interface CanvasCommandCreateNode {
   resources: CanvasResourceInputDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.RenameNode */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.RenameNode */
 export interface CanvasCommandRenameNode {
   type: 'RENAME_NODE'
   nodeId: string
@@ -359,7 +355,7 @@ export interface CanvasCommandRenameNode {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.SetNodeResources */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.SetNodeResources */
 export interface CanvasCommandSetNodeResources {
   type: 'SET_NODE_RESOURCES'
   nodeId: string
@@ -367,7 +363,7 @@ export interface CanvasCommandSetNodeResources {
   resources: CanvasResourceInputDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.SetNodeFunction */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.SetNodeFunction */
 export interface CanvasCommandSetNodeFunction {
   type: 'SET_NODE_FUNCTION'
   nodeId: string
@@ -375,7 +371,7 @@ export interface CanvasCommandSetNodeFunction {
   function?: CanvasFunctionDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.SetNodeGroup */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.SetNodeGroup */
 export interface CanvasCommandSetNodeGroup {
   type: 'SET_NODE_GROUP'
   nodeId: string
@@ -383,7 +379,7 @@ export interface CanvasCommandSetNodeGroup {
   groupId?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.DeleteNode */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.DeleteNode */
 export interface CanvasCommandDeleteNode {
   type: 'DELETE_NODE'
   nodeId: string
@@ -391,7 +387,7 @@ export interface CanvasCommandDeleteNode {
   expectedFunction?: CanvasFunctionDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.UpdateNodeTransform */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.UpdateNodeTransform */
 export interface CanvasCommandUpdateNodeTransform {
   type: 'UPDATE_NODE_TRANSFORM'
   nodeId: string
@@ -399,7 +395,7 @@ export interface CanvasCommandUpdateNodeTransform {
   expectedTransform?: CanvasTransformDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.CreateGroup */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.CreateGroup */
 export interface CanvasCommandCreateGroup {
   type: 'CREATE_GROUP'
   groupId: string
@@ -407,7 +403,7 @@ export interface CanvasCommandCreateGroup {
   transform: CanvasTransformDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.RenameGroup */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.RenameGroup */
 export interface CanvasCommandRenameGroup {
   type: 'RENAME_GROUP'
   groupId: string
@@ -415,7 +411,7 @@ export interface CanvasCommandRenameGroup {
   title: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.UpdateGroupTransform */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.UpdateGroupTransform */
 export interface CanvasCommandUpdateGroupTransform {
   type: 'UPDATE_GROUP_TRANSFORM'
   groupId: string
@@ -423,14 +419,14 @@ export interface CanvasCommandUpdateGroupTransform {
   expectedTransform?: CanvasTransformDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO.DeleteGroup */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO.DeleteGroup */
 export interface CanvasCommandDeleteGroup {
   type: 'DELETE_GROUP'
   groupId: string
   expectedMemberNodeIds: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasCommandDTO */
 export type CanvasCommandDTO =
   | CanvasCommandCreateNode
   | CanvasCommandRenameNode
@@ -444,21 +440,21 @@ export type CanvasCommandDTO =
   | CanvasCommandUpdateGroupTransform
   | CanvasCommandDeleteGroup
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.TargetMissing */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.TargetMissing */
 export interface CanvasConflictTargetMissing {
   kind: 'TARGET_MISSING'
   targetId: string
   target: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.TargetPresent */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.TargetPresent */
 export interface CanvasConflictTargetPresent {
   kind: 'TARGET_PRESENT'
   targetId: string
   target: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.StaleNode */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.StaleNode */
 export interface CanvasConflictStaleNode {
   kind: 'STALE_NODE'
   nodeId: string
@@ -466,28 +462,28 @@ export interface CanvasConflictStaleNode {
   current: CanvasResourceNodeDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.StaleGroup */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.StaleGroup */
 export interface CanvasConflictStaleGroup {
   kind: 'STALE_GROUP'
   groupId: string
   current: CanvasGroupDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.NodeRunning */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.NodeRunning */
 export interface CanvasConflictNodeRunning {
   kind: 'NODE_RUNNING'
   nodeId: string
   run: CanvasFunctionRunDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO.NodeReferenced */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO.NodeReferenced */
 export interface CanvasConflictNodeReferenced {
   kind: 'NODE_REFERENCED'
   nodeId: string
   referencingNodeIds: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasConflictDTO */
 export type CanvasConflictDTO =
   | CanvasConflictTargetMissing
   | CanvasConflictTargetPresent
@@ -496,7 +492,7 @@ export type CanvasConflictDTO =
   | CanvasConflictNodeRunning
   | CanvasConflictNodeReferenced
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasDocumentDTO */
 export interface CanvasDocumentDTO {
   id: string
   title: string
@@ -505,18 +501,18 @@ export interface CanvasDocumentDTO {
   updatedAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionCancelRequestDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionCancelRequestDTO */
 export interface CanvasFunctionCancelRequestDTO {
   requestId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDTO */
 export interface CanvasFunctionDTO {
   name: string
   args: Record<string, unknown>
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionDefinitionDTO */
 export interface CanvasFunctionDefinitionDTO {
   name: string
   description?: string | null
@@ -528,20 +524,20 @@ export interface CanvasFunctionDefinitionDTO {
   unavailableReason: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionOutputDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionOutputDTO */
 export interface CanvasFunctionOutputDTO {
   kind: string
   name?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionReferencePolicyDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionReferencePolicyDTO */
 export interface CanvasFunctionReferencePolicyDTO {
   allowedKinds: string[]
   maxReferences?: number | null
   maxByKind?: Record<string, number> | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionRunDTO */
 export interface CanvasFunctionRunDTO {
   nodeId: string
   requestId: string
@@ -551,25 +547,25 @@ export interface CanvasFunctionRunDTO {
   updatedAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionRunRequestDTO */
 export interface CanvasFunctionRunRequestDTO {
   requestId: string
   expectedVersion: CanvasFunctionVersionDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionUnknownResolutionDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionUnknownResolutionDTO */
 export interface CanvasFunctionUnknownResolutionDTO {
   requestId: string
   resolution: string
   verification: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionVersionDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasFunctionVersionDTO */
 export interface CanvasFunctionVersionDTO {
   definitionFingerprint: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasGroupDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupDTO */
 export interface CanvasGroupDTO {
   id: string
   canvasId: string
@@ -577,48 +573,48 @@ export interface CanvasGroupDTO {
   transform: CanvasTransformDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasGroupPatchDTO.Upsert */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupPatchDTO.Upsert */
 export interface CanvasGroupPatchUpsert {
   op: 'UPSERT'
   group: CanvasGroupDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasGroupPatchDTO.Remove */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupPatchDTO.Remove */
 export interface CanvasGroupPatchRemove {
   op: 'REMOVE'
   groupId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasGroupPatchDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasGroupPatchDTO */
 export type CanvasGroupPatchDTO =
   | CanvasGroupPatchUpsert
   | CanvasGroupPatchRemove
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasNodePatchDTO.Upsert */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasNodePatchDTO.Upsert */
 export interface CanvasNodePatchUpsert {
   op: 'UPSERT'
   node: CanvasResourceNodeDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasNodePatchDTO.Remove */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasNodePatchDTO.Remove */
 export interface CanvasNodePatchRemove {
   op: 'REMOVE'
   nodeId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasNodePatchDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasNodePatchDTO */
 export type CanvasNodePatchDTO =
   | CanvasNodePatchUpsert
   | CanvasNodePatchRemove
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasPatchDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasPatchDTO */
 export interface CanvasPatchDTO {
   revision: string
   groups: CanvasGroupPatchDTO[]
   nodes: CanvasNodePatchDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasPresignedUrlDTO */
 export interface CanvasPresignedUrlDTO {
   method: string
   url: string
@@ -626,7 +622,7 @@ export interface CanvasPresignedUrlDTO {
   expiresAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasReferenceDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasReferenceDTO */
 export interface CanvasReferenceDTO {
   canvasId: string
   sourceNodeId: string
@@ -634,7 +630,7 @@ export interface CanvasReferenceDTO {
   index: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceDTO */
 export interface CanvasResourceDTO {
   id: string
   canvasId: string
@@ -652,33 +648,33 @@ export interface CanvasResourceDTO {
   createdAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO.Keep */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Keep */
 export interface CanvasResourceInputKeep {
   kind: 'KEEP'
   resourceId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO.Text */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Text */
 export interface CanvasResourceInputText {
   kind: 'TEXT'
   name: string
   textContent: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO.Blob */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO.Blob */
 export interface CanvasResourceInputBlob {
   kind: 'BLOB'
   name: string
   blobId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceInputDTO */
 export type CanvasResourceInputDTO =
   | CanvasResourceInputKeep
   | CanvasResourceInputText
   | CanvasResourceInputBlob
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasResourceNodeDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasResourceNodeDTO */
 export interface CanvasResourceNodeDTO {
   id: string
   canvasId: string
@@ -690,7 +686,7 @@ export interface CanvasResourceNodeDTO {
   run: CanvasFunctionRunDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasSnapshotDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasSnapshotDTO */
 export interface CanvasSnapshotDTO {
   document: CanvasDocumentDTO
   nodes: CanvasResourceNodeDTO[]
@@ -698,7 +694,7 @@ export interface CanvasSnapshotDTO {
   references: CanvasReferenceDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CanvasTransformDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CanvasTransformDTO */
 export interface CanvasTransformDTO {
   x: number
   y: number
@@ -816,7 +812,7 @@ export interface ConfigSyncSkipped {
   reason: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO */
+/** Java：fun.fengwk.kkstudio.canvas.dto.CreateCanvasRequestDTO */
 export interface CreateCanvasRequestDTO {
   title?: string | null
 }
@@ -902,6 +898,20 @@ export interface EnvironmentIdeCloseViewDTO {
   documentId: string
   bindingEpoch: string
   discard: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO */
+export interface EnvironmentIdeDirectoryListingDTO {
+  path: string
+  parentPath: string | null
+  children: EnvironmentIdeDirectoryListingEntry[]
+  truncated: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO.Entry */
+export interface EnvironmentIdeDirectoryListingEntry {
+  name: string
+  path: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO */
@@ -1073,10 +1083,10 @@ export interface HarnessCommandCreateDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO */
 export interface HarnessCommandOwnerDTO {
-  type: string
-  chatId?: string | null
-  issueId?: string | null
-  agentName?: string | null
+  kind: string
+  id: string
+  title?: string | null
+  link?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO */
@@ -1454,13 +1464,10 @@ export interface InteractionDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO */
 export interface InteractionOwnerDTO {
-  type: string
-  chatId: string | null
-  chatTitle: string | null
-  issueId: string | null
-  issueTitle: string | null
-  agentName: string | null
-  rootThreadName: string | null
+  kind: string
+  id: string
+  title: string | null
+  link: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO */
@@ -1864,13 +1871,6 @@ export interface ResetStageBudgetRequestDTO {
   requestKey: string
   state: string
   maxRuns: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO */
-export interface ResolveUnknownIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  verification: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO */

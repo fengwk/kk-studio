@@ -62,7 +62,6 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -170,7 +169,6 @@ class DatabaseTurnResolverTest {
   private static final String BUSINESS_CONTRIBUTOR = "business";
   private static final String BUSINESS_CUSTOM_TYPE = "run";
   private static final String BUSINESS_TOOL = "business_transition";
-  private static final String BUSINESS_CONTEXT_HEADING = "# Business Context";
 
   /** 内置 Compaction Agent 在 catalog 中配置的 system prompt：历史压缩预览必须读同一份事实。 */
   private static final String COMPACTION_SYSTEM_PROMPT = "compaction catalog system prompt";
@@ -216,8 +214,9 @@ class DatabaseTurnResolverTest {
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     // Agent 自带的 model/variant 引用是旧数据，绝不能被读取。
-    fixture.editAgent(agent -> agent.modelName("old-model"));
-    fixture.editAgent(agent -> agent.variant("old-variant"));
+    fixture.editAgent(
+        agent ->
+            agent.execution(BuiltinExecution.of(new ModelSelection("old-model", "old-variant"))));
     when(fixture.models.getByName("old-model")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
@@ -254,7 +253,8 @@ class DatabaseTurnResolverTest {
     fixture.missingModel();
     ModelSelection backup = ModelSelection.model("backup-model", "default");
     fixture.addModel("backup-provider", backup, Fixture.parsedModel());
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
 
@@ -269,7 +269,8 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
@@ -277,7 +278,8 @@ class DatabaseTurnResolverTest {
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("model", null))));
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
@@ -1132,9 +1134,8 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void resolvesDynamicMcpToolAndPreservesStaticProjectors() {
-    // 意图：验证动态 MCP 工具能通过 RuntimeToolCatalog 正常解析到 ModelRequestSpec 的 tool bindings 中，同时
-    // HarnessCatalog 中的静态 context projectors 依然正常工作
+  void resolvesDynamicMcpTool() {
+    // 动态 MCP 工具应通过 RuntimeToolCatalog 正常解析到冻结的 tool bindings。
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
@@ -1164,18 +1165,10 @@ class DatabaseTurnResolverTest {
     when(repo.listAllServers()).thenReturn(List.of(server));
     when(repo.listTools("srv")).thenReturn(List.of(mcpTool));
 
-    HarnessContributor projectorContributor =
-        HarnessContributor.of(
-            new ContributorDescriptor(new ContributorId("proj"), "Proj", "1", Set.of()),
-            registrar ->
-                registrar.registerContextProjector(
-                    "meta",
-                    branch -> List.of(new ContextFragment("projected-context-fragment")),
-                    0));
-    HarnessCatalog catalogWithProjector = HarnessCatalog.from(List.of(projectorContributor));
+    HarnessCatalog catalog = HarnessCatalog.from(List.of());
 
     RuntimeToolCatalogSource toolCatalogSource =
-        TestRuntimeToolCatalogSource.of(catalogWithProjector, mcpCatalog);
+        TestRuntimeToolCatalogSource.of(catalog, mcpCatalog);
 
     Fixture fixture =
         new Fixture(
@@ -1187,7 +1180,7 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             PromptCacheRetention.NONE,
             true,
-            catalogWithProjector,
+            catalog,
             toolCatalogSource,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -1201,11 +1194,6 @@ class DatabaseTurnResolverTest {
         spec.toolBindings().stream().map(b -> b.descriptor().name()).toList());
     ToolBinding toolBinding = spec.toolBindings().get(0);
     assertEquals("mcp_srv_echo", toolBinding.definition().descriptor().name());
-
-    // 验证 static context projector 依旧被 HarnessCatalog 正确投影进唯一系统指令
-    assertTrue(
-        spec.systemInstruction().contains("projected-context-fragment"),
-        "systemInstruction must contain text from static context projector");
   }
 
   @Test
@@ -2212,7 +2200,7 @@ class DatabaseTurnResolverTest {
     return new BuiltinHarnessContributor(readTool, dummyTask);
   }
 
-  /** 业务 contributor 替身：一个可显式选择、无需环境的工具，加上只从本 branch 冻结 custom state 渲染的上下文 projector。 */
+  /** 业务 contributor 替身：一个可显式选择、无需环境的工具。 */
   static HarnessContributor defaultBusinessContributor() {
     Tool tool = mock(Tool.class);
     when(tool.descriptor()).thenReturn(hostDescriptor(BUSINESS_TOOL));
@@ -2220,21 +2208,8 @@ class DatabaseTurnResolverTest {
     return HarnessContributor.of(
         new ContributorDescriptor(
             new ContributorId(BUSINESS_CONTRIBUTOR), "Business", "1", Set.of()),
-        registrar -> {
-          registrar.registerCustomEntryType("business.run", BUSINESS_CUSTOM_TYPE);
-          registrar.registerContextProjector(
-              "business.run.context",
-              branch ->
-                  branch
-                      .latestCustomEntry(BUSINESS_CUSTOM_TYPE)
-                      .map(
-                          state ->
-                              List.of(
-                                  new ContextFragment(
-                                      BUSINESS_CONTEXT_HEADING + "\n" + state.dataJson())))
-                      .orElse(List.of()));
-          registrar.registerTool("business.transition", tool, ToolVisibility.SELECTABLE, 0);
-        });
+        registrar ->
+            registrar.registerTool("business.transition", tool, ToolVisibility.SELECTABLE, 0));
   }
 
   private static List<String> toolNames(List<ToolBinding> bindings) {
@@ -2283,7 +2258,7 @@ class DatabaseTurnResolverTest {
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertNull(resolved.childSettings().goal());
-    assertEquals(settings.environmentName(), resolved.childSettings().environmentName());
+    assertNull(resolved.childSettings().environmentName());
   }
 
   @Test
@@ -2673,87 +2648,28 @@ class DatabaseTurnResolverTest {
     assertNull(transition.environmentName());
   }
 
-  /** 测试意图：没有声明业务工具的普通 Thread 绝不获得业务工具与业务上下文（注入面只由 Agent 配置与 branch state 决定）。 */
+  /** 测试意图：没有声明业务工具的普通 Thread 不获得业务工具。 */
   @Test
-  void ordinaryThreadNeverReceivesBusinessToolOrContext() {
+  void ordinaryThreadNeverReceivesBusinessTool() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(List.of(), spec.toolBindings());
-    assertFalse(spec.systemInstruction().contains(BUSINESS_CONTEXT_HEADING));
   }
 
-  /**
-   * 测试意图：业务上下文只来自本 branch 冻结的 contributor state，由上下文 projector 渲染；没有冻结状态的普通 branch 不注入任何业务
-   * 上下文。运行时因此不需要知道 Thread 属于哪个业务对象。
-   */
+  /** 分支自定义状态不会被提升为系统指令。 */
   @Test
-  void businessContextComesFromFrozenBranchStateOnly() {
+  void customStateDoesNotEnterSystemInstruction() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
     ModelRequestSpec frozen =
         fixture.resolved(customStatePath(settings("default"), "{\"runId\":\"run-7\"}"));
 
-    assertTrue(
-        frozen.systemInstruction().contains(BUSINESS_CONTEXT_HEADING), frozen.systemInstruction());
-    assertTrue(frozen.systemInstruction().contains("{\"runId\":\"run-7\"}"));
+    assertFalse(frozen.systemInstruction().contains("{\"runId\":\"run-7\"}"));
 
     ModelRequestSpec ordinary = fixture.resolved(fixture.path(settings("default")));
-    assertFalse(ordinary.systemInstruction().contains(BUSINESS_CONTEXT_HEADING));
-  }
-
-  /**
-   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Contributor fragment；业务上下文作为 Contributor fragment
-   * 与通用 projector 片段一起按注册顺序拼接，普通 branch 上业务段落整体省略。
-   */
-  @Test
-  void contributorFragmentsAppendedInDeterministicOrder() {
-    HarnessContributor contributorWithProjector =
-        HarnessContributor.of(
-            new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
-            registrar ->
-                registrar.registerContextProjector(
-                    "test.projector",
-                    branch -> List.of(new ContextFragment("contributor-fragment-text"))));
-    HarnessCatalog catalog =
-        HarnessCatalog.from(
-            List.of(
-                defaultBuiltinContributor(),
-                defaultBusinessContributor(),
-                contributorWithProjector));
-
-    Fixture fixture =
-        new Fixture(
-            List.of(),
-            List.of(),
-            List.of(),
-            Set.of(),
-            ProviderType.OPENAI,
-            ProviderType.OPENAI,
-            PromptCacheRetention.NONE,
-            true,
-            catalog,
-            Clock.fixed(NOW, ZoneOffset.UTC));
-
-    String instruction = fixture.resolved(fixture.path(settings("default"))).systemInstruction();
-
-    assertEquals(
-        "agent system prompt\n\n"
-            + "<current_environment>\n"
-            + "- name: "
-            + ENV_A_NAME
-            + "\n"
-            + "- date: 2026-08-02\n"
-            + "</current_environment>"
-            + "\n\n"
-            + "contributor-fragment-text",
-        instruction);
-    int agentAt = instruction.indexOf("agent system prompt");
-    int contributorAt = instruction.indexOf("contributor-fragment-text");
-    assertEquals(0, agentAt);
-    assertTrue(contributorAt > agentAt, instruction);
-    assertFalse(instruction.contains(BUSINESS_CONTEXT_HEADING));
+    assertEquals(ordinary.systemInstruction(), frozen.systemInstruction());
   }
 
   /** 测试意图：Catalog 缺失 Agent 显式声明的业务工具时 fail-closed，不静默少一个受控工具。 */
@@ -3651,7 +3567,7 @@ class DatabaseTurnResolverTest {
               .systemPrompt(COMPACTION_SYSTEM_PROMPT)
               .configJson("agent-config");
       if (selection != null) {
-        compaction.modelName(selection.modelName()).variant(selection.variant());
+        compaction.execution(BuiltinExecution.of(selection));
       }
       when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }

@@ -1,8 +1,7 @@
 /**
- * 进程级出站网络边界：代理策略、系统回退与独占 HTTP 传输。
+ * 进程级出站网络边界：平台代理策略与独占 HTTP 传输。
  *
- * <p>代理策略：http/https 独立、小写环境变量优先（包含空值）、空值明确直连、未配置才委托系统 resolver；
- * {@code no_proxy} 同时约束环境代理与系统回退。仅接受无认证的 {@code http://host:port} 代理，HTTPS 由客户端使用
+ * <p>代理只来自平台设置，未配置时直连。仅接受无认证的 {@code http://host:port} 代理，HTTPS 由客户端使用
  * CONNECT。网段规则支持 IPv4 /0..32 与 IPv6 /0..128，只按目标 URL 中的数值 IP 逐位匹配，绝不解析域名。所有非法配置
  * 在构建期以固定、去敏的错误拒绝，不追加 DIRECT 兜底。
  *
@@ -17,7 +16,6 @@ import net from 'node:net'
 import { Readable } from 'node:stream'
 import type { IncomingHttpHeaders } from 'node:http'
 import { Agent, ProxyAgent, request, type Dispatcher } from 'undici'
-import type { SystemProxyResolver } from './contracts.js'
 
 /** 固定、去敏的代理配置错误；不携带任何配置值或原始解析异常。 */
 export class ProxyConfigurationError extends Error {
@@ -34,8 +32,6 @@ export type ProxyChoice = { readonly kind: 'direct' } | { readonly kind: 'proxy'
 export interface ProxyPolicy {
   select(uri: string, signal: AbortSignal): Promise<ProxyChoice>
 }
-
-type ConfiguredProxy = { kind: 'unset' } | { kind: 'direct' } | { kind: 'proxy'; url: string }
 
 interface Bypass {
   matches(host: string, literal: string, port: number): boolean
@@ -107,15 +103,14 @@ class CidrBypass implements Bypass {
   }
 }
 
-class EnvironmentProxyPolicy implements ProxyPolicy {
+class PlatformProxyPolicy implements ProxyPolicy {
   constructor(
-    private readonly http: ConfiguredProxy,
-    private readonly https: ConfiguredProxy,
+    private readonly proxy: string | null,
     private readonly bypass: readonly Bypass[],
-    private readonly fallback: SystemProxyResolver,
   ) {}
 
   async select(uri: string, signal: AbortSignal): Promise<ProxyChoice> {
+    void signal
     if (typeof uri !== 'string' || uri.length === 0) {
       throw new Error('proxy target must be an absolute URL')
     }
@@ -147,62 +142,15 @@ class EnvironmentProxyPolicy implements ProxyPolicy {
         return DIRECT
       }
     }
-    const configured = secure ? this.https : this.http
-    if (configured.kind === 'proxy') {
-      return { kind: 'proxy', url: configured.url }
-    }
-    if (configured.kind === 'direct') {
-      return DIRECT
-    }
-    const resolved = await this.fallback.resolve(httpEquivalent(uri, secure), signal)
-    return resolved === null ? DIRECT : { kind: 'proxy', url: parseProxy(resolved) }
+    return this.proxy === null ? DIRECT : { kind: 'proxy', url: this.proxy }
   }
 }
 
-function httpEquivalent(uri: string, secure: boolean): string {
-  const colon = uri.indexOf(':')
-  return colon < 0 ? uri : `${secure ? 'https' : 'http'}${uri.slice(colon)}`
-}
-
-/** 代理策略：环境变量优先、协议独立，未配置的协议委托系统 resolver。 */
+/** 平台指定的代理和绕过列表。 */
 export const ProxyPolicy = {
-  /** 环境策略：小写优先、协议独立；空值直连，未配置才委托 fallback；no_proxy 同样约束 fallback。 */
-  fromEnvironment(
-    environment: Readonly<Record<string, string | undefined>>,
-    fallback: SystemProxyResolver,
-  ): ProxyPolicy {
-    const noProxy = variable(environment, 'no_proxy')
-    return new EnvironmentProxyPolicy(
-      environmentProxy(variable(environment, 'http_proxy')),
-      environmentProxy(variable(environment, 'https_proxy')),
-      parseBypass(noProxy ?? ''),
-      fallback,
-    )
+  fixed(proxyUrl: string | null, noProxyHosts: string): ProxyPolicy {
+    return new PlatformProxyPolicy(proxyUrl === null ? null : parseProxy(proxyUrl), parseBypass(noProxyHosts))
   },
-}
-
-function variable(environment: Readonly<Record<string, string | undefined>>, name: string): string | null {
-  const lower = name
-  const upper = name.toUpperCase()
-  const key = Object.prototype.hasOwnProperty.call(environment, lower) ? lower : upper
-  if (!Object.prototype.hasOwnProperty.call(environment, key)) {
-    return null
-  }
-  const value = environment[key]
-  if (value === undefined || value === null) {
-    throw new ProxyConfigurationError()
-  }
-  return value
-}
-
-function environmentProxy(value: string | null): ConfiguredProxy {
-  if (value === null) {
-    return { kind: 'unset' }
-  }
-  if (value.length === 0) {
-    return { kind: 'direct' }
-  }
-  return { kind: 'proxy', url: parseProxy(value) }
 }
 
 /** 严格解析无认证代理 URL：只接受 {@code http://host:explicit-port}，无 path/query/fragment/userinfo。 */
@@ -779,13 +727,38 @@ function throwFailures(failures: readonly unknown[]): void {
   throw new AggregateError(failures, 'outbound network cleanup failed')
 }
 
-/** 已安装网络句柄；close 幂等，恢复先前网络并关闭本次安装持有的 resolver。 */
+/** 已安装网络句柄；close 幂等并恢复先前网络。 */
 export interface InstalledOutboundNetwork {
   readonly network: OutboundNetwork
   close(): Promise<void>
 }
 
 let currentNetwork: OutboundNetwork | undefined
+let currentSettings: { proxyUrl: string | null; noProxyHosts: string } = { proxyUrl: null, noProxyHosts: '' }
+let currentPolicy: ProxyPolicy = ProxyPolicy.fixed(null, '')
+
+/** 原子替换后续请求和子进程使用的设置；非法设置不改变当前状态。 */
+export function applyNetworkSettings(proxyUrl: string | null, noProxyHosts: string): void {
+  const policy = ProxyPolicy.fixed(proxyUrl, noProxyHosts)
+  currentSettings = { proxyUrl, noProxyHosts }
+  currentPolicy = policy
+}
+
+/** 子进程只继承平台指定代理，不继承宿主环境中任意大小写的代理变量。 */
+export function subprocessEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result = { ...environment }
+  for (const key of Object.keys(result)) {
+    if (['http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'].includes(key.toLowerCase())) {
+      delete result[key]
+    }
+  }
+  if (currentSettings.proxyUrl !== null) {
+    result.HTTP_PROXY = currentSettings.proxyUrl
+    result.HTTPS_PROXY = currentSettings.proxyUrl
+  }
+  result.NO_PROXY = currentSettings.noProxyHosts
+  return result
+}
 
 /** 当前进程级出站网络；未安装时明确失败，绝不 runtime mock 或静默直连。 */
 export function getOutboundNetwork(): OutboundNetwork {
@@ -795,14 +768,13 @@ export function getOutboundNetwork(): OutboundNetwork {
   return currentNetwork
 }
 
-/** 安装本机出站网络策略；配置非法时不改变当前网络，并把 resolver 留给调用方关闭。 */
-export async function installOutboundNetwork(
-  environment: Readonly<Record<string, string | undefined>>,
-  system: SystemProxyResolver,
-): Promise<InstalledOutboundNetwork> {
-  const policy = ProxyPolicy.fromEnvironment(environment, system)
+/** 安装平台代理策略；新请求现读设置，在途请求不受影响。 */
+export async function installOutboundNetwork(): Promise<InstalledOutboundNetwork> {
   const previous = currentNetwork
-  const network = new DefaultOutboundNetwork(policy)
+  const previousSettings = currentSettings
+  const previousPolicy = currentPolicy
+  applyNetworkSettings(null, '')
+  const network = new DefaultOutboundNetwork({ select: (uri, signal) => currentPolicy.select(uri, signal) })
   currentNetwork = network
   let closePromise: Promise<void> | undefined
   return {
@@ -812,28 +784,10 @@ export async function installOutboundNetwork(
         closePromise = (async () => {
           if (currentNetwork === network) {
             currentNetwork = previous
+            currentSettings = previousSettings
+            currentPolicy = previousPolicy
           }
-          const failures: unknown[] = []
-          // 立即为 system.close 挂成功/失败记录，避免它在 network 释放期间成为 unhandledRejection；
-          // 先请求 system.close 使仍在等待 native 查询的 resolve 退出，再中止并等待自身 pending。
-          let systemFailure: unknown
-          const systemClosed = (async (): Promise<void> => {
-            try {
-              await system.close()
-            } catch (error) {
-              systemFailure = error
-            }
-          })()
-          try {
-            await network.close()
-          } catch (error) {
-            failures.push(error)
-          }
-          await systemClosed
-          if (systemFailure !== undefined) {
-            failures.push(systemFailure)
-          }
-          throwFailures(failures)
+          await network.close()
         })()
       }
       return closePromise

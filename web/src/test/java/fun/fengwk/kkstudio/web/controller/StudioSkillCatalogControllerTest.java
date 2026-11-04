@@ -27,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
@@ -311,7 +312,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     agent.setName("web-agent-" + System.nanoTime());
     agent.setDescription("skill reference guard agent");
     agent.setSystemPrompt("guard");
-    agent.setModel("acceptance-stub");
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver("builtin");
+    execution.setSettings(Map.of("modelName", "acceptance-stub", "variant", "default"));
+    agent.setExecution(execution);
     agent.setConfig(config);
     mockMvc
         .perform(

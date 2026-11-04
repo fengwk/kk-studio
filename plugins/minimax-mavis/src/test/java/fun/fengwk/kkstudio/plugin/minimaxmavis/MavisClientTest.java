@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -52,7 +54,7 @@ class MavisClientTest {
   }
 
   /** 记录请求并返回预设响应的假传输；行为上等价于「一次 send 只发一个请求」。 */
-  private static final class RecordingTransport implements MavisHttpTransport {
+  private static final class RecordingTransport extends MavisHttpTransport {
 
     private final List<MavisHttpRequest> requests = new ArrayList<>();
     private final List<MavisHttpResponse> responses = new ArrayList<>();
@@ -322,6 +324,23 @@ class MavisClientTest {
     assertEquals(1, failing.requests.size());
   }
 
+  /** 网关含重复键或尾随 token 的响应不能通过解析，异常链也不携带远端原文。 */
+  @Test
+  void rejectsAmbiguousJsonWithoutLeakingResponse() {
+    String marker = "sensitive-response-marker";
+    for (String body :
+        List.of("{\"x\":1,\"x\":2,\"secret\":\"" + marker + "\"}", "{} \"" + marker + "\"")) {
+      MavisProtocolException error =
+          assertThrows(
+              MavisProtocolException.class,
+              () ->
+                  client(new RecordingTransport().responder(body))
+                      .invoke(credential(), MavisCapability.TTS, json("{}")));
+      assertFalse(error.toString().contains(marker));
+      assertNull(error.getCause());
+    }
+  }
+
   /** 业务失败携带状态码与去敏消息：401/1004 是认证错误，402 提示停止生成。 */
   @Test
   void invokeBusinessFailuresCarryRedactedDetails() {
@@ -363,6 +382,21 @@ class MavisClientTest {
     assertEquals("token [REDACTED] see https://agent.minimaxi.com/x", leaked.serverMessage());
   }
 
+  /** 业务状态码也可能是任意远端文本，异常消息与结构化字段都不得回显其中可能的凭据。 */
+  @Test
+  void businessStatusNeverEchoesRemoteCode() {
+    String marker = "header.payload.signature";
+    MavisBusinessException error =
+        assertThrows(
+            MavisBusinessException.class,
+            () ->
+                client(new RecordingTransport().responder("{\"code\":\"" + marker + "\"}"))
+                    .invoke(credential(), MavisCapability.TTS, json("{}")));
+
+    assertEquals("unexpected-status", error.code());
+    assertFalse(error.getMessage().contains(marker));
+  }
+
   /** 非 2xx 响应里的服务端摘要同样被去敏并受长度约束。 */
   @Test
   void invokeHttpErrorDetailIsRedacted() {
@@ -380,17 +414,14 @@ class MavisClientTest {
             () -> client(transport).invoke(credential, MavisCapability.TTS, json("{}")));
 
     assertEquals(
-        "synthesize_speech returned HTTP 500: denied for " + MavisRedaction.REDACTED,
+        "synthesize_speech returned HTTP 500: denied for " + PluginRedaction.REDACTED,
         error.getMessage());
     assertEquals(1, transport.requests.size());
   }
 
-  /**
-   * HTTP 403 不能一概当作凭据失效：它同样可能只是权限拒绝。只有响应体携带已知认证码（401 / 1004）才收敛为认证错误， 其余 403（非认证业务码、非 JSON
-   * body）保持普通传输失败，供调用方区分「换 token 也没用」与「需要重新登录」。
-   */
+  /** HTTP 403 不论正文结构都视作认证拒绝，且只发送一次。 */
   @Test
-  void invokeDistinguishesForbiddenFromAuthenticatedRejection() {
+  void invokeTreatsForbiddenAsAuthenticatedRejection() {
     MavisCredential credential = credential();
 
     RecordingTransport bodyAuthCode =
@@ -407,13 +438,13 @@ class MavisClientTest {
                     403,
                     "{\"base_resp\":{\"status_code\":1006,\"status_msg\":\"permission denied\"}}"));
     assertThrows(
-        MavisTransportException.class,
+        MavisAuthException.class,
         () -> client(permissionDenied).invoke(credential, MavisCapability.TTS, json("{}")));
 
     RecordingTransport opaqueForbidden =
         new RecordingTransport().responder(new MavisHttpResponse(403, "forbidden"));
     assertThrows(
-        MavisTransportException.class,
+        MavisAuthException.class,
         () -> client(opaqueForbidden).invoke(credential, MavisCapability.TTS, json("{}")));
 
     assertEquals(1, bodyAuthCode.requests.size());

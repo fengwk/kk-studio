@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
@@ -38,12 +39,14 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -613,8 +616,10 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     config.setSubagents(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName(name);
-    create.setModel(modelRef);
-    create.setVariant("default");
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver(BuiltinExecution.DRIVER);
+    execution.setSettings(Map.of("modelName", modelRef, "variant", "default"));
+    create.setExecution(execution);
     create.setConfig(config);
     return create;
   }
@@ -627,8 +632,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription(current.getDescription());
     update.setSystemPrompt(current.getSystemPrompt());
-    update.setModel(current.getModel());
-    update.setVariant(current.getVariant());
+    update.setExecution(current.getExecution());
     update.setConfig(config);
     update.setExpectedVersion(current.getVersion());
     return update;

@@ -5,9 +5,8 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { useI18n } from '@/shared/i18n'
-import './plugin-connect.css'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 interface PluginConnectModalProps {
@@ -145,40 +144,35 @@ function PluginConnection({
         }
       }}
       pending={pending}
-      className="plugin-connect-modal"
+      className="resource-modal-card plugin-connect-modal modal-touch-target"
     >
-      <div className="plugin-connect-body">
+      <form className="modal-card-form" onSubmit={handleComplete}>
+        <div className="modal-body">
+          {hasNoCandidates ? (
+            <div className="callout callout-warning" role="alert">
+              {t('plugins.noRegionsAvailable')}
+            </div>
+          ) : null}
 
-        {hasNoCandidates ? (
-          <div className="callout callout-warning" role="alert">
-            {t('plugins.noRegionsAvailable')}
-          </div>
-        ) : null}
+          {candidates.length > 1 ? (
+            <div className="form-group">
+              <FieldLabel>{t('plugins.region')}</FieldLabel>
+              <Select
+                value={selectedRegion}
+                options={candidates.map((c) => ({ value: c, label: c }))}
+                onChange={(next) => {
+                  setSelectedRegion(next)
+                  setAuthAttemptId(null)
+                  setLoginOpened(false)
+                }}
+                disabled={pending}
+                aria-label={t('plugins.region')}
+              />
+            </div>
+          ) : null}
 
-        {candidates.length > 1 ? (
           <div className="form-group">
-            <FieldLabel>{t('plugins.region')}</FieldLabel>
-            <Select
-              value={selectedRegion}
-              options={candidates.map((c) => ({ value: c, label: c }))}
-              onChange={(next) => {
-                setSelectedRegion(next)
-                setAuthAttemptId(null)
-                setLoginOpened(false)
-              }}
-              disabled={pending}
-              aria-label={t('plugins.region')}
-            />
-          </div>
-        ) : null}
-
-        {/* 第一步：打开官方登录页面 */}
-        <div className="plugin-connect-step">
-          <div className="step-badge">1</div>
-          <div className="step-content">
-            <p className="step-desc">
-              {t('plugins.connectDialog.step1')}
-            </p>
+            <span>{t('plugins.connectDialog.step1')}</span>
             <Button
               type="button"
               variant="ghost"
@@ -202,73 +196,59 @@ function PluginConnection({
               </span>
             ) : null}
           </div>
-        </div>
 
-        {/* 第二步：填入回跳 URL 并完成连接 */}
-        <form onSubmit={handleComplete} className="plugin-connect-step">
-          <div className="step-badge">2</div>
-          <div className="step-content">
-            <p className="step-desc">
-              {t('plugins.connectDialog.step2')}
-            </p>
-            <div className="form-group">
-              <FieldLabel required>{t('plugins.connectDialog.step2')}</FieldLabel>
-              <TextInput
-                {...inputRefProps}
-                type="password"
-                autoComplete="off"
-                data-testid="plugin-callback-input"
-                aria-label={t('plugins.connectDialog.step2')}
-                placeholder={t('plugins.connectDialog.callbackPlaceholder')}
-                value={callbackUrl}
-                disabled={pending}
-                onChange={(e) => {
-                  setCallbackUrl(e.target.value)
-                  setCompleteError(null)
-                }}
-              />
-              <span className="inline-hint">
-                {loginOpened
-                  ? t('plugins.connectDialog.afterLoginHint')
-                  : t('plugins.connectDialog.beforeLoginHint')}
+          <div className="form-group">
+            <FieldLabel required>{t('plugins.connectDialog.step2')}</FieldLabel>
+            <TextInput
+              {...inputRefProps}
+              type="password"
+              autoComplete="off"
+              data-testid="plugin-callback-input"
+              aria-label={t('plugins.connectDialog.step2')}
+              placeholder={t('plugins.connectDialog.callbackPlaceholder')}
+              value={callbackUrl}
+              disabled={pending}
+              onChange={(e) => {
+                setCallbackUrl(e.target.value)
+                setCompleteError(null)
+              }}
+            />
+            <span className="inline-hint">
+              {loginOpened
+                ? t('plugins.connectDialog.afterLoginHint')
+                : t('plugins.connectDialog.beforeLoginHint')}
+            </span>
+            {completeError ? (
+              <span className="inline-hint danger" role="alert">
+                {completeError}
               </span>
-              {completeError ? (
-                <span className="inline-hint danger" role="alert">
-                  {completeError}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="modal-footer plugin-connect-footer">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={pending}
-                onClick={() => {
-                  setAuthAttemptId(null)
-                  setCallbackUrl('')
-                  onClose()
-                }}
-              >
-                {t('plugins.connectDialog.cancel')}
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={
-                  pending ||
-                  !callbackUrl.trim() ||
-                  !authAttemptId
-                }
-              >
-                {completePending
-                  ? t('plugins.connectDialog.completing')
-                  : t('plugins.connectDialog.complete')}
-              </Button>
-            </div>
+            ) : null}
           </div>
-        </form>
-      </div>
+        </div>
+        <div className="modal-footer">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              setAuthAttemptId(null)
+              setCallbackUrl('')
+              onClose()
+            }}
+          >
+            {t('plugins.connectDialog.cancel')}
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={pending || !callbackUrl.trim() || !authAttemptId}
+          >
+            {completePending
+              ? t('plugins.connectDialog.completing')
+              : t('plugins.connectDialog.complete')}
+          </Button>
+        </div>
+      </form>
     </Dialog>
   )
 }

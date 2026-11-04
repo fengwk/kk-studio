@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
@@ -67,7 +66,6 @@ public final class CommandHarvestReducer {
         case UserMessageCommandPayload ignored -> {}
         case CustomMessageCommandPayload ignored -> {}
         case NotificationCommandPayload ignored -> {}
-        case SetContributorStateCommandPayload ignored -> {}
         case GoalCommandPayload value -> {
           // 每次设置都是新目标（即使文本相同），清除则回到无 Goal。
           GoalSetting goal =

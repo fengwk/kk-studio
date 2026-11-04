@@ -538,18 +538,17 @@ class MiniMaxMavisToolFailureTest {
         "rejectUsed must receive exactly the credential resolved for this call");
   }
 
-  /** 只有已证认证语义才允许作废凭据：403 + 已知认证业务码（1004）收敛为认证拒绝；403 + 非认证业务码（权限拒绝）不是凭据失效， 绝不能把权限问题升级为重新登录。 */
+  /** HTTP 403 不论业务码都只作废实际使用的快照。 */
   @Test
-  void businessAuthCodeInvalidatesButForbiddenWithoutAuthCodeDoesNot() {
+  void forbiddenInvalidatesEvenWithoutAuthBusinessCode() {
     transport.setInvokeResponse(
         new MavisHttpResponse(
             403, "{\"base_resp\":{\"status_code\":1006,\"status_msg\":\"permission denied\"}}"));
+    PluginCredentialSnapshot forbiddenSnapshot = snapshot();
     RejectionTrackingCredentialAccess forbiddenStore =
-        new RejectionTrackingCredentialAccess(snapshot());
+        new RejectionTrackingCredentialAccess(forbiddenSnapshot);
     assertTrue(executeWebSearch(forbiddenStore).error());
-    assertTrue(
-        forbiddenStore.rejected().isEmpty(),
-        "an HTTP 403 without a known auth code must not invalidate the credential");
+    assertEquals(List.of(forbiddenSnapshot), forbiddenStore.rejected());
 
     transport.setInvokeResponse(
         new MavisHttpResponse(403, "{\"base_resp\":{\"status_code\":1004}}"));
@@ -1121,6 +1120,7 @@ class MiniMaxMavisToolFailureTest {
         SESSION_ID,
         ROOT_THREAD_ID,
         ROOT_SESSION_ID,
+        UUID.randomUUID(),
         Instant.now(),
         TurnMediaCapabilities.NONE,
         mock(BranchView.class),
@@ -1283,7 +1283,7 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /** 支持预设 catalog 响应和注入调用异常的假传输。 */
-  static final class FakeTransport implements MavisHttpTransport {
+  static final class FakeTransport extends MavisHttpTransport {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
     private String catalogResponse = CATALOG_RESPONSE;
     private int catalogStatus = 200;

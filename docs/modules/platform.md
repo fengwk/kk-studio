@@ -42,13 +42,15 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat 与 Issue Agent owner 的命令接受、Session 查询与深删除；Issue Agent 归属经 `IssueAgentOwnership` SPI 由 Project 提供 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；Chat 与 Project 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
 
 ## Harness 持久化与调度
 
@@ -236,6 +238,8 @@ subscriber 独立围栏保证关闭后不再回调，用户回调在全局锁外
 环境等待不是新的持久状态：只有 READY 调用存在已到领取时间、没有有效执行租约的
 环境亲和 TOOL Work，且所需环境没有有效 READY 连接租约时才进入查询。
 沿永久父链找到真实执行根，再按根与冻结环境聚合，`waitingCount` 是组内调用数。
+Harness 只读取调用和 Work 事实，在分页之前完成分组；平台环境服务用数据库时间判断
+READY 租约并补齐名称，过滤在线环境后继续扫描候选，确保跨页不拆分同一分组。
 分组用最早调用的 `(createTime, id)` 排序，与人工等待做 keyset 归并；`total` 是
 同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`、`ISSUE_AGENT`，
 或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`（带 Agent 名与根 Thread 名，只在交互中心处理）；
@@ -272,7 +276,7 @@ Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全�
 PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
 路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
 引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
-删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+删除 GROUP 前校验 Agent 入边；Builtin Agent 引用由应用在持有模型行锁的同一事务中校验和更新。
 
 GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
 禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
@@ -280,7 +284,7 @@ GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Var
 冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
 `config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
 能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
-Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的工作流阶段引用时不能删除；Chat 只按名称软引用 Agent，
+Agent 被其它 Agent 的 subagents、插件普通配置或产品引用时不能删除；产品通过 `AgentReferenceCheck` 参与删除前检查，Project 检查未归档项目的工作流阶段。Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
@@ -304,10 +308,16 @@ TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账�
 非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
 其他模型信息，但保留已有价格，不用零价覆盖。
 
-Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
-（默认 true）；工具候选和 Skill 引用在写入时校验。
+Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 Thread 的
+`ExecutionSelection` 相同。写入和导入预检先根据实际注册的 Driver 校验 settings；
+当前提供 `builtin`，其 settings 精确为 `{modelName, variant}`，`variant: null` 表示
+使用单 MODEL 的默认 Variant，GROUP 不允许指定组级 Variant。Builtin 适配在写事务中
+锁定并校验模型和显式 Variant；模型改名仅更新指向它的 Builtin Agent 并推进其版本，
+模型或 Variant 被引用时阻止删除，不解释其他 Driver 的 settings。
+Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)` 和 subagents；工具候选和
+Skill 引用在写入时校验。子 Agent 使用执行根当前 Environment。
 
-Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、model、tools、skills 与普通执行配置，但不能删除或改名；内置定义允许显式未配置模型（独立选择，不继承调用 Thread 的模型，也不静默 fallback），用户创建的 Agent 仍要求模型。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
+Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
 
 ### Git Skill Package
 
@@ -381,12 +391,17 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
-在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受使用 owner KEY SHARE；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
+在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受锁由归属实现提供（Chat 对 `chat` 行取 KEY SHARE，Project 按 `Project SHARE -> Issue UPDATE` 锁定产品层级）；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
 
-平台对 Issue Agent 的全部感知收敛在 [`IssueAgentOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/IssueAgentOwnership.java) SPI：
-Project 应用实现它，负责在调用方事务内锁定 Project → Issue 层级、读写 `(issueId, agentName) -> threadId` 绑定，并按执行根解析 Issue 归属。
-显式的 Issue Agent 操作在没有实现时失败关闭；按执行根发现交互时视为没有 Issue 根。
-Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
+平台对产品归属的全部感知收敛在 [`SessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/SessionOwnership.java) SPI。每个实现以不透明 `{kind, id}` 身份工作，声明是否允许分叉、是否允许经通用命令接口直写，并提供接受、交互与删除的产品锁和写钩子：
+
+- Chat：[`ChatSessionOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/chat/ChatSessionOwnership.java) 暂留 `platform/runtime`，`chat_session` 直接持有 Session；接受锁 `chat` KEY SHARE，允许分叉与通用命令。
+- Project：`project_issue_agent_thread` 维护 `(issueId, agentName) -> thread/session` 稳定绑定；接受与交互锁 `Project SHARE -> Issue UPDATE`，不允许分叉或通用命令直写，删除 Session 前先删绑定行。
+
+`findOwner(rootThreadId, rootSessionId)` 返回展示用 `{kind, id, title, link}`；交互查询只按真实执行根调用各实现，多个实现同时认领同一根时失败关闭。命令接受、Session 查询、深删除与交互待办/查询都只调用该 SPI，不按产品类型分支；未知或重复的 kind 在进入 Runtime 前拒绝。
+Agent 删除前由 [`AgentReferenceCheck`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/AgentReferenceCheck.java) SPI 询问各产品；Project 检查未归档项目的工作流阶段，平台不再用 SQL 读取 `project` 表。
+
+Issue+Agent 的命令由 Issue 业务工作流拥有，SPI 声明通用命令直写为禁止，公共 batch 端点据此拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入，不写 Project contributor state。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
 Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
@@ -505,12 +520,15 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，
 通过 `AutoConfiguration.imports` 创建 bean。`StudioPluginRegistry` 冻结唯一 pluginId；
 `StudioPlugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
-`PluginInstance`，按需提供独立的 Harness Contributor / Canvas Adapter，两域可为空。
+`PluginInstance`：Harness 贡献由 `harnessContributors()` 直接声明，其它产品域贡献按类型读取
+（`contributions(CanvasFunctionAdapter.class)`），可以都为空。
 安装集合随发行物构建确定；`StudioPlugin`、安装目录以及凭据与资源端口的纯契约见
 [Platform Plugin API](platform-plugin-api.md)。
 
-`PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
-任一配置、贡献或目录失败时释放全部已建实例，错误只携带阶段与 pluginId。Web 从同一快照提供两域 Catalog。
+`PluginCatalogSnapshot` 逐个配置实例，合并内置 Harness 贡献，并在返回前验证完整 Harness 目录；
+平台自身不认识任何产品目录，产品目录视图由产品模块提供的 `Function<PluginCatalogSnapshot, ?>`
+在同一个构建窗口里冻结一次，平台只按视图类型保存与读取。任一配置、Harness 贡献或产品目录校验失败时
+先释放全部已建实例，再以只携带阶段与 pluginId 的错误失败，候选快照因此不会发布。Web 从同一快照提供 Harness 与产品目录。
 
 ### Plugin 配置存储
 
@@ -532,7 +550,9 @@ Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去�
 管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
-Canvas 应用经自己的租用适配消费同一份快照里的 Function 目录，冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
+产品目录投影由持有该目录的应用提供：Canvas 在每次快照构建时把内置 adapter 与插件贡献合并校验成唯一目录并冻结，
+再经自己的租用适配提供给执行路径，插件详情里的 `canvasFunctionNames` 也由同一冻结视图投影，因此管理面与执行使用同一份事实；
+冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
 
 ### 新增 Plugin
 
@@ -567,7 +587,7 @@ Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每�
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。
 lease 只保证互斥，无法证明外部 exactly-once；不确定 renewal 保留停止自动重放的边界。
-调用期作废仅按本次快照 CAS，保护并发重新登录；普通 403 权限错误保持独立分类。
+插件 HTTP 调用收到 401/403 时仅按本次快照 CAS 作废，保护并发重新登录；网络失败不作废凭据。
 
 ### Plugin 资源端口
 
@@ -619,7 +639,9 @@ YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
-Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
+Agent 使用 `execution: {driver, settings}` 往返，不接受旧的顶层 `model` / `variant`。
+Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
+优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`
@@ -647,14 +669,15 @@ storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 
-network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
+network 提供 Backend 与 Daemon 共用的全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，
 支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（CIDR 只按目标 URL 中的数值 IP
 逐位匹配，不为域名解析 DNS）。
 代理选择在每次请求时现读内存快照：保存后新发起的 HTTP 请求立即使用新路由，正在执行的请求
 由其自身连接与响应流继续完成，不受影响；模型、Git、MCP、集成、媒体与 S3 统一使用该策略，
 无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，Host/SNI 与证书
-校验保留原域名。Daemon 与浏览器的网络策略独立。
+校验保留原域名。设置提交和通知回读后向本节点在线 Daemon 下发，重连与 READY 时对账；
+浏览器的网络策略独立。
 
 部署级设置由各 `@ConfigurationProperties` 定义，进程启动时装配：
 

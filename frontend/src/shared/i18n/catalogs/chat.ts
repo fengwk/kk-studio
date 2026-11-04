@@ -31,8 +31,8 @@ export const chatCatalog = {
     'zh-CN': '新建 Chat',
   },
   'ai.chat.createDescription': {
-    'en-US': 'Create a Chat (an Agent is required)',
-    'zh-CN': '新建 Chat（需选择 Agent）',
+    'en-US': 'Start a Chat with an Agent',
+    'zh-CN': '选择 Agent 开始 Chat',
   },
   'ai.chat.edit': {
     'en-US': 'Edit Chat',
@@ -75,8 +75,8 @@ export const chatCatalog = {
     'zh-CN': '选择默认环境',
   },
   'ai.chat.environmentUnavailable': {
-    'en-US': '(Unavailable)',
-    'zh-CN': '（不可用）',
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
   },
   'ai.chat.environmentLoadFailed': {
     'en-US': 'Failed to load environments; current selection kept',
@@ -95,12 +95,12 @@ export const chatCatalog = {
     'zh-CN': '进入 Chat {{label}}',
   },
   'ai.chat.missingAgent': {
-    'en-US': '(Deleted or missing)',
-    'zh-CN': '（已删除/缺失）',
+    'en-US': 'Deleted or missing',
+    'zh-CN': '已删除/缺失',
   },
   'ai.chat.namePlaceholder': {
-    'en-US': 'Chat name (duplicates allowed)',
-    'zh-CN': 'Chat 名称（可重名）',
+    'en-US': 'Chat name',
+    'zh-CN': 'Chat 名称',
   },
   'ai.chat.selectAgent': {
     'en-US': 'Select an Agent',
@@ -587,8 +587,8 @@ export const chatCatalog = {
     'zh-CN': '没有可用于压缩的上下文',
   },
   'ai.runtime.command.disabled.compaction.executionChanged': {
-    'en-US': 'Execution settings (model) changed; start a new turn before compacting',
-    'zh-CN': '执行设置（模型）已更改，请先开始新一轮',
+    'en-US': 'The model setting changed; start a new turn before compacting',
+    'zh-CN': '模型设置已更改，请先开始新一轮',
   },
   'ai.runtime.command.disabled.compaction.executionUnsupported': {
     'en-US': 'Compaction is not supported by the current driver',
@@ -755,16 +755,16 @@ export const chatCatalog = {
     'zh-CN': 'Agent 进展报告',
   },
   'ai.runtime.goal.agentReportDisclaimer': {
-    'en-US': 'Reported by Agent (not system acceptance)',
+    'en-US': 'Reported by Agent, not system acceptance',
     'zh-CN': '由 Agent 报告，非系统验收',
   },
   'ai.runtime.goal.statusCompleteReported': {
-    'en-US': 'Completed (Agent Report)',
-    'zh-CN': '已完成（Agent 报告）',
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
   },
   'ai.runtime.goal.statusBlockedReported': {
-    'en-US': 'Blocked (Agent Report)',
-    'zh-CN': '阻塞（Agent 报告）',
+    'en-US': 'Blocked',
+    'zh-CN': '阻塞',
   },
   'ai.runtime.goal.staleReportNotice': {
     'en-US': 'Previous goal progress report is stale',
@@ -779,8 +779,8 @@ export const chatCatalog = {
     'zh-CN': '更新目标',
   },
   'ai.runtime.goal.inputPlaceholder': {
-    'en-US': 'Enter thread goal (max 2,000 characters)...',
-    'zh-CN': '输入 thread 目标（最多 2000 字符）...',
+    'en-US': 'Enter thread goal...',
+    'zh-CN': '输入 thread 目标...',
   },
   'ai.runtime.goal.setGoalBtn': {
     'en-US': 'Set Goal',
@@ -1001,20 +1001,20 @@ export const chatCatalog = {
     'zh-CN': '正在准备审查 Diff…',
   },
   'ai.runtime.mutation.inputLabel': {
-    'en-US': 'Streamed input (awaiting review)',
-    'zh-CN': '流式输入内容（等待审查）',
+    'en-US': 'Streamed input',
+    'zh-CN': '流式输入内容',
   },
   'ai.runtime.mutation.oldString': {
-    'en-US': 'Original text (old_string):',
-    'zh-CN': '原文本 (old_string)：',
+    'en-US': 'Original text:',
+    'zh-CN': '原文本：',
   },
   'ai.runtime.mutation.newString': {
-    'en-US': 'New text (new_string):',
-    'zh-CN': '新文本 (new_string)：',
+    'en-US': 'New text:',
+    'zh-CN': '新文本：',
   },
   'ai.runtime.mutation.emptyFile': {
-    'en-US': '(empty file)',
-    'zh-CN': '（空文件）',
+    'en-US': 'Empty file',
+    'zh-CN': '空文件',
   },
   'ai.runtime.mutation.reviewMissing': {
     'en-US': 'Edit review missing or invalid; cannot allow.',
@@ -1166,8 +1166,8 @@ export const chatCatalog = {
     'zh-CN': '打开原件 {{name}}',
   },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': '{{name}} (unavailable)',
-    'zh-CN': '{{name}}（不可用）',
+    'en-US': '{{name}} · unavailable',
+    'zh-CN': '{{name}} · 不可用',
   },
   'ai.runtime.status.environmentText': {
     'en-US': '{{name}}',
@@ -1178,8 +1178,8 @@ export const chatCatalog = {
     'zh-CN': '环境：{{name}}',
   },
   'ai.runtime.status.environmentUnavailableTitle': {
-    'en-US': 'Environment: {{name}} (unavailable)',
-    'zh-CN': '环境：{{name}}（不可用）',
+    'en-US': 'Environment: {{name}} · unavailable',
+    'zh-CN': '环境：{{name}} · 不可用',
   },
   'ai.runtime.status.environmentNoneText': {
     'en-US': 'No environment',
@@ -1194,12 +1194,12 @@ export const chatCatalog = {
     'zh-CN': 'ctx {{used}}/{{total}}',
   },
   'ai.runtime.status.contextUsageTitleKnown': {
-    'en-US': 'Context occupancy (latest model call estimate): ~{{used}} / {{total}} tokens',
-    'zh-CN': '上下文占用（最近一次模型调用估算）：约 {{used}} / {{total}} tokens',
+    'en-US': 'Context occupancy, latest model call estimate: ~{{used}} / {{total}} tokens',
+    'zh-CN': '上下文占用，最近一次模型调用估算：约 {{used}} / {{total}} tokens',
   },
   'ai.runtime.status.contextUsageTitleUnknown': {
-    'en-US': 'Context occupancy: not yet measured (limit {{total}} tokens)',
-    'zh-CN': '上下文占用：尚未测量（上限 {{total}} tokens）',
+    'en-US': 'Context occupancy: not yet measured, limit {{total}} tokens',
+    'zh-CN': '上下文占用：尚未测量，上限 {{total}} tokens',
   },
   'ai.runtime.status.usageTokensDetail': {
     'en-US': 'Uncached input: {{input}} tokens; output: {{output}} tokens; reasoning: {{reasoning}} tokens',
@@ -1274,8 +1274,8 @@ export const chatCatalog = {
     'zh-CN': '已返回',
   },
   'ai.runtime.notification.entry.viewSubagentExecution': {
-    'en-US': 'View subagent ({{threadId}}) execution',
-    'zh-CN': '查看 subagent ({{threadId}}) 执行',
+    'en-US': 'View subagent {{threadId}} execution',
+    'zh-CN': '查看 subagent {{threadId}} 的执行',
   },
   'ai.runtime.notification.entry.invalidReceipt': {
     'en-US': 'The subagent receipt is not a valid XML envelope and cannot be displayed.',
@@ -1406,8 +1406,8 @@ export const chatCatalog = {
     'zh-CN': '暂无事件',
   },
   'ai.runtime.event.emptyText': {
-    'en-US': '(no summary)',
-    'zh-CN': '（无摘要）',
+    'en-US': 'No summary',
+    'zh-CN': '无摘要',
   },
   'ai.runtime.event.abortedText': {
     'en-US': 'The assistant response was stopped by the user.',
@@ -1470,8 +1470,8 @@ export const chatCatalog = {
     'zh-CN': '冻结调用输入',
   },
   'ai.runtime.debug.requestSnapshotTitle': {
-    'en-US': 'View frozen canonical ProviderRequest for current invocation (not raw HTTP wire payload)',
-    'zh-CN': '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）',
+    'en-US': 'View the frozen canonical ProviderRequest for this invocation, not the raw HTTP payload',
+    'zh-CN': '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文',
   },
   'ai.runtime.debug.planningError': {
     'en-US': 'Planning Error',
@@ -1482,8 +1482,8 @@ export const chatCatalog = {
     'zh-CN': '系统提示词',
   },
   'ai.runtime.debug.emptyPrompt': {
-    'en-US': '(empty)',
-    'zh-CN': '（空）',
+    'en-US': 'Empty',
+    'zh-CN': '空',
   },
   'ai.runtime.debug.toolsTitle': {
     'en-US': 'TOOLS',
@@ -1550,24 +1550,24 @@ export const chatCatalog = {
     'zh-CN': '无显式缓存控制',
   },
   'ai.runtime.debug.cacheRetention.short': {
-    'en-US': 'Short (SHORT)',
-    'zh-CN': '短期 (SHORT)',
+    'en-US': 'Short · SHORT',
+    'zh-CN': '短期 · SHORT',
   },
   'ai.runtime.debug.cacheRetention.long': {
-    'en-US': 'Long (LONG)',
-    'zh-CN': '长期 (LONG)',
+    'en-US': 'Long · LONG',
+    'zh-CN': '长期 · LONG',
   },
   'ai.runtime.debug.envSupport.none': {
-    'en-US': 'Platform only (NONE)',
-    'zh-CN': '平台独立 (NONE)',
+    'en-US': 'Platform only · NONE',
+    'zh-CN': '平台独立 · NONE',
   },
   'ai.runtime.debug.envSupport.optional': {
-    'en-US': 'Optional environment (OPTIONAL)',
-    'zh-CN': '可选环境 (OPTIONAL)',
+    'en-US': 'Optional environment · OPTIONAL',
+    'zh-CN': '可选环境 · OPTIONAL',
   },
   'ai.runtime.debug.envSupport.required': {
-    'en-US': 'Environment required (REQUIRED)',
-    'zh-CN': '需要环境 (REQUIRED)',
+    'en-US': 'Environment required · REQUIRED',
+    'zh-CN': '需要环境 · REQUIRED',
   },
   'ai.runtime.debug.inspectorTitle': {
     'en-US': 'INSPECTOR',
@@ -1610,12 +1610,12 @@ export const chatCatalog = {
     'zh-CN': '状态',
   },
   'ai.runtime.debug.inspector.toolState.sent': {
-    'en-US': 'PLANNED (SENT)',
-    'zh-CN': '纳入当前规划 (SENT)',
+    'en-US': 'PLANNED · SENT',
+    'zh-CN': '纳入当前规划 · SENT',
   },
   'ai.runtime.debug.inspector.toolState.filtered': {
     'en-US': 'FILTERED',
-    'zh-CN': '已过滤 (FILTERED)',
+    'zh-CN': '已过滤 · FILTERED',
   },
   'ai.runtime.debug.filterReason.envNotSelected': {
     'en-US': 'Environment not selected',
@@ -1630,8 +1630,8 @@ export const chatCatalog = {
     'zh-CN': '所需环境 ID',
   },
   'ai.runtime.debug.inspector.provenance': {
-    'en-US': 'Contributor (Provenance)',
-    'zh-CN': '来源 (Contributor)',
+    'en-US': 'Contributor',
+    'zh-CN': '来源',
   },
   'ai.runtime.debug.inspector.description': {
     'en-US': 'Description',
@@ -1647,11 +1647,11 @@ export const chatCatalog = {
   },
   'ai.runtime.debug.inspector.package': {
     'en-US': 'Package',
-    'zh-CN': '包名 (Package)',
+    'zh-CN': '包名',
   },
   'ai.runtime.debug.inspector.delivery': {
     'en-US': 'Delivery',
-    'zh-CN': '交付方式 (Delivery)',
+    'zh-CN': '交付方式',
   },
   'ai.runtime.debug.inspector.path': {
     'en-US': 'Path',
@@ -1750,8 +1750,8 @@ export const chatCatalog = {
     'zh-CN': '说明',
   },
   'ai.runtime.debug.inspector.requestBodyJson': {
-    'en-US': 'Provider Request Body (JSON)',
-    'zh-CN': 'Provider 请求体 (JSON)',
+    'en-US': 'Provider Request Body · JSON',
+    'zh-CN': 'Provider 请求体 · JSON',
   },
   'ai.runtime.debug.previewLoading': {
     'en-US': 'Loading request preview...',
@@ -1778,8 +1778,8 @@ export const chatCatalog = {
     'zh-CN': '未捕获网络层原始 HTTP 报文',
   },
   'ai.runtime.debug.inspector.recordedAt': {
-    'en-US': 'Output recorded at (planning time)',
-    'zh-CN': '输出记录时间（规划时刻）',
+    'en-US': 'Recorded at planning time',
+    'zh-CN': '规划时刻记录',
   },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',
@@ -1982,8 +1982,8 @@ export const chatCatalog = {
     'zh-CN': '请求失败',
   },
   'ai.runtime.action.threadStateChanged': {
-    'en-US': '{{action}}: Thread state changed ({{error}}); refreshed. Please try again',
-    'zh-CN': '{{action}}：Thread 状态已变化（{{error}}），已刷新，请重试',
+    'en-US': '{{action}}: Thread state changed — {{error}}. Refreshed; please try again',
+    'zh-CN': '{{action}}：Thread 状态已变化 — {{error}}。已刷新，请重试',
   },
   'ai.runtime.action.unknownCommand': {
     'en-US': 'Unknown command: {{command}}',

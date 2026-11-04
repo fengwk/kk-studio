@@ -11,7 +11,6 @@ import {
   ideErrorDetail,
   ideErrorText,
   initialViews,
-  isDirtyClose,
   isUnknownIdeFailure,
   isViewGone,
   isViewInUse,
@@ -101,11 +100,6 @@ describe('ide-claim-reducer helpers', () => {
     expect(isViewInUse(new Error('VIEW_IN_USE'))).toBe(true)
     expect(isViewInUse(new Error('CLAIM_CONFLICT'))).toBe(true)
     expect(isViewInUse(new Error('other'))).toBe(false)
-
-    expect(isDirtyClose(new Error('DIRTY state'))).toBe(true)
-    expect(isDirtyClose(new Error('has unsaved changes'))).toBe(true)
-    expect(isDirtyClose(new Error('save or discard'))).toBe(true)
-    expect(isDirtyClose(new Error('clean'))).toBe(false)
 
     const server500 = new ApiError('Internal', 500, 'SERVER_ERROR', {})
     expect(isUnknownIdeFailure(server500)).toBe(true)

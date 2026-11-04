@@ -19,6 +19,7 @@ import { requireTranslationKey, useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Tabs, type TabItem } from '@/shared/ui/controls/Tabs'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import './settings.css'
 
 /**
  * 全局设置页：General 保留本地偏好；所有 server tabs、section/group 顺序和字段控件来自
@@ -91,6 +92,7 @@ export function SettingsPage({
         </div>
       </div>
       <ConflictPresenter
+        className="modal-touch-target"
         conflict={editor.conflict}
         onRefresh={reloadPage}
         onClose={editor.dismissConflict}

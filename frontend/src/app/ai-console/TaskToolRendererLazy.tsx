@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 
 const TaskToolRenderer = lazy(async () => {
-  const module = await import('@/features/chat/runtime/thread-panel/messages/TaskToolRenderer')
+  const module = await import('@/features/thread/runtime/thread-panel/messages/TaskToolRenderer')
   return { default: module.TaskToolRenderer }
 })
 

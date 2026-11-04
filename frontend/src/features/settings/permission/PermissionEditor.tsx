@@ -60,7 +60,7 @@ export function PermissionEditor({
             ? [
                 {
                   value: group.tool,
-                  label: `${group.tool} (${t('ai.catalog.form.unavailable')})`,
+                  label: `${group.tool} · ${t('ai.catalog.form.unavailable')}`,
                 },
               ]
             : []),

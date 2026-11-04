@@ -260,6 +260,23 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         .andExpect(status().isBadRequest());
   }
 
+  /** 旧模型字段即使与有效 execution 并存，也不能通过检查或部分导入。 */
+  @Test
+  void legacyAgentFieldsAreRejectedAtBothImportEndpoints() throws Exception {
+    String agent = "legacy_agent_" + unique();
+    for (String legacy : List.of("    model: acceptance-stub\n", "    variant: default\n")) {
+      String yaml =
+          "agents:\n  - name: "
+              + agent
+              + "\n    execution: {driver: builtin, settings: {modelName: acceptance-stub, variant: default}}\n"
+              + legacy
+              + "    config: {tools: [], skills: [], subagents: []}\n";
+      checkRejected(yaml);
+      importRejected(yaml, true);
+      assertNull(findAgent(agent));
+    }
+  }
+
   /** 预检查对缺 section、空对象、非法嵌套值都与执行一致地硬拒绝，且不回显值。 */
   @Test
   void checkEndpointRejectsIncompleteSettingsAndInvalidValues() throws Exception {
@@ -492,8 +509,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     AgentDefinitionUpdateDTO link = new AgentDefinitionUpdateDTO();
     link.setDescription("agent " + agentB);
     link.setSystemPrompt("prompt " + agentB);
-    link.setModel(model);
-    link.setVariant("default");
+    link.setExecution(execution(model, "default"));
     link.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentA)));
     link.setExpectedVersion(agentBPage.path("version").asText());
     putData("/api/agents/" + agentB, link);
@@ -523,8 +539,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     AgentDefinitionUpdateDTO unlinkA = new AgentDefinitionUpdateDTO();
     unlinkA.setDescription("agent " + agentA);
     unlinkA.setSystemPrompt("prompt " + agentA);
-    unlinkA.setModel(model);
-    unlinkA.setVariant("default");
+    unlinkA.setExecution(execution(model, "default"));
     unlinkA.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of()));
     unlinkA.setExpectedVersion(agentADto.path("version").asText());
     JsonNode unlinkedA = putData("/api/agents/" + agentA, unlinkA);
@@ -562,7 +577,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // Agent 引用闭包（模型/技能/MCP 工具/循环 subagent）恢复。
     JsonNode reA = findAgent(agentA);
-    assertEquals(model, reA.path("model").asText());
+    assertEquals("builtin", reA.path("execution").path("driver").asText());
+    assertEquals(model, reA.path("execution").path("settings").path("modelName").asText());
+    assertEquals("default", reA.path("execution").path("settings").path("variant").asText());
     assertEquals(List.of(mcpTool), listText(reA.path("config").path("tools")));
     assertEquals(List.of("dev"), reA.path("config").path("skills").findValuesAsString("name"));
     assertEquals(pkg, reA.path("config").path("skills").get(0).path("packageName").asText());
@@ -1033,11 +1050,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "  - name: "
             + bad
             + "\n"
-            + "    model: "
-            + provider
-            + "/"
+            + "    execution:\n      driver: builtin\n      settings:\n        modelName: "
             + model
-            + "\n"
+            + "\n        variant: default\n"
             + "    config:\n"
             + "      tools: [totally_unknown_tool]\n"
             + "      skills: []\n"
@@ -1046,6 +1061,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(
         result.path("skipped").findValuesAsString("name").contains(bad),
         "agent with unsupported tool must be skipped: " + result);
+    assertTrue(
+        result
+            .path("skipped")
+            .findValuesAsString("reason")
+            .contains("unsupported or unknown agent tool: totally_unknown_tool"));
     assertNull(findAgent(bad), "skipped agent must not be created");
     assertNotNull(findAgent(good), "a skipped entry must not mutate other agents");
   }
@@ -1186,8 +1206,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setName(name);
     dto.setDescription("agent " + name);
     dto.setSystemPrompt("prompt " + name);
-    dto.setModel(model);
-    dto.setVariant("default");
+    dto.setExecution(execution(model, "default"));
     dto.setConfig(agentConfig(tools, skills, subagents));
     return postData("/api/agents", dto);
   }
@@ -1392,8 +1411,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     Map<String, Object> agentEntry = new LinkedHashMap<>();
     agentEntry.put("name", agent);
-    agentEntry.put("model", model);
-    agentEntry.put("variant", variant);
+    agentEntry.put(
+        "execution",
+        Map.of("driver", "builtin", "settings", Map.of("modelName", model, "variant", variant)));
     agentEntry.put("config", configYaml(agentConfig(List.of(), List.of(), List.of())));
 
     Map<String, Object> document = new LinkedHashMap<>();

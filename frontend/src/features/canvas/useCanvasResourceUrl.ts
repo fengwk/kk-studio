@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 type ResourceUrlKind = 'preview' | 'original'

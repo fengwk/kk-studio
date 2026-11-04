@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 

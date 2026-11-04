@@ -95,7 +95,7 @@ export async function main(argv = process.argv.slice(2)) {
     preflight = await validatePreflight(ctx, args.daemonEnv)
     const selectedModelRefs = new Set(selectedCases.map((testCase) => testCase.model.ref))
     for (const model of MODELS.filter((candidate) => selectedModelRefs.has(candidate.ref))) {
-      const agent = await createTemporaryAgent(ctx, model, systemPrompt, runId, preflight.environment.id)
+      const agent = await createTemporaryAgent(ctx, model, systemPrompt, runId)
       agents.set(model.ref, agent)
     }
 
@@ -231,21 +231,18 @@ async function validatePreflight(ctx, daemonEnv) {
   }
 }
 
-async function createTemporaryAgent(ctx, model, systemPrompt, runId, environmentId) {
+async function createTemporaryAgent(ctx, model, systemPrompt, runId) {
   const suffix = runId.replace(/[^a-z0-9]/g, '').slice(-12)
   const name = `reliability-${model.key}-${suffix}`
   const body = {
     name,
     description: 'Temporary Docker reliability matrix agent.',
     systemPrompt,
-    model: model.modelName,
-    variant: VARIANT,
-    environmentId,
+    execution: { driver: 'builtin', settings: { modelName: model.modelName, variant: VARIANT } },
     config: {
       tools: [...TOOL_NAMES],
       skills: [],
       subagents: [],
-      inheritParentEnvironment: true,
     },
   }
   const { status, json } = await ctx.call('POST', '/api/agents', body)
@@ -254,10 +251,10 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
   assert(agent.systemPrompt === systemPrompt, 'created Agent systemPrompt mismatch')
   assert(
-    agent.model === model.modelName && agent.variant === VARIANT,
+    agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.modelName
+      && agent.execution.settings?.variant === VARIANT,
     'created Agent model mismatch',
   )
-  assert(agent.environmentId === environmentId, 'created Agent environmentId mismatch')
   assert(
     JSON.stringify(agent.config) === JSON.stringify(body.config),
     `created Agent config mismatch: ${JSON.stringify(agent.config)}`,
@@ -579,10 +576,7 @@ export function buildNewSessionRequest({ chat, agent, testCase, prompt }) {
     owner: chatOwner(chat.id),
     sessionId: cid(),
     threadId: cid(),
-    rootSettings: branchSettingsOf(agent, {
-      modelName: testCase.model.modelName,
-      variant: VARIANT,
-    }),
+    rootSettings: branchSettingsOf(agent, agent.execution),
     yoloEnabled: true,
     commands: [userMessageCommand(prompt, cid())],
   }

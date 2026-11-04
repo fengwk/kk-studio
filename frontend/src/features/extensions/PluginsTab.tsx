@@ -5,7 +5,7 @@ import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { isConflictError } from '@/shared/api/client'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { PluginCard } from '@/features/extensions/PluginCard'
@@ -208,6 +208,7 @@ export function PluginsTab() {
 
       {disconnectTarget && (
         <ConfirmActionModal
+          className="modal-touch-target"
           modal={{
             title: t('plugins.disconnect'),
             description: t('plugins.disconnectConfirm', { name: disconnectTarget.name }),

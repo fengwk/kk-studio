@@ -21,9 +21,12 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -201,8 +204,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
     UUID endEntryId = appendHistoryEntry(accepted.getThreadId());
-    issueRunService.completeRun(
-        accepted.getId(), accepted.getVersion(), key("complete"), endEntryId, endEntryId, "REVIEW");
+    issueRunService.finishRun(
+        accepted.getId(),
+        accepted.getVersion(),
+        key("complete"),
+        IssueRunStatus.COMPLETED,
+        endEntryId,
+        endEntryId,
+        "REVIEW",
+        null);
     assertEquals(
         0L, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
 
@@ -364,14 +374,28 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
     String completeKey = key("complete");
     IssueRun completed =
-        issueRunService.completeRun(
-            run.getId(), run.getVersion(), completeKey, endEntryId, endEntryId, "REVIEW");
+        issueRunService.finishRun(
+            run.getId(),
+            run.getVersion(),
+            completeKey,
+            IssueRunStatus.COMPLETED,
+            endEntryId,
+            endEntryId,
+            "REVIEW",
+            null);
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
     Issue afterComplete = issueEditingService.getIssue(issue.getId());
 
     IssueRun replayed =
-        issueRunService.completeRun(
-            run.getId(), run.getVersion(), completeKey, endEntryId, endEntryId, "REVIEW");
+        issueRunService.finishRun(
+            run.getId(),
+            run.getVersion(),
+            completeKey,
+            IssueRunStatus.COMPLETED,
+            endEntryId,
+            endEntryId,
+            "REVIEW",
+            null);
 
     assertEquals(IssueRunStatus.COMPLETED, replayed.getStatus());
     assertEquals(endEntryId, replayed.getEndEntryId());
@@ -405,8 +429,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String completeKey = key("complete");
 
     IssueRun completed =
-        issueRunService.completeRun(
-            run.getId(), run.getVersion(), completeKey, endEntryId, null, null);
+        issueRunService.finishRun(
+            run.getId(),
+            run.getVersion(),
+            completeKey,
+            IssueRunStatus.COMPLETED,
+            endEntryId,
+            null,
+            null,
+            null);
 
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
     assertNull(completed.getNextState());
@@ -422,8 +453,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             "control:" + completeKey));
 
     IssueRun replayed =
-        issueRunService.completeRun(
-            run.getId(), completed.getVersion(), completeKey, endEntryId, null, null);
+        issueRunService.finishRun(
+            run.getId(),
+            completed.getVersion(),
+            completeKey,
+            IssueRunStatus.COMPLETED,
+            endEntryId,
+            null,
+            null,
+            null);
 
     assertEquals(completed.getId(), replayed.getId());
     Issue afterReplay = issueEditingService.getIssue(issue.getId());
@@ -461,9 +499,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
-    // 每次接受显式提交 5 条命令（SET_AGENT/SET_MODEL/SET_ENVIRONMENT/SET_CONTRIBUTOR_STATE/CUSTOM_MESSAGE）与 1 条
-    // root Join。
-    assertEquals(5L, count("select count(*) from harness_thread_command"));
+    // 每次接受显式提交 4 条命令（SET_AGENT/SET_EXECUTION/SET_ENVIRONMENT/CUSTOM_MESSAGE）与 1 条 root Join。
+    assertEquals(4L, count("select count(*) from harness_thread_command"));
     assertEquals(1L, count("select count(*) from harness_thread_join"));
   }
 
@@ -504,8 +541,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
               gated.set(true);
               try {
                 replayed.set(
-                    issueRunService.completeRun(
-                        run.getId(), run.getVersion(), completeKey, endEntryId, null, null));
+                    issueRunService.finishRun(
+                        run.getId(),
+                        run.getVersion(),
+                        completeKey,
+                        IssueRunStatus.COMPLETED,
+                        endEntryId,
+                        null,
+                        null,
+                        null));
               } catch (Throwable error) {
                 replayedError.set(error);
               }
@@ -516,8 +560,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
       assertTrue(awaitingReceipt.await(10, TimeUnit.SECONDS), "第二个请求应停在锁前 receipt 检查");
       // 第一个请求在读走旧快照之后完整收尾：Run 行与 receipt 一起提交。
       first =
-          issueRunService.completeRun(
-              run.getId(), run.getVersion(), completeKey, endEntryId, null, null);
+          issueRunService.finishRun(
+              run.getId(),
+              run.getVersion(),
+              completeKey,
+              IssueRunStatus.COMPLETED,
+              endEntryId,
+              null,
+              null,
+              null);
       assertEquals(IssueRunStatus.COMPLETED, first.getStatus());
       firstCommitted.countDown();
       replayer.join(15_000);
@@ -550,13 +601,28 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID firstEnd = appendHistoryEntry(run.getThreadId());
     UUID secondEnd = appendHistoryEntry(run.getThreadId());
     String completeKey = key("complete");
-    issueRunService.completeRun(run.getId(), run.getVersion(), completeKey, firstEnd, null, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        completeKey,
+        IssueRunStatus.COMPLETED,
+        firstEnd,
+        null,
+        null,
+        null);
 
     assertThrows(
         ProjectDuplicateException.class,
         () ->
-            issueRunService.completeRun(
-                run.getId(), run.getVersion(), completeKey, secondEnd, null, null));
+            issueRunService.finishRun(
+                run.getId(),
+                run.getVersion(),
+                completeKey,
+                IssueRunStatus.COMPLETED,
+                secondEnd,
+                null,
+                null,
+                null));
 
     IssueRun stored = issueRunService.getRun(run.getId());
     assertEquals(IssueRunStatus.COMPLETED, stored.getStatus());
@@ -568,7 +634,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             "control:" + completeKey));
   }
 
-  /** 新请求键仍走版本 CAS：陈旧版本不能完成、取消、失败或标记不明。 */
+  /** 新请求键仍走版本 CAS：陈旧版本不能完成、取消或失败。 */
   @Test
   void runTerminalRequestsRejectStaleVersion() {
     String agent = createAgent();
@@ -581,16 +647,33 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     issueRunService.waitRun(run.getId(), stale);
     assertThrows(
         ProjectVersionConflictException.class,
-        () -> issueRunService.completeRun(run.getId(), stale, key("complete"), end, null, null));
+        () ->
+            issueRunService.finishRun(
+                run.getId(),
+                stale,
+                key("complete"),
+                IssueRunStatus.COMPLETED,
+                end,
+                null,
+                null,
+                null));
     assertThrows(
         ProjectVersionConflictException.class,
-        () -> issueRunService.cancelRun(run.getId(), stale, key("cancel"), end));
+        () ->
+            issueRunService.finishRun(
+                run.getId(),
+                stale,
+                key("cancel"),
+                IssueRunStatus.CANCELLED,
+                end,
+                null,
+                null,
+                null));
     assertThrows(
         ProjectVersionConflictException.class,
-        () -> issueRunService.failRun(run.getId(), stale, key("fail"), end, "失败"));
-    assertThrows(
-        ProjectVersionConflictException.class,
-        () -> issueRunService.markUnknown(run.getId(), stale, key("unknown"), end, "不明"));
+        () ->
+            issueRunService.finishRun(
+                run.getId(), stale, key("fail"), IssueRunStatus.FAILED, end, null, null, "失败"));
     assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
   }
 
@@ -612,18 +695,27 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueRunService.completeRun(
-                run.getId(), run.getVersion(), key("complete"), detachedEntryId, null, "REVIEW"));
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            issueRunService.completeRun(
+            issueRunService.finishRun(
                 run.getId(),
                 run.getVersion(),
                 key("complete"),
+                IssueRunStatus.COMPLETED,
+                detachedEntryId,
+                null,
+                "REVIEW",
+                null));
+    assertThrows(
+        ProjectValidationException.class,
+        () ->
+            issueRunService.finishRun(
+                run.getId(),
+                run.getVersion(),
+                key("complete"),
+                IssueRunStatus.COMPLETED,
                 run.getStartEntryId(),
                 null,
-                "REVIEW"));
+                "REVIEW",
+                null));
 
     IssueRun unchanged = issueRunService.getRun(run.getId());
     assertEquals(IssueRunStatus.RUNNING, unchanged.getStatus());
@@ -645,17 +737,19 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueRunService.completeRun(
+            issueRunService.finishRun(
                 run.getId(),
                 run.getVersion(),
                 key("complete"),
+                IssueRunStatus.COMPLETED,
                 endEntryId,
                 run.getStartEntryId(),
-                "REVIEW"));
+                "REVIEW",
+                null));
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
   }
 
-  /** 失败与不明收尾允许空区间（接受后还没有任何产出就要能安全停止），并与对应暂停门禁同事务写入。 */
+  /** 失败允许空区间（接受后还没有任何产出就要能安全停止），并与 ERROR 暂停门禁同事务写入；恢复必须显式。 */
   @Test
   void terminalFailureAllowsEmptyIntervalAndWritesPauseGate() {
     String agent = createAgent();
@@ -665,33 +759,33 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     IssueRun failed =
-        issueRunService.failRun(
+        issueRunService.finishRun(
             failedRun.getId(),
             failedRun.getVersion(),
             key("fail"),
+            IssueRunStatus.FAILED,
             failedRun.getStartEntryId(),
-            "provider exploded");
+            null,
+            null,
+            "Run stopped with in-flight side effects; outcome unknown");
 
     assertEquals(IssueRunStatus.FAILED, failed.getStatus());
-    assertEquals("provider exploded", failed.getError());
+    assertEquals("Run stopped with in-flight side effects; outcome unknown", failed.getError());
     assertNotNull(failed.getEndedAt());
     assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
 
-    Issue afterFail = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
-    IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    UUID unknownEnd = appendHistoryEntry(unknownRun.getThreadId());
-    IssueRun unknown =
-        issueRunService.markUnknown(
-            unknownRun.getId(),
-            unknownRun.getVersion(),
-            key("unknown"),
-            unknownEnd,
-            "side effect lost");
+    // 门禁关闭期间不自动重试：新 Run 被拒绝，必须由显式 resume 解除。
+    assertThrows(
+        ProjectValidationException.class,
+        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
 
-    assertEquals(IssueRunStatus.UNKNOWN, unknown.getStatus());
-    assertEquals("side effect lost", unknown.getError());
-    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
+    Issue afterFail = issueEditingService.getIssue(issue.getId());
+    Issue resumed =
+        issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
+    assertNull(resumed.getPauseReason());
+    assertEquals(
+        IssueRunStatus.RUNNING,
+        issueRunService.acceptRun(issue.getId(), key("accept")).getStatus());
   }
 
   /** 人工停止收尾为 CANCELLED 并保留 USER 暂停门禁，避免轮询立即启动新 Run。 */
@@ -705,7 +799,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
 
     IssueRun cancelled =
-        issueRunService.cancelRun(run.getId(), run.getVersion(), key("cancel"), endEntryId);
+        issueRunService.finishRun(
+            run.getId(),
+            run.getVersion(),
+            key("cancel"),
+            IssueRunStatus.CANCELLED,
+            endEntryId,
+            null,
+            null,
+            null);
 
     assertEquals(IssueRunStatus.CANCELLED, cancelled.getStatus());
     assertEquals(endEntryId, cancelled.getEndEntryId());
@@ -714,6 +816,80 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         ProjectValidationException.class,
         () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+  }
+
+  /** 失败与取消的 receipt 必须绑定精确终态字段，重试不重复写入或解除暂停。 */
+  @Test
+  void failedAndCancelledReceiptsUseExactHashesAndReplay() throws Exception {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("终态收据", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    for (IssueRunStatus status : List.of(IssueRunStatus.FAILED, IssueRunStatus.CANCELLED)) {
+      String acceptKey = key("accept");
+      IssueRun run = issueRunService.acceptRun(issue.getId(), acceptKey);
+      String terminalKey = key("terminal");
+      String error = status == IssueRunStatus.FAILED ? "failure detail" : null;
+      UUID end = run.getStartEntryId();
+      IssueRun finished =
+          issueRunService.finishRun(
+              run.getId(), run.getVersion(), terminalKey, status, end, null, null, error);
+      Issue after = issueEditingService.getIssue(issue.getId());
+      String canonical =
+          (status == IssueRunStatus.FAILED ? "FAIL_RUN" : "CANCEL_RUN")
+              + "\u001f"
+              + run.getId()
+              + "\u001f"
+              + end
+              + "\u001f"
+              + (error == null ? "USER" : error);
+      String hash =
+          HexFormat.of()
+              .formatHex(
+                  MessageDigest.getInstance("SHA-256")
+                      .digest(canonical.getBytes(StandardCharsets.UTF_8)));
+      assertEquals(
+          hash,
+          jdbc.queryForObject(
+              "select request_hash from project_issue_activity where issue_id = ? and idempotency_key = ?",
+              String.class,
+              issue.getId(),
+              "control:" + terminalKey));
+      assertEquals(
+          finished.getVersion(),
+          issueRunService
+              .finishRun(run.getId(), run.getVersion(), terminalKey, status, end, null, null, error)
+              .getVersion());
+      assertEquals(status, issueRunService.acceptRun(issue.getId(), acceptKey).getStatus());
+      UUID differentEnd = UUID.randomUUID();
+      assertThrows(
+          ProjectDuplicateException.class,
+          () ->
+              issueRunService.finishRun(
+                  run.getId(),
+                  run.getVersion(),
+                  terminalKey,
+                  status,
+                  differentEnd,
+                  null,
+                  null,
+                  error));
+      if (error != null) {
+        assertThrows(
+            ProjectDuplicateException.class,
+            () ->
+                issueRunService.finishRun(
+                    run.getId(), run.getVersion(), terminalKey, status, end, null, null, "other"));
+      }
+      assertEquals(after.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
+      assertEquals(
+          1L,
+          count(
+              "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+              issue.getId(),
+              "control:" + terminalKey));
+      issueLifecycleService.resumeIssue(issue.getId(), after.getVersion(), key("resume"));
+    }
   }
 
   /** WAITING/RUNNING 的重复置位是空重放：丢响应后的旧版本重试不再冲突，也不重复消耗额度或推进 Run 版本。 */
@@ -757,8 +933,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         waitingIssue.getId(),
         waitingIssue.getVersion(),
         key("pause"),
-        PauseReason.UNKNOWN,
-        "副作用不明");
+        PauseReason.ERROR,
+        "Run stopped with in-flight side effects; outcome unknown");
 
     assertThrows(
         ProjectValidationException.class,
@@ -767,7 +943,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun unchanged = issueRunService.getRun(waiting.getId());
     assertEquals(IssueRunStatus.WAITING, unchanged.getStatus());
     assertNull(unchanged.getActiveSince());
-    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertEquals(1L, budgetUsed(issue.getId()));
   }
 

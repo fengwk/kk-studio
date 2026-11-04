@@ -12,10 +12,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * 组合式订阅容器：只共享 UUID 定点/全局注册、注销与消费者隔离 fan-out，不携带任何领域事件语义。
+ * 平台内共享的组合式订阅容器：只共享 UUID 定点/全局注册、注销与消费者隔离 fan-out，不携带任何领域事件语义。
  *
- * <p>注册（{@code compute} 内 add 与集合创建原子完成）与最后注销（{@code computeIfPresent} 内 remove-if-empty 原子完成）在 同一
- * key 上串行化，杜绝「新订阅者加入已移除集合」的 detached subscriber；注销动作幂等。{@code key} 为 null 表示全局订阅（接收全部投递）。
+ * <p>边界模块（Thread version、Canvas revision、失效提示等）的进程内 Hub 直接组合本类，避免各自复制注册与投递实现。注册（{@code compute} 内
+ * add 与集合创建原子完成）与最后注销（{@code computeIfPresent} 内 remove-if-empty 原子完成）在同一 key 上串行化，杜绝「新订阅者加入已移除集合」的
+ * detached subscriber；注销动作幂等。{@code key} 为 null 表示全局订阅（接收全部投递）。
  *
  * <p>{@link #publish} 只投递对应 key 与全局订阅者，{@link #broadcast} 投递全部订阅者且全局只投递一次。单个消费者抛出的 {@link
  * RuntimeException} 只隔离该消费者，不阻断其余消费者与后续通知；{@link Error} 不被吞掉。

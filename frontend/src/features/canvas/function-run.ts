@@ -7,7 +7,7 @@ import {
   getCanvasFunctionRun,
   resolveCanvasFunctionRun,
   startCanvasFunctionRun,
-} from '@/shared/api/studio-service'
+} from '@/features/canvas/canvas-api'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   CanvasFunctionRunDTO,

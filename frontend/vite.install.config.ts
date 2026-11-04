@@ -10,7 +10,7 @@ export default defineConfig({
       'src/features/environment/install-command.windows.test.ts',
       'src/features/environment/EnvironmentInstallModal.test.tsx',
       'src/features/environment/EnvironmentsPage.test.tsx',
-      'src/shared/api/environment-service.test.ts',
+      'src/features/environment/environment-service.test.ts',
       'src/shared/ui/feedback/Toast.test.tsx',
       'src/shared/ui/controls/Select.test.tsx',
     ],
@@ -20,7 +20,7 @@ export default defineConfig({
       include: [
         'src/features/environment/install-command.ts',
         'src/features/environment/EnvironmentInstallModal.tsx',
-        'src/shared/api/environment-service.ts',
+        'src/features/environment/environment-service.ts',
         'src/shared/ui/feedback/Toast.tsx',
       ],
       thresholds: { perFile: true, lines: 90, statements: 90, functions: 80, branches: 80 },

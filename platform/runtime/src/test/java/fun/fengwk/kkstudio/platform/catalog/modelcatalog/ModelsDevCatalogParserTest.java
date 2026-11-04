@@ -16,6 +16,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelPricingCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
@@ -146,7 +147,7 @@ class ModelsDevCatalogParserTest {
     assertDecimal("2", fastMultiplier.getFactors().getReasoning());
 
     // 经唯一 parser 解析为 ModelPricing
-    ModelPricing modelPricing = AgentModelRuntimeConfigParser.parsePricing(pricingDto);
+    ModelPricing modelPricing = AgentModelPricingCodec.parsePricing(pricingDto);
     assertNotNull(modelPricing);
     assertEquals(1, modelPricing.multipliers().size());
 
@@ -457,7 +458,7 @@ class ModelsDevCatalogParserTest {
     assertEquals(pricing, decoded.getPricing());
     String encoded = parser.encode(decoded);
     assertEquals(pricing, parser.decode(encoded).getPricing());
-    assertEquals(parser.parsePricing(pricing), parser.parse(encoded).pricing());
+    assertEquals(AgentModelPricingCodec.parsePricing(pricing), parser.parse(encoded).pricing());
   }
 
   private static void assertRejected(ModelDefaultCandidateDTO candidate) {

@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.OutputStream;
@@ -204,8 +205,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     agentConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName(agentName);
-    agent.setModel(modelName);
-    agent.setVariant("default");
+    agent.setExecution(execution(modelName));
     agent.setConfig(agentConfig);
     JsonNode agentData =
         data(
@@ -217,17 +217,22 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.name").value(agentName))
                 .andExpect(jsonPath("$.data.type").value("USER"))
-                .andExpect(jsonPath("$.data.model").value(modelName))
+                .andExpect(jsonPath("$.data.execution.driver").value("builtin"))
+                .andExpect(jsonPath("$.data.execution.settings.modelName").value(modelName))
+                .andExpect(jsonPath("$.data.execution.settings.variant").value("default"))
+                .andExpect(jsonPath("$.data.model").doesNotExist())
+                .andExpect(jsonPath("$.data.variant").doesNotExist())
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.subagents").isEmpty())
-                .andExpect(jsonPath("$.data.config.inheritParentEnvironment").value(true))
+                .andExpect(jsonPath("$.data.config.inheritParentEnvironment").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
     assertEquals(agentName, agentData.path("name").asText());
-    assertEquals(modelName, agentData.path("model").asText());
+    assertEquals(
+        modelName, agentData.path("execution").path("settings").path("modelName").asText());
     assertFalse(agentData.has("id"));
     assertFalse(agentData.has("modelId"));
 
@@ -247,7 +252,10 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     JsonNode agentPage =
         data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
     JsonNode listedAgent = findResult(agentPage, agentName);
-    assertEquals(modelName, listedAgent.path("model").asText());
+    assertEquals(
+        modelName, listedAgent.path("execution").path("settings").path("modelName").asText());
+    assertFalse(listedAgent.has("model"));
+    assertFalse(listedAgent.has("variant"));
     assertFalse(listedAgent.has("id"));
     assertFalse(listedAgent.has("modelId"));
 
@@ -348,8 +356,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
     agentUpdate.setDescription("updated agent");
     agentUpdate.setSystemPrompt("updated prompt");
-    agentUpdate.setModel(modelName);
-    agentUpdate.setVariant("default");
+    agentUpdate.setExecution(execution(modelName));
     agentUpdate.setConfig(agentConfig);
     agentUpdate.setExpectedVersion("0");
     ObjectNode agentUpdateBody = objectMapper.valueToTree(agentUpdate);
@@ -369,14 +376,19 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                         .content(objectMapper.writeValueAsString(agentUpdate)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value(agentName))
-                .andExpect(jsonPath("$.data.model").value(modelName))
+                .andExpect(jsonPath("$.data.execution.driver").value("builtin"))
+                .andExpect(jsonPath("$.data.execution.settings.modelName").value(modelName))
+                .andExpect(jsonPath("$.data.execution.settings.variant").value("default"))
+                .andExpect(jsonPath("$.data.model").doesNotExist())
+                .andExpect(jsonPath("$.data.variant").doesNotExist())
                 .andExpect(jsonPath("$.data.description").value("updated agent"))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.modelId").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("1"))
                 .andReturn());
     assertEquals(agentName, updatedAgent.path("name").asText());
-    assertEquals(modelName, updatedAgent.path("model").asText());
+    assertEquals(
+        modelName, updatedAgent.path("execution").path("settings").path("modelName").asText());
 
     agentUpdate.setExpectedVersion("0");
     mockMvc
@@ -434,6 +446,43 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isNoContent());
   }
 
+  /** 可空 Variant 必须在真实 HTTP 响应中保留，以便客户端原样执行完整 PUT。 */
+  @Test
+  public void shouldRoundTripBuiltinExecutionWithNullVariant() throws Exception {
+    String name = "null-variant-agent-" + System.nanoTime();
+    String body =
+        """
+        {"name":"%s","execution":{"driver":"builtin",
+        "settings":{"modelName":"acceptance-stub","variant":null}},
+        "config":{"tools":[],"skills":[],"subagents":[]}}
+        """
+            .formatted(name);
+    JsonNode created =
+        data(
+            mockMvc
+                .perform(post("/api/agents").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andReturn());
+    JsonNode settings = created.path("execution").path("settings");
+    assertTrue(settings.has("variant"));
+    assertTrue(settings.path("variant").isNull());
+    ObjectNode update = objectMapper.createObjectNode();
+    update.set("execution", created.path("execution"));
+    update.set("config", created.path("config"));
+    update.put("expectedVersion", created.path("version").asText());
+    JsonNode updated =
+        data(
+            mockMvc
+                .perform(
+                    put("/api/agents/{name}", name)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(update.toString()))
+                .andExpect(status().isOk())
+                .andReturn());
+    assertTrue(updated.path("execution").path("settings").has("variant"));
+    assertTrue(updated.path("execution").path("settings").path("variant").isNull());
+  }
+
   @Test
   public void shouldRejectMalformedModelRefsAndDatabaseIdContracts() throws Exception {
     String suffix = Long.toString(System.nanoTime());
@@ -444,8 +493,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     AgentDefinitionCreateDTO malformed = new AgentDefinitionCreateDTO();
     malformed.setName("malformed-agent-" + suffix);
-    malformed.setModel(" invalid surrounding whitespace ");
-    malformed.setVariant("default");
+    malformed.setExecution(execution(" invalid surrounding whitespace "));
     malformed.setConfig(config);
     mockMvc
         .perform(
@@ -471,10 +519,20 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     AgentDefinitionCreateDTO idBasedAgent = new AgentDefinitionCreateDTO();
     idBasedAgent.setName("id-based-agent-" + suffix);
-    idBasedAgent.setVariant("default");
+    idBasedAgent.setExecution(execution("acceptance-stub"));
     idBasedAgent.setConfig(config);
+    // 旧字段即使与合法 execution 同时出现，也必须被 HTTP 边界拒绝。
+    for (String legacy : List.of("model", "variant")) {
+      ObjectNode legacyBody = objectMapper.valueToTree(idBasedAgent);
+      legacyBody.put(legacy, "default");
+      mockMvc
+          .perform(
+              post("/api/agents")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(legacyBody.toString()))
+          .andExpect(status().isBadRequest());
+    }
     ObjectNode idBasedAgentBody = objectMapper.valueToTree(idBasedAgent);
-    idBasedAgentBody.remove("model");
     idBasedAgentBody.put("modelId", "1");
     mockMvc
         .perform(
@@ -538,8 +596,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName(agentName);
-    agent.setModel(oldModelName);
-    agent.setVariant("default");
+    agent.setExecution(execution(oldModelName));
     AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     agentConfig.setTools(List.of());
     agentConfig.setSkills(List.of());
@@ -598,7 +655,10 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     JsonNode agentPage =
         data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
     JsonNode listedAgent = findResult(agentPage, agentName);
-    assertEquals(newModelName, listedAgent.path("model").asText());
+    assertEquals(
+        newModelName, listedAgent.path("execution").path("settings").path("modelName").asText());
+    assertEquals(
+        "default", listedAgent.path("execution").path("settings").path("variant").asText());
     assertEquals("1", listedAgent.path("version").asText());
 
     // 5. 即使目标 Model 属于另一个 Provider，rename 仍返回 409 duplicate。
@@ -672,7 +732,9 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     JsonNode agentPageAfterConflict =
         data(mockMvc.perform(get("/api/agents")).andExpect(status().isOk()).andReturn());
     JsonNode agentAfterConflict = findResult(agentPageAfterConflict, agentName);
-    assertEquals(newModelName, agentAfterConflict.path("model").asText());
+    assertEquals(
+        newModelName,
+        agentAfterConflict.path("execution").path("settings").path("modelName").asText());
     assertEquals("1", agentAfterConflict.path("version").asText());
 
     // 6. 验证 expectedVersion 过期时触发 CAS 版本冲突 409
@@ -721,7 +783,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     ObjectNode forged = objectMapper.createObjectNode();
     forged.put("name", "forged-" + suffix);
-    forged.put("model", "p/m");
+    forged.set("execution", objectMapper.valueToTree(execution("p/m")));
     forged.put("type", "BUILTIN");
     forged.set("config", objectMapper.valueToTree(config));
     mockMvc
@@ -731,7 +793,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
 
     ObjectNode reserved = objectMapper.createObjectNode();
     reserved.put("name", "Compaction");
-    reserved.put("model", "p/m");
+    reserved.set("execution", objectMapper.valueToTree(execution("p/m")));
     reserved.set("config", objectMapper.valueToTree(config));
     mockMvc
         .perform(
@@ -748,14 +810,23 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     JsonNode builtin = findResult(page, "Compaction");
     assertEquals("BUILTIN", builtin.path("type").asText());
     // 未配置模型的内置 Agent 显式序列化 null，而不是字段缺失。
-    assertTrue(builtin.has("model"));
-    assertTrue(builtin.path("model").isNull());
+    assertTrue(builtin.has("execution"));
+    assertTrue(builtin.path("execution").isNull());
+    assertFalse(builtin.has("model"));
+    assertFalse(builtin.has("variant"));
 
     mockMvc
         .perform(delete("/api/agents/{name}", "Compaction").param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+  }
+
+  private static HarnessExecutionSelectionDTO execution(String modelName) {
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver("builtin");
+    execution.setSettings(Map.of("modelName", modelName, "variant", "default"));
+    return execution;
   }
 
   private JsonNode data(MvcResult result) throws Exception {

@@ -39,7 +39,7 @@ export function PluginConnectionCheckModal({
 
   return (
     <Dialog
-      className="resource-modal-card plugin-check-modal"
+      className="resource-modal-card plugin-check-modal modal-touch-target"
       title={t('plugins.connectionCheck.title', { name: plugin.name })}
       pending={pending}
       onClose={onClose}

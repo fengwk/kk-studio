@@ -335,7 +335,19 @@ class EnvironmentServiceTest {
   @Test
   void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentService service = service(repo);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    SystemSettings defaults = SystemSettings.DEFAULT;
+    when(snapshot.get())
+        .thenReturn(
+            new SystemSettings(
+                defaults.tool(),
+                defaults.aiRuntime(),
+                defaults.environment(),
+                new SystemSettings.Network("http://proxy.invalid:8080", "localhost,.internal"),
+                defaults.storageMedia(),
+                defaults.advanced()));
+    EnvironmentService service =
+        new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
     Environment env = environment("secret-token", 4L);
     DaemonConfiguration daemon = new DaemonConfiguration();
     daemon.setStudioUrl("https://studio.example.com");
@@ -387,6 +399,8 @@ class EnvironmentServiceTest {
 
     String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
 
+    assertTrue(script.contains("http://proxy.invalid:8080"));
+    assertTrue(script.contains("localhost,.internal"));
     assertFalse(script.contains("secret-token"), "the old token is never recoverable");
     verify(repo)
         .redeemInstallCode(
@@ -443,8 +457,9 @@ class EnvironmentServiceTest {
   }
 
   private static EnvironmentService service(EnvironmentRepository repo) {
-    return new EnvironmentService(
-        repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    return new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
   }
 
   /** 测试意图：在线轮换必须被允许——不再查询/拒绝活跃 lease，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
