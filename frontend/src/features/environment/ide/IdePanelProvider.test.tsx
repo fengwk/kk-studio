@@ -13,6 +13,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
 import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
 import {
+  IDE_RECENT_DIRECTORIES_KEY,
   IDE_TAB_LAST_KEY,
   IDE_TAB_SESSION_KEY,
   type IdePresentation,
@@ -245,12 +246,32 @@ describe('IdePanelProvider', () => {
     await user.click(screen.getByTestId('toggle-a'))
     const iframe = await screen.findByTestId('ide-iframe')
     expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    expect(service.openIdeView.mock.calls[0]?.[1]).not.toHaveProperty('directory')
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).not.toHaveAttribute('hidden')
     expect(screen.getByTestId('ide-iframe')).toBe(iframe)
     expect(service.openIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens a new view in the last confirmed directory for that environment', async () => {
+    // 无视图时使用按 Environment 保存的最近目录；没有记录时省略目录，由 Daemon 使用宿主主目录。
+    localStorage.setItem(IDE_RECENT_DIRECTORIES_KEY, JSON.stringify({
+      byEnvironment: { [ENV_A]: [DIRECTORY_B, DIRECTORY_A] },
+    }))
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+    })
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    expect(service.openIdeView.mock.calls[0]?.[1]).toMatchObject({
+      mode: 'create',
+      directory: DIRECTORY_B,
+    })
   })
 
   it('restores the session viewId through an ack, resume claim and holding epoch without touching local', async () => {
