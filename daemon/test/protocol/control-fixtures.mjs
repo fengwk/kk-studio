@@ -184,6 +184,8 @@ export function settingsEnvelope() {
     payload: {
       case: 'settings',
       value: create(SettingsSchema, {
+        proxyUrl: 'http://proxy.invalid:8080',
+        noProxyHosts: 'localhost,10.0.0.0/8',
         resourceBudgets: create(ResourceBudgetsSchema, {
           maxResourceBytes: 1048576n,
           temporaryResourceTtlSeconds: 3600n,
@@ -341,8 +343,6 @@ export function updateEnvelope() {
       value: create(UpdateSchema, {
         operationId: OPERATION,
         targetVersion: '1.2.3',
-        artifactUrl: ARTIFACT,
-        artifactSha256: 'A'.repeat(64),
       }),
     },
   })

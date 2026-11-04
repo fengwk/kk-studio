@@ -665,14 +665,15 @@ storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 
-network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
+network 提供 Backend 与 Daemon 共用的全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
 null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，
 支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（CIDR 只按目标 URL 中的数值 IP
 逐位匹配，不为域名解析 DNS）。
 代理选择在每次请求时现读内存快照：保存后新发起的 HTTP 请求立即使用新路由，正在执行的请求
 由其自身连接与响应流继续完成，不受影响；模型、Git、MCP、集成、媒体与 S3 统一使用该策略，
 无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，Host/SNI 与证书
-校验保留原域名。Daemon 与浏览器的网络策略独立。
+校验保留原域名。设置提交和通知回读后向本节点在线 Daemon 下发，重连与 READY 时对账；
+浏览器的网络策略独立。
 
 部署级设置由各 `@ConfigurationProperties` 定义，进程启动时装配：
 

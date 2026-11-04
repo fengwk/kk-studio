@@ -24,6 +24,7 @@ export interface ActiveUpdate {
   controller: AbortController | null
   receipt: UpdateReceipt
   prepared: boolean
+  stopWatching?: () => void
 }
 
 /**
@@ -46,7 +47,7 @@ export type UpdateDecision =
 
 /** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
 export function updateCommandKey(command: Update): string {
-  return JSON.stringify([command.targetVersion, command.artifactUrl, command.artifactSha256])
+  return JSON.stringify([command.targetVersion])
 }
 
 export function normalizeUpdateResult(raw: UpdateOutcomeLike, operationId: string): UpdateResult {
@@ -223,8 +224,6 @@ export async function executeUpdateAttempt(
     const plainCommand: Record<string, unknown> = {
       operationId: command.operationId,
       targetVersion: command.targetVersion,
-      artifactUrl: command.artifactUrl,
-      artifactSha256: command.artifactSha256,
     }
     const raw = await update.handleUpdate(
       plainCommand,

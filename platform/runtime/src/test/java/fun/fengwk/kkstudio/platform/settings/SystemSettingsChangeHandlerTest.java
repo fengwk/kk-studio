@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -27,7 +29,8 @@ class SystemSettingsChangeHandlerTest {
     SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     when(repository.get()).thenReturn(record(VERSION_ONE, 1), record(VERSION_TWO, 2));
-    SystemSettingsChangeHandler handler = new SystemSettingsChangeHandler(repository, snapshot);
+    SystemSettingsChangeHandler handler =
+        new SystemSettingsChangeHandler(repository, snapshot, event -> {});
 
     handler.onNotification(null);
     assertEquals(VERSION_ONE, snapshot.get());
@@ -43,9 +46,25 @@ class SystemSettingsChangeHandlerTest {
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     when(repository.get()).thenReturn(record(VERSION_ONE, 1));
 
-    new SystemSettingsChangeHandler(repository, snapshot).onResync();
+    new SystemSettingsChangeHandler(repository, snapshot, event -> {}).onResync();
 
     assertEquals(VERSION_ONE, snapshot.get());
+  }
+
+  /** 本地提交、通知和重连回读后都唤醒在线连接，发送方再现读最新快照。 */
+  @Test
+  void publishesNetworkAfterEachAuthoritativeRefresh() {
+    SystemSettingsRepository repository = mock(SystemSettingsRepository.class);
+    SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
+    when(repository.get()).thenReturn(record(VERSION_ONE, 1));
+    List<Object> events = new ArrayList<>();
+    SystemSettingsChangeHandler handler =
+        new SystemSettingsChangeHandler(repository, snapshot, events::add);
+    handler.onLocalCommit();
+    handler.onNotification("1");
+    handler.onResync();
+    assertEquals(
+        List.of(VERSION_ONE.network(), VERSION_ONE.network(), VERSION_ONE.network()), events);
   }
 
   /** 运行期数据库短暂失败不得杀死统一 listener 的调用线程，且后续通知仍可恢复刷新。 */
@@ -56,7 +75,8 @@ class SystemSettingsChangeHandlerTest {
     when(repository.get())
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(record(VERSION_ONE, 1));
-    SystemSettingsChangeHandler handler = new SystemSettingsChangeHandler(repository, snapshot);
+    SystemSettingsChangeHandler handler =
+        new SystemSettingsChangeHandler(repository, snapshot, event -> {});
 
     assertDoesNotThrow(() -> handler.onNotification(""));
     handler.onNotification("");
@@ -71,7 +91,8 @@ class SystemSettingsChangeHandlerTest {
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     when(repository.get()).thenReturn(null);
 
-    assertDoesNotThrow(() -> new SystemSettingsChangeHandler(repository, snapshot).onResync());
+    assertDoesNotThrow(
+        () -> new SystemSettingsChangeHandler(repository, snapshot, event -> {}).onResync());
 
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
   }
@@ -103,7 +124,8 @@ class SystemSettingsChangeHandlerTest {
           }
         };
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
-    SystemSettingsChangeHandler handler = new SystemSettingsChangeHandler(repository, snapshot);
+    SystemSettingsChangeHandler handler =
+        new SystemSettingsChangeHandler(repository, snapshot, event -> {});
     Thread older = new Thread(() -> handler.onNotification("1"));
 
     older.start();

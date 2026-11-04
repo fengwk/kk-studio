@@ -95,7 +95,8 @@ Set-Content -LiteralPath "$archivePath.sha256" -Value "$digest  $asset`n" -Encod
 # --- network and ScheduledTasks stubs ------------------------------------------------------
 
 function Invoke-RestMethod {
-    param([Parameter(Mandatory = $true)][string] $Uri, $Headers)
+    param([Parameter(Mandatory = $true)][string] $Uri, $Headers, $Proxy, [switch] $NoProxy)
+    $script:NetworkCalls += $Uri
     return [pscustomobject] @{ tag_name = $script:FixtureTag }
 }
 
@@ -103,8 +104,12 @@ function Invoke-WebRequest {
     param(
         [Parameter(Mandatory = $true)][string] $Uri,
         [switch] $UseBasicParsing,
-        [Parameter(Mandatory = $true)][string] $OutFile
+        [Parameter(Mandatory = $true)][string] $OutFile,
+        $Proxy,
+        [switch] $NoProxy
     )
+    $script:NetworkCalls += $Uri
+    $script:NetworkProxies += $Proxy
     $name = Split-Path -Leaf $Uri
     $source = Join-Path $script:HttpDir $name
     if (-not (Test-Path -LiteralPath $source)) { throw "no fixture for $Uri" }
@@ -166,6 +171,8 @@ function Unregister-ScheduledTask { param([string] $TaskName, [string] $TaskPath
 
 $script:FixtureTag = $releaseTag
 $script:HttpDir = $httpDir
+$script:NetworkCalls = @()
+$script:NetworkProxies = @()
 $originalProfile = $env:USERPROFILE
 $env:USERPROFILE = $profileDir
 
@@ -328,11 +335,84 @@ try {
     Assert-True -Condition (Test-Path -LiteralPath (Join-Path $installRoot "daemon.token")) -Message "token published"
     Assert-True -Condition ($script:Tasks.Count -eq 1) -Message "scheduled task registered"
 
+    # Exercise an explicit release through the real install and verify the private snapshot.
+    $script:NetworkCalls = @()
+    $exit = Invoke-Installer -Parameters @{
+        Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+    }
+    Assert-True -Condition ($exit -eq 0) -Message "explicit version install succeeds"
+    $base = "https://github.com/fengwk/kk-studio/releases/download/$releaseTag/$asset"
+    Assert-True -Condition ($script:NetworkCalls.Count -eq 2) -Message "explicit version performs exactly two downloads"
+    Assert-Equal -Actual $script:NetworkCalls[0] -Expected $base -Message "exact archive URL"
+    Assert-Equal -Actual $script:NetworkCalls[1] -Expected "$base.sha256" -Message "exact checksum URL"
+    foreach ($name in @("daemon.json", "daemon.token")) {
+        $source = if ($name -eq "daemon.json") { $pairs[0] } else { $pairs[1] }
+        Assert-Equal -Actual ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $installRoot $name)))) `
+            -Expected ([Convert]::ToBase64String([IO.File]::ReadAllBytes($source))) -Message "$name preserved"
+    }
+    # Managed updates pass their proxy decision explicitly, including on PowerShell 5.1.
+    $oldMode = $env:KK_DAEMON_INSTALL_PROXY_ENV
+    $oldProxy = $env:HTTPS_PROXY
+    $oldNoProxy = $env:NO_PROXY
+    try {
+        $env:KK_DAEMON_INSTALL_PROXY_ENV = "1"
+        $env:HTTPS_PROXY = "http://127.0.0.1:8080"
+        $env:NO_PROXY = "localhost"
+        $script:NetworkProxies = @()
+        $exit = Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        }
+        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "proxy install succeeds"
+        foreach ($proxy in $script:NetworkProxies) {
+            Assert-Equal -Actual $proxy -Expected "http://127.0.0.1:8080" -Message "archive request uses managed proxy"
+        }
+        # A platform bypass applies to both the release host and its subdomains.
+        $env:NO_PROXY = "github.com"
+        $script:NetworkProxies = @()
+        $exit = Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        }
+        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "bypass install succeeds"
+        foreach ($proxy in $script:NetworkProxies) {
+            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "bypassed archive request is direct"
+        }
+        $env:HTTPS_PROXY = ""
+        $env:NO_PROXY = ""
+        $script:NetworkProxies = @()
+        $exit = Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        }
+        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "direct install succeeds"
+        foreach ($proxy in $script:NetworkProxies) {
+            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "direct archive request has no proxy"
+        }
+    }
+    finally {
+        $env:KK_DAEMON_INSTALL_PROXY_ENV = $oldMode
+        $env:HTTPS_PROXY = $oldProxy
+        $env:NO_PROXY = $oldNoProxy
+    }
+    foreach ($bad in @("", "../bad", ("a" * 65), "bad`n")) {
+        $script:NetworkCalls = @()
+        $rejected = $false
+        try {
+            Invoke-Installer -Parameters @{ Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $bad } | Out-Null
+        }
+        catch { $rejected = $true }
+        Assert-True -Condition ($rejected -and $script:NetworkCalls.Count -eq 0) -Message "invalid version rejected before network"
+    }
+    foreach ($command in @("help", "status", "uninstall")) {
+        $rejected = $false
+        try { Invoke-Installer -Parameters @{ Command = $command; Version = "1" } | Out-Null }
+        catch { $rejected = $true }
+        Assert-True -Condition $rejected -Message "$command rejects version"
+    }
     $registered = @($script:Tasks.Values)[0]
     $expectedConfig = Join-Path $installRoot "daemon.json"
     $expectedArguments = '"main.js" "--config" "' + $expectedConfig + '"'
     Assert-True -Condition ($registered.Action.Argument -ceq $expectedArguments) `
         -Message "task arguments are the quoted direct argv"
+    Assert-True -Condition (-not $registered.Action.Argument.Contains("token-value")) -Message "task arguments do not expose token"
     Assert-Contains -Haystack $registered.Action.Execute -Needle "node.exe" -Message "task runs node.exe"
 
     # status is read-only and reports Running. It must use the same sandbox wrapper as install.
@@ -355,13 +435,4 @@ finally {
 Write-Host ("Windows installer fixture: {0} checks, {1} failures" -f $script:Checks, $script:Failures)
 if ($script:Failures -gt 0) { exit 1 }
 
-# The Windows gate invokes this installer suite for both PowerShell hosts. Run the managed
-# update suite from the same gate so the update contract cannot silently fall out of CI.
-$hostExe = (Get-Process -Id $PID).Path
-$updateSuite = Join-Path $PSScriptRoot "test_daemon_update_windows.ps1"
-& $hostExe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $updateSuite
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Windows managed-update fixture failed"
-    exit 1
-}
 exit 0

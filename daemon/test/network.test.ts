@@ -10,22 +10,14 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from 'undici'
 import { WebSocket, WebSocketServer } from 'ws'
 
-import type { SystemProxyResolver } from '../src/contracts.js'
 import {
+  applyNetworkSettings,
   getOutboundNetwork,
   installOutboundNetwork,
   withLoopbackResponse,
   type OutboundNetwork,
 } from '../src/network.js'
 import { createHttpPutObject } from '../src/transport/resources.js'
-
-/** 测试用系统回退：明确直连。 */
-const systemDirect: SystemProxyResolver = {
-  async resolve(): Promise<string | null> {
-    return null
-  },
-  async close(): Promise<void> {},
-}
 
 interface ForwardProxy {
   url: string
@@ -190,7 +182,8 @@ async function withNetwork<T>(
   environment: Record<string, string | undefined>,
   run: (network: OutboundNetwork) => Promise<T>,
 ): Promise<T> {
-  const installed = await installOutboundNetwork(environment, systemDirect)
+  const installed = await installOutboundNetwork()
+  applyNetworkSettings(environment.http_proxy ?? environment.https_proxy ?? null, environment.no_proxy ?? '')
   try {
     return await run(installed.network)
   } finally {
@@ -235,6 +228,29 @@ async function runProbe(
 }
 
 describe('outbound network integration', () => {
+  it('routes signed PUTs using current settings and clears proxy and bypass dynamically', async () => {
+    const proxy = await startProxy()
+    const origin = await startOrigin()
+    cleanups.push(proxy.close, origin.close)
+    await withNetwork({}, async () => {
+      const put = createHttpPutObject()
+      const ticket = { method: 'PUT', url: origin.url, headers: {}, expiresAt: '2030-01-01T00:00:00.000Z' }
+      const upload = () => put(ticket, new Uint8Array([1]), new AbortController().signal)
+      await upload()
+      expect(proxy.requests).toHaveLength(0)
+      applyNetworkSettings(proxy.url, '')
+      await upload()
+      expect(proxy.requests).toHaveLength(1)
+      applyNetworkSettings(proxy.url, '127.0.0.1')
+      await upload()
+      expect(proxy.requests).toHaveLength(1)
+      applyNetworkSettings(null, '')
+      await upload()
+      expect(proxy.requests).toHaveLength(1)
+      expect(origin.hits).toHaveLength(4)
+    })
+  })
+
   it('routes HTTP GET through the chosen proxy and honours no_proxy', async () => {
     const proxy = await startProxy()
     const origin = await startOrigin()
@@ -451,9 +467,10 @@ describe('outbound network integration', () => {
   })
 
   it('restores the previous network when an install closes', async () => {
-    const baseline = await installOutboundNetwork({}, systemDirect)
+    const baseline = await installOutboundNetwork()
     try {
-      const installed = await installOutboundNetwork({ http_proxy: 'http://127.0.0.1:9' }, systemDirect)
+      const installed = await installOutboundNetwork()
+      applyNetworkSettings('http://127.0.0.1:9', '')
       expect(getOutboundNetwork()).toBe(installed.network)
       await installed.close()
       expect(getOutboundNetwork()).toBe(baseline.network)
@@ -462,11 +479,9 @@ describe('outbound network integration', () => {
     }
   })
 
-  it('leaves the current network untouched when the environment is invalid', async () => {
+  it('leaves the current network untouched when settings are invalid', async () => {
     await withNetwork({}, async (baseline) => {
-      await expect(
-        installOutboundNetwork({ https_proxy: 'invalid-secret' }, systemDirect),
-      ).rejects.toThrow(/Invalid HTTP proxy or bypass configuration/)
+      expect(() => applyNetworkSettings('invalid-secret', '')).toThrow(/Invalid HTTP proxy or bypass configuration/)
       expect(getOutboundNetwork()).toBe(baseline)
     })
   })
@@ -492,39 +507,10 @@ describe('outbound network integration', () => {
 })
 
 describe('outbound network lifecycle and connect deadlines', () => {
-  it('shares one in-flight close across concurrent callers', async () => {
-    let systemCloses = 0
-    let release: () => void = () => undefined
-    const system: SystemProxyResolver = {
-      async resolve(): Promise<string | null> {
-        return null
-      },
-      close(): Promise<void> {
-        systemCloses += 1
-        return new Promise<void>((resolve) => {
-          release = resolve
-        })
-      },
-    }
-    const installed = await installOutboundNetwork({}, system)
-    const first = installed.close()
-    const second = installed.close()
-    let secondSettled = false
-    void second.then(() => {
-      secondSettled = true
-    })
-    await Promise.resolve()
-    expect(systemCloses).toBe(1)
-    expect(secondSettled).toBe(false)
-    release()
-    await Promise.all([first, second])
-    expect(systemCloses).toBe(1)
-  })
-
   it('refuses new resources through a closed network handle', async () => {
     const origin = await startOrigin()
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork({}, systemDirect)
+    const installed = await installOutboundNetwork()
     await installed.close()
     await expect(
       installed.network.openResponse(origin.url, {}, new AbortController().signal),
@@ -538,7 +524,7 @@ describe('outbound network lifecycle and connect deadlines', () => {
   it('converges on close with an unconsumed response body', async () => {
     const origin = await startOrigin('unconsumed-body')
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork({}, systemDirect)
+    const installed = await installOutboundNetwork()
     const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
     expect(response.statusCode).toBe(200)
     await installed.close()
@@ -548,7 +534,7 @@ describe('outbound network lifecycle and connect deadlines', () => {
   it('waits for an in-flight retire and shares its failure across close callers', async () => {
     const origin = await startOrigin()
     cleanups.push(origin.close)
-    const installed = await installOutboundNetwork({}, systemDirect)
+    const installed = await installOutboundNetwork()
     const response = await installed.network.openResponse(origin.url, {}, new AbortController().signal)
     expect(response.statusCode).toBe(200)
     const failure = new Error('retire failed')
@@ -580,43 +566,6 @@ describe('outbound network lifecycle and connect deadlines', () => {
       await expect(second).rejects.toBe(failure)
     } finally {
       spy.mockRestore()
-    }
-  })
-
-  it('records an immediately rejected system close without an unhandled rejection', async () => {
-    const origin = await startOrigin()
-    cleanups.push(origin.close)
-    const systemFailure = new Error('system close failed')
-    const system: SystemProxyResolver = {
-      async resolve(): Promise<string | null> {
-        return null
-      },
-      close(): Promise<void> {
-        return Promise.reject(systemFailure)
-      },
-    }
-    const installed = await installOutboundNetwork({}, system)
-    await installed.network.openResponse(origin.url, {}, new AbortController().signal)
-    const events: unknown[] = []
-    const listener = (reason: unknown): void => {
-      events.push(reason)
-    }
-    process.on('unhandledRejection', listener)
-    let release: () => void = () => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const spy = vi.spyOn(Agent.prototype, 'destroy').mockImplementation(() => gate)
-    try {
-      const closure = installed.close()
-      await new Promise((resolve) => setTimeout(resolve, 30))
-      expect(events).toHaveLength(0)
-      release()
-      await expect(closure).rejects.toBe(systemFailure)
-      expect(events).toHaveLength(0)
-    } finally {
-      spy.mockRestore()
-      process.off('unhandledRejection', listener)
     }
   })
 })

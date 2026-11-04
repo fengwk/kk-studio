@@ -6,12 +6,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.Proxy;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
@@ -30,22 +34,31 @@ public final class EnvironmentInstallScripts {
 
   private EnvironmentInstallScripts() {}
 
-  public static String install(EnvironmentInstallConfigDTO config, String registrationToken) {
+  public static String install(
+      EnvironmentInstallConfigDTO config,
+      String registrationToken,
+      SystemSettings.Network network) {
     EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
     text(registrationToken, "registrationToken");
     boolean windows = "windows".equals(normalized.getOperatingSystem());
-    return render(windows, "install", daemonJson(normalized.getDaemon()), registrationToken);
+    return render(
+        windows, "install", daemonJson(normalized.getDaemon()), registrationToken, network);
   }
 
-  public static String uninstall(String operatingSystem) {
+  public static String uninstall(String operatingSystem, SystemSettings.Network network) {
     if (!Set.of("linux", "macos", "windows").contains(operatingSystem)) {
       throw new AiValidationException(
           "operatingSystem", "operatingSystem must be linux, macos or windows");
     }
-    return render("windows".equals(operatingSystem), "uninstall", "", "");
+    return render("windows".equals(operatingSystem), "uninstall", "", "", network);
   }
 
-  private static String render(boolean windows, String action, String daemonJson, String token) {
+  private static String render(
+      boolean windows,
+      String action,
+      String daemonJson,
+      String token,
+      SystemSettings.Network network) {
     String template = windows ? WINDOWS : UNIX;
     String parameters = "";
     if (!daemonJson.isEmpty()) {
@@ -60,7 +73,25 @@ public final class EnvironmentInstallScripts {
             : (windows ? windowsStaging(daemonJson, token) : unixStaging(daemonJson, token));
     String installer =
         windows ? ps(INSTALLER_BASE + "/install.ps1") : sh(INSTALLER_BASE + "/install.sh");
-    return template.formatted(staging, installer, action, parameters);
+    String proxy = network.proxyUrl() == null ? "" : network.proxyUrl();
+    if (windows) {
+      boolean installerDirect =
+          HttpProxySelector.fixed(network.proxyUrl(), network.noProxyHosts())
+                  .select(URI.create(INSTALLER_BASE))
+                  .getFirst()
+                  .type()
+              == Proxy.Type.DIRECT;
+      return template.formatted(
+          staging,
+          ps(proxy),
+          ps(network.noProxyHosts()),
+          installerDirect ? "$true" : "$false",
+          installer,
+          action,
+          parameters);
+    }
+    return template.formatted(
+        staging, sh(proxy), sh(network.noProxyHosts()), installer, action, parameters);
   }
 
   private static String unixStaging(String daemonJson, String token) {

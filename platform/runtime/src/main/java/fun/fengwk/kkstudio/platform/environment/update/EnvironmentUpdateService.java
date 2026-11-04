@@ -156,13 +156,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     try {
       gateway
           .server()
-          .sendUpdate(
-              environmentId,
-              new DaemonUpdateCommand(
-                  operationId,
-                  target.targetVersion(),
-                  target.artifactUrl(),
-                  target.artifactSha256()));
+          .sendUpdate(environmentId, new DaemonUpdateCommand(operationId, target.targetVersion()));
       return startResult(
           EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, runtimeStatusOr(environmentId, current));
     } catch (EnvironmentCapabilityBusyException error) {
