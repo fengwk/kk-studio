@@ -16,12 +16,12 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -37,6 +37,8 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
+import fun.fengwk.kkstudio.platform.harness.notification.ThreadVersionHub;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
@@ -112,17 +114,16 @@ public class HarnessRuntimeConfiguration {
     return new BuiltinRequestQuery(store, store);
   }
 
-  /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建；媒体传输构造前先安装统一代理。 */
+  /** Plugin 资源端口需要 Session Blob 引用与存储装配，由组合根创建；媒体传输构造前先安装统一代理。 */
   @Bean
   @DependsOn("systemProxySelector")
   public PluginResourceGateway pluginResourceGateway(
-      HarnessStore harnessStore,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobManager storageBlobManager,
       StorageUploadService storageUploadService,
       PluginProperties properties) {
     return new StoragePluginResourceGateway(
-        harnessStore, sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
+        sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
   }
 
   /** Harness 工具目录：插件快照的 Contributor 工具加 MCP 动态工具，每次租用冻结为一份不可变目录。 */
@@ -150,6 +151,22 @@ public class HarnessRuntimeConfiguration {
         compactionConfigProvider,
         modelProcessor::cancel,
         toolProcessor::cancel);
+  }
+
+  /**
+   * Thread version 变更的公开订阅源：浏览器版本事件与内部观察者（TaskTool / PluginPromptTaskService）的纯 wake 信号共用同一份注册与
+   * resync 语义。
+   */
+  @Bean
+  public ThreadVersionHub threadVersionHub(ObjectProvider<HarnessRuntime> runtime) {
+    // Runtime 依赖 ToolProcessor，而工具目录初始化期间会取得这个 wake 源；只在订阅时解析 Runtime。
+    return new ThreadVersionHub(runtime::getObject);
+  }
+
+  /** Harness 变更订阅的公开入口：集中 Thread version、执行树与待处理交互三个通知 channel 的协议与分发。 */
+  @Bean
+  public HarnessChangeNotifications harnessChangeNotifications(ThreadVersionHub threadVersionHub) {
+    return new HarnessChangeNotifications(threadVersionHub);
   }
 
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */

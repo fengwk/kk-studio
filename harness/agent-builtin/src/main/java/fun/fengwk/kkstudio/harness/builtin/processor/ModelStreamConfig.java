@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

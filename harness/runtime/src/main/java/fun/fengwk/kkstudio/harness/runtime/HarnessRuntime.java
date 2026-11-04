@@ -2,13 +2,14 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
@@ -40,6 +41,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
@@ -70,6 +73,8 @@ import java.util.function.Consumer;
  * #renameSession}、{@link #getSession}、{@link #manualCompactionAvailability}、{@link
  * #compactThread}、{@link #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link
  * #getSessionEntries}。
+ *
+ * <p>Thread 控制请求值类型位于 {@code harness.api.thread}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -207,6 +212,16 @@ public final class HarnessRuntime {
   public Optional<UUID> findThreadSessionId(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId));
+  }
+
+  /**
+   * Thread durable version 的窄查询：只读取 invalidation cursor，不装载 Entry 历史或运行时上下文。
+   *
+   * <p>Thread 不存在时为空；变更订阅据此对未知 Thread 失败，不向观察者暴露持久化实现。
+   */
+  public Optional<Long> findThreadVersion(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::version));
   }
 
   /** 查询 Session 是否存在。 */

@@ -119,7 +119,6 @@ class ToolExecutionGatewayPreflightTest {
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
-            ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
@@ -187,7 +186,6 @@ class ToolExecutionGatewayPreflightTest {
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
-            ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
             settingsProvider,

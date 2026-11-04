@@ -7,6 +7,15 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;

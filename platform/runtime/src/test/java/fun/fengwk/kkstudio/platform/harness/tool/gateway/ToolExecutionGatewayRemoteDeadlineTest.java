@@ -585,7 +585,6 @@ class ToolExecutionGatewayRemoteDeadlineTest {
   private static ToolExecutionGateway gateway(HarnessCatalog catalog, LatchingTransport transport) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
-        ToolGatewayTestSupport.DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new ToolGatewayTestSupport.FixedToolSettingsProvider(

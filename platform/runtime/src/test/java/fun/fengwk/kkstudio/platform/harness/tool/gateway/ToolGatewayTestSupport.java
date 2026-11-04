@@ -50,9 +50,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
 import java.security.MessageDigest;
@@ -81,7 +81,9 @@ final class ToolGatewayTestSupport {
   static final EnvironmentId ENV_B = TestEnvironments.environmentId("env-2");
   static final UUID INVOCATION_ID = new UUID(0L, 42L);
   static final UUID THREAD_ID = new UUID(0L, 7L);
-  static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
+  static final UUID SESSION_ID = new UUID(0L, 9L);
+  static final UUID ROOT_THREAD_ID = new UUID(0L, 10L);
+  static final UUID ROOT_SESSION_ID = new UUID(0L, 12L);
 
   /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -105,15 +107,11 @@ final class ToolGatewayTestSupport {
         }
       };
 
-  /** 测试默认的 ContributorBranchViewLoader。 */
-  static final ContributorBranchViewLoader DEFAULT_CONTRIBUTOR_BRANCH_LOADER =
-      (assistantEntryId, contributorId) -> EMPTY_BRANCH_VIEW;
-
-  /** 测试默认明确失败的 ContributorBranchViewLoader。 */
-  static final ContributorBranchViewLoader FAILING_CONTRIBUTOR_BRANCH_LOADER =
-      (assistantEntryId, contributorId) -> {
-        throw new IllegalStateException("no contributor branch loader is configured");
-      };
+  /** 测试默认的冻结上下文事实：Harness 会在 admission 前把这些事实随执行描述传入。 */
+  static ToolGateway.ExecutionScope scope(BranchView branch) {
+    return new ToolGateway.ExecutionScope(
+        THREAD_ID, SESSION_ID, ROOT_THREAD_ID, ROOT_SESSION_ID, branch, TurnMediaCapabilities.NONE);
+  }
 
   /** 固定 busy/overload 延迟 supplier。 */
   static final Supplier<Duration> BUSY_RETRY_DELAY = () -> Duration.ofSeconds(2);
@@ -229,8 +227,7 @@ final class ToolGatewayTestSupport {
       ToolInvocationRequest request, ToolGateway.RemoteExecutionObserver remoteExecutions) {
     return new ToolGateway.Execution(
         INVOCATION_ID,
-        THREAD_ID,
-        ASSISTANT_ENTRY_ID,
+        scope(EMPTY_BRANCH_VIEW),
         1,
         request,
         ToolApproval.notRequired(),
@@ -291,13 +288,11 @@ final class ToolGatewayTestSupport {
 
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
-      ContributorBranchViewLoader branchLoader,
       FakeTransport transport,
       FakeResourceStager store,
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
-        branchLoader,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
@@ -317,7 +312,6 @@ final class ToolGatewayTestSupport {
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
         toolCatalogSource,
-        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),

@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -242,7 +243,16 @@ class GoalFeatureTest {
   private static ToolOutcome executeTool(
       Tool tool, BranchView branch, Instant executedAt, String callId, String argumentsJson) {
     ToolExecutionContext context =
-        new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), executedAt, branch);
+        new ToolExecutionContext(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            executedAt,
+            TurnMediaCapabilities.NONE,
+            branch,
+            Optional.empty());
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),

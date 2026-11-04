@@ -30,7 +30,8 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlBuiltinHarnessStore，
 装配唯一的 Builtin Driver、资源工具目录、PluginResourceGateway、HarnessRuntime、
-请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
+Harness 变更订阅源（`ThreadVersionHub` 同时充当内部观察者的纯 wake 源）与
+`HarnessChangeNotifications`、请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
 Processor、realtime 与 Environment 会话由它显式导入，不在核心类里再声明一遍。
 
 [`HarnessProcessorConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java)
@@ -204,6 +205,13 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
 Thread/Canvas version、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
+
+Harness 的 Thread version、执行树与交互失效不在这里定义协议：组合根只取平台
+[`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
+给出的 channel 与回调绑定，消费侧
+[`ApplicationEventHub`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventHub.java)
+只依赖公开契约 `harness.api.HarnessChangeSubscriptions`。`environment_changed` 是 web 自有的环境失效：
+payload 是 Environment ID，只驱动环境回读，并在同一 handler 内要求交互失效源全量 resync。
 
 `POST /api/threads/{threadId}/stream-catchup` 是浏览器追帧入口，body 为
 `{invocationId: canonical UUID, attempt: 正整数}`。服务端先用目标 Thread 的 durable 快照确认

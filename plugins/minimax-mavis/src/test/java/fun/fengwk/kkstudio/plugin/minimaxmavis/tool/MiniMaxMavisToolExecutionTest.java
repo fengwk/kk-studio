@@ -313,14 +313,14 @@ class MiniMaxMavisToolExecutionTest {
 
   /** 假资源网关。 */
   static final class FakeResourceGateway implements PluginResourceGateway {
-    private final List<UUID> resolvedThreadIds = Collections.synchronizedList(new ArrayList<>());
+    private final List<UUID> resolvedSessionIds = Collections.synchronizedList(new ArrayList<>());
     private final List<String> resolvedUris = Collections.synchronizedList(new ArrayList<>());
     private final List<Runnable> stagedBeforeRequests =
         Collections.synchronizedList(new ArrayList<>());
 
     @Override
-    public URI resolveSessionResource(UUID threadId, String resourceUri) {
-      resolvedThreadIds.add(threadId);
+    public URI resolveSessionResource(UUID sessionId, String resourceUri) {
+      resolvedSessionIds.add(sessionId);
       resolvedUris.add(resourceUri);
       return URI.create("https://stage.kkstudio.local/download/mock-file");
     }
@@ -343,8 +343,8 @@ class MiniMaxMavisToolExecutionTest {
       return List.copyOf(stagedBeforeRequests);
     }
 
-    public List<UUID> resolvedThreadIds() {
-      return Collections.unmodifiableList(resolvedThreadIds);
+    public List<UUID> resolvedSessionIds() {
+      return Collections.unmodifiableList(resolvedSessionIds);
     }
 
     public List<String> resolvedUris() {

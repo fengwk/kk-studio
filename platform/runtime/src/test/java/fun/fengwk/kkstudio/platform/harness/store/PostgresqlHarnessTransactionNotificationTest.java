@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 
 import javax.sql.DataSource;
 
@@ -78,9 +79,9 @@ import java.util.function.UnaryOperator;
  */
 class PostgresqlHarnessTransactionNotificationTest {
 
-  private static final String VERSION_CHANNEL = "harness_thread_version";
-  private static final String TREE_CHANNEL = "harness_thread_tree";
-  private static final String INTERACTION_CHANNEL = "harness_tool_interaction";
+  private static final String VERSION_CHANNEL = HarnessNotificationChannel.THREAD_VERSION;
+  private static final String TREE_CHANNEL = HarnessNotificationChannel.THREAD_TREE;
+  private static final String INTERACTION_CHANNEL = HarnessNotificationChannel.TOOL_INTERACTION;
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 

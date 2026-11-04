@@ -9,7 +9,7 @@
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier} 是纯、非持久化的 Thread
  * live/historical 适用性分类：分类器以当前 ThreadState + root-to-head EntryPath + 本 Thread 当前适用的 Driver
- * 状态（{@link fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState}，无则 null）+ 仅在 generation
+ * 状态（{@link fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState}，无则 null）+ 仅在 generation
  * 结果恰为当前 Assistant head 时加载的 Tool siblings 为输入，不接触 Store、不产生锁，返回唯一的 {@link
  * fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext} 上下文（terminal apply / Work-only 挂起 /
  * continuation / 输入或静止）；{@link fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus}

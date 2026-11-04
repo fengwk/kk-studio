@@ -961,7 +961,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             remoteExecutionId,
@@ -1023,7 +1023,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1043,7 +1043,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1074,7 +1074,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),
@@ -1104,7 +1104,7 @@ class ToolExecutionGatewayRunTest {
     ToolGateway.ReattachExecution reattach =
         new ToolGateway.ReattachExecution(
             UUID.randomUUID(),
-            UUID.randomUUID(),
+            ToolGatewayTestSupport.THREAD_ID,
             request,
             ToolGatewayTestSupport.ENV_A,
             UUID.randomUUID(),

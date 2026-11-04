@@ -23,9 +23,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
@@ -53,12 +50,10 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.stream.Stream;
 
 /** StoragePluginResourceGateway 核心生产实现高强度测试。 */
@@ -66,7 +61,6 @@ class StoragePluginResourceGatewayTest {
 
   @TempDir Path tempDir;
 
-  private HarnessStore harnessStore;
   private SessionBlobRefManager sessionBlobRefManager;
   private StorageBlobManager storageBlobManager;
   private StorageUploadService storageUploadService;
@@ -76,7 +70,6 @@ class StoragePluginResourceGatewayTest {
 
   @BeforeEach
   void setUp() {
-    harnessStore = mock(HarnessStore.class);
     sessionBlobRefManager = mock(SessionBlobRefManager.class);
     storageBlobManager = mock(StorageBlobManager.class);
     storageUploadService = mock(StorageUploadService.class);
@@ -92,12 +85,7 @@ class StoragePluginResourceGatewayTest {
 
     gateway =
         new StoragePluginResourceGateway(
-            harnessStore,
-            sessionBlobRefManager,
-            storageBlobManager,
-            storageUploadService,
-            properties,
-            transport);
+            sessionBlobRefManager, storageBlobManager, storageUploadService, properties, transport);
   }
 
   // =========================================================================
@@ -108,16 +96,14 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceSuccess() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
 
     String signedUrl = "https://s3.example.com/blobs/" + blobId + "?token=xyz";
     StoragePresignedUrlDTO presigned = StoragePresignedUrlDTO.builder().url(signedUrl).build();
     when(storageBlobManager.presignOriginalUrl(blobId)).thenReturn(presigned);
 
-    URI resolved = gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId);
+    URI resolved = gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId);
 
     assertEquals(URI.create(signedUrl), resolved);
     verify(storageBlobManager).presignOriginalUrl(blobId);
@@ -140,32 +126,32 @@ class StoragePluginResourceGatewayTest {
         "   "
       })
   void resolveSessionResourceRejectsNonCanonicalUrisWithoutStoreCalls(String invalidUri) {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
 
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, invalidUri));
+            () -> gateway.resolveSessionResource(sessionId, invalidUri));
     assertTrue(exception.getMessage().contains("must be kkstudio:/resources/<blobId>"));
-    verifyNoInteractions(harnessStore, sessionBlobRefManager, storageBlobManager);
+    verifyNoInteractions(sessionBlobRefManager, storageBlobManager);
   }
 
   /** resourceUri 为 null 时必须立即失败，且不触发任何底层存储调用。 */
   @Test
   void resolveSessionResourceRejectsNullUriWithoutStoreCalls() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
 
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, null));
+            () -> gateway.resolveSessionResource(sessionId, null));
     assertTrue(exception.getMessage().contains("must be kkstudio:/resources/<blobId>"));
-    verifyNoInteractions(harnessStore, sessionBlobRefManager, storageBlobManager);
+    verifyNoInteractions(sessionBlobRefManager, storageBlobManager);
   }
 
-  /** threadId 为 null 时必须立即拒绝，且不触发任何底层存储或会话交互。 */
+  /** sessionId 为 null 时必须立即拒绝，且不触发任何底层存储或会话交互。 */
   @Test
-  void resolveSessionResourceRejectsNullThreadIdWithoutStoreCalls() {
+  void resolveSessionResourceRejectsNullSessionIdWithoutStoreCalls() {
     UUID blobId = UUID.randomUUID();
     String uri = "kkstudio:/resources/" + blobId;
 
@@ -173,22 +159,7 @@ class StoragePluginResourceGatewayTest {
         assertThrows(
             PluginResourceUnavailableException.class,
             () -> gateway.resolveSessionResource(null, uri));
-    assertTrue(exception.getMessage().contains("requires an invocation thread id"));
-    verifyNoInteractions(harnessStore, sessionBlobRefManager, storageBlobManager);
-  }
-
-  /** Thread 记录不存在时，必须确定性拒绝且不调用 SessionBlobRefManager 或 StorageBlobManager。 */
-  @Test
-  void resolveSessionResourceFailsWhenThreadNotFound() {
-    UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    mockThreadNotFound(threadId);
-
-    PluginResourceUnavailableException exception =
-        assertThrows(
-            PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
-    assertTrue(exception.getMessage().contains("the invocation thread is no longer available"));
+    assertTrue(exception.getMessage().contains("requires an invocation session id"));
     verifyNoInteractions(sessionBlobRefManager, storageBlobManager);
   }
 
@@ -196,15 +167,13 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceRejectsUnauthorizedAccessWithoutPresigning() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(false);
 
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("does not reference this resource"));
     verifyNoInteractions(storageBlobManager);
   }
@@ -213,9 +182,7 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceConvergencesStorageResourceNotFoundException() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
     when(storageBlobManager.presignOriginalUrl(blobId))
         .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
@@ -223,7 +190,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("is no longer available"));
     assertTrue(exception.getCause() instanceof StorageResourceNotFoundException);
   }
@@ -240,51 +207,33 @@ class StoragePluginResourceGatewayTest {
       })
   void resolveSessionResourceRejectsUnusablePresignedUrls(String url) {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
     when(storageBlobManager.presignOriginalUrl(blobId))
         .thenReturn(StoragePresignedUrlDTO.builder().url(url).build());
 
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
   }
 
   /** 预签名 DTO 或其内部 URL 为空时必须拒绝。 */
   @Test
   void resolveSessionResourceRejectsNullOrBlankPresignedUrl() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
 
     when(storageBlobManager.presignOriginalUrl(blobId)).thenReturn(null);
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
 
     when(storageBlobManager.presignOriginalUrl(blobId))
         .thenReturn(StoragePresignedUrlDTO.builder().url("").build());
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
-  }
-
-  /** 底层事务读取失败抛出 RuntimeException 时必须收敛为 PluginResourceUnavailableException。 */
-  @Test
-  void resolveSessionResourceConvergencesStoreTransactionException() {
-    UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-
-    when(harnessStore.transaction(any())).thenThrow(new RuntimeException("Database timeout"));
-    PluginResourceUnavailableException txEx =
-        assertThrows(
-            PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
-    assertTrue(txEx.getMessage().contains("cannot read the invocation thread"));
+        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
   }
 
   /**
@@ -293,16 +242,14 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceConvergencesSessionRefContainsException() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
 
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId))
         .thenThrow(new RuntimeException("Database error"));
     PluginResourceUnavailableException authEx =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
     assertTrue(authEx.getMessage().contains("cannot verify session resource ownership"));
   }
 
@@ -1142,11 +1089,7 @@ class StoragePluginResourceGatewayTest {
   void publicConstructorWiresRealTransportAndClosesIdempotently() throws IOException {
     StoragePluginResourceGateway publicGateway =
         new StoragePluginResourceGateway(
-            harnessStore,
-            sessionBlobRefManager,
-            storageBlobManager,
-            storageUploadService,
-            properties);
+            sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
     publicGateway.close();
     publicGateway.close();
   }
@@ -1155,9 +1098,7 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceFailsWhenSigningBackendThrows() {
     UUID blobId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    mockThreadSession(threadId, sessionId);
     when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
     when(storageBlobManager.presignOriginalUrl(blobId))
         .thenThrow(new IllegalStateException("signing backend unavailable"));
@@ -1165,7 +1106,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("cannot sign this session resource"));
   }
 
@@ -1284,12 +1225,7 @@ class StoragePluginResourceGatewayTest {
     broken.getResource().setUploadTimeout(Duration.ofMinutes(1));
     StoragePluginResourceGateway blockedGateway =
         new StoragePluginResourceGateway(
-            harnessStore,
-            sessionBlobRefManager,
-            storageBlobManager,
-            storageUploadService,
-            broken,
-            transport);
+            sessionBlobRefManager, storageBlobManager, storageUploadService, broken, transport);
     byte[] pngData = createPngData(96);
     TrackedInputStream body = new TrackedInputStream(pngData);
     transport.setGetResponse(
@@ -1317,12 +1253,7 @@ class StoragePluginResourceGatewayTest {
     defaults.getResource().setTempDirectory("   ");
     StoragePluginResourceGateway defaultGateway =
         new StoragePluginResourceGateway(
-            harnessStore,
-            sessionBlobRefManager,
-            storageBlobManager,
-            storageUploadService,
-            defaults,
-            transport);
+            sessionBlobRefManager, storageBlobManager, storageUploadService, defaults, transport);
 
     assertNotNull(defaultGateway);
   }
@@ -1355,34 +1286,6 @@ class StoragePluginResourceGatewayTest {
   /** 3 参便捷入口：宿主授权检查恒为通过（{@code beforeRequest} 为空操作）；每请求围栏语义由第 7 组用例单独覆盖。 */
   private ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name) {
     return gateway.stageRemoteMedia(remoteUri, family, name, () -> {});
-  }
-
-  private void mockThreadSession(UUID threadId, UUID sessionId) {
-    ThreadState thread = mock(ThreadState.class);
-    when(thread.sessionId()).thenReturn(sessionId);
-    when(harnessStore.transaction(any()))
-        .thenAnswer(
-            invocation -> {
-              Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
-              HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              ThreadStore threadStore = mock(ThreadStore.class);
-              when(tx.threads()).thenReturn(threadStore);
-              when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
-              return callback.apply(tx);
-            });
-  }
-
-  private void mockThreadNotFound(UUID threadId) {
-    when(harnessStore.transaction(any()))
-        .thenAnswer(
-            invocation -> {
-              Function<HarnessStore.Transaction, Object> callback = invocation.getArgument(0);
-              HarnessStore.Transaction tx = mock(HarnessStore.Transaction.class);
-              ThreadStore threadStore = mock(ThreadStore.class);
-              when(tx.threads()).thenReturn(threadStore);
-              when(threadStore.find(threadId)).thenReturn(Optional.empty());
-              return callback.apply(tx);
-            });
   }
 
   private void mockReserveReady(UUID uploadId, UUID blobId) {

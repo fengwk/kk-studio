@@ -66,7 +66,7 @@ Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态
 
 ## 资源端口
 
-[`PluginResourceGateway`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceGateway.java) 是 Plugin 与 Storage 之间唯一的窄接口：`resolveSessionResource` 按本次调用显式给出的 threadId 解析 Session 引用并签发受控短期 HTTPS 下载地址，`stageRemoteMedia` 把远端媒体按声明的 [`PluginMediaFamily`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginMediaFamily.java) 有界流式暂存为全局 Blob 上传。授权、HTTPS、重定向与私网校验以及 MIME 嗅探都由宿主实现，任何不满足约束的输入以 [`PluginResourceUnavailableException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceUnavailableException.java) 终结。
+[`PluginResourceGateway`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceGateway.java) 是 Plugin 与 Storage 之间唯一的窄接口：`resolveSessionResource` 按本次调用执行上下文中的 sessionId 校验 Session 引用并签发受控短期 HTTPS 下载地址，不查询 Harness 存储；`stageRemoteMedia` 把远端媒体按声明的 [`PluginMediaFamily`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginMediaFamily.java) 有界流式暂存为全局 Blob 上传。授权、HTTPS、重定向与私网校验以及 MIME 嗅探都由宿主实现，任何不满足约束的输入以 [`PluginResourceUnavailableException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceUnavailableException.java) 终结。
 
 [`SessionResourceUri`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/SessionResourceUri.java) 定义平台托管资源 URI 的规范形态 `kkstudio:/resources/<canonical-uuid>`，只接受完整规范形态，并在自由文本中按边界识别内嵌 URI；URI 只是指向全局 Blob 的标识，不是权限凭据。
 

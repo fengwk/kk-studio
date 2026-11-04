@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
@@ -231,12 +232,12 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
   void notifyThreadVersion(UUID threadId, long version) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
+    notifyChannel(HarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
   }
 
   /** 执行树失效：payload 为真实执行根 id；绝不伪造根 Thread 的 version。 */
   void notifyExecutionTree(UUID rootThreadId) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
+    notifyChannel(HarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
   }
 
   /**
@@ -244,7 +245,7 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
    */
   void notifyToolInteraction(UUID rootThreadId) {
     notifyChannel(
-        PostgresqlHarnessNotificationChannel.TOOL_INTERACTION,
+        HarnessNotificationChannel.TOOL_INTERACTION,
         rootThreadId == null ? "" : rootThreadId.toString());
   }
 

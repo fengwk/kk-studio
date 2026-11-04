@@ -34,10 +34,10 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor} 输入必须是 THREAD target 的
  * claim，通过单一 {@link fun.fengwk.kkstudio.harness.spi.store.HarnessStore} 与 {@link
- * fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver} 协作，是每个 claim 恰执行一个持久化 action 的
- * single-action reducer（Driver 结果应用 -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt;
- * input -&gt; idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动在单个 store transaction 内构造
- * candidate，由 Driver 同步解析与校验后提交，不存在事务外解析、二次 CAS 或可恢复的 TURN_START-without-Invocation 中间态。 Driver
+ * fun.fengwk.kkstudio.harness.spi.driver.AgentDriver} 协作，是每个 claim 恰执行一个持久化 action 的 single-action
+ * reducer（Driver 结果应用 -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt; input -&gt;
+ * idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动在单个 store transaction 内构造 candidate，由
+ * Driver 同步解析与校验后提交，不存在事务外解析、二次 CAS 或可恢复的 TURN_START-without-Invocation 中间态。 Driver
  * 负责检查具体执行后端的请求与分支事实是否一致；契约错误转为 durable FAILED。终态应用只由 ThreadProcessor 写 Entry/head。Result / Config
  * 类型见 {@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig}。

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
@@ -43,8 +44,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -54,8 +55,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /** 统一 Tool SPI 的 branch effects、provenance、WRITE 声明与 owner 注入测试。 */
@@ -73,6 +72,9 @@ class ToolExecutionGatewayEffectsTest {
           Duration.ZERO);
   private static final AgentToolDefinition DEFINITION =
       new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE);
+
+  /** Harness 冻结并随执行描述传入的 branch 视图：Tool 必须原样看到它，而平台不得自行加载。 */
+  private static final BranchView FROZEN_BRANCH = emptyBranch();
 
   @Test
   void effectsToolPassesPermissionPreflightWithoutLocalToolRegistration() {
@@ -96,13 +98,11 @@ class ToolExecutionGatewayEffectsTest {
                 ToolGateway.Admitted.class,
                 fixture.gateway.admit(fixture.execution("write", StateAccess.WRITE)))
             .run();
-    fixture.loadedAssistantId.set(null);
     ToolGateway.Busy busy =
         assertInstanceOf(
             ToolGateway.Busy.class,
             fixture.gateway.admit(fixture.execution("write", StateAccess.WRITE)));
 
-    assertNull(fixture.loadedAssistantId.get());
     assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), busy.retryAfter());
     first.close();
     assertInstanceOf(
@@ -126,7 +126,6 @@ class ToolExecutionGatewayEffectsTest {
     assertEquals(
         List.of(new CustomEntryPayload("goal", "state", "{\"objective\":\"ship\"}")),
         succeeded.success().effects().customEntries());
-    assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, fixture.loadedAssistantId.get());
   }
 
   @Test
@@ -230,6 +229,12 @@ class ToolExecutionGatewayEffectsTest {
       @Override
       public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
         assertEquals("effects_tool", request.descriptor().name());
+        // 平台必须把 Harness 冻结的上下文原样交给工具：分支视图、会话与执行根都不能由网关自行加载或合成。
+        assertSame(FROZEN_BRANCH, request.context().branch());
+        assertEquals(ToolGatewayTestSupport.SESSION_ID, request.context().sessionId());
+        assertEquals(ToolGatewayTestSupport.ROOT_THREAD_ID, request.context().rootThreadId());
+        assertEquals(ToolGatewayTestSupport.ROOT_SESSION_ID, request.context().rootSessionId());
+        assertEquals(TurnMediaCapabilities.NONE, request.context().mediaCapabilities());
         return outcome;
       }
     };
@@ -252,18 +257,11 @@ class ToolExecutionGatewayEffectsTest {
               registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
             });
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
-    AtomicReference<UUID> loadedAssistantId = new AtomicReference<>();
-    ContributorBranchViewLoader loader =
-        (assistantEntryId, contributorId) -> {
-          loadedAssistantId.set(assistantEntryId);
-          return emptyBranch();
-        };
     ToolGatewayTestSupport.FakeResourceStager stager =
         new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
-            loader,
             new ToolGatewayTestSupport.FakeTransport(),
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
@@ -273,7 +271,7 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC),
             admission);
-    return new Fixture(gateway, stager, loadedAssistantId);
+    return new Fixture(gateway, stager);
   }
 
   private static BranchView emptyBranch() {
@@ -296,9 +294,7 @@ class ToolExecutionGatewayEffectsTest {
   }
 
   private record Fixture(
-      ToolExecutionGateway gateway,
-      ToolGatewayTestSupport.FakeResourceStager stager,
-      AtomicReference<UUID> loadedAssistantId) {
+      ToolExecutionGateway gateway, ToolGatewayTestSupport.FakeResourceStager stager) {
 
     ToolGateway.Execution execution(String localName, StateAccess access) {
       ContributorBinding contributor =
@@ -308,7 +304,13 @@ class ToolExecutionGatewayEffectsTest {
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
               new ToolBinding(DEFINITION, contributor, EnvironmentSupport.NONE, null, null));
-      return ToolGatewayTestSupport.execution(request);
+      return new ToolGateway.Execution(
+          ToolGatewayTestSupport.INVOCATION_ID,
+          ToolGatewayTestSupport.scope(FROZEN_BRANCH),
+          1,
+          request,
+          ToolApproval.notRequired(),
+          new ToolGatewayTestSupport.RecordingRemoteExecutions());
     }
 
     ToolGateway.Completion run(String localName, StateAccess access) {

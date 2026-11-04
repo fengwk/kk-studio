@@ -12,9 +12,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
@@ -27,16 +25,12 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
-/** Session 所属权和 Blob 引用校验先于外部流 IO。 */
+/** Session 所属权和 Blob 引用校验先于外部流 IO；会话身份来自执行上下文而不是存储反查。 */
 class PlatformResourceContentReaderTest {
 
-  private HarnessStore store;
-  private HarnessStore.Transaction transaction;
-  private ThreadStore threadStore;
   private SessionBlobRefManager refs;
   private StorageBlobManager blobManager;
   private StorageBlobContentService blobs;
@@ -44,81 +38,61 @@ class PlatformResourceContentReaderTest {
 
   @BeforeEach
   void setUp() {
-    store = mock(HarnessStore.class);
-    transaction = mock(HarnessStore.Transaction.class);
-    threadStore = mock(ThreadStore.class);
-    when(transaction.threads()).thenReturn(threadStore);
     refs = mock(SessionBlobRefManager.class);
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
-    when(store.transaction(any()))
-        .thenAnswer(
-            invocation -> {
-              Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
-              return callback.apply(transaction);
-            });
-    reader = new PlatformResourceContentReader(() -> store, refs, blobManager, blobs);
+    reader = new PlatformResourceContentReader(refs, blobManager, blobs);
   }
 
-  /** 测试意图：无效身份或不存在的 Thread 不允许进入存储层。 */
+  /** 测试意图：缺少会话身份或目标 Blob 时在入口拒绝，绝不进入存储层。 */
   @Test
-  void rejectsInvalidThreadBeforeOpeningBlob() {
+  void rejectsMissingSessionOrBlobBeforeOpeningBlob() {
     UUID id = UUID.randomUUID();
     assertThrows(PlatformReadException.class, () -> read(null, id));
     assertThrows(PlatformReadException.class, () -> read(id, null));
-    when(threadStore.find(id)).thenReturn(Optional.empty());
-    assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(id, id))
-            .getMessage()
-            .contains("thread not found"));
     verifyNoInteractions(blobs);
   }
 
-  /** 测试意图：store 尚未就绪时不能尝试授权与外部 IO。 */
+  /** 测试意图：执行上下文必须携带冻结的消费者媒体能力，缺失时以明确错误拒绝而不是静默按文本处理。 */
   @Test
-  void rejectsUnavailableStore() {
-    PlatformResourceContentReader unavailable =
-        new PlatformResourceContentReader(() -> null, refs, blobManager, blobs);
-    assertTrue(
-        assertThrows(
-                PlatformReadException.class,
-                () ->
-                    unavailable.readResource(
-                        UUID.randomUUID(),
-                        null,
-                        "call-1",
-                        UUID.randomUUID(),
-                        null,
-                        null,
-                        null,
-                        "resource",
-                        ReadDeadline.after(Duration.ofSeconds(60))))
-            .getMessage()
-            .contains("harness store is unavailable"));
+  void rejectsMissingFrozenMediaCapabilities() {
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            reader.readResource(
+                sessionId,
+                null,
+                blobId,
+                null,
+                null,
+                null,
+                "resource",
+                ReadDeadline.after(Duration.ofSeconds(60))));
     verifyNoInteractions(blobs);
   }
 
   /** 测试意图：deadline 为 null 时在入口直接拒绝。 */
   @Test
   void rejectsNullDeadline() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     assertThrows(
         NullPointerException.class,
         () ->
             reader.readResource(
-                threadId, null, "call-1", blobId, null, null, null, "resource", null));
+                sessionId, TurnMediaCapabilities.NONE, blobId, null, null, null, "resource", null));
   }
 
   /** 测试意图：没有会话引用的 URI 不暴露 Blob 是否存在或内容。 */
   @Test
   void rejectsUnreferencedBlobBeforeOpeningStream() {
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, sessionId, blobId, false);
+    authorize(sessionId, blobId, false);
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("not referenced"));
     verifyNoInteractions(blobs);
@@ -127,13 +101,13 @@ class PlatformResourceContentReaderTest {
   /** 测试意图：已授权但 Blob 不存在时映射为读工具错误。 */
   @Test
   void mapsMissingBlob() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, UUID.randomUUID(), blobId, true);
+    authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("resource not found"));
   }
@@ -141,18 +115,18 @@ class PlatformResourceContentReaderTest {
   /** 测试意图：存储异常、空结果与非法编码分别输出明确错误，不能产生伪造的空文本。 */
   @Test
   void reportsUnavailableAndInvalidContent() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, UUID.randomUUID(), blobId, true);
+    authorize(sessionId, blobId, true);
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("content is unavailable"));
 
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new IllegalStateException("storage unavailable"));
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("failed to read resource"));
 
@@ -163,7 +137,7 @@ class PlatformResourceContentReaderTest {
               return callback.apply(new ByteArrayInputStream(new byte[] {0}));
             });
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("binary"));
   }
@@ -171,9 +145,9 @@ class PlatformResourceContentReaderTest {
   /** 测试意图：只在保留 Blob 流的生命周期内执行文本窗口投影。 */
   @Test
   void formatsAuthorizedStream() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, UUID.randomUUID(), blobId, true);
+    authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenAnswer(
             invocation -> {
@@ -181,16 +155,15 @@ class PlatformResourceContentReaderTest {
               return callback.apply(
                   new ByteArrayInputStream("blob-content".getBytes(StandardCharsets.UTF_8)));
             });
-    assertTrue(read(threadId, blobId).contains("1|blob-content"));
+    assertTrue(read(sessionId, blobId).contains("1|blob-content"));
   }
 
   /** 测试意图：读取预算由入口传入并在各阶段复用同一对象，会话鉴权耗时计入同一预算。 */
   @Test
   void passesSameDeadlineAndMeasuresAuthCost() {
-    UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, sessionId, blobId, true);
+    authorize(sessionId, blobId, true);
     ReadDeadline entryDeadline = ReadDeadline.after(Duration.ofSeconds(60));
     // 会话引用校验耗时也必须计入同一读取预算。
     when(refs.contains(sessionId, blobId))
@@ -210,34 +183,31 @@ class PlatformResourceContentReaderTest {
               return "1|blob-content";
             });
 
-    assertTrue(read(threadId, blobId, entryDeadline).contains("1|blob-content"));
+    assertTrue(read(sessionId, blobId, entryDeadline).contains("1|blob-content"));
   }
 
   /** 测试意图：超时与取消以可区分消息对外表达，不能退化成通用读取失败。 */
   @Test
   void mapsTimeoutAndInterruptFailures() {
-    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    authorize(threadId, UUID.randomUUID(), blobId, true);
+    authorize(sessionId, blobId, true);
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new StorageReadTimeoutException("blob read timed out: " + blobId));
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("resource read timed out"));
 
     when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new StorageReadInterruptedException("blob read interrupted: " + blobId));
     assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
             .getMessage()
             .contains("resource read interrupted"));
   }
 
-  private void authorize(UUID threadId, UUID sessionId, UUID blobId, boolean allowed) {
-    ThreadState thread = mock(ThreadState.class);
-    when(thread.sessionId()).thenReturn(sessionId);
-    when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
+  private void authorize(UUID sessionId, UUID blobId, boolean allowed) {
     when(refs.contains(sessionId, blobId)).thenReturn(allowed);
   }
 
@@ -250,14 +220,14 @@ class PlatformResourceContentReaderTest {
     }
   }
 
-  private String read(UUID threadId, UUID blobId) {
-    return read(threadId, blobId, ReadDeadline.after(Duration.ofSeconds(60)));
+  private String read(UUID sessionId, UUID blobId) {
+    return read(sessionId, blobId, ReadDeadline.after(Duration.ofSeconds(60)));
   }
 
-  private String read(UUID threadId, UUID blobId, ReadDeadline deadline) {
+  private String read(UUID sessionId, UUID blobId, ReadDeadline deadline) {
     PlatformResourceContentReader.ResourceRead result =
         reader.readResource(
-            threadId, null, "call-1", blobId, null, null, null, "resource", deadline);
+            sessionId, TurnMediaCapabilities.NONE, blobId, null, null, null, "resource", deadline);
     return switch (result) {
       case PlatformResourceContentReader.ResourceRead.Text text -> text.text();
       case PlatformResourceContentReader.ResourceRead.Media media -> throw new AssertionError(

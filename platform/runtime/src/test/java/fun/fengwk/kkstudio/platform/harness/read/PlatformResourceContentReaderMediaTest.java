@@ -18,18 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnMediaCapabilities;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
@@ -43,90 +32,44 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
-/** 真实多模态 {@code read} 的冻结调用模型校验：授权先于存储，模态/协议/预算校验先于任何 Blob 内容读取。 */
+/** 真实多模态 {@code read} 的冻结上下文校验：授权先于存储，模态/协议/预算校验先于任何 Blob 内容读取。 */
 class PlatformResourceContentReaderMediaTest {
 
-  private static final String CALL_ID = "call-1";
   private static final String SHA = "a".repeat(64);
 
-  private HarnessStore store;
-  private HarnessStore.Transaction transaction;
-  private ThreadStore threadStore;
-  private ToolStore toolStore;
-  private EntryStore entryStore;
   private SessionBlobRefManager refs;
   private StorageBlobManager blobManager;
   private StorageBlobContentService blobs;
   private PlatformResourceContentReader reader;
 
-  private UUID threadId;
   private UUID sessionId;
   private UUID blobId;
-  private UUID invocationId;
-  private UUID turnStartEntryId;
 
   @BeforeEach
   void setUp() {
-    store = mock(HarnessStore.class);
-    transaction = mock(HarnessStore.Transaction.class);
-    threadStore = mock(ThreadStore.class);
-    toolStore = mock(ToolStore.class);
-    entryStore = mock(EntryStore.class);
-    when(transaction.threads()).thenReturn(threadStore);
-    when(transaction.tools()).thenReturn(toolStore);
-    when(transaction.entries()).thenReturn(entryStore);
     refs = mock(SessionBlobRefManager.class);
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
-    when(store.transaction(any()))
-        .thenAnswer(
-            invocation -> {
-              Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
-              return callback.apply(transaction);
-            });
-    reader = new PlatformResourceContentReader(() -> store, refs, blobManager, blobs);
+    reader = new PlatformResourceContentReader(refs, blobManager, blobs);
 
-    threadId = UUID.randomUUID();
     sessionId = UUID.randomUUID();
     blobId = UUID.randomUUID();
-    invocationId = UUID.randomUUID();
-    turnStartEntryId = UUID.randomUUID();
-
-    ThreadState thread = mock(ThreadState.class);
-    when(thread.sessionId()).thenReturn(sessionId);
-    when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(true);
-
-    ToolInvocation invocation = mock(ToolInvocation.class);
-    when(invocation.call()).thenReturn(new ToolCall(CALL_ID, "read", "{}"));
-    when(invocation.threadId()).thenReturn(threadId);
-    when(invocation.turnStartEntryId()).thenReturn(turnStartEntryId);
-    when(toolStore.find(invocationId)).thenReturn(Optional.of(invocation));
   }
 
   /** 支持的模型与协议下，媒体读取返回指向同一已授权 Blob 的 durable 引用，且不读取任何字节。 */
   @Test
   void mediaResourceReturnsDurableReferenceWithoutReadingBytes() {
     stubBlob("image/png", 3L);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
-    ResourceRead read =
-        reader.readResource(
-            threadId,
-            invocationId,
-            CALL_ID,
-            blobId,
-            null,
-            null,
-            null,
-            "kkstudio:/resources/" + blobId,
-            deadline());
+    ResourceRead read = read(capabilities, "kkstudio:/resources/" + blobId, deadline());
 
     ResourceRead.Media media = assertInstanceOf(ResourceRead.Media.class, read);
     assertEquals(blobId, media.resource().sessionBlobId());
@@ -139,22 +82,11 @@ class PlatformResourceContentReaderMediaTest {
   @Test
   void rejectsModelWithoutDeclaredModalityBeforeReading() {
     stubBlob("image/png", 3L);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT));
+    TurnMediaCapabilities capabilities =
+        capabilities(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT));
 
     PlatformReadException error =
-        assertThrows(
-            PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    CALL_ID,
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "resource",
-                    deadline()));
+        assertThrows(PlatformReadException.class, () -> read(capabilities, "resource", deadline()));
     assertTrue(error.getMessage().contains("does not declare IMAGE"), error.getMessage());
     verifyNoInteractions(blobs);
   }
@@ -163,23 +95,13 @@ class PlatformResourceContentReaderMediaTest {
   @Test
   void rejectsProtocolWithoutAnyLegalPositionBeforeReading() {
     stubBlob("audio/mpeg", 3L);
-    stubFrozenSpec(
-        ProviderType.OPENAI_RESPONSES, Set.of(ModelInputModality.TEXT, ModelInputModality.AUDIO));
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI_RESPONSES,
+            Set.of(ModelInputModality.TEXT, ModelInputModality.AUDIO));
 
     PlatformReadException error =
-        assertThrows(
-            PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    CALL_ID,
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "resource",
-                    deadline()));
+        assertThrows(PlatformReadException.class, () -> read(capabilities, "resource", deadline()));
     assertTrue(
         error.getMessage().contains("neither user messages nor tool results"), error.getMessage());
     verifyNoInteractions(blobs);
@@ -190,22 +112,12 @@ class PlatformResourceContentReaderMediaTest {
   void rejectsOverLimitBeforeReadingContent() {
     long tooLarge = ProviderResourceMaterializer.maxInlineBlobBytes() + 1L;
     stubBlob("image/png", tooLarge);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
     PlatformReadException error =
-        assertThrows(
-            PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    CALL_ID,
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "resource",
-                    deadline()));
+        assertThrows(PlatformReadException.class, () -> read(capabilities, "resource", deadline()));
     assertTrue(error.getMessage().contains("exceeds"), error.getMessage());
     verifyNoInteractions(blobs);
   }
@@ -219,41 +131,26 @@ class PlatformResourceContentReaderMediaTest {
         assertThrows(
             PlatformReadException.class,
             () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    CALL_ID,
-                    blobId,
-                    null,
-                    null,
-                    null,
+                read(
+                    capabilities(
+                        ProviderType.OPENAI,
+                        Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE)),
                     "resource",
                     deadline()));
     assertTrue(error.getMessage().contains("not referenced"), error.getMessage());
     verifyNoInteractions(blobManager, blobs);
   }
 
-  /** 调用绑定不一致（call id 与冻结 invocation 不符）时拒绝。 */
+  /** 冻结能力快照不含该模态时即拒绝，即使同一 Blob 的 MIME 在别处被声明为媒体：绝不反查实时模型。 */
   @Test
-  void rejectsCallBindingMismatch() {
+  void usesProvidedFrozenCapabilitiesOnly() {
     stubBlob("image/png", 3L);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    "other-call",
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "resource",
-                    deadline()));
-    assertTrue(error.getMessage().contains("does not match"), error.getMessage());
+            () -> read(TurnMediaCapabilities.NONE, "resource", deadline()));
+    assertTrue(error.getMessage().contains("does not declare IMAGE"), error.getMessage());
     verifyNoInteractions(blobs);
   }
 
@@ -270,17 +167,7 @@ class PlatformResourceContentReaderMediaTest {
             });
 
     ReadDeadline deadline = deadline();
-    ResourceRead read =
-        reader.readResource(
-            threadId,
-            null,
-            null,
-            blobId,
-            null,
-            null,
-            null,
-            "kkstudio:/resources/" + blobId,
-            deadline);
+    ResourceRead read = read(TurnMediaCapabilities.NONE, "kkstudio:/resources/" + blobId, deadline);
 
     ResourceRead.Text text = assertInstanceOf(ResourceRead.Text.class, read);
     assertTrue(text.text().contains("1|blob-content"), text.text());
@@ -297,17 +184,7 @@ class PlatformResourceContentReaderMediaTest {
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    null,
-                    null,
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "kkstudio:/resources/" + blobId,
-                    deadline()));
+            () -> read(TurnMediaCapabilities.NONE, "kkstudio:/resources/" + blobId, deadline()));
 
     assertEquals("failed to read resource: " + blobId, error.getMessage());
     assertFalse(error.getMessage().contains("sentinel-secret-7f3a"));
@@ -318,24 +195,16 @@ class PlatformResourceContentReaderMediaTest {
   @Test
   void mediaPathRejectsExpiredDeadlineWithoutDownload() throws InterruptedException {
     stubBlob("image/png", 1024L);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
     ReadDeadline expired = ReadDeadline.after(Duration.ofMillis(10));
     Thread.sleep(15L);
 
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () ->
-                reader.readResource(
-                    threadId,
-                    invocationId,
-                    CALL_ID,
-                    blobId,
-                    null,
-                    null,
-                    null,
-                    "kkstudio:/resources/" + blobId,
-                    expired));
+            () -> read(capabilities, "kkstudio:/resources/" + blobId, expired));
 
     assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
     verifyNoInteractions(blobs);
@@ -345,29 +214,27 @@ class PlatformResourceContentReaderMediaTest {
   @Test
   void mediaPathRejectsInterruptedThreadWithoutDownload() {
     stubBlob("image/png", 1024L);
-    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    TurnMediaCapabilities capabilities =
+        capabilities(
+            ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
     Thread.currentThread().interrupt();
     try {
       PlatformReadException error =
           assertThrows(
               PlatformReadException.class,
-              () ->
-                  reader.readResource(
-                      threadId,
-                      invocationId,
-                      CALL_ID,
-                      blobId,
-                      null,
-                      null,
-                      null,
-                      "kkstudio:/resources/" + blobId,
-                      deadline()));
+              () -> read(capabilities, "kkstudio:/resources/" + blobId, deadline()));
 
       assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
       verifyNoInteractions(blobs);
     } finally {
       Thread.interrupted();
     }
+  }
+
+  private ResourceRead read(
+      TurnMediaCapabilities capabilities, String displayPath, ReadDeadline deadline) {
+    return reader.readResource(
+        sessionId, capabilities, blobId, null, null, null, displayPath, deadline);
   }
 
   private static ReadDeadline deadline() {
@@ -384,22 +251,12 @@ class PlatformResourceContentReaderMediaTest {
     when(blobManager.getBlob(blobId)).thenReturn(blob);
   }
 
-  private void stubFrozenSpec(ProviderType type, Set<ModelInputModality> modalities) {
-    TurnCapabilities capabilities =
-        new TurnCapabilities(
-            List.of(),
-            List.of(),
-            new TurnMediaCapabilities(
-                modalities,
-                type.mediaCapabilities().userModalities(),
-                type.mediaCapabilities().toolResultModalities()));
-    TurnStartPayload start = mock(TurnStartPayload.class);
-    when(start.ownerThreadId()).thenReturn(threadId);
-    when(start.capabilities()).thenReturn(capabilities);
-    Entry entry = mock(Entry.class);
-    when(entry.payload()).thenReturn(start);
-    EntryPath path = mock(EntryPath.class);
-    when(path.head()).thenReturn(entry);
-    when(entryStore.loadPath(turnStartEntryId)).thenReturn(path);
+  /** 与 Builtin 解析时同一来源的冻结能力快照：消费者声明的输入模态 + 协议合法的内容位置。 */
+  private static TurnMediaCapabilities capabilities(
+      ProviderType type, Set<ModelInputModality> modalities) {
+    return new TurnMediaCapabilities(
+        modalities,
+        type.mediaCapabilities().userModalities(),
+        type.mediaCapabilities().toolResultModalities());
   }
 }

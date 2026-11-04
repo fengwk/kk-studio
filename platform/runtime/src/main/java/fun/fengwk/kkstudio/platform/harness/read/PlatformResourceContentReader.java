@@ -2,11 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.read;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnMediaCapabilities;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
@@ -19,9 +15,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 平台侧 Session 授权 Blob 资源内容读取器。
@@ -29,12 +23,10 @@ import java.util.function.Supplier;
  * <p>按 {@code kkstudio:/resources/<blobId>} 读取当前会话授权的 Blob：
  *
  * <ol>
- *   <li>通过 {@code threadId} 从 {@link HarnessStore} 解析关联的 {@code sessionId}，并校验当前 Session 已引用该
- *       Blob（鉴权失败与不存在 无法区分地拒绝，避免信息泄露）；
+ *   <li>会话身份由工具执行上下文给出，只校验该 Session 已引用该 Blob（鉴权失败与不存在无法区分地拒绝，避免信息泄露）；
  *   <li>以授权 Blob 的权威 MIME 判定读取形态：文本继续返回有界窗口；{@code image/*}、{@code audio/*}、{@code video/*} 与
  *       {@code application/pdf} 走真实媒体路径；
- *   <li>媒体路径在读取任何内容之前，用「通过工具调用 id 解析到的唯一冻结调用模型」的输入模态与该 protocol 的合法位置能力、权威 MIME 与内联预算共同校验：
- *       不支持或超预算都以明确英文错误拒绝；
+ *   <li>媒体路径在读取任何内容之前，用执行上下文中该 Turn 已冻结的消费者媒体能力、权威 MIME 与内联预算共同校验：不支持或超预算都以明确英文错误拒绝；
  *   <li>通过校验后只返回指向同一已授权 Blob 的 durable {@link ResourceRef}，真实字节在 provider attempt 物化时读取。
  * </ol>
  *
@@ -51,18 +43,14 @@ public class PlatformResourceContentReader {
     record Media(ResourceRef resource, String preview) implements ResourceRead {}
   }
 
-  private final Supplier<HarnessStore> harnessStoreSupplier;
   private final SessionBlobRefManager sessionBlobRefManager;
   private final StorageBlobManager storageBlobManager;
   private final StorageBlobContentService storageBlobContentService;
 
   public PlatformResourceContentReader(
-      Supplier<HarnessStore> harnessStoreSupplier,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobManager storageBlobManager,
       StorageBlobContentService storageBlobContentService) {
-    this.harnessStoreSupplier =
-        Objects.requireNonNull(harnessStoreSupplier, "harnessStoreSupplier");
     this.sessionBlobRefManager =
         Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
     this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
@@ -71,38 +59,36 @@ public class PlatformResourceContentReader {
   }
 
   /**
-   * 按调用工具槽位读取 Session 授权的 Blob：文本返回有界窗口；支持的媒体返回指向同一 Blob 的 durable 引用。
+   * 按工具执行上下文读取 Session 授权的 Blob：文本返回有界窗口；支持的媒体返回指向同一 Blob 的 durable 引用。
    *
-   * <p>媒体路径只用冻结调用模型事实，绝不读取 live thread 当前 model 替代：模态/协议不支持、MIME 非法或超出内联预算时，在读取任何 Blob
+   * <p>媒体路径只用执行上下文中冻结的消费者媒体能力，绝不读取 live thread 当前 model 替代：模态/协议不支持、MIME 非法或超出内联预算时，在读取任何 Blob
    * 内容之前以明确英文错误拒绝。
    *
-   * @param threadId 当前 Harness Thread ID，非空
-   * @param invocationId 调用该工具的 durable {@code ToolInvocation} id；文本读取可为 null，媒体读取必须存在
-   * @param callId 本次工具调用 id，用于校验调用绑定
+   * @param sessionId 本次调用所属会话，非空
+   * @param mediaCapabilities 本次调用 Turn 已冻结的消费者媒体能力，非空
    * @param blobId 目标 Blob ID，非空
    * @param deadline 绝对读取截止，非空
    * @return 文本窗口或媒体引用
-   * @throws PlatformReadException 鉴权失败、调用绑定不一致、媒体不受支持或超出预算、读取失败时抛出
+   * @throws PlatformReadException 鉴权失败、媒体不受支持或超出预算、读取失败时抛出
    */
   public ResourceRead readResource(
-      UUID threadId,
-      UUID invocationId,
-      String callId,
+      UUID sessionId,
+      TurnMediaCapabilities mediaCapabilities,
       UUID blobId,
       Integer offset,
       Integer limit,
       Integer columnOffset,
       String displayPath,
       ReadDeadline deadline) {
-    if (threadId == null) {
-      throw new PlatformReadException("threadId must not be null");
+    if (sessionId == null) {
+      throw new PlatformReadException("sessionId must not be null");
     }
+    Objects.requireNonNull(mediaCapabilities, "mediaCapabilities must not be null");
     if (blobId == null) {
       throw new PlatformReadException("blobId must not be null");
     }
     Objects.requireNonNull(deadline, "deadline must not be null");
-    HarnessStore store = requireStore();
-    authorize(store, threadId, blobId);
+    authorize(sessionId, blobId);
 
     StorageBlob blob = storageBlobManager.getBlob(blobId);
     ModelInputModality modality = blob == null ? null : mediaModality(blob.getMediaType());
@@ -113,10 +99,8 @@ public class PlatformResourceContentReader {
     if (blob.getState() != StorageBlobState.ACTIVE) {
       throw new PlatformReadException("resource is not available: " + blobId);
     }
-    TurnMediaCapabilities capabilities =
-        resolveFrozenMediaCapabilities(store, invocationId, callId, threadId);
-    boolean consumerDeclares = capabilities.declares(modality);
-    boolean protocolAccepts = capabilities.acceptsProtocolPosition(modality);
+    boolean consumerDeclares = mediaCapabilities.declares(modality);
+    boolean protocolAccepts = mediaCapabilities.acceptsProtocolPosition(modality);
     if (!consumerDeclares || !protocolAccepts) {
       throw new PlatformReadException(
           unsupportedMediaMessage(blob, modality, consumerDeclares, protocolAccepts));
@@ -163,56 +147,11 @@ public class PlatformResourceContentReader {
     return new ResourceRead.Media(ref, null);
   }
 
-  private HarnessStore requireStore() {
-    HarnessStore store = harnessStoreSupplier.get();
-    if (store == null) {
-      throw new PlatformReadException("harness store is unavailable");
-    }
-    return store;
-  }
-
-  /** Thread 存在且当前 Session 已引用该 Blob；否则以无法区分的错误拒绝。 */
-  private void authorize(HarnessStore store, UUID threadId, UUID blobId) {
-    Optional<ThreadState> threadState = store.transaction(tx -> tx.threads().find(threadId));
-    if (threadState.isEmpty()) {
-      throw new PlatformReadException("thread not found: " + threadId);
-    }
-    UUID sessionId = threadState.get().sessionId();
+  /** 当前 Session 已引用该 Blob；否则以无法区分的错误拒绝。会话身份来自执行上下文，不在这里反查 Harness 存储。 */
+  private void authorize(UUID sessionId, UUID blobId) {
     if (!sessionBlobRefManager.contains(sessionId, blobId)) {
       throw new PlatformReadException("resource is not referenced by this session");
     }
-  }
-
-  /** 通过调用工具槽位解析其所属 Turn 已冻结的媒体能力，并校验 thread 与 call 绑定。读取路径绝不反查 ModelInvocation。 */
-  private static TurnMediaCapabilities resolveFrozenMediaCapabilities(
-      HarnessStore store, UUID invocationId, String callId, UUID threadId) {
-    if (invocationId == null) {
-      throw new PlatformReadException(
-          "cannot resolve the calling turn capabilities: tool invocation identity is unavailable");
-    }
-    return store.transaction(
-        tx -> {
-          ToolInvocation invocation = tx.tools().find(invocationId).orElse(null);
-          if (invocation == null) {
-            throw new PlatformReadException("calling tool invocation not found: " + invocationId);
-          }
-          if (callId == null || !callId.equals(invocation.call().id())) {
-            throw new PlatformReadException(
-                "calling tool invocation does not match the requested call");
-          }
-          if (!invocation.threadId().equals(threadId)) {
-            throw new PlatformReadException("calling tool invocation is not bound to this thread");
-          }
-          if (!(tx.entries().loadPath(invocation.turnStartEntryId()).head().payload()
-              instanceof TurnStartPayload start)) {
-            throw new PlatformReadException("calling tool turn start is invalid");
-          }
-          if (!start.ownerThreadId().equals(threadId) || start.capabilities() == null) {
-            throw new PlatformReadException(
-                "calling turn has no frozen media capabilities for this thread");
-          }
-          return start.capabilities().mediaCapabilities();
-        });
   }
 
   private String readTextWindow(

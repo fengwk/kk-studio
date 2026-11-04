@@ -6,8 +6,8 @@ import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationStatus;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 
 import java.util.Objects;

@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.platform.pluginhost.resource;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
@@ -36,7 +34,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -45,9 +42,9 @@ import java.util.UUID;
  * <p>两条路径都不信任调用方给出的字符串或响应头：
  *
  * <ul>
- *   <li><b>输入</b>：URI 必须是规范的 {@code kkstudio:/resources/<blobId>}；<b>调用方显式传入 threadId</b>，实现从
- *       durable Thread 行解析 Session，只有该 Session 的 {@code session_blob_ref} 确实引用该 blob 时才签发短期预签名
- *       GET。没有 threadId 或 thread 无法解析时确定性失败，绝不退化成「未鉴权下载」。
+ *   <li><b>输入</b>：URI 必须是规范的 {@code kkstudio:/resources/<blobId>}；<b>调用方显式传入执行上下文冻结的 sessionId</b>，
+ *       只有该 Session 的 {@code session_blob_ref} 确实引用该 blob 时才签发短期预签名 GET。没有 sessionId 时确定性失败，绝不退化成
+ *       「未鉴权下载」，也不查询 Harness 存储。
  *   <li><b>输出</b>：远端地址必须是 HTTPS 且没有 userinfo/fragment；地址准入由下载传输在真正解析 socket 目标时执行，
  *       解析出的每个地址都必须是公网地址，且校验通过的那批地址就是建连使用的地址，因此不存在「先校验、再第二次解析」 的 DNS rebinding 窗口；宿主授权检查（{@code
  *       beforeRequest}）在每一次真正出网（下载 GET 与预签名上传
@@ -74,7 +71,6 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
 
   private static final String SHA256 = "SHA-256";
 
-  private final HarnessStore harnessStore;
   private final SessionBlobRefManager sessionBlobRefManager;
   private final StorageBlobManager storageBlobManager;
   private final StorageUploadService storageUploadService;
@@ -83,13 +79,11 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   private final Path tempDirectory;
 
   public StoragePluginResourceGateway(
-      HarnessStore harnessStore,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobManager storageBlobManager,
       StorageUploadService storageUploadService,
       PluginProperties properties) {
     this(
-        harnessStore,
         sessionBlobRefManager,
         storageBlobManager,
         storageUploadService,
@@ -101,13 +95,11 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
 
   /** 测试用装配：传输可替换，使安全规则无需真实网络即可验证。 */
   StoragePluginResourceGateway(
-      HarnessStore harnessStore,
       SessionBlobRefManager sessionBlobRefManager,
       StorageBlobManager storageBlobManager,
       StorageUploadService storageUploadService,
       PluginProperties properties,
       RemoteMediaTransport transport) {
-    this.harnessStore = Objects.requireNonNull(harnessStore, "harnessStore");
     this.sessionBlobRefManager =
         Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
     this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
@@ -125,18 +117,17 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   }
 
   @Override
-  public URI resolveSessionResource(UUID threadId, String resourceUri) {
+  public URI resolveSessionResource(UUID sessionId, String resourceUri) {
     UUID blobId =
         SessionResourceUri.parse(resourceUri)
             .orElseThrow(
                 () ->
                     new PluginResourceUnavailableException(
                         "session resource uri must be kkstudio:/resources/<blobId>"));
-    if (threadId == null) {
+    if (sessionId == null) {
       throw new PluginResourceUnavailableException(
-          "session resource access requires an invocation thread id");
+          "session resource access requires an invocation session id");
     }
-    UUID sessionId = resolveSessionId(threadId);
     boolean authorized;
     try {
       authorized = sessionBlobRefManager.contains(sessionId, blobId);
@@ -328,21 +319,6 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
       throw new PluginResourceUnavailableException(
           "staging upload id is not a canonical uuid", error);
     }
-  }
-
-  private UUID resolveSessionId(UUID threadId) {
-    Optional<ThreadState> thread;
-    try {
-      thread = harnessStore.transaction(tx -> tx.threads().find(threadId));
-    } catch (RuntimeException error) {
-      throw new PluginResourceUnavailableException("cannot read the invocation thread", error);
-    }
-    return thread
-        .map(ThreadState::sessionId)
-        .orElseThrow(
-            () ->
-                new PluginResourceUnavailableException(
-                    "the invocation thread is no longer available"));
   }
 
   /** 下载地址必须是没有敏感成分的绝对 HTTPS URI。 */

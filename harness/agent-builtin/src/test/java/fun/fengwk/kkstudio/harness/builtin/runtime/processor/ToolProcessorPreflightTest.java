@@ -176,7 +176,7 @@ class ToolProcessorPreflightTest {
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
     assertEquals(0, run.closes.get());
     assertTrue(fixture.processor.hasActiveExecution());
@@ -611,7 +611,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
     assertEquals(0, run.closes.get());
     // registry / lease 语义与普通 Allow 路径一致：本地 execution 已注册，TOOL Work 持有 claim lease。
@@ -694,7 +694,7 @@ class ToolProcessorPreflightTest {
     assertEquals(1, fixture.gateway.admitCalls);
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
-    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).scope().threadId());
   }
 
   /** 子代理读取真实执行根：root 关闭时子代理走正常 gateway preflight，不因自身无开关而静默 Allow。 */

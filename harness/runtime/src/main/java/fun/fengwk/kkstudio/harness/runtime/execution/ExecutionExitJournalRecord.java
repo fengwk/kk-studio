@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 
 import java.time.Instant;
 import java.util.Objects;

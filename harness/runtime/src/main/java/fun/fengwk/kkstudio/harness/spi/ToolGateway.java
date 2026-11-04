@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.spi;
 
+import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
@@ -7,8 +9,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -40,6 +42,8 @@ public interface ToolGateway {
   /**
    * 重新挂接一个在途的远端 Capability 执行。
    *
+   * <p>挂接只把本地执行体接到该次远端执行上：不重新 admission、不需要执行上下文事实，因此实现也不读取分支视图、会话或媒体能力。
+   *
    * @param execution 挂接执行描述
    * @return 已准入的阻塞执行句柄
    * @throws EnvironmentCapabilityUnavailableException 发送前目标不可用（如本节点不持有该 Environment 的 READY 租约）
@@ -61,14 +65,38 @@ public interface ToolGateway {
   }
 
   /**
+   * 一次 Tool execution 所属的冻结 Harness 上下文事实：Thread、会话、执行根、该调用 assistant 分支的只读视图与消费者媒体能力。
+   *
+   * <p>全部事实来自 Processor 对 own Thread、执行根与该调用 assistant path 的同一事务读取。执行网关、Plugin 与产品不得为了这些事实 再查询
+   * Harness 存储：{@code branch} 已按该调用的 Contributor 与 assistant 分支限定，{@code mediaCapabilities}
+   * 唯一来源是冻结的 TURN_START 能力快照。
+   */
+  record ExecutionScope(
+      UUID threadId,
+      UUID sessionId,
+      UUID rootThreadId,
+      UUID rootSessionId,
+      BranchView branch,
+      TurnMediaCapabilities mediaCapabilities) {
+
+    public ExecutionScope {
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(sessionId, "sessionId");
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      Objects.requireNonNull(rootSessionId, "rootSessionId");
+      branch = Objects.requireNonNull(branch, "branch");
+      mediaCapabilities = Objects.requireNonNull(mediaCapabilities, "mediaCapabilities");
+    }
+  }
+
+  /**
    * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, attempt)}，request 已冻结。 {@code
-   * assistantEntryId} 是所有 sibling 共享的冻结 branch basis；{@code threadId} 提供平台 ToolExecutionContext
-   * 需要的持久线程所有权。{@code remoteExecutions} 只登记这一本地代次上的实际远端调用。
+   * scope} 携带该调用所属的 Thread/会话/执行根、assistant 分支视图与冻结媒体能力，平台据此装配 {@code ToolExecutionContext}，不查询
+   * Harness 存储。{@code remoteExecutions} 只登记这一本地代次上的实际远端调用。
    */
   record Execution(
       UUID invocationId,
-      UUID threadId,
-      UUID assistantEntryId,
+      ExecutionScope scope,
       int attempt,
       ToolInvocationRequest request,
       ToolApproval approval,
@@ -76,8 +104,7 @@ public interface ToolGateway {
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
-      Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(assistantEntryId, "assistantEntryId");
+      scope = Objects.requireNonNull(scope, "scope");
       if (attempt < 1) {
         throw new IllegalArgumentException("attempt must be positive");
       }
@@ -95,8 +122,11 @@ public interface ToolGateway {
   /**
    * 一次重新挂接远端执行的不可变描述。
    *
+   * <p>挂接不复用本地 admission 资源，也不需要 {@link ExecutionScope} 的上下文事实：分支视图、执行根与媒体能力都不会被挂接使用，因此这里只携带 所属
+   * Thread id。
+   *
    * @param invocationId Tool invocation id
-   * @param threadId Thread id
+   * @param threadId 该调用所属 Thread id
    * @param request 冻结的 Tool 调用请求
    * @param environmentId 远端 Environment 路由身份
    * @param remoteExecutionId 原 owner 发送给远端 Capability 的执行 id
@@ -114,7 +144,7 @@ public interface ToolGateway {
 
     public ReattachExecution {
       Objects.requireNonNull(invocationId, "invocationId");
-      Objects.requireNonNull(threadId, "threadId");
+      threadId = Objects.requireNonNull(threadId, "threadId");
       request = Objects.requireNonNull(request, "request");
       environmentId = Objects.requireNonNull(environmentId, "environmentId");
       remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");

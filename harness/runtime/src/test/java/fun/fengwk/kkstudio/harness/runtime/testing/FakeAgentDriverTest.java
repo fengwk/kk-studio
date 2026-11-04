@@ -9,14 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
-import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 
 import java.util.List;
 

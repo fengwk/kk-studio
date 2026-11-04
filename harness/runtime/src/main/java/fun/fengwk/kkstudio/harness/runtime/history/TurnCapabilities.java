@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.util.HashSet;
 import java.util.List;

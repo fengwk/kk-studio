@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.driver;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
 
 import java.util.Collection;
 import java.util.HashMap;

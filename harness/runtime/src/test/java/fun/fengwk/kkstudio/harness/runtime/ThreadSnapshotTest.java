@@ -26,10 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
-import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
-import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
@@ -51,11 +47,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPa
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.spi.driver.FailureProjection;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.spi.driver.GenerationStatus;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -868,6 +869,16 @@ class ThreadSnapshotTest {
                 false,
                 List.of(),
                 false));
+  }
+
+  /** Thread version 窄查询只返回 durable version，未知 Thread 返回空而不抛异常。 */
+  @Test
+  void findThreadVersionReadsOnlyTheDurableVersion() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    long version = runtime.getThreadSnapshot(baseline.threadId()).thread().version();
+
+    assertEquals(Optional.of(version), runtime.findThreadVersion(baseline.threadId()));
+    assertEquals(Optional.empty(), runtime.findThreadVersion(new UUID(0L, 0xdeadbeefL)));
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */

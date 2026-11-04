@@ -81,6 +81,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -453,7 +454,13 @@ public final class ToolProcessorTestSupport {
                           16_384,
                           null,
                           null,
-                          new TurnCapabilities(modelRequest.toolBindings(), List.of())),
+                          new TurnCapabilities(
+                              modelRequest.toolBindings(),
+                              List.of(),
+                              new TurnMediaCapabilities(
+                                  Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+                                  Set.of(ModelInputModality.TEXT),
+                                  Set.of(ModelInputModality.IMAGE)))),
                       now.plusMillis(1)));
           tx.entries()
               .insert(
@@ -548,7 +555,13 @@ public final class ToolProcessorTestSupport {
                           16_384,
                           null,
                           null,
-                          new TurnCapabilities(modelRequest.toolBindings(), List.of())),
+                          new TurnCapabilities(
+                              modelRequest.toolBindings(),
+                              List.of(),
+                              new TurnMediaCapabilities(
+                                  Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+                                  Set.of(ModelInputModality.TEXT),
+                                  Set.of(ModelInputModality.IMAGE)))),
                       now.plusMillis(1)));
           tx.entries()
               .insert(
