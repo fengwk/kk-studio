@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -359,6 +360,7 @@ describe('daemon main real assembly', () => {
         expect(environment?.architecture).toBe(Architecture.ARM64)
       }
       expect(typeof environment?.homeDirectory).toBe('string')
+      expect(environment?.tempDirectory).toBe(tmpdir())
 
       // 真实 fs.write / fs.read：文件确实落到真实私有数据目录。
       const file = join(fixture.root, 'note.txt')

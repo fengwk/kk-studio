@@ -29,7 +29,7 @@ import {
  * <p>在 Linux 上父进程同时把自己变成子进程收养者（`PR_SET_CHILD_SUBREAPER`，失败即失败关闭）：helper 崩溃时，它名下已经
  * `setsid` 的后代会被内核重新挂到父进程。父进程只收敛**本次调用新增**的直接子进程（对照 `start()` 时的基线）并排除其它活动
  * helper，绝不因为「是父进程的孩子」就整片收敛陌生会话。macOS 没有收养机制，`becomeChildSubreaper()` 返回 `false`，收尾
- * 不做这层扫描；未登记且故意脱离的后代不在本次会话生命周期内，限制由 `processScopeCapabilities()` 如实暴露。
+ * 不做这层扫描；未登记且故意脱离的后代不在本次会话生命周期内。
  */
 export class PosixProcessSupervisor implements ProcessSupervisor {
   private readonly processes = new Set<PosixManagedProcess>()

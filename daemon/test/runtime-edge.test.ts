@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isAbsolute } from 'node:path'
+import { tmpdir } from 'node:os'
+import { isAbsolute, resolve } from 'node:path'
 import { create } from '@bufbuild/protobuf'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
@@ -733,9 +734,11 @@ describe('runtime resource upload control plane', () => {
 
 describe('environment detection helpers', () => {
   it('collects host facts and stable notes', () => {
-    const info = detectEnvironmentInfo(testConfig())
+    const config = testConfig()
+    const info = detectEnvironmentInfo(config)
     expect(isAbsolute(info.homeDirectory)).toBe(true)
-    expect(info.tempDirectory).toContain('tmp')
+    expect(info.tempDirectory).toBe(tmpdir())
+    expect(resolve(info.tempDirectory).startsWith(resolve(config.dataDir))).toBe(false)
     expect([
       OperatingSystem.WINDOWS,
       OperatingSystem.WSL,

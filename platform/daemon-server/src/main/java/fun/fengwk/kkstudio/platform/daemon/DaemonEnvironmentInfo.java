@@ -5,11 +5,12 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与受控临时目录。
+ * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与操作系统临时目录。
  *
  * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
- * escape 不能替代这一信任边界。{@code architecture}、{@code userName}、{@code homeDirectory} 与 {@code
- * tempDirectory} 只用于 Card 和当前 Environment Prompt 展示，不构成 cwd、默认 workdir 或沙箱。
+ * escape 不能替代这一信任边界。{@code architecture}、{@code userName} 与 {@code homeDirectory} 只用于 Card 和当前
+ * Environment Prompt 展示；{@code tempDirectory} 只用于当前 Environment Prompt 展示与工具指引，不构成 cwd、默认 workdir
+ * 或沙箱。
  */
 public record DaemonEnvironmentInfo(
     DaemonOperatingSystem operatingSystem,
@@ -145,7 +146,7 @@ public record DaemonEnvironmentInfo(
   }
 
   /**
-   * 校验受控临时目录的展示结构：非空白、无周边空白、单行、无控制字符，且是任一支持 OS 的绝对路径。
+   * 校验操作系统临时目录的展示结构：非空白、无周边空白、单行、无控制字符，且是任一支持 OS 的绝对路径。
    *
    * <p>tempDirectory 是 Daemon 上报的宿主事实，只用于模型可见的当前 Environment 展示与工具指引；它不构成沙箱或默认 workdir。
    */
