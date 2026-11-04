@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -24,6 +25,44 @@ public class PlatformSkillContentReader {
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.gitCache = Objects.requireNonNull(gitCache, "gitCache");
   }
+
+  /**
+   * 列出全部已发布包的只读摘要。摘要只含目录展示所需的包名、描述与技能清单，不含 token 或仓库地址。
+   *
+   * @return 按包名升序排列的包摘要
+   */
+  public List<PackageSummary> listPackages() {
+    return skillPackageRepository.listPackages().stream()
+        .map(
+            pkg ->
+                new PackageSummary(
+                    pkg.packageName(),
+                    pkg.description(),
+                    pkg.skills() == null ? List.of() : List.copyOf(pkg.skills())))
+        .toList();
+  }
+
+  /**
+   * 列出指定包 manifest 中的技能。
+   *
+   * @param packageName 包名
+   * @return 按 manifest 顺序排列的技能
+   * @throws PlatformReadException 包不存在
+   */
+  public List<SkillManifestEntry> listSkills(String packageName) {
+    if (packageName == null || packageName.isBlank()) {
+      throw new PlatformReadException("packageName must not be blank");
+    }
+    SkillPackage pkg = skillPackageRepository.getPackage(packageName);
+    if (pkg == null) {
+      throw new PlatformReadException("skill package not found: " + packageName);
+    }
+    return pkg.skills() == null ? List.of() : List.copyOf(pkg.skills());
+  }
+
+  /** 目录展示用的包摘要：只有包名、描述与技能清单，不含任何凭据。 */
+  public record PackageSummary(
+      String packageName, String description, List<SkillManifestEntry> skills) {}
 
   /**
    * 读取指定 Skill Package 下某个 Skill 的文件字节。

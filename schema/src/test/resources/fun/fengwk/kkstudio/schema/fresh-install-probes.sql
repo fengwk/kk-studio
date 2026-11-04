@@ -720,6 +720,14 @@ select pg_temp.rejects('session_file rejects leading-slash path',
 select pg_temp.rejects('session_file rejects dot-dot path segment',
     $$insert into session_file (session_id, path, blob_id, revision)
       values (pg_temp.uid(103), 'a/../b.txt', pg_temp.uid(605), 1)$$, '23514', 'ck_session_file_path');
+select pg_temp.rejects('session_file rejects C0 control characters',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), 'valid/ctl' || chr(9) || '.txt', pg_temp.uid(605), 1)$$,
+    '23514', 'ck_session_file_path');
+select pg_temp.rejects('session_file rejects DEL and C1 control characters',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), 'valid/del' || chr(127) || chr(133) || '.txt', pg_temp.uid(605), 1)$$,
+    '23514', 'ck_session_file_path');
 select pg_temp.rejects('session_file rejects non-positive revision',
     $$insert into session_file (session_id, path, blob_id, revision)
       values (pg_temp.uid(103), 'valid/file2.txt', pg_temp.uid(605), 0)$$, '23514', 'ck_session_file_revision');

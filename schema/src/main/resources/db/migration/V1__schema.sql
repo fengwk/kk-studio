@@ -2086,7 +2086,8 @@ create table session_file (
     constraint pk_session_file primary key (session_id, path),
     constraint fk_session_file_session foreign key (session_id) references harness_session (id) on delete restrict,
     constraint fk_session_file_blob foreign key (blob_id) references storage_blob (id) on delete restrict,
-    constraint ck_session_file_path check (path <> '' and path = btrim(path) and path !~ '^/' and path !~ '(^|/)\.\.?(/|$)'),
+    constraint ck_session_file_path check (path <> '' and path = btrim(path) and path !~ '^/'
+        and path !~ '(^|/)\.\.?(/|$)' and path !~ '[\u0001-\u001F\u007F-\u009F]'),
     constraint ck_session_file_revision check (revision > 0)
 );
 

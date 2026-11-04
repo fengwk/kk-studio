@@ -13,6 +13,9 @@ import java.util.regex.Pattern;
  *   <li>{@link Kind#ROOT}：{@code vfs:/} 或 {@code vfs:}
  *   <li>{@link Kind#SESSIONS_ROOT}：{@code vfs:/sessions} 或 {@code vfs:/sessions/}
  *   <li>{@link Kind#SKILLS}：{@code vfs:/skills} 或 {@code vfs:/skills/}
+ *   <li>{@link Kind#SKILLS_PACKAGE}：{@code vfs:/skills/<package>} 或 {@code vfs:/skills/<package>/}
+ *   <li>{@link Kind#SKILLS_SKILL}：{@code vfs:/skills/<package>/<skill>} 或 {@code
+ *       vfs:/skills/<package>/<skill>/}
  *   <li>{@link Kind#SKILLS_PATH}：{@code vfs:/skills/<package>/<skill>/<relativePath>}
  *   <li>{@link Kind#RESOURCE}：{@code vfs:/resources/<blobId>}
  *   <li>{@link Kind#RESOURCES_ROOT}：{@code vfs:/resources} 或 {@code vfs:/resources/}
@@ -30,6 +33,8 @@ public final class VfsPath {
     ROOT,
     SESSIONS_ROOT,
     SKILLS,
+    SKILLS_PACKAGE,
+    SKILLS_SKILL,
     SKILLS_PATH,
     RESOURCE,
     RESOURCES_ROOT,
@@ -81,6 +86,9 @@ public final class VfsPath {
     if (uri.contains("\\")) {
       throw new IllegalArgumentException("path must not contain backslashes: " + uri);
     }
+    if (containsControlCharacter(uri)) {
+      throw new IllegalArgumentException("path must not contain control characters: " + uri);
+    }
     if ("vfs:".equals(uri)) {
       return new VfsPath(Kind.ROOT, uri, "vfs:/", null, null, null, null, null, null, null, false);
     }
@@ -120,15 +128,51 @@ public final class VfsPath {
               null,
               trailingSlash);
         }
-        int s1 = afterTop.indexOf('/');
-        if (s1 <= 0) {
+        // 目录层级的尾部斜杠只表示目录语义，不参与包/技能名解析。
+        String skillsRemainder =
+            afterTop.endsWith("/") ? afterTop.substring(0, afterTop.length() - 1) : afterTop;
+        int s1 = skillsRemainder.indexOf('/');
+        if (s1 < 0) {
+          String pkgOnly = skillsRemainder;
+          return new VfsPath(
+              Kind.SKILLS_PACKAGE,
+              uri,
+              "vfs:/skills/" + pkgOnly,
+              null,
+              null,
+              null,
+              null,
+              pkgOnly,
+              null,
+              null,
+              trailingSlash);
+        }
+        if (s1 == 0) {
           throw new IllegalArgumentException(
               "invalid skills path (expected vfs:/skills/<package>/<skill>/<file>): " + uri);
         }
-        String pkg = afterTop.substring(0, s1);
-        String sub = afterTop.substring(s1 + 1);
+        String pkg = skillsRemainder.substring(0, s1);
+        String sub = skillsRemainder.substring(s1 + 1);
+        if (sub.isEmpty()) {
+          throw new IllegalArgumentException(
+              "invalid skills path (expected vfs:/skills/<package>/<skill>/<file>): " + uri);
+        }
         int s2 = sub.indexOf('/');
-        if (s2 <= 0) {
+        if (s2 < 0) {
+          return new VfsPath(
+              Kind.SKILLS_SKILL,
+              uri,
+              "vfs:/skills/" + pkg + "/" + sub,
+              null,
+              null,
+              null,
+              null,
+              pkg,
+              sub,
+              null,
+              trailingSlash);
+        }
+        if (s2 == 0) {
           throw new IllegalArgumentException(
               "invalid skills path (expected vfs:/skills/<package>/<skill>/<file>): " + uri);
         }
@@ -287,7 +331,10 @@ public final class VfsPath {
   }
 
   public boolean isUnderSkillsRoot() {
-    return kind == Kind.SKILLS || kind == Kind.SKILLS_PATH;
+    return kind == Kind.SKILLS
+        || kind == Kind.SKILLS_PACKAGE
+        || kind == Kind.SKILLS_SKILL
+        || kind == Kind.SKILLS_PATH;
   }
 
   public boolean isUnderResourcesRoot() {
@@ -299,6 +346,17 @@ public final class VfsPath {
         && sessionPath.startsWith("threads/")
         && !"threads/".equals(sessionPath)
         && !"threads".equals(sessionPath);
+  }
+
+  /** C0（含 TAB/LF）、DEL 与 C1 控制字符一律拒绝：它们不可见，会让路径显示与写入不一致。 */
+  private static boolean containsControlCharacter(String value) {
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      if (character < 0x20 || character == 0x7F || (character >= 0x80 && character <= 0x9F)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static UUID parseCanonicalUuid(String str) {

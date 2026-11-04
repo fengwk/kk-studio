@@ -144,7 +144,14 @@ public class SessionFileQueryService {
             .findFirst()
             .orElseThrow(
                 () -> new SessionFileAccessException("unknown session owner: " + owner.kind()));
-    if (!ownership.ownsSession(owner, sessionId)) {
+    boolean owned;
+    try {
+      owned = ownership.ownsSession(owner, sessionId);
+    } catch (IllegalArgumentException malformedOwner) {
+      // owner id 格式非法与「不属于该 owner」在面板 API 上不可区分：统一按不存在处理，不泄漏解析细节。
+      throw new SessionFileAccessException("session is not owned by the given owner");
+    }
+    if (!owned) {
       throw new SessionFileAccessException("session is not owned by the given owner");
     }
   }
