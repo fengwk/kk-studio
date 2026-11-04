@@ -413,7 +413,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |
 | `api.history` | Entry Tree 的公开值类型：`Entry`、sealed payload 家族、`EntryPath` / `EntrySlice` 路径视图、`ScopedBranchView` Contributor 限域视图、`SubagentBinding`、`EntryType` 与 `TurnPathValidator` 回合文法校验；payload 编解码与 payload mapper 在 `codec`，历史归一化与最终回答判定在 `runtime.history` |
-| `api.interaction` | 等待输入/审批的只读投影与 `(createdAt, id)` 稳定分页（`PendingInteraction`、`PendingEnvironmentWait` 及分页），不持有产品归属 |
+| `api.interaction` | 等待输入/审批的只读投影与冻结环境的待领取 Work 候选；先按执行根和环境聚合再按代表键分页，也可按调用读取 Work 可领取性与时间边界。环境在线状态、名称及产品归属由平台判断 |
 | `api.join` | Join 票据与交付凭据：`ThreadJoin`、`JoinDelivery`、`ThreadJoinOutcome`、`ThreadJoinReceipt` 与完成通知渲染 `ThreadJoinCompletionRenderer`；持久化推进与交付在 `runtime.join` |
 | `api.realtime` | 有损实时投影的公开契约：sealed `RealtimeEvent`（Model delta / Model checkpoint / Tool partial）及其 wire 种类 `RealtimeEventType`、oversize payload 的跨节点上限 `RealtimePayloadLimits` 与不可用错误 `RealtimePayloadUnavailableException`；wire 编解码在 `codec`，通知信封、缓冲与恢复在平台实现，本包不持有 durable state |
 | `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现与端口分别在 `runtime.retry`、`spi.retry` |

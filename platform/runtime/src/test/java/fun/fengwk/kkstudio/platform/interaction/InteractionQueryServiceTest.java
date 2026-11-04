@@ -31,8 +31,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
@@ -54,7 +53,7 @@ class InteractionQueryServiceTest {
   }
 
   private SessionOwnership ownership;
-  private EnvironmentRepository environmentRepository;
+  private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService service;
@@ -63,15 +62,15 @@ class InteractionQueryServiceTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     ownership = mock(SessionOwnership.class);
-    environmentRepository = mock(EnvironmentRepository.class);
+    environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     // 默认没有环境等待分组；需要环境等待的用例再显式覆盖本 stub。
-    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+    when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
-    service = new InteractionQueryService(List.of(ownership), environmentRepository, runtimes);
+    service = new InteractionQueryService(List.of(ownership), environmentService, runtimes);
   }
 
   private void stubOwner(UUID root, UUID session, String kind, UUID ownerId, String title) {
@@ -84,7 +83,7 @@ class InteractionQueryServiceTest {
   void differentProductsOnDifferentRootsAreVisible() {
     SessionOwnership other = mock(SessionOwnership.class);
     service =
-        new InteractionQueryService(List.of(ownership, other), environmentRepository, runtimes);
+        new InteractionQueryService(List.of(ownership, other), environmentService, runtimes);
     UUID root1 = id(101);
     UUID session1 = id(102);
     UUID root2 = id(201);
@@ -594,7 +593,7 @@ class InteractionQueryServiceTest {
       int size,
       List<PendingEnvironmentWait> rows,
       boolean hasMore) {
-    when(runtime.listPendingEnvironmentWaits(afterCreatedAt, afterId, size))
+    when(runtime.listEnvironmentWaitCandidates(afterCreatedAt, afterId, size))
         .thenReturn(new PendingEnvironmentWaitPage(rows, hasMore));
   }
 
@@ -605,9 +604,7 @@ class InteractionQueryServiceTest {
   }
 
   private void stubEnvironmentName(String environmentId, String name) {
-    Environment environment = mock(Environment.class);
-    when(environment.getName()).thenReturn(name);
-    when(environmentRepository.getById(UUID.fromString(environmentId))).thenReturn(environment);
+    when(environmentService.requireName(EnvironmentId.parse(environmentId))).thenReturn(name);
   }
 
   /** 人工后代与环境等待共享根及根 Session，并在列表和计数中只解析一次归属。 */
@@ -704,6 +701,32 @@ class InteractionQueryServiceTest {
     assertEquals(1, secondEnvironmentItem.getWaitingCount().intValue());
   }
 
+  /** 在线候选不能让人工等待末页出现多余的空游标页，total 同样不计在线环境。 */
+  @Test
+  void onlineCandidatesDoNotCreateAnEmptyCursorPage() {
+    UUID root = id(11);
+    UUID session = id(12);
+    Instant manualTime = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction manual = waitingInput(id(101), root, session, manualTime);
+    PendingEnvironmentWait online =
+        environmentWait(root, WAITING_ENVIRONMENT_ID, manualTime.plusSeconds(1), id(102), 1);
+    stubRoot(root);
+    stubOwner(root, session, "CHAT", id(13), "chat");
+    when(environmentService.findReadyLeaseUntil(EnvironmentId.parse(WAITING_ENVIRONMENT_ID)))
+        .thenReturn(Optional.of(manualTime.plusSeconds(100)));
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
+        .thenReturn(new PendingInteractionPage(List.of(manual), false));
+    stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 1, List.of(online), false);
+    stubCountPage(List.of(manual), false);
+    stubEnvironmentCountPage(List.of(online));
+
+    InteractionPageDTO page = service.listInteractions(null, null, 1);
+
+    assertEquals(1, page.getTotal());
+    assertEquals(id(101).toString(), page.getItems().getFirst().getInteractionId());
+    assertNull(page.getNextCursor());
+  }
+
   /** 测试意图：环境等待条目的游标是组内最早调用的 {@code (createdAt, id)}；按该游标翻页只跳过已消费分组，不漏项、不重复。 */
   @Test
   void environmentWaitKeepsStableCursorAcrossPages() {
@@ -725,6 +748,8 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(firstCreatedAt, id(901), 1))
         .thenReturn(new PendingInteractionPage(List.of(), false));
     stubEnvironmentPage(firstCreatedAt, id(901), 1, List.of(second), false);
+    stubEnvironmentPage(
+        firstCreatedAt, id(901), InteractionQueryService.COUNT_PAGE_SIZE, List.of(second), false);
     stubCountPage(List.of(), false);
     stubEnvironmentCountPage(List.of(first, second));
 
@@ -803,7 +828,7 @@ class InteractionQueryServiceTest {
     assertEquals(0, page.getItems().size());
     assertEquals(0, page.getTotal());
     assertNull(page.getNextCursor());
-    verifyNoInteractions(environmentRepository);
+    verifyNoInteractions(environmentService);
   }
 
   /** 测试意图：控制器/插件发起、没有 Chat 或 Issue 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
@@ -849,12 +874,12 @@ class InteractionQueryServiceTest {
   void constructorRejectsNullDependencies() {
     assertThrows(
         NullPointerException.class,
-        () -> new InteractionQueryService(null, environmentRepository, runtimes));
+        () -> new InteractionQueryService(null, environmentService, runtimes));
     assertThrows(
         NullPointerException.class,
         () -> new InteractionQueryService(List.of(ownership), null, runtimes));
     assertThrows(
         NullPointerException.class,
-        () -> new InteractionQueryService(List.of(ownership), environmentRepository, null));
+        () -> new InteractionQueryService(List.of(ownership), environmentService, null));
   }
 }

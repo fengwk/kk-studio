@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
@@ -51,7 +51,7 @@ class InteractionRootAttributionConsistencyTest {
   }
 
   private SessionOwnership sessionOwnership;
-  private EnvironmentRepository environmentRepository;
+  private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService queryService;
@@ -61,15 +61,15 @@ class InteractionRootAttributionConsistencyTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     sessionOwnership = mock(SessionOwnership.class);
-    environmentRepository = mock(EnvironmentRepository.class);
+    environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+    when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
     queryService =
-        new InteractionQueryService(List.of(sessionOwnership), environmentRepository, runtimes);
+        new InteractionQueryService(List.of(sessionOwnership), environmentService, runtimes);
     interactionService = new InteractionService(List.of(sessionOwnership), runtimes);
   }
 
@@ -142,7 +142,7 @@ class InteractionRootAttributionConsistencyTest {
     SessionOwnership other = mock(SessionOwnership.class);
     queryService =
         new InteractionQueryService(
-            List.of(sessionOwnership, other), environmentRepository, runtimes);
+            List.of(sessionOwnership, other), environmentService, runtimes);
     when(sessionOwnership.findOwner(root, session))
         .thenReturn(Optional.of(new SessionOwnerDisplay("A", "1", null, null)));
     when(other.findOwner(root, session))

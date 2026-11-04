@@ -10,10 +10,10 @@ import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
@@ -33,9 +33,7 @@ import java.util.UUID;
 /**
  * 统一待处理交互查询用例：把 Harness 的三种只读等待事实投影为同一稳定 keyset 分页列表。
  *
- * <p>事实源只有 Harness：{@code WAITING_INPUT} / {@code WAITING_APPROVAL} 的 ToolInvocation（人工等待），以及
- * {@link HarnessRuntime#listPendingEnvironmentWaits} 提供的「READY 调用 + 到期且无有效执行 lease 的 TOOL Work +
- * 所需环境无有效 READY 连接租约」聚合（环境等待）。两者都不复制待办台账、不落地持久等待状态。
+ * <p>Harness 提供人工等待和按根、冻结环境聚合的可领取 Work 候选；环境服务判断 READY 租约。两者都不复制待办台账、不落地持久等待状态。
  *
  * <p>产品 owner 与根由服务端按来源 Thread 不可变的执行根解析：人工等待用 {@link HarnessRuntime#findRootThreadId}
  * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后通过产品 SPI 解析根归属。没有产品归属时，控制器或插件发起的独立执行根作为 Agent 任务暴露。
@@ -54,16 +52,15 @@ public class InteractionQueryService {
   private static final String TYPE_ENVIRONMENT_WAIT = "ENVIRONMENT_WAIT";
 
   private final List<SessionOwnership> ownerships;
-  private final EnvironmentRepository environmentRepository;
+  private final EnvironmentService environmentService;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
       List<SessionOwnership> ownerships,
-      EnvironmentRepository environmentRepository,
+      EnvironmentService environmentService,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.ownerships = List.copyOf(ownerships);
-    this.environmentRepository =
-        Objects.requireNonNull(environmentRepository, "environmentRepository");
+    this.environmentService = Objects.requireNonNull(environmentService, "environmentService");
     this.rootResolver = new InteractionRootResolver(runtimes);
   }
 
@@ -110,7 +107,7 @@ public class InteractionQueryService {
       }
       if (environmentQueue.isEmpty() && environmentHasMore) {
         PendingEnvironmentWaitPage page =
-            runtime.listPendingEnvironmentWaits(
+            runtime.listEnvironmentWaitCandidates(
                 environmentCursorCreatedAt, environmentCursorId, remaining);
         environmentHasMore = page.hasMore();
         if (!page.waits().isEmpty()) {
@@ -150,6 +147,26 @@ public class InteractionQueryService {
         }
       }
     }
+    // 引擎候选包含在线环境；页满后排除尾部在线候选，避免为不存在的后续等待项产生空游标页。
+    while (items.size() == limit) {
+      if (environmentQueue.isEmpty() && environmentHasMore) {
+        PendingEnvironmentWaitPage page =
+            runtime.listEnvironmentWaitCandidates(
+                environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
+        environmentHasMore = page.hasMore();
+        if (!page.waits().isEmpty()) {
+          environmentQueue.addAll(page.waits());
+          PendingEnvironmentWait last = page.waits().getLast();
+          environmentCursorCreatedAt = last.representativeCreatedAt();
+          environmentCursorId = last.representativeInvocationId();
+        }
+      }
+      PendingEnvironmentWait candidate = environmentQueue.peek();
+      if (candidate == null || context.readyLease(candidate.environmentId()).isEmpty()) {
+        break;
+      }
+      environmentQueue.poll();
+    }
     boolean moreRemaining =
         !manualQueue.isEmpty()
             || !environmentQueue.isEmpty()
@@ -160,7 +177,7 @@ public class InteractionQueryService {
     dto.setNextCursor(
         moreRemaining ? InteractionCursor.encode(consumedCreatedAt, consumedId) : null);
     dto.setTotal(countVisibleInteractions(context));
-    dto.setFreshnessAt(context.runtime().findNextEnvironmentWaitChange().orElse(null));
+    dto.setFreshnessAt(context.freshnessAt());
     return dto;
   }
 
@@ -199,7 +216,7 @@ public class InteractionQueryService {
       PendingEnvironmentWaitPage page =
           context
               .runtime()
-              .listPendingEnvironmentWaits(
+              .listEnvironmentWaitCandidates(
                   environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
       if (page.waits().isEmpty()) {
         break;
@@ -276,6 +293,7 @@ public class InteractionQueryService {
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
     private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
+    private final Map<EnvironmentId, Optional<Instant>> readyLeaseById = new HashMap<>();
 
     private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
       this.runtime = runtime;
@@ -306,6 +324,9 @@ public class InteractionQueryService {
       }
       Optional<InteractionOwnerDTO> owner =
           ownerByRootThread.computeIfAbsent(rootThreadId, this::resolveOwnerForRoot);
+      if (owner.isEmpty() || readyLease(row.environmentId()).isPresent()) {
+        return null;
+      }
       return owner.map(value -> new ResolvedRoot(rootThreadId, value)).orElse(null);
     }
 
@@ -368,15 +389,22 @@ public class InteractionQueryService {
     /** 环境展示名只按环境 id 从注册表补齐一次（按页去重），绝不按当前 composer 环境猜测，也不逐卡快照。 */
     private String resolveEnvironmentName(String environmentId) {
       return environmentNameById.computeIfAbsent(
-          environmentId,
-          id -> {
-            Environment environment = environmentRepository.getById(UUID.fromString(id));
-            if (environment == null) {
-              throw new IllegalStateException(
-                  "waiting environment registry entry does not exist: " + id);
-            }
-            return environment.getName();
-          });
+          environmentId, id -> environmentService.requireName(EnvironmentId.parse(id)));
+    }
+
+    private Optional<Instant> readyLease(EnvironmentId environmentId) {
+      return readyLeaseById.computeIfAbsent(environmentId, environmentService::findReadyLeaseUntil);
+    }
+
+    private Instant freshnessAt() {
+      Instant earliest = runtime.findNextEnvironmentWorkChange().orElse(null);
+      for (EnvironmentId id : runtime.listReadyToolEnvironments()) {
+        Instant leaseUntil = readyLease(id).orElse(null);
+        if (leaseUntil != null && (earliest == null || leaseUntil.isBefore(earliest))) {
+          earliest = leaseUntil;
+        }
+      }
+      return earliest;
     }
   }
 
