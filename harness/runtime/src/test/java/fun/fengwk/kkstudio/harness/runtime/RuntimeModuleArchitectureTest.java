@@ -6,10 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
-
 import java.io.IOException;
-import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,17 +25,6 @@ class RuntimeModuleArchitectureTest {
     assertFalse(
         source.contains("fun.fengwk.kkstudio.harness.runtime.processor."),
         "manual compaction control must not depend on processor internals");
-
-    List<String> publicOperations =
-        Stream.of(ThreadProcessor.class.getDeclaredMethods())
-            .filter(method -> Modifier.isPublic(method.getModifiers()))
-            .map(method -> method.getName())
-            .sorted()
-            .toList();
-    assertEquals(
-        List.of("process"),
-        publicOperations,
-        "ThreadProcessor public operations must be limited to claimed THREAD work reduction");
   }
 
   /** 权限路径实现迁出后，内核源码不再引用 JGit。 */

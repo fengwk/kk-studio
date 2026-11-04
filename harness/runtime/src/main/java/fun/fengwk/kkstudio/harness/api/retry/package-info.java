@@ -8,6 +8,6 @@
  * 失败回答是否进入重试预算，不是第二个预算。
  *
  * <p>两个值都只做输入校验与纯派生，不读时钟、不持有 durable 状态；一次失败是否真正重试由 {@code runtime.retry} 的判定实现结合错误可重试性与已消耗 attempt
- * 决定，部署配置的现读端口在 {@code fun.fengwk.kkstudio.harness.spi.retry}。
+ * 决定，部署配置通过 JDK {@code Supplier}/{@code Function} 在每个判定点现读。
  */
 package fun.fengwk.kkstudio.harness.api.retry;

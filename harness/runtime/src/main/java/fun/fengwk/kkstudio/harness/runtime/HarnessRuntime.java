@@ -273,7 +273,7 @@ public final class HarnessRuntime {
     }
     store.transaction(
         tx -> {
-          SessionDeletion.delete(tx, ids, deleteRelations, releaseRefs);
+          SessionDeletion.delete(tx, ids, deleteRelations, releaseRefs, driverRegistry);
           return null;
         });
   }

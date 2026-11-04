@@ -114,7 +114,7 @@ export function useIssueActionRunner({
   const executeIssueAction = async (
     kind: IssueActionKind,
     requestKey: string,
-    payload: Record<string, unknown>,
+    payload: PendingIssueAction['payload'],
     runApi: (expectedVersion: string) => Promise<unknown>,
     onExplicitSuccess: () => void,
   ) => {
@@ -181,7 +181,7 @@ export function useIssueActionRunner({
           await api.transitionIssue(issue.id, {
             expectedVersion,
             requestKey,
-            toState: (payload as { toState: string }).toState,
+            toState: payload.toState,
           })
           break
         case 'RECOVER':
@@ -194,30 +194,30 @@ export function useIssueActionRunner({
           await api.blockIssue(issue.id, {
             expectedVersion,
             requestKey,
-            reason: (payload as { reason: string }).reason,
+            reason: payload.reason,
           })
           break
         case 'STOP':
           await api.stopIssue(issue.id, {
             expectedVersion,
             requestKey,
-            detail: (payload as { detail: string | null }).detail,
+            detail: payload.detail,
           })
           break
         case 'RESET_BUDGET':
           await api.resetStageBudget(issue.id, {
             expectedVersion,
             requestKey,
-            state: (payload as { state: string }).state,
-            maxRuns: (payload as { maxRuns: number }).maxRuns,
+            state: payload.state,
+            maxRuns: payload.maxRuns,
           })
           break
         case 'ACTIVITY':
           await api.appendIssueActivity(issue.id, {
             expectedVersion,
             requestKey,
-            kind: (payload as { kind: 'COMMENT' | 'INSTRUCTION' }).kind,
-            body: (payload as { body: string }).body,
+            kind: payload.kind,
+            body: payload.body,
           })
           break
       }

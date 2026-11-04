@@ -1,15 +1,13 @@
 package fun.fengwk.kkstudio.harness.api.entry;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.util.Iterator;
 import java.util.Objects;
@@ -27,12 +25,7 @@ public record ExecutionSelection(String driver, String settingsJson) {
   private static final Pattern DRIVER_PATTERN = Pattern.compile("^[a-z][a-z0-9-]{0,31}$");
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
   public ExecutionSelection {
     driver = requireCanonicalDriver(driver, "driver");

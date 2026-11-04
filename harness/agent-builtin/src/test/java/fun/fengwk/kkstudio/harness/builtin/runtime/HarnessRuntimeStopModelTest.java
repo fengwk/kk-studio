@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
@@ -123,7 +124,7 @@ class HarnessRuntimeStopModelTest {
     assertFalse(
         store
             .transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, baseline.modelId())))
             .isPresent());
   }
 
@@ -273,7 +274,7 @@ class HarnessRuntimeStopModelTest {
     assertFalse(
         store
             .transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, baseline.modelId())))
             .isPresent());
   }
 
@@ -357,7 +358,7 @@ class HarnessRuntimeStopModelTest {
     for (WorkTarget target :
         List.of(
             new WorkTarget(WorkTargetType.THREAD, baseline.threadId()),
-            new WorkTarget(WorkTargetType.MODEL, baseline.modelId()),
+            new WorkTarget(BuiltinWorkType.MODEL, baseline.modelId()),
             new WorkTarget(WorkTargetType.TOOL, ready),
             new WorkTarget(WorkTargetType.TOOL, running))) {
       assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
@@ -447,7 +448,7 @@ class HarnessRuntimeStopModelTest {
     assertTrue(
         store
             .transaction(
-                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+                tx -> tx.work().find(new WorkTarget(BuiltinWorkType.MODEL, baseline.modelId())))
             .isEmpty());
     assertTrue(
         store

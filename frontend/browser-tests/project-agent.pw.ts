@@ -234,10 +234,8 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: createIssueDetail() })
           return
         }
-        if (path === `/api/issues/${ISSUE_ID}/activities`) {
-          if (method === 'POST') {
-            issueActivities.push(route.request().postDataJSON())
-          }
+        if (path === `/api/issues/${ISSUE_ID}/activities` && method === 'POST') {
+          issueActivities.push(route.request().postDataJSON())
           await route.fulfill({ json: { status: 200, data: [] } })
           return
         }

@@ -238,92 +238,108 @@ comment on column agent_model_group_cooldown.group_version is
 -- -----------------------------------------------------------------------------
 -- Platform 全局 Skill Package
 --
--- Skill 正文、references、scripts 与 assets 全部保留在 Git：Platform 每个 packageName 只
--- 保存一行——不可变 repository URL、只用于检查候选更新的 branch、人工确认的 exact current
--- commit、最近观察到的 branch HEAD 与检查结果，以及从 current commit 派生的 Skill
--- manifest JSON。repository URL 创建后不可改，更换仓库要使用新的 Package。
+-- 技能包是「名称 + 当前版本」：当前版本 = 版本号 + 一份服务端规范化归档 + 从归档读出的
+-- Skill 清单。每个包只保留当前版本；发布是短事务内的 CAS 切换，旧归档的引用在同一事务
+-- 内释放。Git 渠道的仓库事实单独一行；上传渠道的包没有 Git 事实行。
 --
--- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
+-- Package 名与 SkillNames 共用 Agent Skills 短名规则。
 -- -----------------------------------------------------------------------------
 
 create table skill_package (
-    package_name         varchar(128)  not null,
-    description          text,
-    repository_url       text          not null,
-    branch               varchar(255)  not null,
-    current_commit       varchar(64)   not null,
-    observed_head_commit varchar(64),
-    head_checked_at      timestamptz(3),
-    head_check_error     text,
-    skills               jsonb         not null default '[]'::jsonb,
-    token                text,
-    version              bigint        not null default 0,
-    create_time          timestamptz(3) not null default current_timestamp,
-    update_time          timestamptz(3) not null default current_timestamp,
+    package_name     varchar(64)    not null,
+    description      text,
+    package_version  varchar(128)   not null,
+    artifact_blob_id uuid           not null,
+    manifest         jsonb          not null,
+    published_at     timestamptz(3) not null,
+    version          bigint         not null default 0,
+    create_time      timestamptz(3) not null default current_timestamp,
+    update_time      timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
-        package_name = btrim(package_name)
-        and char_length(package_name) > 0
-        and package_name !~ '[[:cntrl:]]'
-        and position(':' in package_name) = 0
-        and position('/' in package_name) = 0
-        and position('@' in package_name) = 0
-        and position('\' in package_name) = 0
+        package_name collate "C" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
     ),
     constraint ck_skill_package_description check (
         description is null
-        or (description = btrim(description) and char_length(description) > 0)
+        or (
+            description = btrim(description)
+            and char_length(description) > 0
+            and char_length(description) <= 1024
+        )
     ),
-    constraint ck_skill_package_repository_url check (
+    constraint ck_skill_package_version_text check (
+        package_version = btrim(package_version)
+        and char_length(package_version) between 1 and 128
+        and package_version !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_package_manifest check (jsonb_typeof(manifest) = 'object'),
+    constraint ck_skill_package_published_at check (published_at is not null),
+    constraint ck_skill_package_version check (version >= 0),
+    constraint ck_skill_package_time_order check (update_time >= create_time)
+);
+
+comment on table skill_package is 'Platform 全局 Skill Package 当前版本：每个 packageName 恰一行，保存当前版本号、规范化 ZIP 归档引用、从归档读出的 Skill 清单与发布时刻；不保留历史版本';
+comment on column skill_package.package_name is 'package 名（主键；1–64 个小写字母或数字，以单个连字符分隔）';
+comment on column skill_package.description is '可空 package 描述；去边缘空白后 1–1024 字符，null 表示未填写';
+comment on column skill_package.package_version is '当前版本号：Git 渠道为 commit SHA，上传渠道为用户填写的文本（1–128 字符，无控制字符）';
+comment on column skill_package.artifact_blob_id is '当前版本规范化 ZIP 归档的 storage_blob 引用；发布切换时原子替换并在同一事务释放旧引用';
+comment on column skill_package.manifest is '从最终 ZIP 读出的 Skill 清单（JSON object {skills:[{name,description}]}，按 name 排序）；不信任客户端提交的结构';
+comment on column skill_package.published_at is '当前版本发布时间（毫秒精度）';
+comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
+comment on column skill_package.create_time is '创建时间（毫秒精度）';
+comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+
+create table skill_package_git_source (
+    package_name   varchar(64)   not null,
+    repository_url text          not null,
+    branch         varchar(255)  not null,
+    token          text,
+    head_commit    varchar(64)   not null,
+    checked_at     timestamptz(3) not null,
+    check_error    text,
+    constraint pk_skill_package_git_source primary key (package_name),
+    constraint fk_skill_package_git_source_package foreign key (package_name)
+        references skill_package (package_name) on delete cascade,
+    constraint ck_skill_package_git_source_repository_url check (
         repository_url = btrim(repository_url)
         and repository_url ~ '^[a-z][a-z0-9+.-]*://[^[:space:]]+$'
         and char_length(repository_url) <= 2048
         and repository_url !~ '[[:cntrl:]]'
         and repository_url !~ '://[^/[:space:]]*@'
     ),
-    constraint ck_skill_package_branch check (
+    constraint ck_skill_package_git_source_branch check (
         branch = btrim(branch)
         and char_length(branch) > 0
         and branch !~ '[[:cntrl:]]'
     ),
-    constraint ck_skill_package_current_commit check (
-        current_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
-    ),
-    constraint ck_skill_package_observed_head_commit check (
-        observed_head_commit is null
-        or observed_head_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
-    ),
-    constraint ck_skill_package_head_check_error check (
-        head_check_error is null
-        or (
-            head_check_error = btrim(head_check_error)
-            and char_length(head_check_error) > 0
-            and octet_length(head_check_error) <= 4096
-        )
-    ),
-    constraint ck_skill_package_skills check (jsonb_typeof(skills) = 'array'),
-    constraint ck_skill_package_token check (
+    constraint ck_skill_package_git_source_token check (
         token is null
         or length(token) > 0
     ),
-    constraint ck_skill_package_version check (version >= 0),
-    constraint ck_skill_package_time_order check (update_time >= create_time)
+    constraint ck_skill_package_git_source_head_commit check (
+        head_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
+    ),
+    constraint ck_skill_package_git_source_check_error check (
+        check_error is null
+        or (
+            check_error = btrim(check_error)
+            and char_length(check_error) > 0
+            and octet_length(check_error) <= 4096
+        )
+    )
 );
 
-comment on table skill_package is 'Platform 全局 Skill Package 权威行：每个 packageName 恰一行，内容保存在 Git，数据库只保存不可变仓库事实、人工确认的 exact commit、branch 检查观察值与派生的 Skill manifest';
-comment on column skill_package.package_name is 'package 名（主键与不可变路由身份；非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
-comment on column skill_package.description is '可空 package 描述；null 表示未填写';
-comment on column skill_package.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
-comment on column skill_package.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
-comment on column skill_package.current_commit is '人工确认的 exact Git object id（40 或 64 位小写 hex），与 skills 在同一次 CAS 中原子切换';
-comment on column skill_package.observed_head_commit is '最近一次成功检查到的 branch HEAD（40 或 64 位小写 hex）；从未成功检查时为 null';
-comment on column skill_package.head_checked_at is '最近一次检查时间（毫秒精度）；从未检查时为 null';
-comment on column skill_package.head_check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
-comment on column skill_package.skills is '从 current_commit 派生的 Skill manifest（JSON array，元素为 {name, description} 并按 name 排序）；元素形状由应用严格验证';
-comment on column skill_package.token is '私有仓库访问令牌；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回';
-comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
-comment on column skill_package.create_time is '创建时间（毫秒精度）';
-comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
+create index idx_skill_package_git_source_head_commit
+    on skill_package_git_source (head_commit);
+
+comment on table skill_package_git_source is 'Git 渠道 Skill Package 的仓库事实：只有 Git 渠道的包才有这一行；上传渠道的包没有';
+comment on column skill_package_git_source.package_name is '所属 package（主键，随 skill_package 删除级联）';
+comment on column skill_package_git_source.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
+comment on column skill_package_git_source.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
+comment on column skill_package_git_source.token is '私有仓库访问令牌；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回，也不下发给 Daemon';
+comment on column skill_package_git_source.head_commit is '最近一次检查到的 branch HEAD（40 或 64 位小写 hex）；发布该 commit 后与 package_version 一致';
+comment on column skill_package_git_source.checked_at is '最近一次检查时间（毫秒精度）';
+comment on column skill_package_git_source.check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
 
 -- -----------------------------------------------------------------------------
 -- 构建期 Plugin 的普通配置与凭据
@@ -772,7 +788,7 @@ comment on column environment_connection.owner_node_id is '当前持有该连接
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
 comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
-comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建同步投影（JSON array，元素含 installed commit、稳定 path、状态与有界错误）；新的 READY 先清空再全量同步，写回必须命中 owner/lease fence';
+comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建安装投影（JSON array，元素为 {packageName, installedSha256, localPath, error}）；连线就绪后先清空再由全量对账回填，写回必须命中 owner/lease fence';
 comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
 comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
@@ -851,7 +867,7 @@ insert into system_setting (id, config) values (
 
 -- Harness Runtime durable schema.
 --
--- 所有 Harness 生成的持久实体 ID（Session / Entry / Thread / ThreadCommand client id / ModelInvocation /
+-- 所有持久实体 ID（Session / Entry / Thread / ThreadCommand client id / Builtin ModelInvocation /
 -- ToolInvocation / WorkTarget）均为 PostgreSQL uuid，由 HarnessStore 注入的 Supplier<UUID> 生成（生产：
 -- UUID::randomUUID），本 schema 不提供任何序列。ThreadCommand 无代理主键，身份为 (thread_id, sequence)。
 -- 时间列统一使用毫秒精度 timestamptz(3)，与 HarnessStore 的时间精度契约一致。
@@ -1122,7 +1138,10 @@ create index idx_harness_thread_command_stop_request
 
 comment on index idx_harness_thread_command_stop_request is 'Stop 幂等键：(thread_id, stop_request_id) 按 sequence 升序汇总被该 stopRequestId 取消的 Command';
 
-create table harness_model_invocation (
+------------------------------------------------------------------------------
+-- 2a. Platform Builtin model invocation (depends on Harness Thread and Entry)
+------------------------------------------------------------------------------
+create table builtin_model_invocation (
     id uuid primary key,
     thread_id uuid not null,
     turn_start_entry_id uuid not null,
@@ -1144,16 +1163,16 @@ create table harness_model_invocation (
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     provider_replay_state jsonb,
-    constraint fk_harness_model_invocation_thread foreign key (thread_id)
+    constraint fk_builtin_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
-    constraint fk_harness_model_invocation_turn_start foreign key (turn_start_entry_id)
+    constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
         references harness_entry (id),
-    constraint fk_harness_model_invocation_request_head foreign key (request_head_entry_id)
+    constraint fk_builtin_model_invocation_request_head foreign key (request_head_entry_id)
         references harness_entry (id),
-    constraint fk_harness_model_invocation_result foreign key (result_entry_id)
+    constraint fk_builtin_model_invocation_result foreign key (result_entry_id)
         references harness_entry (id),
-    constraint uk_harness_model_invocation_turn unique (thread_id, turn_start_entry_id),
-    constraint ck_harness_model_invocation_status check (
+    constraint uk_builtin_model_invocation_turn unique (thread_id, turn_start_entry_id),
+    constraint ck_builtin_model_invocation_status check (
         status in (
             'READY',
             'RUNNING',
@@ -1163,10 +1182,10 @@ create table harness_model_invocation (
             'UNKNOWN'
         )
     ),
-    constraint ck_harness_model_invocation_terminal_facts check (
+    constraint ck_builtin_model_invocation_terminal_facts check (
         result is null or error is null
     ),
-    constraint ck_harness_model_invocation_provider_replay_state check (
+    constraint ck_builtin_model_invocation_provider_replay_state check (
         provider_replay_state is null
         or (
             jsonb_typeof(provider_replay_state) = 'object'
@@ -1177,31 +1196,34 @@ create table harness_model_invocation (
     )
 );
 
-comment on table harness_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
-comment on column harness_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
-comment on column harness_model_invocation.thread_id is '所属 Thread';
-comment on column harness_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
-comment on column harness_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
-comment on column harness_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
-comment on column harness_model_invocation.status is '生命周期状态';
-comment on column harness_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
-comment on column harness_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
-comment on column harness_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
-comment on column harness_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
-comment on column harness_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
-comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
-comment on column harness_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
-comment on column harness_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
-comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
-comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column harness_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
+comment on table builtin_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
+comment on column builtin_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
+comment on column builtin_model_invocation.thread_id is '所属 Thread';
+comment on column builtin_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
+comment on column builtin_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
+comment on column builtin_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
+comment on column builtin_model_invocation.status is '生命周期状态';
+comment on column builtin_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
+comment on column builtin_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
+comment on column builtin_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
+comment on column builtin_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
+comment on column builtin_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
+comment on column builtin_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
+comment on column builtin_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
+comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
+comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
+comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
+comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
 
-create unique index uk_harness_model_invocation_result
-    on harness_model_invocation (result_entry_id)
+create unique index uk_builtin_model_invocation_result
+    on builtin_model_invocation (result_entry_id)
     where result_entry_id is not null;
 
-comment on index uk_harness_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
+comment on index uk_builtin_model_invocation_result is 'resultEntryId 全局唯一（非 null 时）';
 
+------------------------------------------------------------------------------
+-- 2b. Harness runtime execution protocol (continued)
+------------------------------------------------------------------------------
 create table harness_tool_invocation (
     id uuid primary key,
     thread_id uuid not null,
@@ -1305,7 +1327,7 @@ create index idx_harness_tool_invocation_pending
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
--- Durable Work：全部后台调度共用的唯一 mailbox 表，各调度目标按 target_type 区分；
+-- Durable Work：全部后台调度共用的唯一 mailbox 表。各模块定义自己的 target_type；
 -- due、租约与 wake 围栏一律以数据库时钟判定。
 create table durable_work (
     target_type varchar(16) not null,
@@ -1319,7 +1341,7 @@ create table durable_work (
     constraint fk_durable_work_environment foreign key (required_environment_id)
         references environment (id) on delete restrict,
     constraint ck_durable_work_target_type check (
-        target_type in ('THREAD', 'MODEL', 'AGENT', 'TOOL', 'ISSUE', 'CANVAS_RUN')
+        target_type ~ '^[A-Z][A-Z0-9_]{0,15}$'
     ),
     constraint ck_durable_work_lease_pair check (
         (lease_token is null) = (lease_until is null)
@@ -1327,20 +1349,17 @@ create table durable_work (
     constraint ck_durable_work_lease_token check (
         lease_token is null
         or (length(lease_token) > 0 and btrim(lease_token) = lease_token)
-    ),
-    constraint ck_durable_work_required_environment check (
-        required_environment_id is null or target_type in ('TOOL', 'AGENT')
     )
 );
 
 comment on table durable_work is 'Durable Work：一个调度 target 的 mailbox 状态；wake_version 递增防止旧 worker 完成时吞掉新的 wake';
-comment on column durable_work.target_type is 'target 类型（THREAD/MODEL/AGENT/TOOL/ISSUE/CANVAS_RUN），决定由哪个 dispatcher 领取';
+comment on column durable_work.target_type is '模块定义的 target 类型，1–16 个大写字母、数字或下划线，首字符为字母';
 comment on column durable_work.target_id is 'target 实体的 UUID（与 target_type 构成主键）';
 comment on column durable_work.available_at is '最早可被 claim 的时间（毫秒精度）';
 comment on column durable_work.wake_version is 'wake 计数（从 1 递增）';
 comment on column durable_work.lease_token is '当前 lease token（与 lease_until 同时存在或同时缺失）';
 comment on column durable_work.lease_until is '当前 lease 到期时间（毫秒精度）';
-comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID（仅 TOOL/AGENT 可非空；非空时仅持有该 environment READY 连接租约的节点可 claim）';
+comment on column durable_work.required_environment_id is '执行该 Work 所需 Environment 的全局唯一 UUID；非空时仅持有该 environment READY 连接租约的节点可 claim';
 
 create index idx_durable_work_available
     on durable_work (available_at, target_type, target_id);
@@ -1503,7 +1522,7 @@ create table harness_execution_exit (
         char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
     ),
     constraint ck_harness_execution_exit_kind check (
-        (kind in ('MODEL', 'TOOL', 'AGENT') and parent_execution_id is null and environment_id is null)
+        (kind in ('DRIVER', 'TOOL') and parent_execution_id is null and environment_id is null)
         or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id and environment_id is not null)
     ),
     constraint ck_harness_execution_exit_state check (
@@ -1513,7 +1532,7 @@ create table harness_execution_exit (
     ),
     constraint ck_harness_execution_exit_kind_state check (
         state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
-        or (kind in ('MODEL', 'TOOL', 'AGENT') and state = 'STUDIO_EXITED')
+        or (kind in ('DRIVER', 'TOOL') and state = 'STUDIO_EXITED')
         or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
     ),
     constraint ck_harness_execution_exit_time check (
@@ -1525,11 +1544,11 @@ create table harness_execution_exit (
 comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
 comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
 comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
-comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
+comment on column harness_execution_exit.invocation_id is '关联的逻辑 Driver 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'MODEL、TOOL、AGENT 或挂在本地 TOOL/AGENT 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 AGENT 执行代次；本地执行为空';
+comment on column harness_execution_exit.kind is 'DRIVER、TOOL 或挂在本地 TOOL/DRIVER 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 或 DRIVER 执行代次；本地执行为空';
 comment on column harness_execution_exit.environment_id is 'REMOTE 执行关联的远端 Environment 标识；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
@@ -1903,6 +1922,7 @@ create table storage_blob (
     width         integer,
     height        integer,
     duration_ms   bigint,
+    archive_index jsonb,
     ref_count     bigint         not null default 0,
     state         varchar(16)    not null default 'ACTIVE',
     created_at    timestamptz(3) not null default current_timestamp,
@@ -1915,6 +1935,9 @@ create table storage_blob (
         width is null or (width > 0 and height > 0)
     ),
     constraint ck_storage_blob_duration_positive check (duration_ms is null or duration_ms > 0),
+    constraint ck_storage_blob_archive_index check (
+        archive_index is null or jsonb_typeof(archive_index) = 'object'
+    ),
     constraint ck_storage_blob_state_ref_count check (
         (state = 'ACTIVE' and ref_count > 0) or (state = 'DELETING' and ref_count = 0)
     )
@@ -1923,6 +1946,13 @@ create table storage_blob (
 create unique index uk_storage_blob_active_hash
     on storage_blob (sha256, size_bytes)
     where state = 'ACTIVE';
+
+comment on column storage_blob.archive_index is
+    '服务端校验过的 ZIP 归档条目索引（{entries:[{path,size,dataOffset,compressedSize,crc32}]}）；null 表示不是服务端生成的归档';
+
+alter table skill_package
+    add constraint fk_skill_package_artifact
+        foreign key (artifact_blob_id) references storage_blob (id) on delete restrict;
 
 create table storage_upload (
     id                  uuid           primary key,

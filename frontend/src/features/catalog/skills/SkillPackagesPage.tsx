@@ -18,8 +18,8 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import type {
-  SkillPackageCreateDTO,
-  SkillPackageDTO,
+  SkillPackageDetailDTO,
+  SkillPackageGitCreateDTO,
   SkillPackageEditDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -30,10 +30,30 @@ function formatCommit(commit: string | null | undefined): string {
   return commit.length > 10 ? commit.slice(0, 10) : commit
 }
 
+type DerivedCheckStatus = 'CHECK_FAILED' | 'UPDATE_AVAILABLE' | 'UP_TO_DATE' | 'UNCHECKED'
+
+function deriveCheckStatus(pkg: {
+  headCheckError?: string | null
+  updateAvailable?: boolean
+  headCheckedAt?: number | null
+  headCommit?: string | null
+}): DerivedCheckStatus {
+  if (pkg.headCheckError) {
+    return 'CHECK_FAILED'
+  }
+  if (pkg.updateAvailable) {
+    return 'UPDATE_AVAILABLE'
+  }
+  if (pkg.headCheckedAt || pkg.headCommit) {
+    return 'UP_TO_DATE'
+  }
+  return 'UNCHECKED'
+}
+
 /**
  * 检查状态只映射到共享 Badge 的语义：ok=success、warning=warning、error=danger。
  */
-function checkStatusTone(status: string): BadgeTone {
+function checkStatusTone(status: DerivedCheckStatus): BadgeTone {
   switch (status) {
     case 'UP_TO_DATE':
       return 'success'
@@ -47,15 +67,11 @@ function checkStatusTone(status: string): BadgeTone {
   }
 }
 
-const CHECK_STATUS_LABEL_KEYS = {
+const CHECK_STATUS_LABEL_KEYS: Record<DerivedCheckStatus, TranslationKey> = {
   UNCHECKED: 'ai.skillPackages.status.UNCHECKED',
   UP_TO_DATE: 'ai.skillPackages.status.UP_TO_DATE',
   UPDATE_AVAILABLE: 'ai.skillPackages.status.UPDATE_AVAILABLE',
   CHECK_FAILED: 'ai.skillPackages.status.CHECK_FAILED',
-} as const satisfies Record<string, TranslationKey>
-
-function isCheckStatus(status: string): status is keyof typeof CHECK_STATUS_LABEL_KEYS {
-  return Object.hasOwn(CHECK_STATUS_LABEL_KEYS, status)
 }
 
 export function SkillPackagesPage() {
@@ -65,17 +81,17 @@ export function SkillPackagesPage() {
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<SkillPackageDTO | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<SkillPackageDTO | null>(null)
+  const [editTarget, setEditTarget] = useState<SkillPackageDetailDTO | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<SkillPackageDetailDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [checkingPackage, setCheckingPackage] = useState<string | null>(null)
   const [updatingPackage, setUpdatingPackage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   // Query packages
-  const packagesQuery = useQuery({
+  const packagesQuery = useQuery<SkillPackageDetailDTO[]>({
     queryKey: queryKeys.skills.packages,
-    queryFn: () => agentService.listSkillPackages(),
+    queryFn: () => agentService.listSkillPackages() as Promise<SkillPackageDetailDTO[]>,
   })
 
   // Mutations
@@ -145,7 +161,7 @@ export function SkillPackagesPage() {
       (pkg) =>
         pkg.packageName.toLowerCase().includes(term) ||
         (pkg.description && pkg.description.toLowerCase().includes(term)) ||
-        pkg.repositoryUrl.toLowerCase().includes(term),
+        (pkg.git?.repositoryUrl && pkg.git.repositoryUrl.toLowerCase().includes(term)),
     )
   }, [packagesQuery.data, search])
 
@@ -159,30 +175,28 @@ export function SkillPackagesPage() {
       {filteredPackages.map((pkg) => {
         const isChecking = checkingPackage === pkg.packageName
         const isUpdating = updatingPackage === pkg.packageName
-        const checkStatusLabel = isCheckStatus(pkg.checkStatus)
-          ? t(CHECK_STATUS_LABEL_KEYS[pkg.checkStatus])
-          : pkg.checkStatus
-        const hasUpdate =
-          Boolean(pkg.observedHeadCommit) && pkg.observedHeadCommit !== pkg.currentCommit
+        const derivedStatus = deriveCheckStatus(pkg)
+        const checkStatusLabel = t(CHECK_STATUS_LABEL_KEYS[derivedStatus])
+        const hasUpdate = Boolean(pkg.updateAvailable && pkg.headCommit)
 
         // 元信息按“标识/引用 → 检查诊断 → 技能清单”组织；错误与技能清单只在有数据时出现。
         const rows: ResourceCardMetaRow[] = [
-          [t('ai.skillPackages.repositoryUrl'), pkg.repositoryUrl],
-          [t('ai.skillPackages.branch'), pkg.branch],
+          [t('ai.skillPackages.repositoryUrl'), pkg.git?.repositoryUrl ?? '—'],
+          [t('ai.skillPackages.branch'), pkg.git?.branch ?? '—'],
           [
             t('ai.skillPackages.token'),
-            pkg.hasToken
+            pkg.git?.hasToken
               ? t('ai.skillPackages.tokenConfigured')
               : t('ai.skillPackages.tokenNotConfigured'),
           ],
           [
             t('ai.skillPackages.currentCommit'),
-            <code title={pkg.currentCommit ?? undefined}>{formatCommit(pkg.currentCommit)}</code>,
+            <code title={pkg.packageVersion ?? undefined}>{formatCommit(pkg.packageVersion)}</code>,
           ],
           [
             t('ai.skillPackages.observedHeadCommit'),
-            <code title={pkg.observedHeadCommit ?? undefined}>
-              {formatCommit(pkg.observedHeadCommit)}
+            <code title={pkg.headCommit ?? undefined}>
+              {formatCommit(pkg.headCommit)}
             </code>,
           ],
           [t('ai.skillPackages.skillsCount'), String(pkg.skills.length)],
@@ -214,7 +228,7 @@ export function SkillPackagesPage() {
             title={pkg.packageName}
             subtitle={pkg.description || '—'}
             badge={
-              <Badge tone={checkStatusTone(pkg.checkStatus)} data-testid="check-status-pill">
+              <Badge tone={checkStatusTone(derivedStatus)} data-testid="check-status-pill">
                 {checkStatusLabel}
               </Badge>
             }
@@ -247,7 +261,7 @@ export function SkillPackagesPage() {
                       publishMutation.mutate({
                         name: pkg.packageName,
                         expectedVersion: pkg.version,
-                        targetCommit: pkg.observedHeadCommit!,
+                        targetCommit: pkg.headCommit!,
                       })
                     }
                   >
@@ -359,7 +373,7 @@ function CreatePackageModal({
   const [formError, setFormError] = useState<string | null>(null)
 
   const createMutation = useMutation({
-    mutationFn: (data: SkillPackageCreateDTO) => agentService.createSkillPackage(data),
+    mutationFn: (data: SkillPackageGitCreateDTO) => agentService.createSkillPackage(data),
     onSuccess,
     onError: (err: unknown) => {
       setFormError(err instanceof Error ? err.message : String(err))
@@ -391,7 +405,7 @@ function CreatePackageModal({
       return
     }
     setFormError(null)
-    const payload: SkillPackageCreateDTO = {
+    const payload: SkillPackageGitCreateDTO = {
       packageName: packageName.trim(),
       description: description.trim() || null,
       repositoryUrl: repositoryUrl.trim(),
@@ -491,13 +505,13 @@ function EditPackageModal({
   onClose,
   onSuccess,
 }: {
-  target: SkillPackageDTO
+  target: SkillPackageDetailDTO
   onClose: () => void
   onSuccess: () => void
 }) {
   const { t } = useI18n()
   const [description, setDescription] = useState(target.description ?? '')
-  const [branch, setBranch] = useState(target.branch)
+  const [branch, setBranch] = useState(target.git?.branch ?? '')
   const [token, setToken] = useState('')
   const [clearToken, setClearToken] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -564,7 +578,7 @@ function EditPackageModal({
 
             <label className="form-group">
               <FieldLabel>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
-              <TextInput value={target.repositoryUrl} disabled readOnly />
+              <TextInput value={target.git?.repositoryUrl ?? '—'} disabled readOnly />
             </label>
 
             <label className="form-group">

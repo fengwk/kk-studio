@@ -26,7 +26,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         name: 'read',
         description: 'Read file',
         inputSchemaJson: '{"type":"object","properties":{"path":{"type":"string"}}}',
-        environmentSupport: 'OPTIONAL',
+        environmentSupport: 'ROUTED',
         requiredEnvironmentId: null,
         provenance: 'builtin:read',
         state: 'SENT',
@@ -50,9 +50,10 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         description: 'dev workflow',
         path: '/opt/skills/dev-tools/dev/SKILL.md',
         delivery: 'LOCAL',
-        currentCommit: '1111111111111111111111111111111111111111',
-        observedHeadCommit: '1111111111111111111111111111111111111111',
-        installedCommit: '1111111111111111111111111111111111111111',
+        packageVersion: '1111111111111111111111111111111111111111',
+        headCommit: '1111111111111111111111111111111111111111',
+        artifactSha256: 'mock-sha256',
+        installedSha256: '1111111111111111111111111111111111111111',
         promptXml: '<skill name="dev">Run dev workflows</skill>',
       },
     ],
@@ -127,7 +128,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     // 工具标题与徽章
     expect(screen.getByText(/工具 1 纳入规划 · 1 已过滤/)).toBeInTheDocument()
     expect(screen.getByText('read')).toBeInTheDocument()
-    const readBadge = screen.getByTitle('可选环境 · OPTIONAL')
+    const readBadge = screen.getByTitle('按调用路由 · ROUTED')
     expect(readBadge).toHaveTextContent('P+E')
 
     // 过滤工具包含 ⊘ 符号与需要环境徽章
@@ -160,7 +161,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText('Currently planned tool environment')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
     expect(screen.getByText(/TOOLS 1 planned · 1 filtered/)).toBeInTheDocument()
-    expect(screen.getByTitle('Optional environment · OPTIONAL')).toBeInTheDocument()
+    expect(screen.getByTitle('Routed per call · ROUTED')).toBeInTheDocument()
     expect(screen.getByTitle('Environment required · REQUIRED')).toBeInTheDocument()
     expect(screen.getByText('SKILLS 1')).toBeInTheDocument()
     expect(screen.getByText('· local')).toBeInTheDocument()
@@ -201,7 +202,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('名称')).toBeInTheDocument()
     expect(screen.getByText('纳入当前规划 · SENT')).toBeInTheDocument()
-    expect(screen.getByText('可选环境 · OPTIONAL')).toBeInTheDocument()
+    expect(screen.getByText('按调用路由 · ROUTED')).toBeInTheDocument()
     expect(screen.getByText('builtin:read')).toHaveClass('ui-mono')
     expect(screen.getByText('builtin:read')).toBeInTheDocument()
     expect(screen.getByText('Read file')).toBeInTheDocument()
@@ -601,9 +602,10 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               description: 'platform skill',
               path: '/platform/path',
               delivery: 'PLATFORM',
-              currentCommit: '222',
-              observedHeadCommit: '222',
-              installedCommit: '222',
+              packageVersion: '222',
+              headCommit: '222',
+              artifactSha256: 'sha-222',
+              installedSha256: '222',
               promptXml: '<platform />',
             },
           }}
@@ -650,9 +652,10 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'custom',
                 path: '/path',
                 delivery: 'CUSTOM_CARRIER' as unknown as ThreadModelRequestDebugSkill['delivery'],
-                currentCommit: '111',
-                observedHeadCommit: null,
-                installedCommit: null,
+                packageVersion: '111',
+                headCommit: null,
+                artifactSha256: 'sha-111',
+                installedSha256: null,
                 promptXml: '<skill />',
               },
             ],
@@ -686,9 +689,10 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'platform delivery skill',
                 path: '/p',
                 delivery: 'PLATFORM',
-                currentCommit: '222',
-                observedHeadCommit: null,
-                installedCommit: null,
+                packageVersion: '222',
+                headCommit: null,
+                artifactSha256: 'sha-222',
+                installedSha256: null,
                 promptXml: '<skill />',
               },
               {
@@ -697,9 +701,10 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 description: 'custom carrier skill',
                 path: '/c',
                 delivery: 'S3_BUCKET' as unknown as 'LOCAL',
-                currentCommit: '333',
-                observedHeadCommit: null,
-                installedCommit: null,
+                packageVersion: '333',
+                headCommit: null,
+                artifactSha256: 'sha-333',
+                installedSha256: null,
                 promptXml: '<skill />',
               },
             ],

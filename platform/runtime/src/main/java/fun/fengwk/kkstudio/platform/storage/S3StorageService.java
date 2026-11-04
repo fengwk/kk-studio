@@ -20,6 +20,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectKeyNormalizer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -178,6 +179,33 @@ public class S3StorageService {
         response,
         new S3ObjectMetadata(
             contentLength, response.response().contentType(), response.response().eTag()));
+  }
+
+  /**
+   * 读取对象的单个字节区间（HTTP Range）。
+   *
+   * <p>只接受显式 offset/length：调用方用归档索引定位目标条目的压缩数据，读取长度以索引为准，不读取整个对象。
+   */
+  public byte[] readObjectRange(String key, long offset, long length) {
+    Assert.isTrue(offset >= 0L, "offset must be greater than or equal to 0");
+    Assert.isTrue(length > 0L, "length must be greater than 0");
+    Assert.isTrue(offset <= Long.MAX_VALUE - length, "range must not overflow");
+    Assert.isTrue(length <= Integer.MAX_VALUE, "range length is too large");
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    GetObjectRequest request =
+        GetObjectRequest.builder()
+            .bucket(properties.getBucket())
+            .key(normalizedKey)
+            .range("bytes=" + offset + "-" + (offset + length - 1))
+            .build();
+    try (ResponseInputStream<GetObjectResponse> response = s3Client.getObject(request)) {
+      byte[] data = response.readNBytes((int) length);
+      Assert.isTrue(
+          data.length == length, "S3 range response length mismatch for key: " + normalizedKey);
+      return data;
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to read S3 object range: " + normalizedKey, e);
+    }
   }
 
   public void deleteObject(String key) {

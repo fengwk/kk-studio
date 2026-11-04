@@ -3,7 +3,7 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -33,8 +33,7 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlBuiltinHarnessStore，
 装配唯一的 Builtin Driver、资源工具目录、PluginResourceGateway、HarnessRuntime、
-Harness 变更订阅源（`ThreadVersionHub` 同时充当内部观察者的纯 wake 源）与
-`HarnessChangeNotifications`、请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
+Harness 变更订阅源（`HarnessChangeNotifications` 同时充当内部观察者的纯 wake 源）、请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
 Processor、realtime 与 Environment 会话由它显式导入，不在核心类里再声明一遍。
 
 [`HarnessProcessorConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java)
@@ -87,8 +86,8 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 `model` / `variant` 不属于请求契约。Driver、模型与 Variant 的校验和引用事务见
 [Platform Catalog](platform.md#catalog)。
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
-| Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
-| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档 |
+| Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
@@ -177,7 +176,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 同源 IDE 网关在 Studio 同源下固定 `/environment-ide/{environmentId}/{viewId}/` 路由：
 按路径严格解析 canonical UUID 的 `environmentId` 与 `viewId`。跨节点控制命令经由
-[`ClusterEnvironmentIdeInternalController`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/cluster/ClusterEnvironmentIdeInternalController.java)
+[`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalController.java)
 进行 HMAC 认证与 owner 转发。
 
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
@@ -195,6 +194,12 @@ JSON API 显式返回共享的
 下载、HTML 与字节流保留原始响应，不参与信封包装。
 信封本身属于 Platform 的共享 HTTP 模型，拥有 HTTP 边界的应用模块（例如 Canvas）与控制器的归属包无关，
 都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
+
+集群内部端点（`/internal/**`）与浏览器 API 共用同一个信封和同一张领域错误到状态映射
+（[`DomainErrorStatus`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/DomainErrorStatus.java)）：
+认证失败固定 401 且 `code` 为 `UNAUTHORIZED`、不回显原因；领域失败保留 `code` 与 `errors.resource`/`errors.detail`；
+请求体超限为 413。内部端点没有请求 locale，`message` 与 `errors.detail` 使用固定的英文去敏文案，
+不把用户输入渲染进错误响应。
 
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
@@ -225,15 +230,16 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
 Thread version、Canvas revision、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
-通道与进程内 fan-out 归各自模块所有：Thread 由本模块的 `ThreadVersionHub` 承担；Canvas 的
-`CanvasVersionHub` 与其他 revision 通知语义属于 [Canvas](canvas.md#revision-通知)，Web 只把它的 channel
-登记到 LISTEN 连接并把通知与 resync 转交，再把 revision 事件转发给浏览器。
-
-Harness 的 Thread version、执行树与交互失效不在这里定义协议：组合根只取平台
+通道、payload 与进程内 fan-out 归各自生产方所有：Harness 的 Thread version、执行树与交互失效由
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
-给出的 channel 与回调绑定，消费侧
-[`ApplicationEventHub`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventHub.java)
-只依赖公开契约 `harness.api.HarnessChangeSubscriptions`。`environment_changed` 是 web 自有的环境失效：
+给出 channel 与回调绑定；Canvas revision 属于 [Canvas](canvas.md#revision-通知) 的 `CanvasVersionNotifications`；
+Project 快照失效属于 `ProjectChangeNotifications`；环境失效属于
+[`EnvironmentChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentChangeNotifications.java)。
+Web 只把生产方的 channel 登记到 LISTEN 连接，把通知与 resync 转交给生产方入口，再把事件转发给浏览器。
+
+消费侧 [`ApplicationEventHub`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventHub.java)
+只依赖公开的 Harness 契约 `harness.api.HarnessChangeSubscriptions` 与通用的
+`VersionNotificationHub` / `NotificationInvalidationSource` 机制，不持有逐领域的失效中转类。`environment_changed`
 payload 是 Environment ID，只驱动环境回读，并在同一 handler 内要求交互失效源全量 resync。
 
 `POST /api/threads/{threadId}/stream-catchup` 是浏览器追帧入口，body 为

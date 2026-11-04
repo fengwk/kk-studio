@@ -26,7 +26,8 @@ import { searchCapabilities } from './coding/search.js'
 import { processCapability } from './coding/process.js'
 import { createLspCapabilities } from './coding/lsp.js'
 import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.js'
-import { createSkillCapability } from './skill/sync.js'
+import { SkillPackageInstaller } from './skill/installer.js'
+import { createSkillReconciler } from './skill/reconcile.js'
 import { createIdeService } from './ide/service.js'
 import { handleUpdate } from './installer.js'
 
@@ -45,7 +46,6 @@ import { handleUpdate } from './installer.js'
 
 /** capability id 常量；与 EnvironmentCapabilityCatalog 对齐。 */
 const PROCESS_EXEC_ID = 'process.exec'
-const SKILL_SYNC_ID = 'skill.sync'
 
 export async function main(argv: string[]): Promise<number> {
   let args: string[]
@@ -150,7 +150,6 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       ...searchCapabilities,
       [PROCESS_EXEC_ID]: processCapability,
       ...lspGroup.capabilities,
-      [SKILL_SYNC_ID]: createSkillCapability(config),
     }
     runtime = new Runtime({
       config,
@@ -171,6 +170,11 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
         },
       },
     })
+    const skillInstaller = SkillPackageInstaller.open(config)
+    const skillReconciler = createSkillReconciler(skillInstaller, (states) => {
+      runtime?.sendSkillState(states)
+    })
+    runtime.setSkillReconciler(skillReconciler)
 
     process.once('SIGINT', onDaemonSignal)
     process.once('SIGTERM', onDaemonSignal)

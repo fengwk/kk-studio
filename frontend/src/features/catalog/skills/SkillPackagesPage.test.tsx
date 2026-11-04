@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { agentService } from '@/shared/api/agent-service'
 import { setLocale } from '@/shared/i18n'
-import type { SkillPackageDTO } from '@/shared/api/generated/contracts'
+import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -22,22 +22,51 @@ vi.mock('@/app/ai-console/AiNavigation', () => ({
   AiNavigation: () => <div data-testid="navigation-slot" />,
 }))
 
-function samplePackage(overrides: Partial<SkillPackageDTO> = {}): SkillPackageDTO {
+function samplePackage(
+  overrides: Partial<SkillPackageDetailDTO> & {
+    repositoryUrl?: string
+    branch?: string
+    hasToken?: boolean
+    checkStatus?: string
+  } = {},
+): SkillPackageDetailDTO {
+  const packageVersion = overrides.packageVersion ?? '1111111111111111111111111111111111111111'
+  const headCommit = overrides.headCommit !== undefined ? overrides.headCommit : null
+  const headCheckedAt = overrides.headCheckedAt !== undefined ? overrides.headCheckedAt : null
+  const headCheckError = overrides.headCheckError !== undefined ? overrides.headCheckError : null
+  const updateAvailable =
+    overrides.updateAvailable !== undefined
+      ? overrides.updateAvailable
+      : overrides.checkStatus === 'UPDATE_AVAILABLE'
+        ? true
+        : Boolean(headCommit && headCommit !== packageVersion)
+
+  const repositoryUrl =
+    overrides.git?.repositoryUrl ?? overrides.repositoryUrl ?? 'https://github.com/example/skills.git'
+  const branch = overrides.git?.branch ?? overrides.branch ?? 'main'
+  const hasToken = overrides.git?.hasToken ?? overrides.hasToken ?? false
+
   return {
     packageName: 'core-tools',
     description: 'Core developer skills',
-    repositoryUrl: 'https://github.com/example/skills.git',
-    branch: 'main',
-    hasToken: false,
-    currentCommit: '1111111111111111111111111111111111111111',
-    observedHeadCommit: null,
-    headCheckedAt: null,
-    headCheckError: null,
-    checkStatus: 'UNCHECKED',
+    packageVersion,
+    publishedAt: 1784505600,
     skills: [
       { name: 'dev', description: 'dev skill' },
       { name: 'bash', description: 'bash runner' },
     ],
+    source: 'GIT',
+    git: {
+      repositoryUrl,
+      branch,
+      hasToken,
+    },
+    headCommit,
+    headCheckedAt,
+    headCheckError,
+    updateAvailable,
+    artifactSha256: 'mock-sha256',
+    artifactSizeBytes: '1024',
     version: '1',
     createTime: 1784505600,
     updateTime: 1784509200,
@@ -141,9 +170,9 @@ describe('SkillPackagesPage', () => {
     const user = userEvent.setup()
     const pkgWithUpdate = samplePackage({
       packageName: 'core-tools',
-      checkStatus: 'UPDATE_AVAILABLE',
-      currentCommit: '1111111111111111111111111111111111111111',
-      observedHeadCommit: '2222222222222222222222222222222222222222',
+      updateAvailable: true,
+      packageVersion: '1111111111111111111111111111111111111111',
+      headCommit: '2222222222222222222222222222222222222222',
       version: '1',
     })
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([pkgWithUpdate])
@@ -162,7 +191,7 @@ describe('SkillPackagesPage', () => {
       expectedVersion: '1',
     })
 
-    // Update button is present because observedHeadCommit !== currentCommit
+    // Update button is present because updateAvailable && headCommit
     const updateBtn = screen.getByRole('button', { name: /发布更新.*core-tools|Update.*core-tools/i })
     await user.click(updateBtn)
 
@@ -234,7 +263,6 @@ describe('SkillPackagesPage', () => {
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([
       samplePackage({
         packageName: 'demo-pkg',
-        checkStatus: 'UNCHECKED',
         headCheckError: 'diagnostic error from git',
         skills: [{ name: 'read', description: 'file reader' }],
       }),
@@ -248,7 +276,7 @@ describe('SkillPackagesPage', () => {
 
     // 中文断言
     expect(screen.getByRole('button', { name: '创建技能包' })).toBeInTheDocument()
-    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('未检查')
+    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('检查失败')
     expect(screen.getByText('访问令牌')).toBeInTheDocument()
     expect(screen.getByText('未配置')).toBeInTheDocument()
     expect(screen.getByText('包含技能数量')).toBeInTheDocument()
@@ -266,7 +294,7 @@ describe('SkillPackagesPage', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Create Package' })).toBeInTheDocument()
-    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('Unchecked')
+    expect(screen.getByTestId('check-status-pill')).toHaveTextContent('Check failed')
     expect(screen.getByText('Access Token')).toBeInTheDocument()
     expect(screen.getByText('Not configured')).toBeInTheDocument()
     expect(screen.getByText('Skills Count')).toBeInTheDocument()
@@ -279,11 +307,31 @@ describe('SkillPackagesPage', () => {
   })
 
   it('renders all 4 status pills with localized text while retaining wire enum classes', async () => {
-    const packages: SkillPackageDTO[] = [
-      samplePackage({ packageName: 'p-unchecked', checkStatus: 'UNCHECKED' }),
-      samplePackage({ packageName: 'p-uptodate', checkStatus: 'UP_TO_DATE' }),
-      samplePackage({ packageName: 'p-updateavail', checkStatus: 'UPDATE_AVAILABLE' }),
-      samplePackage({ packageName: 'p-failed', checkStatus: 'CHECK_FAILED' }),
+    const packages: SkillPackageDetailDTO[] = [
+      samplePackage({
+        packageName: 'p-unchecked',
+        headCheckError: null,
+        updateAvailable: false,
+        headCheckedAt: null,
+        headCommit: null,
+      }),
+      samplePackage({
+        packageName: 'p-uptodate',
+        headCheckError: null,
+        updateAvailable: false,
+        headCheckedAt: 1784505600,
+        headCommit: '1111111111111111111111111111111111111111',
+      }),
+      samplePackage({
+        packageName: 'p-updateavail',
+        headCheckError: null,
+        updateAvailable: true,
+        headCommit: '2222222222222222222222222222222222222222',
+      }),
+      samplePackage({
+        packageName: 'p-failed',
+        headCheckError: 'diagnostic error from git',
+      }),
     ]
     vi.mocked(agentService.listSkillPackages).mockResolvedValue(packages)
 

@@ -1,17 +1,14 @@
 package fun.fengwk.kkstudio.harness.codec;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -29,14 +26,7 @@ public final class InvocationJsonSupport {
 
   public static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // 树搬运的自由 JSON（如 variant.protocolOptions）按 BigDecimal 读回，1e309/1e-324 与高精度小数不得退化为 Infinity
-          // / 0。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private InvocationJsonSupport() {}
 

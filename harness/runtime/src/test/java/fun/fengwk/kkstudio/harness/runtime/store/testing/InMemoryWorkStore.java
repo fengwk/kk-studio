@@ -93,9 +93,7 @@ final class InMemoryWorkStore implements WorkStore {
     tx.checkOpen();
     Instant now = tx.now();
     Objects.requireNonNull(target, "target");
-    if (requiredEnvironmentId != null
-        && target.type() != WorkTargetType.TOOL
-        && target.type() != WorkTargetType.AGENT) {
+    if (requiredEnvironmentId != null && !target.type().environmentAffinity()) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
@@ -111,39 +109,37 @@ final class InMemoryWorkStore implements WorkStore {
   }
 
   private void requireWorkOwnerLocked(WorkTarget target) {
-    UUID threadId =
-        switch (target.type()) {
-          case THREAD, AGENT -> {
-            if (!state.threads.containsKey(target.id())) {
-              throw new IllegalArgumentException("work target does not exist: " + target);
-            }
-            yield target.id();
-          }
-          case MODEL -> {
-            UUID ownerThreadId = state.driverRowOwners.get(target.id());
-            if (!state.driverRows.containsKey(target.id()) || ownerThreadId == null) {
-              throw new IllegalArgumentException("work target does not exist: " + target);
-            }
-            yield ownerThreadId;
-          }
-          case TOOL -> {
-            ToolInvocation tool = state.toolInvocations.get(target.id());
-            if (tool == null) {
-              throw new IllegalArgumentException("work target does not exist: " + target);
-            }
-            yield tool.threadId();
-          }
-        };
+    UUID threadId;
+    if (WorkTargetType.THREAD.equals(target.type())) {
+      if (!state.threads.containsKey(target.id())) {
+        throw new IllegalArgumentException("work target does not exist: " + target);
+      }
+      threadId = target.id();
+    } else if (WorkTargetType.TOOL.equals(target.type())) {
+      ToolInvocation tool = state.toolInvocations.get(target.id());
+      if (tool == null) {
+        throw new IllegalArgumentException("work target does not exist: " + target);
+      }
+      threadId = tool.threadId();
+    } else {
+      UUID ownerThreadId = state.driverRowOwners.get(target.id());
+      if (!state.driverRows.containsKey(target.id()) || ownerThreadId == null) {
+        throw new IllegalArgumentException("work target does not exist: " + target);
+      }
+      threadId = ownerThreadId;
+    }
     tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.thread(threadId));
   }
 
   private void requireTargetExists(WorkTarget target) {
-    boolean exists =
-        switch (target.type()) {
-          case THREAD, AGENT -> state.threads.containsKey(target.id());
-          case MODEL -> state.driverRows.containsKey(target.id());
-          case TOOL -> state.toolInvocations.containsKey(target.id());
-        };
+    boolean exists;
+    if (WorkTargetType.THREAD.equals(target.type())) {
+      exists = state.threads.containsKey(target.id());
+    } else if (WorkTargetType.TOOL.equals(target.type())) {
+      exists = state.toolInvocations.containsKey(target.id());
+    } else {
+      exists = state.driverRows.containsKey(target.id());
+    }
     if (!exists) {
       throw new IllegalArgumentException("work target does not exist: " + target);
     }

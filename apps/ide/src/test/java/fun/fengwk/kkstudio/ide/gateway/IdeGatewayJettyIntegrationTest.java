@@ -33,14 +33,14 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelExchange;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.TunnelStream;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.BufferedReader;
 import java.io.IOException;

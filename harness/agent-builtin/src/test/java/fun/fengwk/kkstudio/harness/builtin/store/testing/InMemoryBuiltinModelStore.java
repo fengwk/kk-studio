@@ -12,9 +12,10 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterializatio
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransaction;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
-import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,8 +24,7 @@ import java.util.UUID;
 /**
  * Builtin 私有模型视图的内存实现：与 Runtime 事务共享同一 driver row 快照、数据库时钟与锁阶梯。
  *
- * <p>Model 行与 group 成员冷却都存放在 {@link InMemoryHarnessTransaction} 的 driver row / attribute
- * 区域，因此不持有第二份状态，rollback 与按 Thread 深删除与核心完全一致。
+ * <p>Model 行存放在 {@link InMemoryHarnessTransaction} 的 driver row 区域，因此与核心共享回滚。
  *
  * <p>Builtin-specific 校验由本类实现：新 ModelInvocation 只能 READY / attempt=0 插入，保持 {@code (thread,
  * turnStartEntryId)} 唯一、requestHeadEntryId 等于 Thread 当前 head、turnStartEntryId 位于 requestHead 的
@@ -33,10 +33,6 @@ import java.util.UUID;
  * children 的模型行。核心 Store 不实现这些约束， 只提供 driver row 快照与 owner 关联。
  */
 final class InMemoryBuiltinModelStore {
-
-  /** group 成员冷却身份；typed key 避免字段拼接导致不同成员身份碰撞。 */
-  private record GroupCooldownKey(
-      String groupName, long groupVersion, String memberModelName, String memberVariant) {}
 
   private final InMemoryHarnessTransaction tx;
 
@@ -134,30 +130,6 @@ final class InMemoryBuiltinModelStore {
     tx.updateDriverRow(invocation.id(), invocation);
   }
 
-  boolean isCooling(
-      String groupName, long groupVersion, String memberModelName, String memberVariant) {
-    Instant now = tx.now();
-    return tx.driverAttribute(
-            new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant))
-        .map(Instant.class::cast)
-        .map(until -> until.isAfter(now))
-        .orElse(false);
-  }
-
-  void freeze(
-      String groupName,
-      long groupVersion,
-      String memberModelName,
-      String memberVariant,
-      Instant cooldownUntil) {
-    GroupCooldownKey key =
-        new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant);
-    Instant existing = tx.driverAttribute(key).map(Instant.class::cast).orElse(null);
-    if (existing == null || existing.isBefore(cooldownUntil)) {
-      tx.putDriverAttribute(key, cooldownUntil);
-    }
-  }
-
   boolean delete(UUID modelInvocationId) {
     ModelInvocation model =
         tx.findDriverRow(modelInvocationId)
@@ -181,6 +153,14 @@ final class InMemoryBuiltinModelStore {
       }
     }
     return tx.deleteDriverRow(modelInvocationId);
+  }
+
+  /** 指定 Thread 的 model 行，按 UUID 升序。 */
+  List<ModelInvocation> findByThread(UUID threadId) {
+    return rows().stream()
+        .filter(model -> model.threadId().equals(threadId))
+        .sorted(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR))
+        .toList();
   }
 
   /** 当前快照内已提交的 model 行，按 driver row 的迭代顺序返回。 */

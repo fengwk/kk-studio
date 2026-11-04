@@ -2,21 +2,27 @@ package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -33,6 +39,7 @@ import java.util.UUID;
  * 意图：heartbeat 只提供 round，续租必须经 LIST_VIEWS 后按 eventNode/connection/document 查询事件节点，并且只写入
  * view+doc+epoch 全匹配的 证明；查询失败、身份换代或无轮次都不能凭心跳本身续租。
  */
+@ExtendWith(OutputCaptureExtension.class)
 class IdeLeaseCoordinatorTest {
 
   private static final EnvironmentId ENV =
@@ -152,6 +159,20 @@ class IdeLeaseCoordinatorTest {
     assertTrue(transport.leases.isEmpty());
   }
 
+  /** 发送失败必须可观测且不能重放旧轮次。 */
+  @Test
+  void failedLeaseSendIsLoggedWithoutRetry(CapturedOutput output) {
+    views.response = views();
+    transport.failSend = true;
+
+    coordinator.onHeartbeat(ENV, IDENTITY, 48L);
+
+    assertEquals(1, transport.sendAttempts);
+    assertTrue(transport.leases.isEmpty());
+    assertTrue(output.getOut().contains("IDE lease send failed"));
+    assertTrue(output.getOut().contains("48"));
+  }
+
   @Test
   void concurrentHeartbeatIsCoalesced() {
     Deque<Runnable> pending = new ArrayDeque<>();
@@ -245,19 +266,19 @@ class IdeLeaseCoordinatorTest {
         EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
       throw new AssertionError("unexpected close");
     }
-
-    @Override
-    public void detachView(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-      throw new AssertionError("unexpected detach");
-    }
   }
 
-  private static final class FakeTransport implements IdeCommandTransport {
+  private static final class FakeTransport extends IdeCommandTransport {
+
+    private FakeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<DaemonIdeLease> leases = new ArrayList<>();
     private final List<DaemonConnectionIdentity> expectedIdentities = new ArrayList<>();
     private DaemonConnectionIdentity identity = IDENTITY;
+    private boolean failSend;
+    private int sendAttempts;
 
     @Override
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
@@ -274,6 +295,10 @@ class IdeLeaseCoordinatorTest {
         EnvironmentId environmentId,
         DaemonConnectionIdentity expectedIdentity,
         DaemonIdeLease lease) {
+      sendAttempts++;
+      if (failSend) {
+        throw new IllegalStateException("send failed");
+      }
       expectedIdentities.add(expectedIdentity);
       leases.add(lease);
     }
@@ -282,7 +307,11 @@ class IdeLeaseCoordinatorTest {
     public void abandonIde(UUID invocationId) {}
   }
 
-  private static final class FakeGateway implements IdeBrowserUseGateway {
+  private static final class FakeGateway extends IdeBrowserUseGateway {
+
+    private FakeGateway() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     private final Map<Group, Proofs> proofs = new HashMap<>();
     private final Set<Group> failures = new HashSet<>();

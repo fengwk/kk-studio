@@ -384,7 +384,8 @@ Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录�
 更改 Agent 契约时同步 case、fixture 与生成的前端契约。
 
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
-返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
+返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long；
+Issue 活动流通过详情接口的 `afterSequence`、`limit` 和 `nextActivityCursor` 验证有界分页。
 
 Thread 快照增量读取属于免费 L1：`thread_snapshot.incremental_read` 用缺失 Agent 的回合快速收敛，不调用模型，
 验证非法 `afterEntryId` 返回 400、祖先游标只返回其后的 Entry、游标即 head 时为空增量、非祖先游标回退完整历史。
@@ -406,7 +407,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 
 事件 L1 使用 `/api/events`：heartbeat case 校验首帧 `connected` 的
 `eventNodeId` / `connectionId` 与保活帧，Project case 验证全局失效通知。
-L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`、`skill.sync`）；
+L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`）；
 它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
@@ -492,7 +493,7 @@ Gemini implicit cache 是机会性能力，零缓存不会导致失败：**Gemin
 尚无后续观测时为 `NOT_EVALUATED`。它与 case PASS/FAIL 独立。每轮成功观测立即写入白名单 artifact，
 强缓存断言前已落盘；失败也保留此前完成轮次的数值，不输出原始 provider 配置、URL、错误或模型回复。
 
-独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
+独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
 用于测量历史断点，而非仅验证 system 前缀命中。它直接调用 Provider，不启动应用或数据库；默认只执行免费 wire 形状检查。
 已授权付费、且 `TEST_ANTHROPIC_BASE_URL` / `TEST_ANTHROPIC_API_KEY` 完整时，可显式运行：
 

@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
  *
  * <p>生产 {@link EnvironmentSessionListener} 由 web 组合根（dispatcher wake）提供；platform 不再是组合根后， 测试上下文用
  * no-op 桥接满足 {@code EnvironmentDaemonGateway} 的构造依赖。internal Thread change source 同样由 web 组合根以平台
- * {@code ThreadVersionHub} bean 提供；本测试上下文提供不产生信号的占位 bean 满足构造依赖——platform 测试从不真正等待任务完成。
+ * {@code HarnessChangeNotifications} bean 提供；本测试上下文提供不产生信号的占位 bean 满足构造依赖——platform 测试从不真正等待任务完成。
  *
  * <p>Harness 目录由测试宿主冻结已注册贡献，生产目录仍只由 web 组合根提供。
  */

@@ -5,11 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
-
 import java.time.Duration;
 
-/** Config 校验：正整毫秒 Duration、maxDispatchTasks 与三类型 lease lookup。 */
+/** Config 校验：正整毫秒 Duration 与 maxDispatchTasks。 */
 class HarnessWorkDispatcherConfigTest {
 
   private static final Duration VALID = Duration.ofMillis(10);
@@ -18,17 +16,8 @@ class HarnessWorkDispatcherConfigTest {
   void acceptsPositiveWholeMillisecondDurations() {
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
-            Duration.ofSeconds(30),
-            Duration.ofMillis(1),
-            Duration.ofSeconds(20),
-            Duration.ofMinutes(1),
-            Duration.ofSeconds(5),
-            Duration.ofMillis(500),
-            3);
-    assertEquals(Duration.ofSeconds(30), config.threadLeaseDuration());
-    assertEquals(Duration.ofMillis(1), config.modelLeaseDuration());
-    assertEquals(Duration.ofSeconds(20), config.agentLeaseDuration());
-    assertEquals(Duration.ofMinutes(1), config.toolLeaseDuration());
+            Duration.ofSeconds(30), Duration.ofSeconds(5), Duration.ofMillis(500), 3);
+    assertEquals(Duration.ofSeconds(30), config.leaseDuration());
     assertEquals(Duration.ofSeconds(5), config.periodicPollInterval());
     assertEquals(Duration.ofMillis(500), config.executorRejectionDelay());
     assertEquals(3, config.maxDispatchTasks());
@@ -38,7 +27,7 @@ class HarnessWorkDispatcherConfigTest {
   void rejectsNullZeroNegativeAndSubMillisecondDurations() {
     Duration halfMillisecond = Duration.ofNanos(500_000);
     Duration oneAndHalfMillisecond = Duration.ofNanos(1_500_000);
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 3; i++) {
       int index = i;
       Duration nullValue = null;
       Duration zero = Duration.ZERO;
@@ -69,35 +58,14 @@ class HarnessWorkDispatcherConfigTest {
     assertThrows(IllegalArgumentException.class, () -> configWithMax(-1));
   }
 
-  @Test
-  void looksUpTheLeaseDurationPerTargetType() {
-    HarnessWorkDispatcherConfig config =
-        new HarnessWorkDispatcherConfig(
-            Duration.ofSeconds(30),
-            Duration.ofSeconds(45),
-            Duration.ofSeconds(50),
-            Duration.ofSeconds(60),
-            VALID,
-            VALID,
-            1);
-    assertEquals(Duration.ofSeconds(30), config.leaseDuration(WorkTargetType.THREAD));
-    assertEquals(Duration.ofSeconds(45), config.leaseDuration(WorkTargetType.MODEL));
-    assertEquals(Duration.ofSeconds(50), config.leaseDuration(WorkTargetType.AGENT));
-    assertEquals(Duration.ofSeconds(60), config.leaseDuration(WorkTargetType.TOOL));
-    assertThrows(NullPointerException.class, () -> config.leaseDuration(null));
-  }
-
   private static HarnessWorkDispatcherConfig configWith(
       int index, Duration value, Duration fallback) {
-    Duration[] durations =
-        new Duration[] {fallback, fallback, fallback, fallback, fallback, fallback};
+    Duration[] durations = new Duration[] {fallback, fallback, fallback};
     durations[index] = value;
-    return new HarnessWorkDispatcherConfig(
-        durations[0], durations[1], durations[2], durations[3], durations[4], durations[5], 1);
+    return new HarnessWorkDispatcherConfig(durations[0], durations[1], durations[2], 1);
   }
 
   private static HarnessWorkDispatcherConfig configWithMax(int maxDispatchTasks) {
-    return new HarnessWorkDispatcherConfig(
-        VALID, VALID, VALID, VALID, VALID, VALID, maxDispatchTasks);
+    return new HarnessWorkDispatcherConfig(VALID, VALID, VALID, maxDispatchTasks);
   }
 }

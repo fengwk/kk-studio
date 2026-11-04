@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
@@ -297,6 +296,41 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(encoded, parser.encode(parser.decode(encoded)));
   }
 
+  /** 校验后的原文与运行时 canonical 值各自保留，多个 variant 不得串用选项。 */
+  @Test
+  void preservesRawOptionsAndAssociatesCanonicalOptionsWithEachVariant() {
+    String config =
+        validConfig()
+            .replace(
+                VARIANT_JSON,
+                "\"variants\":[{\"id\":\"quality\",\"protocolOptionsJson\":"
+                    + "\"  { \\\"n\\\":1.100 }  \"},{\"id\":\"fast\","
+                    + "\"protocolOptionsJson\":\"{\\\"n\\\":1e-324}\"}],");
+    AgentModelConfigDTO dto = parser.decode(config);
+    assertEquals("{ \"n\":1.100 }", dto.getVariants().get(0).getProtocolOptionsJson());
+    var fromDto = parser.parse(dto).variants();
+    var fromJson = parser.parse(config).variants();
+    assertEquals(fromDto, fromJson);
+    assertEquals("{\"n\":1.1}", fromDto.get(0).protocolOptions().canonicalJson());
+    assertEquals(
+        new BigDecimal("1e-324"),
+        fromDto.get(1).protocolOptions().copyOptions().path("n").decimalValue());
+  }
+
+  /** 选项校验仍早于默认 variant 和定价校验，且不得泄露原文。 */
+  @Test
+  void reportsOptionsBeforeLaterValidationFailures() {
+    AgentModelConfigDTO dto = parser.decode(validConfig());
+    dto.getVariants().get(0).setProtocolOptionsJson("{\"secret\":1,\"secret\":2}");
+    dto.setDefaultVariant("missing");
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(dto));
+    assertEquals(
+        "invalid agent model: config.variants[0].protocolOptionsJson is invalid",
+        error.getMessage());
+    assertNull(error.getCause());
+  }
+
   /** HTTP 使用的普通 mapper 也只能收取真正的 JSON string token；校验后可存回 config 并作为 string 响应。 */
   @Test
   void acceptsOnlyStringTokenAtHttpDtoBoundary() throws Exception {
@@ -466,8 +500,7 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(runtime.contains("1.234567890123456789E+45"), runtime);
     // 协议编码器实际使用的树仍是 JSON 数字；写成 wire 后不能变为字符串或 JS 浮点近似值。
     var wireOptions =
-        ProviderProtocolOptionsJson.copyOfOptions(
-            conventionParser.parse(encoded).variants().get(0));
+        conventionParser.parse(encoded).variants().get(0).protocolOptions().copyOptions();
     assertEquals(new BigInteger("9007199254740993"), wireOptions.path("large").bigIntegerValue());
     assertEquals(
         new BigInteger("9223372036854775808"), wireOptions.path("beyond").bigIntegerValue());

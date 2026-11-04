@@ -19,18 +19,19 @@
     "@bufbuild/protobuf": "2.16.0",
     "@vscode/ripgrep": "1.18.0",
     "diff": "9.0.0",
-    "isomorphic-git": "1.43.3",
     "jsonc-parser": "3.3.1",
     "koffi": "3.3.3",
     "tar": "7.5.22",
     "undici": "8.11.2",
     "vscode-jsonrpc": "9.0.3",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "yauzl": "2.10.0"
   },
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "2.16.0",
     "@types/node": "24.19.2",
     "@types/ws": "8.18.2",
+    "@types/yauzl": "2.10.3",
     "@vitest/coverage-v8": "5.0.3",
     "typescript": "7.0.2",
     "vitest": "5.0.3"

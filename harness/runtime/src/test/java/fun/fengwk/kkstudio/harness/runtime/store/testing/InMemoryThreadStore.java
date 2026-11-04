@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -20,6 +21,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Thread 聚合原语：Thread 行携带当前 projection，更新必须已锁定且通过 {@link ThreadState#validateTransition}。
@@ -201,7 +203,7 @@ final class InMemoryThreadStore implements ThreadStore {
   }
 
   @Override
-  public int delete(List<UUID> threadIds) {
+  public int delete(List<UUID> threadIds, DriverThreadDeletion driverDeletion) {
     tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");
     InMemoryHarnessLocks locks = tx.locks();
@@ -251,14 +253,10 @@ final class InMemoryThreadStore implements ThreadStore {
       locks.lock(InMemoryHarnessLocks.LockKey.command(command.threadId(), command.sequence()));
     }
 
-    List<UUID> driverRowIds =
-        state.driverRows.keySet().stream()
-            .filter(id -> threadIdSet.contains(state.driverRowOwners.get(id)))
-            .sorted(UuidOrder.COMPARATOR)
-            .toList();
-    for (UUID driverRowId : driverRowIds) {
-      locks.lock(InMemoryHarnessLocks.LockKey.driver(driverRowId));
-    }
+    Objects.requireNonNull(driverDeletion, "driverDeletion");
+    List<WorkTarget> driverTargets = driverDeletion.lockForDeletion(tx, copied);
+    Set<UUID> driverTargetIds =
+        driverTargets.stream().map(WorkTarget::id).collect(Collectors.toUnmodifiableSet());
 
     List<ToolInvocation> tools =
         state.toolInvocations.values().stream()
@@ -275,10 +273,11 @@ final class InMemoryThreadStore implements ThreadStore {
         state.works.keySet().stream()
             .filter(
                 target ->
-                    (target.type() == WorkTargetType.THREAD && threadIdSet.contains(target.id()))
-                        || (target.type() == WorkTargetType.MODEL
-                            && driverRowIds.contains(target.id()))
-                        || (target.type() == WorkTargetType.TOOL && toolIds.contains(target.id())))
+                    (WorkTargetType.THREAD.equals(target.type())
+                            && threadIdSet.contains(target.id()))
+                        || driverTargetIds.contains(target.id())
+                        || (WorkTargetType.TOOL.equals(target.type())
+                            && toolIds.contains(target.id())))
             .sorted(InMemoryHarnessLocks.WORK_LOCK_ORDER)
             .toList();
     for (WorkTarget target : workTargets) {
@@ -294,10 +293,7 @@ final class InMemoryThreadStore implements ThreadStore {
     for (ToolInvocation tool : tools) {
       state.toolInvocations.remove(tool.id());
     }
-    for (UUID driverRowId : driverRowIds) {
-      state.driverRows.remove(driverRowId);
-      state.driverRowOwners.remove(driverRowId);
-    }
+    driverDeletion.deleteLocked(tx, copied, driverTargets);
     for (UUID threadId : copied) {
       state.threads.remove(threadId);
     }

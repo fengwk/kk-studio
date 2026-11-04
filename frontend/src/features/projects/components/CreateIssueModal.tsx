@@ -69,7 +69,7 @@ export function CreateIssueModal({
 
   return (
     <Dialog
-      className="resource-modal-card"
+      className="resource-modal-card modal-touch-target"
       title={t('projects.issue.create')}
       headerIcon={<FilePlus size={18} aria-hidden="true" />}
       pending={isSubmitting}

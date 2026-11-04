@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
@@ -60,6 +59,8 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * {@link DatabaseProviderResolutionService} 的单元测试：不依赖 PostgreSQL，mock {@link
@@ -608,8 +609,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             blobManager,
             contentService,
-            new ProviderFactories(
-                List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter))));
+            List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter)));
     ProviderRequest persisted =
         request(
             ProviderCacheControl.none(),
@@ -649,12 +649,11 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             blobManager,
             contentService,
-            new ProviderFactories(
-                List.of(
-                    factory(
-                        ProviderType.OPENAI,
-                        PromptCacheRetention.SHORT,
-                        adapter(ProviderType.OPENAI, mock(ModelProvider.class))))));
+            List.of(
+                factory(
+                    ProviderType.OPENAI,
+                    PromptCacheRetention.SHORT,
+                    adapter(ProviderType.OPENAI, mock(ModelProvider.class)))));
     ProviderRequest persisted =
         request(
             ProviderCacheControl.none(),
@@ -701,8 +700,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             blobManager,
             contentService,
-            new ProviderFactories(
-                List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter))));
+            List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter)));
     ProviderRequest persisted =
         request(
             ProviderCacheControl.none(),
@@ -728,19 +726,19 @@ class DatabaseProviderResolutionServiceTest {
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
     return resolution(
-        mock(StorageBlobManager.class),
-        mock(StorageBlobContentService.class),
-        new ProviderFactories(List.of(factories)));
+        mock(StorageBlobManager.class), mock(StorageBlobContentService.class), List.of(factories));
   }
 
   private DatabaseProviderResolutionService resolution(
       StorageBlobManager blobManager,
       StorageBlobContentService contentService,
-      ProviderFactories factories) {
+      List<ProviderFactory> factories) {
     return new DatabaseProviderResolutionService(
         repository,
         configurationCodec,
-        factories,
+        factories.stream()
+            .collect(
+                Collectors.toUnmodifiableMap(ProviderFactory::providerType, Function.identity())),
         new ProviderResourceMaterializer(blobManager, contentService));
   }
 

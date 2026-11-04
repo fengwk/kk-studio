@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 import java.util.List;
@@ -29,10 +28,7 @@ public final class IdeViewBindingRegistry {
       UUID eventNodeId,
       UUID connectionId,
       UUID claimId,
-      long bindingEpoch,
-      String directory,
-      String workspacePath,
-      IdeViewState state) {
+      long bindingEpoch) {
 
     public Binding {
       daemonIdentity = Objects.requireNonNull(daemonIdentity, "daemonIdentity");
@@ -44,9 +40,6 @@ public final class IdeViewBindingRegistry {
       if (bindingEpoch <= 0) {
         throw new IllegalArgumentException("bindingEpoch must be positive");
       }
-      directory = Objects.requireNonNull(directory, "directory");
-      workspacePath = Objects.requireNonNull(workspacePath, "workspacePath");
-      state = Objects.requireNonNull(state, "state");
     }
 
     public EnvironmentId environmentId() {
@@ -55,20 +48,6 @@ public final class IdeViewBindingRegistry {
 
     public boolean matches(UUID expectedDocumentId, long expectedEpoch) {
       return documentId.equals(expectedDocumentId) && bindingEpoch == expectedEpoch;
-    }
-
-    public Binding withDirectory(String updatedDirectory) {
-      return new Binding(
-          daemonIdentity,
-          viewId,
-          documentId,
-          eventNodeId,
-          connectionId,
-          claimId,
-          bindingEpoch,
-          updatedDirectory,
-          workspacePath,
-          state);
     }
   }
 
@@ -93,22 +72,6 @@ public final class IdeViewBindingRegistry {
         .filter(entry -> entry.getKey().environmentId().equals(environmentId))
         .map(Map.Entry::getValue)
         .toList();
-  }
-
-  /** 只有 document+epoch 仍匹配时才更新目录，避免迟到回执覆盖新绑定。 */
-  public boolean updateDirectory(
-      EnvironmentId environmentId,
-      UUID viewId,
-      UUID documentId,
-      long bindingEpoch,
-      String directory) {
-    Key key = new Key(environmentId, viewId);
-    Binding current = bindings.get(key);
-    if (current == null || !current.matches(documentId, bindingEpoch)) {
-      return false;
-    }
-    Binding updated = current.withDirectory(directory);
-    return bindings.replace(key, current, updated);
   }
 
   /** 只有 epoch 仍匹配才移除；旧关闭不能删除新绑定。 */

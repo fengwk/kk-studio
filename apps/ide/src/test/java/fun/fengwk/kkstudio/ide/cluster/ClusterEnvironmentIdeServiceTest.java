@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,28 +14,30 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
-import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -71,7 +76,7 @@ class ClusterEnvironmentIdeServiceTest {
     EnvironmentIdeServiceImpl local =
         new EnvironmentIdeServiceImpl(
             localTransport,
-            new InMemoryIdeBootstrapTicketService(),
+            new IdeBootstrapTicketService(),
             new AllowGateway(),
             new IdeViewBindingRegistry(),
             Duration.ofSeconds(1),
@@ -88,6 +93,33 @@ class ClusterEnvironmentIdeServiceTest {
     assertEquals(VIEW, dto.getViewId());
     assertEquals(IdeAction.OPEN_VIEW, localTransport.commands.get(0).getAction());
     assertTrue(client.calls.isEmpty());
+  }
+
+  /** 本地 owner 的各类视图命令只交给本地服务，不触发任何远端请求。 */
+  @Test
+  void localBoundCommandsAndQueriesDoNotUseRemoteClient() {
+    EnvironmentIdeServiceImpl delegate = mock(EnvironmentIdeServiceImpl.class);
+    IdeClusterClient remote = mock(IdeClusterClient.class);
+    service = new ClusterEnvironmentIdeService(registry, remote, delegate);
+    registry.current = Optional.of(ClusterOwnerRoute.local(NODE_A));
+    EnvironmentIdeChangeDirectoryDTO directory = new EnvironmentIdeChangeDirectoryDTO();
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+
+    service.changeDirectory(ENV, VIEW, directory);
+    service.focusTerminal(ENV, VIEW, binding);
+    service.collapseMobile(ENV, VIEW, binding);
+    service.closeView(ENV, VIEW, close);
+    service.listViews(ENV);
+    service.listDirectories(ENV, "/tmp");
+
+    verify(delegate).changeDirectory(ENV, VIEW, directory);
+    verify(delegate).focusTerminal(ENV, VIEW, binding);
+    verify(delegate).collapseMobile(ENV, VIEW, binding);
+    verify(delegate).closeView(ENV, VIEW, close);
+    verify(delegate).listViews(ENV);
+    verify(delegate).listDirectories(ENV, "/tmp");
+    verifyNoInteractions(remote);
   }
 
   @Test
@@ -141,12 +173,12 @@ class ClusterEnvironmentIdeServiceTest {
 
     service.changeDirectory(ENV, VIEW, directory);
     service.focusTerminal(ENV, VIEW, binding);
-    service.detachView(ENV, VIEW, binding);
+    service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
     service.listViews(ENV);
 
     assertEquals(
-        List.of("changeDirectory", "focusTerminal", "detachView", "closeView", "listViews"),
+        List.of("changeDirectory", "focusTerminal", "collapseMobile", "closeView", "listViews"),
         client.calls);
   }
 
@@ -231,12 +263,12 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     @Override
-    public void detachView(
+    public void collapseMobile(
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
         EnvironmentIdeViewBindingDTO request) {
-      calls.add("detachView");
+      calls.add("collapseMobile");
     }
 
     @Override
@@ -246,7 +278,11 @@ class ClusterEnvironmentIdeServiceTest {
     }
   }
 
-  private static final class RecordingTransport implements IdeCommandTransport {
+  private static final class RecordingTransport extends IdeCommandTransport {
+
+    private RecordingTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<IdeCommand> commands = new ArrayList<>();
 
@@ -295,7 +331,11 @@ class ClusterEnvironmentIdeServiceTest {
     public void abandonIde(UUID invocationId) {}
   }
 
-  private static final class AllowGateway implements IdeBrowserUseGateway {
+  private static final class AllowGateway extends IdeBrowserUseGateway {
+
+    private AllowGateway() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     @Override
     public boolean findExactIntent(

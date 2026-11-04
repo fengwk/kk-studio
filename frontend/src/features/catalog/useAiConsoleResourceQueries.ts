@@ -5,18 +5,22 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { toAgentModelViews, type AgentModelView } from '@/features/catalog/AgentModelView'
 
 export interface AiConsoleResourceQueries {
-  providersQuery: ReturnType<typeof useQuery>
-  modelsQuery: ReturnType<typeof useQuery>
-  agentsQuery: ReturnType<typeof useQuery>
-  toolsQuery: ReturnType<typeof useQuery>
-  skillsQuery: ReturnType<typeof useQuery>
-  environmentsQuery: ReturnType<typeof useQuery>
-  providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
-  models: AgentModelView[]
-  agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
-  toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
-  skills: Awaited<ReturnType<typeof agentService.listSkillPackages>>
-  environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
+  queries: {
+    providers: ReturnType<typeof useQuery>
+    models: ReturnType<typeof useQuery>
+    agents: ReturnType<typeof useQuery>
+    tools: ReturnType<typeof useQuery>
+    skills: ReturnType<typeof useQuery>
+    environments: ReturnType<typeof useQuery>
+  }
+  resources: {
+    providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
+    models: AgentModelView[]
+    agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
+    toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
+    skills: Awaited<ReturnType<typeof agentService.listSkillPackages>>
+    environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
+  }
 }
 
 export interface AiConsoleResourceQueryEnabled {
@@ -68,17 +72,21 @@ export function useAiConsoleResourceQueries(
   })
 
   return {
-    providersQuery,
-    modelsQuery,
-    agentsQuery,
-    toolsQuery,
-    skillsQuery,
-    environmentsQuery,
-    providers: providersQuery.data?.results ?? [],
-    models: toAgentModelViews(modelsQuery.data?.results ?? []),
-    agents: agentsQuery.data?.results ?? [],
-    toolCatalog: toolsQuery.data ?? [],
-    skills: skillsQuery.data ?? [],
-    environments: environmentsQuery.data ?? [],
+    queries: {
+      providers: providersQuery,
+      models: modelsQuery,
+      agents: agentsQuery,
+      tools: toolsQuery,
+      skills: skillsQuery,
+      environments: environmentsQuery,
+    },
+    resources: {
+      providers: providersQuery.data?.results ?? [],
+      models: toAgentModelViews(modelsQuery.data?.results ?? []),
+      agents: agentsQuery.data?.results ?? [],
+      toolCatalog: toolsQuery.data ?? [],
+      skills: skillsQuery.data ?? [],
+      environments: environmentsQuery.data ?? [],
+    },
   }
 }

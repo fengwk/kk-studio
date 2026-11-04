@@ -1,16 +1,13 @@
 package fun.fengwk.kkstudio.harness.model;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.SerializationFeature;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 单个 model variant 携带的厂商原生协议请求选项。
@@ -30,7 +27,7 @@ public record ProviderProtocolOptions(String canonicalJson) {
   public static final int MAX_UTF8_BYTES = 64 * 1024;
 
   private static final String EMPTY_JSON = "{}";
-  private static final ObjectMapper STRICT_MAPPER = newStrictMapper();
+  private static final ObjectMapper STRICT_MAPPER = HarnessJson.STRICT_OPTIONS;
 
   /** 空 object：未声明任何原生协议选项。 */
   public static final ProviderProtocolOptions EMPTY = new ProviderProtocolOptions(EMPTY_JSON);
@@ -48,6 +45,25 @@ public record ProviderProtocolOptions(String canonicalJson) {
       return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
     } catch (JacksonException error) {
       throw new IllegalArgumentException("protocolOptions must contain JSON values only");
+    }
+  }
+
+  /** 从已解析的 JSON object 构造，避免调用方序列化后再解析一次。 */
+  public static ProviderProtocolOptions fromJsonNode(ObjectNode options) {
+    Objects.requireNonNull(options, "options");
+    try {
+      return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("protocolOptions must contain JSON values only");
+    }
+  }
+
+  /** 返回 canonical JSON 的独立可变副本；每次调用互不影响。 */
+  public ObjectNode copyOptions() {
+    try {
+      return (ObjectNode) STRICT_MAPPER.readTree(canonicalJson);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("variant protocol options are not valid JSON", error);
     }
   }
 
@@ -84,17 +100,5 @@ public record ProviderProtocolOptions(String canonicalJson) {
       throw new IllegalArgumentException(
           "protocolOptions must not exceed " + MAX_UTF8_BYTES + " UTF-8 bytes");
     }
-  }
-
-  private static ObjectMapper newStrictMapper() {
-    return JsonMapper.builder()
-        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-        // 厂商原生数值先按 BigDecimal 读回（保留 1e309/1e-324 精度），canonical 文本再移除无语义意义的尾零。
-        .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-        .enable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
-        // 无法映射为 JSON 的值（如无属性的任意对象）必须明确失败，而不是静默序列化为空 object。
-        .enable(SerializationFeature.FAIL_ON_EMPTY_BEANS)
-        .build();
   }
 }

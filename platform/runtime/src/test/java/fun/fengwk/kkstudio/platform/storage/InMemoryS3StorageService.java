@@ -186,6 +186,22 @@ public class InMemoryS3StorageService extends S3StorageService {
   }
 
   @Override
+  public byte[] readObjectRange(String key, long offset, long length) {
+    record("readObjectRange", key);
+    byte[] bytes = objects.get(key);
+    if (bytes == null) {
+      throw NoSuchKeyException.builder().message("missing: " + key).build();
+    }
+    if (offset < 0 || length <= 0 || offset + length > bytes.length) {
+      throw new IllegalArgumentException(
+          "invalid range: offset=" + offset + ", length=" + length + ", size=" + bytes.length);
+    }
+    byte[] range = new byte[(int) length];
+    System.arraycopy(bytes, (int) offset, range, 0, (int) length);
+    return range;
+  }
+
+  @Override
   public void deleteObject(String key) {
     record("deleteObject", key);
     RuntimeException failure = deleteFailures.remove(key);

@@ -6,7 +6,7 @@
  * 漂移门禁：TsContractArtifactTest（mvn verify 覆盖）
  */
 
-/** Java：fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO */
 export interface AddIssueEvidenceRequestDTO {
   uploadId: string
 }
@@ -312,7 +312,7 @@ export interface AgentTaskSubmitDTO {
   maxTurns: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO */
 export interface AppendIssueActivityRequestDTO {
   expectedVersion: string
   requestKey: string
@@ -326,12 +326,12 @@ export interface ApplyCanvasCommandsRequestDTO {
   commands: CanvasCommandDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO */
 export interface ArchiveIssueRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.BlockIssueRequestDTO */
 export interface BlockIssueRequestDTO {
   expectedVersion: string
   requestKey: string
@@ -817,13 +817,13 @@ export interface CreateCanvasRequestDTO {
   title?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.CreateIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.CreateIssueRequestDTO */
 export interface CreateIssueRequestDTO {
   title: string
   description?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO */
 export interface CreateProjectRequestDTO {
   title: string
   description?: string | null
@@ -886,21 +886,21 @@ export interface EnvironmentEventDTO {
   message: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO */
 export interface EnvironmentIdeChangeDirectoryDTO {
   documentId: string
   bindingEpoch: string
   directory: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO */
 export interface EnvironmentIdeCloseViewDTO {
   documentId: string
   bindingEpoch: string
   discard: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO */
 export interface EnvironmentIdeDirectoryListingDTO {
   path: string
   parentPath: string | null
@@ -908,13 +908,13 @@ export interface EnvironmentIdeDirectoryListingDTO {
   truncated: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO.Entry */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO.Entry */
 export interface EnvironmentIdeDirectoryListingEntry {
   name: string
   path: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
   documentId: string
@@ -925,13 +925,13 @@ export interface EnvironmentIdeOpenViewDTO {
   directory?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO */
 export interface EnvironmentIdeViewBindingDTO {
   documentId: string
   bindingEpoch: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO */
 export interface EnvironmentIdeViewDTO {
   viewId: string
   environmentId: string
@@ -947,7 +947,7 @@ export interface EnvironmentIdeViewDTO {
   entryUrl?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO */
+/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO */
 export interface EnvironmentIdeViewsDTO {
   views: EnvironmentIdeViewDTO[]
 }
@@ -1196,9 +1196,10 @@ export interface HarnessModelRequestDebugSkillDTO {
   description: string
   path: string
   delivery: string
-  currentCommit: string
-  observedHeadCommit: string | null
-  installedCommit: string | null
+  packageVersion: string
+  headCommit: string | null
+  artifactSha256: string
+  installedSha256: string | null
   promptXml: string
 }
 
@@ -1468,6 +1469,28 @@ export interface HarnessUserMessageContentDTO {
   imageTier?: string | null
 }
 
+/** Java：fun.fengwk.kkstudio.ide.browser.IdeBrowserUseIntentReply */
+export interface IdeBrowserUseIntentReply {
+  matched: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.ide.browser.IdeBrowserUseSnapshot */
+export interface IdeBrowserUseSnapshot {
+  eventNodeId: string
+  connectionId: string
+  documentId: string
+  revision: string
+  views: IdeBrowserUseSnapshotView[]
+}
+
+/** Java：fun.fengwk.kkstudio.ide.browser.IdeBrowserUseSnapshot.View */
+export interface IdeBrowserUseSnapshotView {
+  environmentId: string
+  viewId: string
+  claimId: string
+  bindingEpoch: string
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO */
 export interface InteractionDTO {
   type: string
@@ -1503,7 +1526,7 @@ export interface InteractionPageDTO {
   freshnessAt: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueActivityDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueActivityDTO */
 export interface IssueActivityDTO {
   issueId: string
   sequence: string
@@ -1516,14 +1539,14 @@ export interface IssueActivityDTO {
   createdAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueAgentThreadDTO */
 export interface IssueAgentThreadDTO {
   issueId: string
   agentName: string
   threadId: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueDTO */
 export interface IssueDTO {
   id: string
   projectId: string
@@ -1541,7 +1564,7 @@ export interface IssueDTO {
   updatedAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueDetailDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueDetailDTO */
 export interface IssueDetailDTO {
   issue: IssueDTO
   activities: IssueActivityDTO[]
@@ -1553,7 +1576,7 @@ export interface IssueDetailDTO {
   agentThreads: IssueAgentThreadDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueEvidenceDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueEvidenceDTO */
 export interface IssueEvidenceDTO {
   issueId: string
   blobId: string
@@ -1564,7 +1587,7 @@ export interface IssueEvidenceDTO {
   createdAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueRunDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueRunDTO */
 export interface IssueRunDTO {
   id: string
   issueId: string
@@ -1586,7 +1609,7 @@ export interface IssueRunDTO {
   endedAt: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueRunSummaryDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueRunSummaryDTO */
 export interface IssueRunSummaryDTO {
   id: string
   issueId: string
@@ -1598,7 +1621,7 @@ export interface IssueRunSummaryDTO {
   endedAt: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.IssueStageBudgetDTO */
 export interface IssueStageBudgetDTO {
   state: string
   maxRuns: number
@@ -1688,7 +1711,7 @@ export interface ModelDefaultLimitDTO {
   output?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.PauseIssueRequestDTO */
 export interface PauseIssueRequestDTO {
   expectedVersion: string
   requestKey: string
@@ -1829,7 +1852,7 @@ export interface PluginSecretProjectionDTO {
   configured: boolean
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectDTO */
 export interface ProjectDTO {
   id: string
   title: string
@@ -1843,30 +1866,30 @@ export interface ProjectDTO {
   updatedAt: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO */
 export interface ProjectIssueSnapshotDTO {
   issue: IssueDTO
   currentOrLatestRun: IssueRunSummaryDTO | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO */
 export interface ProjectSnapshotDTO {
   project: ProjectDTO
   issues: ProjectIssueSnapshotDTO[]
   referencedStateCodes: string[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectVersionRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectVersionRequestDTO */
 export interface ProjectVersionRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectWorkflowDTO */
 export interface ProjectWorkflowDTO {
   states: ProjectWorkflowStateDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ProjectWorkflowStateDTO */
 export interface ProjectWorkflowStateDTO {
   state: string
   name: string
@@ -1878,19 +1901,19 @@ export interface ProjectWorkflowStateDTO {
   next?: string[] | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.RecoverIssueRequestDTO */
 export interface RecoverIssueRequestDTO {
   expectedVersion: string
   requestKey: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ReopenIssueRequestDTO */
 export interface ReopenIssueRequestDTO {
   expectedVersion: string
   requestKey: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ResetStageBudgetRequestDTO */
 export interface ResetStageBudgetRequestDTO {
   expectedVersion: string
   requestKey: string
@@ -1898,10 +1921,34 @@ export interface ResetStageBudgetRequestDTO {
   maxRuns: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.ResumeIssueRequestDTO */
 export interface ResumeIssueRequestDTO {
   expectedVersion: string
   requestKey: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO */
+export interface SkillArchiveDownloadDTO {
+  filename: string
+  sha256: string
+  sizeBytes: string
+  download: StoragePresignedUrlDTO
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO */
+export interface SkillEnvironmentSyncDTO {
+  environmentId: string
+  installedSha256: string | null
+  localPath: string | null
+  error: string | null
+  upToDate: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillGitSourceDTO */
+export interface SkillGitSourceDTO {
+  repositoryUrl: string
+  branch: string
+  hasToken: boolean
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.skill.SkillManifestEntryDTO */
@@ -1915,28 +1962,21 @@ export interface SkillPackageCheckDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO */
-export interface SkillPackageCreateDTO {
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO */
+export interface SkillPackageDetailDTO {
   packageName: string
   description?: string | null
-  repositoryUrl: string
-  branch: string
-  token?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO */
-export interface SkillPackageDTO {
-  packageName: string
-  description?: string | null
-  repositoryUrl: string
-  branch: string
-  hasToken: boolean
-  currentCommit: string
-  observedHeadCommit: string | null
+  packageVersion: string
+  publishedAt: number
+  skills: SkillManifestEntryDTO[]
+  source: string
+  git: SkillGitSourceDTO | null
+  headCommit: string | null
   headCheckedAt: number | null
   headCheckError: string | null
-  checkStatus: string
-  skills: SkillManifestEntryDTO[]
+  updateAvailable: boolean
+  artifactSha256: string
+  artifactSizeBytes: string
   version: string
   createTime: number
   updateTime: number
@@ -1946,14 +1986,74 @@ export interface SkillPackageDTO {
 export interface SkillPackageEditDTO {
   expectedVersion: string
   description?: string | null
+  branch?: string | null
+  token?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO */
+export interface SkillPackageFileDTO {
+  path: string
+  size: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO */
+export interface SkillPackageGitCreateDTO {
+  packageName: string
+  description?: string | null
+  repositoryUrl: string
   branch: string
   token?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO */
-export interface SkillPackagePublishDTO {
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO */
+export interface SkillPackageGitPublishDTO {
   expectedVersion: string
   targetCommit: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO */
+export interface SkillPackagePreviewDTO {
+  stagingUploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+  skills: SkillManifestEntryDTO[]
+  ignoredDirectories: string[]
+  archiveSha256: string
+  archiveSizeBytes: string
+  contentSizeBytes: string
+  fileCount: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO */
+export interface SkillPackageSummaryDTO {
+  packageName: string
+  description?: string | null
+  packageVersion: string
+  publishedAt: number
+  skills: SkillManifestEntryDTO[]
+  source: string
+  updateAvailable: boolean
+  version: string
+  createTime: number
+  updateTime: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPreviewDTO */
+export interface SkillPackageUploadPreviewDTO {
+  uploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO */
+export interface SkillPackageUploadPublishDTO {
+  stagingUploadId: string
+  packageName: string
+  packageVersion: string
+  description?: string | null
+  expectedVersion?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO */
@@ -1962,7 +2062,7 @@ export interface SkillRefDTO {
   name: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.StopIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.StopIssueRequestDTO */
 export interface StopIssueRequestDTO {
   expectedVersion: string
   requestKey: string
@@ -2205,39 +2305,39 @@ export interface ToolInvocationDTO {
   updateTime: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.TransitionIssueRequestDTO */
 export interface TransitionIssueRequestDTO {
   expectedVersion: string
   requestKey: string
   toState: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.UnarchiveIssueRequestDTO */
 export interface UnarchiveIssueRequestDTO {
   expectedVersion: string
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.UpdateIssueRequestDTO */
 export interface UpdateIssueRequestDTO {
   expectedVersion: string
   title?: string | null
   description?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectRequestDTO */
 export interface UpdateProjectRequestDTO {
   expectedVersion: string
   title?: string | null
   description?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectWorkflowRequestDTO */
 export interface UpdateProjectWorkflowRequestDTO {
   expectedVersion: string
   workflow: ProjectWorkflowDTO
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO */
+/** Java：fun.fengwk.kkstudio.project.dto.UpdateProjectYoloRequestDTO */
 export interface UpdateProjectYoloRequestDTO {
   expectedVersion: string
   yoloEnabled: boolean

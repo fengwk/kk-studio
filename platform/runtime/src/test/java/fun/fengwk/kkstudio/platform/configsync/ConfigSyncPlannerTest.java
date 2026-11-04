@@ -17,7 +17,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,12 +24,8 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
@@ -57,9 +52,6 @@ class ConfigSyncPlannerTest {
   private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
-  private final SkillGitCache skillGitCache = mock(SkillGitCache.class);
-  private final AgentDefinitionRepository agentDefinitionRepository =
-      mock(AgentDefinitionRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final RuntimeToolCatalog toolCatalog = mock(RuntimeToolCatalog.class);
 
@@ -67,8 +59,6 @@ class ConfigSyncPlannerTest {
       new ConfigSyncPlanner(
           snapshotReader,
           mcpDiscovery,
-          skillGitCache,
-          agentDefinitionRepository,
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
@@ -97,8 +87,6 @@ class ConfigSyncPlannerTest {
     return new ConfigSyncPlanner(
         snapshotReader,
         mcpDiscovery,
-        skillGitCache,
-        agentDefinitionRepository,
         mcpServerRepository,
         TestCatalogSources.singleLease(toolCatalog),
         ConfigSyncFixtures.MODEL_CONFIG_PARSER,
@@ -218,7 +206,7 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void invalidSkillPackageNameIsRejectedBeforeGit() {
+  void invalidSkillPackageNameIsRejected() {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
@@ -226,39 +214,37 @@ class ConfigSyncPlannerTest {
         "skillPackages:\n"
             + "  - packageName: bad/name\n"
             + "    repositoryUrl: https://example.com/x.git\n"
-            + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n";
+            + "    branch: main\n";
     assertThrows(AiValidationException.class, () -> plan(yamlText));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
   }
 
   @Test
-  void skillGitFailureIsSkippedWithoutLeakingUrl() {
-    when(snapshotReader.read()).thenReturn(emptySnapshot());
+  void existingUploadPackageCannotBeReplacedByGitImport() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(ConfigSyncFixtures.uploadSkillPackage("pkg", "s")),
+                List.of(),
+                List.of(),
+                List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    doThrow(new SkillGitException("cannot fetch https://user:pass@example.com/secret.git"))
-        .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         "skillPackages:\n"
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/pkg.git\n"
-            + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n";
-    ConfigSyncPlan plan = plan(yamlText);
-
-    assertEquals("cannot restore exact commit", reason(plan.skipped(), "skillPackages", "pkg"));
-    assertFalse(reason(plan.skipped(), "skillPackages", "pkg").contains("user:pass"));
+            + "    branch: main\n";
+    AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
+    assertTrue(
+        error.getMessage().contains("uploaded skill package cannot be replaced by a Git import"));
   }
 
   @Test
-  void existingSkillPackageIsRescannedAndAdvertised() {
-    // 既有 Skill Package 的 repositoryUrl 不变时按 exact commit 重扫 manifest，并把发布技能放入可用依赖池。
+  void existingSkillPackageWithSameRepositoryUrlIsPlanned() {
+    // 既有 Skill Package 的 repositoryUrl 不变时纳入计划，不访问 Git。
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -270,8 +256,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    when(skillGitCache.scanManifest("pkg", "a".repeat(40)))
-        .thenReturn(List.of(new SkillManifestEntry("s2", "published")));
 
     String yamlText =
         PROVIDER_AND_MODEL
@@ -279,9 +263,6 @@ class ConfigSyncPlannerTest {
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/pkg.git\n"
             + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n"
             + "agents:\n"
             + agent(
                 "a",
@@ -291,10 +272,10 @@ class ConfigSyncPlannerTest {
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals(1, plan.skillPackages().size());
-    assertEquals(
-        List.of("s2"),
-        plan.skillPackages().get(0).manifest().stream().map(SkillManifestEntry::name).toList());
-    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40), null);
+    ConfigSyncPlan.SkillImport importedSkill = plan.skillPackages().get(0);
+    assertEquals("pkg", importedSkill.packageName());
+    assertEquals("https://example.com/pkg.git", importedSkill.repositoryUrl());
+    assertEquals("main", importedSkill.branch());
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
   }
@@ -317,42 +298,10 @@ class ConfigSyncPlannerTest {
         "skillPackages:\n"
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/other.git\n"
-            + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n";
+            + "    branch: main\n";
     AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
 
     assertFalse(error.getMessage().contains("other.git"));
-    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString(), any());
-  }
-
-  @Test
-  void existingSkillPackageLosingReferencedSkillIsRejected() {
-    when(snapshotReader.read())
-        .thenReturn(
-            snapshot(
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(skillPackage("pkg", "s1", "s2")),
-                List.of(),
-                List.of(),
-                List.of()));
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    when(skillGitCache.scanManifest("pkg", "a".repeat(40)))
-        .thenReturn(List.of(new SkillManifestEntry("s1", "kept")));
-    when(agentDefinitionRepository.existsReferencingSkill("pkg", "s2")).thenReturn(true);
-
-    String yamlText =
-        "skillPackages:\n"
-            + "  - packageName: pkg\n"
-            + "    repositoryUrl: https://example.com/pkg.git\n"
-            + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n";
-    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -476,23 +425,10 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void existingSkillGitFailurePoisonsAgentsReferencingIt() {
-    // 既有 Skill Package 重新导入时 Git 恢复失败：skill 被 skip，引用它的 Agent 也必须一起 skip，
-    // 不能退回借用快照中的既有包。
-    when(snapshotReader.read())
-        .thenReturn(
-            snapshot(
-                List.of(provider("p")),
-                List.of(model("p", "m")),
-                List.of(),
-                List.of(skillPackage("pkg", "s")),
-                List.of(),
-                List.of(),
-                List.of()));
+  void newSkillPackageInDocumentSatisfiesAgentDuringPlanning() {
+    // 文件中声明的 Skill Package 在计划期不访问 Git，但进入导入计划并满足引用它的 Agent。
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    doThrow(new SkillGitException("boom"))
-        .when(skillGitCache)
-        .ensureCommit(anyString(), anyString(), anyString(), any());
 
     String yamlText =
         PROVIDER_AND_MODEL
@@ -500,9 +436,6 @@ class ConfigSyncPlannerTest {
             + "  - packageName: pkg\n"
             + "    repositoryUrl: https://example.com/pkg.git\n"
             + "    branch: main\n"
-            + "    currentCommit: "
-            + "a".repeat(40)
-            + "\n"
             + "agents:\n"
             + agent(
                 "a",
@@ -511,10 +444,9 @@ class ConfigSyncPlannerTest {
                     + "      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
-    assertEquals("cannot restore exact commit", reason(plan.skipped(), "skillPackages", "pkg"));
-    assertEquals("missing skill package: pkg", reason(plan.skipped(), "agents", "a"));
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+    assertEquals(1, plan.skillPackages().size());
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
   }
 
   @Test
@@ -1043,8 +975,6 @@ class ConfigSyncPlannerTest {
         new ConfigSyncPlanner(
             snapshotReader,
             mcpDiscovery,
-            skillGitCache,
-            agentDefinitionRepository,
             mcpServerRepository,
             TestCatalogSources.singleLease(toolCatalog),
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,

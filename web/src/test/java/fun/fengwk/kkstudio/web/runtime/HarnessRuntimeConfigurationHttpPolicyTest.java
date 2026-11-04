@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -21,6 +20,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /** 生产 HTTP 策略解析：Provider 覆盖优先于系统名单，省略继承、空数组禁用。 */
 class HarnessRuntimeConfigurationHttpPolicyTest {
@@ -77,13 +77,13 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
   }
 
   private ModelHttpErrorPolicy policyFor(String providerName) {
-    ModelHttpErrorPolicyProvider provider =
+    Function<String, ModelHttpErrorPolicy> provider =
         new HarnessProcessorConfiguration()
             .modelHttpErrorPolicyProvider(
                 new SystemSettingsSnapshot(settingsWithRetryList(List.of(429))),
                 repository(),
                 codec);
-    return provider.policy(providerName);
+    return provider.apply(providerName);
   }
 
   private static SystemSettings settingsWithRetryList(List<Integer> retryStatusCodes) {

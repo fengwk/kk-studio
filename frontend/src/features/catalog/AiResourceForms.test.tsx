@@ -7,7 +7,9 @@ import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-co
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { validateResourceDraft } from '@/features/catalog/ai-resource-form-validation'
 import { toEditableProvider, toEditableProviderUpdate } from '@/features/catalog/ai-provider-draft-codec'
-import { AgentForm, ModelForm, ProviderForm } from '@/features/catalog/AiResourceForms'
+import { AgentForm } from '@/features/catalog/AiAgentResourceForm'
+import { ModelForm } from '@/features/catalog/AiModelResourceForm'
+import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { setLocale } from '@/shared/i18n'
 

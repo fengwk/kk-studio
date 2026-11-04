@@ -27,7 +27,12 @@ import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
+import fun.fengwk.kkstudio.harness.spi.work.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -516,7 +521,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     ToolSideEffect sideEffect = request.binding().descriptor().sideEffect();
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(),
+            config.retryPolicyProvider().get(),
             retryable && sideEffect != ToolSideEffect.NON_IDEMPOTENT,
             attempt);
     if (decision.retry()) {

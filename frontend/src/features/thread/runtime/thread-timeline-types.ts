@@ -298,7 +298,7 @@ export interface ThreadModelRequestDebugTool {
   description: string
   inputSchemaJson: string
   environmentSupport: 'NONE' | 'ROUTED' | 'REQUIRED'
-  requiredEnvironmentId: string | null
+  requiredEnvironmentId?: string | null
   provenance: string
   state: string
   filterReason: string | null
@@ -310,9 +310,10 @@ export interface ThreadModelRequestDebugSkill {
   description: string
   path: string
   delivery: string
-  currentCommit: string
-  observedHeadCommit: string | null
-  installedCommit: string | null
+  packageVersion: string
+  headCommit: string | null
+  artifactSha256: string
+  installedSha256: string | null
   promptXml: string
 }
 

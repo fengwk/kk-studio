@@ -82,15 +82,14 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
@@ -115,6 +114,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationC
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageGitSource;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
@@ -136,6 +136,7 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
@@ -156,6 +157,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、唯一的 registry
@@ -193,6 +196,12 @@ class DatabaseTurnResolverTest {
 
   /** 测试用全局目录 Package 的权威 currentCommit。 */
   private static final String CURRENT_COMMIT = "0123456789abcdef0123456789abcdef01234567";
+
+  /** 测试用全局目录 Package 的权威工件 SHA-256 与 Blob ID。 */
+  private static final String ARTIFACT_SHA256 = "a".repeat(64);
+
+  private static final UUID ARTIFACT_BLOB_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000001");
 
   /** 测试用全局目录 Skill 名称与描述对。 */
   private static SkillName skillName(String name, String description) {
@@ -868,6 +877,14 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent skill not found in the global catalog: test-package/dev",
         fixture.rejected(fixture.path(settings("default"))).error().message());
+
+    // 工件 Blob 记录缺失：typed 拒绝规划。
+    fixture = new Fixture(List.of(), List.of("dev"), List.of());
+    fixture.readyEnvironment(ENV_A, List.of());
+    fixture.missingArtifactBlob();
+    assertEquals(
+        "skill package artifact blob not found: test-package",
+        fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
   @Test
@@ -1296,20 +1313,19 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 测试意图：只有选定 Environment 的同步投影精确记录该 package 的 currentCommit 已安装时，prompt 才注入 Daemon
-   * 本地稳定路径；提交不一致或同步失败都必须回退 platform URI。
+   * 测试意图：只有选定 Environment 的同步投影精确记录该 package 的 artifactSha256 已安装时，prompt 才注入 Daemon
+   * 本地稳定路径；摘要不一致或同步失败都必须回退 platform URI。
    */
   @Test
   void usesLocalStableSkillPathOnlyForExactlyInstalledCommit() {
-    String installedCommit = "0123456789abcdef0123456789abcdef01234567";
-    String otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+    String installedSha = "a".repeat(64);
+    String otherSha = "b".repeat(64);
     String localPath = "/home/dev/.kkstudio/skills/test-package";
 
     Fixture installed = new Fixture(List.of(), List.of("dev"), List.of());
     installed.readyEnvironment(ENV_A, List.of("dev"));
     installed.readyEnvironmentWithSkillState(
-        ENV_A,
-        List.of(EnvironmentSkillState.installed("test-package", installedCommit, localPath)));
+        ENV_A, List.of(EnvironmentSkillState.installed("test-package", installedSha, localPath)));
 
     assertTrue(
         instructionText(installed.resolved(installed.path(settings("default"))))
@@ -1318,7 +1334,7 @@ class DatabaseTurnResolverTest {
     Fixture mismatched = new Fixture(List.of(), List.of("dev"), List.of());
     mismatched.readyEnvironment(ENV_A, List.of("dev"));
     mismatched.readyEnvironmentWithSkillState(
-        ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherCommit, localPath)));
+        ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherSha, localPath)));
     assertTrue(
         instructionText(mismatched.resolved(mismatched.path(settings("default"))))
             .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
@@ -1330,7 +1346,7 @@ class DatabaseTurnResolverTest {
         List.of(
             EnvironmentSkillState.failed(
                 "test-package",
-                EnvironmentSkillState.installed("test-package", installedCommit, localPath),
+                EnvironmentSkillState.installed("test-package", installedSha, localPath),
                 "skill package sync failed: COMMIT_NOT_FOUND")));
     assertTrue(
         instructionText(failed.resolved(failed.path(settings("default"))))
@@ -1428,13 +1444,13 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装 commit」分开投影——只有精确安装 currentCommit 才是 LOCAL； 提交不一致或同步失败仍如实暴露实际
-   * installedCommit，但交付方式必须是 PLATFORM；observedHeadCommit 来自 Package 自身； promptXml 与真正进入
-   * systemInstruction 的片段逐字相同。
+   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装工件摘要」分开投影——只有精确安装 artifactSha256 才是 LOCAL； 摘要不一致或同步失败仍如实暴露实际
+   * installedSha256，但交付方式必须是 PLATFORM；headCommit 来自 Package 自身； promptXml 与真正进入 systemInstruction
+   * 的片段逐字相同。
    */
   @Test
   void previewPlanProjectsSkillDeliveryCommitsAndExactPromptXml() {
-    String otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+    String otherSha = "b".repeat(64);
     String observedHead = "abcdef0123456789abcdef0123456789abcdef01";
     String localPath = "/home/dev/.kkstudio/skills/test-package";
 
@@ -1450,9 +1466,10 @@ class DatabaseTurnResolverTest {
     assertEquals("dev description", platformSkill.description());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, platformSkill.delivery());
     assertEquals("vfs:/skills/test-package/dev/SKILL.md", platformSkill.path());
-    assertEquals(CURRENT_COMMIT, platformSkill.currentCommit());
-    assertEquals(observedHead, platformSkill.observedHeadCommit());
-    assertNull(platformSkill.installedCommit());
+    assertEquals(CURRENT_COMMIT, platformSkill.packageVersion());
+    assertEquals(observedHead, platformSkill.headCommit());
+    assertEquals(ARTIFACT_SHA256, platformSkill.artifactSha256());
+    assertNull(platformSkill.installedSha256());
     String platformXml = AgentPromptComposer.skillFragment(platformSkill.promptEntry());
     assertTrue(
         platformXml.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), platformXml);
@@ -1461,20 +1478,23 @@ class DatabaseTurnResolverTest {
     Fixture alreadyInstalled = new Fixture(List.of(), List.of("dev"), List.of());
     alreadyInstalled.readyEnvironment(ENV_A, List.of("dev"));
     alreadyInstalled.readyEnvironmentWithSkillState(
-        ENV_A, List.of(EnvironmentSkillState.installed("test-package", CURRENT_COMMIT, localPath)));
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", ARTIFACT_SHA256, localPath)));
     LiveTurnPlan.Planned localPlan =
         alreadyInstalled.planned(alreadyInstalled.path(settings("default")));
     LiveTurnPlan.PlannedSkill localSkill = localPlan.skills().getFirst();
     assertEquals(SkillPromptResolution.Delivery.LOCAL, localSkill.delivery());
     assertEquals(localPath + "/dev/SKILL.md", localSkill.path());
-    assertEquals(CURRENT_COMMIT, localSkill.installedCommit());
+    assertEquals(CURRENT_COMMIT, localSkill.packageVersion());
+    assertEquals(ARTIFACT_SHA256, localSkill.artifactSha256());
+    assertEquals(ARTIFACT_SHA256, localSkill.installedSha256());
     assertTrue(
         localPlan
             .spec()
             .systemInstruction()
             .contains("<path>" + localPath + "/dev/SKILL.md</path>"));
 
-    // 同步失败保留更早一次成功安装的事实：如实暴露 installedCommit，但交付方式仍是 PLATFORM。
+    // 同步失败保留更早一次成功安装的事实：如实暴露 installedSha256，但交付方式仍是 PLATFORM。
     Fixture failedSync = new Fixture(List.of(), List.of("dev"), List.of());
     failedSync.readyEnvironment(ENV_A, List.of("dev"));
     failedSync.readyEnvironmentWithSkillState(
@@ -1482,12 +1502,13 @@ class DatabaseTurnResolverTest {
         List.of(
             EnvironmentSkillState.failed(
                 "test-package",
-                EnvironmentSkillState.installed("test-package", otherCommit, localPath),
+                EnvironmentSkillState.installed("test-package", otherSha, localPath),
                 "skill package sync failed: COMMIT_NOT_FOUND")));
     LiveTurnPlan.PlannedSkill failedSkill =
         failedSync.planned(failedSync.path(settings("default"))).skills().getFirst();
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, failedSkill.delivery());
-    assertEquals(otherCommit, failedSkill.installedCommit());
+    assertEquals(otherSha, failedSkill.installedSha256());
+    assertEquals(ARTIFACT_SHA256, failedSkill.artifactSha256());
     assertEquals("vfs:/skills/test-package/dev/SKILL.md", failedSkill.path());
   }
 
@@ -1657,7 +1678,7 @@ class DatabaseTurnResolverTest {
         new DatabaseProviderResolutionService(
             fixture.providers,
             new AgentProviderConfigurationCodec(JsonMapper.builder().build()),
-            new ProviderFactories(List.of(factory)),
+            Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
@@ -3029,6 +3050,7 @@ class DatabaseTurnResolverTest {
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final SkillPackageRepository skillPackageRepository =
         mock(SkillPackageRepository.class);
+    private final StorageBlobManager blobManager = mock(StorageBlobManager.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private String observedHeadCommit;
     private AgentDefinition agent;
@@ -3204,6 +3226,11 @@ class DatabaseTurnResolverTest {
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
 
+      StorageBlob defaultBlob = new StorageBlob();
+      defaultBlob.setId(ARTIFACT_BLOB_ID);
+      defaultBlob.setSha256(ARTIFACT_SHA256);
+      when(blobManager.getBlob(any(UUID.class))).thenReturn(defaultBlob);
+
       when(skillPackageRepository.getPackage(anyString()))
           .thenAnswer(
               invocation -> {
@@ -3212,17 +3239,29 @@ class DatabaseTurnResolverTest {
                 if (entries == null) {
                   return null;
                 }
-                SkillPackage pkg =
-                    SkillPackage.builder()
-                        .packageName(pkgName)
-                        .currentCommit(CURRENT_COMMIT)
-                        .observedHeadCommit(observedHeadCommit)
-                        .skills(
-                            entries.entrySet().stream()
-                                .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
-                                .toList())
-                        .build();
-                return pkg;
+                SkillPackageGitSource gitSource =
+                    observedHeadCommit != null
+                        ? new SkillPackageGitSource(
+                            "https://example.com/" + pkgName + ".git",
+                            "main",
+                            null,
+                            observedHeadCommit,
+                            NOW,
+                            null)
+                        : null;
+                return new SkillPackage(
+                    pkgName,
+                    "description",
+                    CURRENT_COMMIT,
+                    ARTIFACT_BLOB_ID,
+                    entries.entrySet().stream()
+                        .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
+                        .toList(),
+                    NOW,
+                    1L,
+                    NOW,
+                    NOW,
+                    gitSource);
               });
 
       modelSupportsTools(true);
@@ -3291,6 +3330,7 @@ class DatabaseTurnResolverTest {
               environmentRepository,
               skillPackageRepository,
               skillPromptPathResolver,
+              blobManager,
               new AgentPromptComposer(() -> subagentConfig),
               clock);
 
@@ -3301,7 +3341,10 @@ class DatabaseTurnResolverTest {
               providers,
               modelConfigParser,
               groupConfigCodec,
-              new ProviderFactories(factories),
+              factories.stream()
+                  .collect(
+                      Collectors.toUnmodifiableMap(
+                          ProviderFactory::providerType, Function.identity())),
               () -> new CompactionConfig(20_000),
               contextResolver,
               TokenEstimator::estimateRequestTokens,
@@ -3400,6 +3443,10 @@ class DatabaseTurnResolverTest {
 
     private void missingGlobalSkills() {
       packages.clear();
+    }
+
+    private void missingArtifactBlob() {
+      when(blobManager.getBlob(any(UUID.class))).thenReturn(null);
     }
 
     private void modelSupportsTools(boolean tools) {

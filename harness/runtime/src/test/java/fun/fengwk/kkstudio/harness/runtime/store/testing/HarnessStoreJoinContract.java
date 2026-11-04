@@ -1449,7 +1449,7 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void executionKindStateCombinationsAndRemoteParentIdentityAreConstrained() {
-    // 测试意图：退出证据必须与 kind 匹配；Remote 只能挂同代 TOOL 父，非法登记/ACK 都不写。
+    // 测试意图：退出证据必须与 kind 匹配；Remote 只能挂同代 TOOL 或 DRIVER 父，非法登记/ACK 都不写。
     UUID threadId = baseline.threadId();
     ExecutionExitFact tool =
         fact(
@@ -1461,7 +1461,7 @@ public abstract class HarnessStoreJoinContract {
             TestIds.id(833),
             1,
             "lease-1",
-            ExecutionExitKind.MODEL,
+            ExecutionExitKind.DRIVER,
             null);
     ExecutionExitFact remote =
         fact(
@@ -1511,22 +1511,15 @@ public abstract class HarnessStoreJoinContract {
             .orElseThrow()
             .state());
 
-    ExecutionExitFact wrongKindParent =
-        fact(
-            TestIds.id(835),
-            threadId,
-            TestIds.id(836),
-            1,
-            "lease-2",
-            ExecutionExitKind.MODEL,
-            null);
+    // 已登记的 REMOTE 不能成为另一个 REMOTE 的父代。
+    ExecutionExitFact wrongKindParent = remote;
     ExecutionExitFact wrongKindRemote =
         fact(
             TestIds.id(837),
             threadId,
-            TestIds.id(836),
+            TestIds.id(831),
             1,
-            "lease-2",
+            "lease-1",
             ExecutionExitKind.REMOTE,
             wrongKindParent.executionId());
     ExecutionExitFact otherLeaseParent =
@@ -1544,7 +1537,6 @@ public abstract class HarnessStoreJoinContract {
     store.transaction(
         tx -> {
           tx.threads().lock(threadId);
-          tx.exits().register(wrongKindParent);
           tx.exits().register(otherLeaseParent);
           return null;
         });
@@ -1558,7 +1550,7 @@ public abstract class HarnessStoreJoinContract {
                       return tx.exits().register(wrongKindRemote);
                     }));
     assertEquals(
-        "remote execution parent must be the same generation's TOOL or AGENT execution",
+        "remote execution parent must be the same generation's TOOL or DRIVER execution",
         wrongKindParentFailure.getMessage());
     IllegalArgumentException wrongLeaseParentFailure =
         assertThrows(
@@ -1570,13 +1562,13 @@ public abstract class HarnessStoreJoinContract {
                       return tx.exits().register(wrongIdentityRemote);
                     }));
     assertEquals(
-        "remote execution parent must be the same generation's TOOL or AGENT execution",
+        "remote execution parent must be the same generation's TOOL or DRIVER execution",
         wrongLeaseParentFailure.getMessage());
     assertTrue(store.transaction(tx -> tx.exits().find(wrongKindRemote.executionId())).isEmpty());
     assertTrue(
         store.transaction(tx -> tx.exits().find(wrongIdentityRemote.executionId())).isEmpty());
 
-    // 验证 AGENT execution 作为 parent 注册 REMOTE execution 成功
+    // 验证 DRIVER execution 作为 parent 注册 REMOTE execution 成功
     ExecutionExitFact agentParent =
         fact(
             TestIds.id(841),
@@ -1584,7 +1576,7 @@ public abstract class HarnessStoreJoinContract {
             TestIds.id(842),
             1,
             "lease-agent",
-            ExecutionExitKind.AGENT,
+            ExecutionExitKind.DRIVER,
             null);
     ExecutionExitFact agentRemote =
         fact(
@@ -1621,10 +1613,22 @@ public abstract class HarnessStoreJoinContract {
     UUID invocationId = TestIds.id(850);
     ExecutionExitFact oldGeneration =
         fact(
-            TestIds.id(851), threadId, invocationId, 1, "lease-old", ExecutionExitKind.MODEL, null);
+            TestIds.id(851),
+            threadId,
+            invocationId,
+            1,
+            "lease-old",
+            ExecutionExitKind.DRIVER,
+            null);
     ExecutionExitFact newGeneration =
         fact(
-            TestIds.id(852), threadId, invocationId, 2, "lease-new", ExecutionExitKind.MODEL, null);
+            TestIds.id(852),
+            threadId,
+            invocationId,
+            2,
+            "lease-new",
+            ExecutionExitKind.DRIVER,
+            null);
     store.transaction(
         tx -> {
           tx.threads().lock(threadId);

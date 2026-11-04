@@ -2,7 +2,7 @@
  * 模型模块边界：无状态 Model/Provider 契约与 typed invocation error。
  *
  * <p>顶层 value object 在不依赖 Tool、Session、Runtime 编排、Spring 与持久化的前提下描述一个 model 与其 accounting；子包按
- * codec、Provider 协议与 cache policy 拆分职责，具体协议实现位于同模块的 {@code harness.provider} 包。
+ * codec、Provider 协议与 cache policy 拆分职责，具体协议实现位于同模块的 {@code harness.model.provider.impl} 包。
  *
  * <p>Public 边界与职责划分：
  *
@@ -19,7 +19,7 @@
  *       ProviderCacheControl} 随请求保存。
  *   <li>{@link fun.fengwk.kkstudio.harness.model.provider}：所有 SDK adapter 必须使用的 Provider
  *       request、response、message、content-block、stream 与 exception 契约。具体 Provider SDK adapter 实现位于
- *       同模块的 {@code fun.fengwk.kkstudio.harness.provider}，绝不能把 SDK 类型泄漏回本边界。
+ *       同模块的 {@code fun.fengwk.kkstudio.harness.model.provider.impl}，绝不能把 SDK 类型泄漏回本边界。
  *   <li>{@link fun.fengwk.kkstudio.harness.model.codec} 与 {@link
  *       fun.fengwk.kkstudio.harness.model.provider.codec}：在 Model/Provider wire 边界使用的严格
  *       deterministic JSON codec。{@link

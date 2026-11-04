@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectKeyNormalizer;
 
 import java.net.URI;
 import java.time.Instant;

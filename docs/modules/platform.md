@@ -36,9 +36,11 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [harness/tool/permission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission) | Tool permission 的规则模型与有序求值、Bash 静态 surface 分析，以及部署范围 permission 快照的现读端口 `ToolSettingsProvider`；只产出策略候选 |
 | [harness/admission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission) | Model 与 Tool 网关共用的进程内并发槽位 `ConcurrencyAdmission`：无等待队列、幂等释放，不持久化、不跨进程协调 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseAgentTurnContextResolver` 解析与模型无关的 Agent 目录快照；`DatabaseTurnResolver` 在其上规划模型、压缩与预算，不反查 Thread 归属 |
-| [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
-| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、payload 解析、进程内定点分发与 resync |
-| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅 fan-out 容器与 NOTIFY 失效分发基座，供 Harness 源与 web 的画布、环境失效共用 |
+| [harness/builtin/query](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/query) | Builtin 请求体预览与结构化模型请求调试，只读复用发送路径的规划和物化 |
+| [harness/builtin/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/realtime) | Builtin 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
+| [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 实时事件传输：PostgreSQL 通道与订阅注册、严格帧编解码、跨节点 payload 回拉与有界缓冲 |
+| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、Thread version 的权威 cursor、payload 解析与 resync |
+| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
@@ -46,11 +48,13 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
+| [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值/错误信封约定，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 边界约定：响应信封 `ApiResponse`、路径与分页参数的共同翻译 `RequestParameters`、领域错误到状态的唯一映射 `DomainErrorStatus`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
+| [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `StudioMessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 ## Harness 持久化与调度
 
@@ -71,13 +75,14 @@ channel 名只在
 定义一次，写事务按它投递，订阅源按同一常量监听；组合根只按
 [`HarnessNotificationBinding`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessNotificationBinding.java)
 的 channel 与回调装配统一 LISTEN 连接，不需要知道 payload 协议。
-[`ThreadVersionHub`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/ThreadVersionHub.java)
-先注册订阅再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor，畸形 payload 与重连退化为 resync，未知 Thread 失败且不留注册。
-执行树与交互共用
+Thread version 的注册与分发复用 `platform.notification` 的
+[`VersionNotificationHub`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification/VersionNotificationHub.java)：
+订阅先注册 consumer，再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor；畸形 payload 与重连退化为 resync，未知 Thread
+失败且不留注册。执行树与交互共用
 [`HarnessInvalidationSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessInvalidationSource.java)：
 按真实执行根定点失效，空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
-`platform.notification` 的 `SubscriptionFanOut` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和分发语义，
-Canvas 与 Environment 的失效 hub 也复用它，不经过 Harness 契约。
+`platform.notification` 的 `SubscriptionFanOut`、`VersionNotificationHub` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和
+分发语义；channel、payload 与事件类型由各生产方定义，Canvas、Project 与 Environment 的失效源也组合它们，不经过 Harness 契约。
 
 ### 事务边界与锁序
 
@@ -85,8 +90,9 @@ Canvas 与 Environment 的失效 hub 也复用它，不经过 Harness 契约。
 在每个回调外层开启 `READ_COMMITTED`、`PROPAGATION_REQUIRED`、名为 `harness-store` 的事务；
 同一 Store 实例用 `ThreadLocal` 拒绝嵌套事务，加入调用方外层事务时由外层决定最终提交。
 [`PostgresqlBuiltinHarnessStore`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/store/PostgresqlBuiltinHarnessStore.java)
-将 Builtin 私有事务视图装配到同一事务核心；Thread 深删除通过 Driver 中立接口先锁私有行和相应 Work，
-再删除 Work 与私有行，不由通用存储解析模型状态。
+将 Builtin 私有事务视图装配到同一事务核心；Thread 深删除由 Driver 中立的 `DriverThreadDeletion`
+两阶段端口协作：第一阶段按 Driver id 稳定排序锁定私有行并声明相应 Work，第二阶段在通用存储删除 Work
+与 ToolInvocation 之后再删除私有行，不由通用存储解析模型状态。
 [`PostgresqlHarnessTransaction`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/store/PostgresqlHarnessTransaction.java)
 记录已达成的最高锁阶梯，显式拒绝逆序；句柄严格绑定创建它的线程。数据库异常记录为首个故障，
 回调返回前由 `rethrowDatabaseFailure()` 强制重抛，避免污染连接继续提交。
@@ -113,12 +119,13 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 ### 持久事实与 EntryPath 读取
 
 持久事实由 `harness_session`、`harness_entry`、`harness_thread`、
-`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、
+`harness_thread_command`、Builtin 的 `builtin_model_invocation`、`harness_tool_invocation`、
 `harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit` 与共享
 `durable_work` 保存。数据库约束形状和归属，语义由应用层维护，详细列与约束见 [Schema](schema.md)。
 其中 Entry 父子必须同属 Session，每个 Session 至多一个 ROOT；命令以 Thread 与序号为主键、
 幂等键在 Thread 内唯一，Model 按 Thread 与 Turn 唯一，Tool 按 Assistant Entry 与调用序号唯一。
-Work 的租约 token 与 deadline 同空同非空，环境亲和性仅用于 TOOL；Thread 的执行根与父关系创建时固定，
+Work 的租约 token 与 deadline 同空同非空，`target_type` 只校验大写格式，环境亲和性由各 Work 类型自己声明
+（当前生产仅 TOOL 使用）；Thread 的执行根与父关系创建时固定，
 只有执行根可设置 `yolo_enabled`。所有时间列使用毫秒精度，版本与业务 ID 由应用生成。
 执行退出事实按具体执行代次登记，`UNCONFIRMED` 可推进为真实退出或显式 `ABANDONED`，
 真实证据可替换放弃；事实保留到 Thread 深删除，不设 TTL。
@@ -141,8 +148,9 @@ INPUT/CONTINUATION 轮次和 assistant tool call，排除 COMPACTION 与 STOP。
 返回完整链并将 `baseEntryId` 置空。head 缺失时拒绝。切片及 CUSTOM 窄查询不回填完整路径缓存。
 
 深删除先排序并锁定目标 Thread，重复 ID、未锁树或仍被引用的目标被拒绝；
-依次锁 Command、Model、Tool、Work，再按 Work、Command、Tool、Model、执行退出事实、
-Thread 的顺序删除。Entry 叶子优先逐层删除，Session 单独删除。
+依次锁 Command、Driver 私有行、Tool、Work，再按 Work、Command、Tool、Driver 私有行、
+执行退出事实、Thread 的顺序删除。Driver 私有行由 `DriverThreadDeletion` 锁定和删除；
+Entry 叶子优先逐层删除，Session 单独删除。
 
 ### Work 的 claim / lease / wake
 
@@ -175,7 +183,7 @@ token/deadline 决定谁仍拥有，三者互不替代。
 
 [`HarnessWorkDispatcher`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/HarnessWorkDispatcher.java)
 只做 claim、类型路由、有界 handoff、wake 合并、周期 poll 和 stop，不读取业务状态或解释 Processor 结果。
-它传递节点身份，以 round-robin 轮转已注册的 `THREAD`、`MODEL`、`AGENT`、`TOOL` 子集，
+它传递节点身份，以 round-robin 轮转已注册的 `THREAD`、`TOOL` 与 Driver 注册的 Work 类型子集，
 必须包含 `THREAD`；CAS 合并 wake 保证同一时刻只有一个 drain。`start()` 注册 fixed-delay poll
 并立即唤醒，运行中重复调用无操作，stop 后不能重启。执行器由调用方管理，stop 取消 poll 并立即返回；
 在途 claim 即使提交也会在 handoff 前归还。
@@ -183,7 +191,7 @@ token/deadline 决定谁仍拥有，三者互不替代。
 调度骨架复用 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)。
 worker 必须使用 fail-fast 拒绝策略；容量拒绝时先校验有效 lease，再按 `executorRejectionDelay`
 重排并结束当前 drain，防止忙循环。Processor 运行时异常只记录日志并保留租约等待到期恢复。
-`HarnessWorkDispatcherConfig` 的各类型 lease、poll 与拒绝延迟必须为正整毫秒，
+`HarnessWorkDispatcherConfig` 的统一 `leaseDuration`、poll 与拒绝延迟必须为正整毫秒，
 `maxDispatchTasks` 只限制本机排队及运行中的 handoff，不限制异步 Model/Tool 执行并发。
 
 ### Realtime source / sink
@@ -254,7 +262,9 @@ Work 可领取时间和执行租约的最小值，不使用全局交互截止点
 或无未来边界时不定时。这四项是读取时 sidecar，不属于 Thread version 所保证的
 durable 快照，到期后同 version 重新 GET 会自然变化，无额外持久写入。
 
-数据库 `environment_changed` 同时失效环境与交互查询。连接认领、READY（包括宿主信息与
+数据库 `environment_changed` 同时失效环境与交互查询；channel 与订阅入口由
+[`EnvironmentChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentChangeNotifications.java)
+定义，写侧在同一事务内投递。连接认领、READY（包括宿主信息与
 Skill 投影重建）、断线、释放及运维事件等事实变更仍在写事务内发布；围栏失败不发布，
 发布失败回滚对应状态写。心跳仅在既有 owner/token/有效期围栏下持久续租 `last_seen_at`
 和 `lease_until`，不再因续租发布通知。心跳中若携带实质变化的运行态，或独立运行态消息
@@ -291,7 +301,7 @@ Provider credential 在显式写入口接收，常规响应给出安全投影；
 [`ProviderType`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
 `GET /api/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
-模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscovery.java)），
+模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
 MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
@@ -323,7 +333,9 @@ Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只�
 
 每个 Package 保存不可变 `packageName`、repository URL，以及 branch、`currentCommit`、
 `observedHeadCommit`、检查结果和从当前 commit 派生的 Skill 列表。
-根目录 `<name>/SKILL.md` 的 frontmatter 必须满足名称与目录一致、description 非空且有界；
+Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字符分隔。
+根目录 `<name>/SKILL.md` 的 frontmatter 名称必须与目录一致；description 去掉首尾空白后为
+1–1024 个字符，允许换行；
 路径和符号链接保持在仓库树内。正文和附属文件由 Git 保存。
 
 创建发布当时 branch 的 exact HEAD；Check 只更新观察事实。Update 要求

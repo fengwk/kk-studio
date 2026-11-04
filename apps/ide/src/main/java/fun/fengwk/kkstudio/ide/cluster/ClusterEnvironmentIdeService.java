@@ -4,19 +4,22 @@ import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * {@link EnvironmentIdeService} 的跨节点组合实现：按当前 owner 快照决定本地交付还是单跳内部转发。
@@ -40,112 +43,102 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   @Override
   public EnvironmentIdeViewDTO openView(
       EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      return local.openView(environmentId, request);
-    }
-    return client.openView(environmentId, route, request);
+    return route(
+        environmentId,
+        () -> local.openView(environmentId, request),
+        owner -> client.openView(environmentId, owner, request));
   }
 
   @Override
   public EnvironmentIdeViewDTO changeDirectory(
       EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      return local.changeDirectory(environmentId, parsedViewId, request);
-    }
-    return client.changeDirectory(environmentId, route, parsedViewId, request);
+    return route(
+        environmentId,
+        () -> local.changeDirectory(environmentId, parsedViewId, request),
+        owner -> client.changeDirectory(environmentId, owner, parsedViewId, request));
   }
 
   @Override
   public void focusTerminal(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      local.focusTerminal(environmentId, parsedViewId, request);
-      return;
-    }
-    client.focusTerminal(environmentId, route, parsedViewId, request);
+    routeAction(
+        environmentId,
+        () -> local.focusTerminal(environmentId, parsedViewId, request),
+        owner -> client.focusTerminal(environmentId, owner, parsedViewId, request));
   }
 
   @Override
   public void collapseMobile(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      local.collapseMobile(environmentId, parsedViewId, request);
-    } else {
-      client.collapseMobile(environmentId, route, parsedViewId, request);
-    }
+    routeAction(
+        environmentId,
+        () -> local.collapseMobile(environmentId, parsedViewId, request),
+        owner -> client.collapseMobile(environmentId, owner, parsedViewId, request));
   }
 
   @Override
   public EnvironmentIdeDirectoryListingDTO listDirectories(
       EnvironmentId environmentId, String path) {
-    Objects.requireNonNull(environmentId, "environmentId");
     EnvironmentIdeServiceImpl.parseDirectory(path);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    return route.local()
-        ? local.listDirectories(environmentId, path)
-        : client.listDirectories(environmentId, route, path);
+    return route(
+        environmentId,
+        () -> local.listDirectories(environmentId, path),
+        owner -> client.listDirectories(environmentId, owner, path));
   }
 
   @Override
   public void closeView(
       EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      local.closeView(environmentId, parsedViewId, request);
-      return;
-    }
-    client.closeView(environmentId, route, parsedViewId, request);
-  }
-
-  @Override
-  public void detachView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(request, "request");
-    String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      local.detachView(environmentId, parsedViewId, request);
-      return;
-    }
-    client.detachView(environmentId, route, parsedViewId, request);
+    routeAction(
+        environmentId,
+        () -> local.closeView(environmentId, parsedViewId, request),
+        owner -> client.closeView(environmentId, owner, parsedViewId, request));
   }
 
   @Override
   public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      return local.listViews(environmentId);
-    }
-    return client.listViews(environmentId, route);
+    return route(
+        environmentId,
+        () -> local.listViews(environmentId),
+        owner -> client.listViews(environmentId, owner));
   }
 
-  private ClusterOwnerRoute requireRoute(EnvironmentId environmentId) {
-    return registry
-        .route(environmentId)
-        .orElseThrow(
-            () ->
-                new AiEnvironmentIdeUnavailableException(
-                    "environment IDE owner route is unavailable"));
+  private <T> T route(
+      EnvironmentId environmentId,
+      Supplier<T> localCall,
+      Function<ClusterOwnerRoute, T> remoteCall) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    ClusterOwnerRoute owner =
+        registry
+            .route(environmentId)
+            .orElseThrow(
+                () ->
+                    new AiEnvironmentIdeUnavailableException(
+                        "environment IDE owner route is unavailable"));
+    return owner.local() ? localCall.get() : remoteCall.apply(owner);
+  }
+
+  private void routeAction(
+      EnvironmentId environmentId, Runnable localCall, Consumer<ClusterOwnerRoute> remoteCall) {
+    route(
+        environmentId,
+        () -> {
+          localCall.run();
+          return null;
+        },
+        owner -> {
+          remoteCall.accept(owner);
+          return null;
+        });
   }
 
   private static String parseViewId(String viewId) {

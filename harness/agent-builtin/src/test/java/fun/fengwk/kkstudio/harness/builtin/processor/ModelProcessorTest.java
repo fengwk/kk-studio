@@ -61,6 +61,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
@@ -76,6 +77,7 @@ import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ExecutionExitFailur
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ExitLogCapture;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryModelGateway;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -104,19 +106,18 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
-import fun.fengwk.kkstudio.harness.runtime.processor.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
-import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
+import fun.fengwk.kkstudio.harness.spi.work.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -251,7 +252,7 @@ class ModelProcessorTest {
     assertFalse(fixture.gateway.controlled(fixture.invocationId).interrupted.get());
     assertTrue(fixture.processor.hasActiveExecution());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
   }
@@ -415,7 +416,7 @@ class ModelProcessorTest {
                 FALLBACK_DELAY,
                 ModelStreamConfig.DEFAULT,
                 null,
-                ModelHttpErrorPolicyProvider.DEFAULT),
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
@@ -483,7 +484,7 @@ class ModelProcessorTest {
               .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(invocationId))
               .isEmpty(),
           "Stop deletes the completed Model invocation");
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
+      assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, invocationId)));
       UUID heldExecutionId = executionId;
       assertEquals(
           ExecutionExitState.UNCONFIRMED,
@@ -626,7 +627,7 @@ class ModelProcessorTest {
     assertEquals(0, model.attempt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(NOW.plusSeconds(5), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
@@ -646,7 +647,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
   }
@@ -672,7 +673,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -720,7 +721,7 @@ class ModelProcessorTest {
   void ownershipLossDuringMaterializationDoesNotWriteOrDispatch() {
     ReplayHistory history = seedReplayHistory();
     InMemoryBuiltinHarnessStore store = history.store();
-    WorkTarget target = new WorkTarget(WorkTargetType.MODEL, history.invocationId());
+    WorkTarget target = new WorkTarget(BuiltinWorkType.MODEL, history.invocationId());
     FakeGateway gateway = new FakeGateway();
     HarnessStore hooked =
         afterEntryPathLoad(
@@ -765,7 +766,7 @@ class ModelProcessorTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
     assertEquals("invalid entry path", failed.error().message());
     assertEquals(0, failed.attempt());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -820,7 +821,7 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(fixture.clock.instant().plusSeconds(5), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
@@ -852,7 +853,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** 恢复预检后丢失 claim：重试与预算耗尽两条路径的 tentative 写入都必须回滚，不能推进 attempt 或唤醒 THREAD。 */
@@ -933,7 +934,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     assertEquals(0, fixture.gateway.admitCalls);
   }
 
@@ -982,7 +983,7 @@ class ModelProcessorTest {
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1493,7 +1494,7 @@ class ModelProcessorTest {
             false,
             ModelStreamConfig.DEFAULT,
             null,
-            ModelHttpErrorPolicyProvider.DEFAULT);
+            providerName -> ModelHttpErrorPolicy.DEFAULT);
     truncated.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
@@ -1518,7 +1519,7 @@ class ModelProcessorTest {
             false,
             ModelStreamConfig.DEFAULT,
             null,
-            ModelHttpErrorPolicyProvider.DEFAULT);
+            providerName -> ModelHttpErrorPolicy.DEFAULT);
     filtered.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
@@ -1701,7 +1702,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1731,7 +1732,7 @@ class ModelProcessorTest {
         ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /**
@@ -1775,7 +1776,7 @@ class ModelProcessorTest {
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
     assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(NOW.plusSeconds(5), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
@@ -1828,7 +1829,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** 白名单命中的 HTTP 失败进入既有重试预算，且诊断 kind 不被改写（429 仍是 BILLING）。 */
@@ -2041,7 +2042,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** Stop deleteWork 后到达的 late TRANSIENT 失败：retry 事务 ownership 校验失败，保持 RUNNING 并关闭本地执行。 */
@@ -2179,7 +2180,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** 处理期间到达新 wake：terminal complete 只清 lease 保留行，新 wake 保持可见。 */
@@ -2198,7 +2199,7 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(2, modelWork.wakeVersion());
     assertNull(modelWork.leaseToken());
@@ -2224,7 +2225,7 @@ class ModelProcessorTest {
     assertEquals("answer", model.result().text());
     assertNotNull(model.streamCheckpoint());
     assertEquals("answer", model.streamCheckpoint().text());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     fixture.sink.failure = null;
     assertTrue(fixture.sink.events.isEmpty());
   }
@@ -2254,7 +2255,7 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
     assertEquals(1, deltas(fixture.sink).size());
   }
 
@@ -2329,7 +2330,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
     assertNull(model.streamCheckpoint());
     assertTrue(fixture.sink.events.isEmpty());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** thinking delta 进 checkpoint；final thinking 补发布 gap。 */
@@ -2504,7 +2505,7 @@ class ModelProcessorTest {
         ProviderErrorKind.INVALID_RESPONSE, retried.failedAttempts().getFirst().error().kind());
     assertEquals(
         NOW.plusSeconds(5),
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .availableAt());
 
     // 重试耗尽：第二次 INVALID_RESPONSE 转 FAILED。
@@ -2557,7 +2558,7 @@ class ModelProcessorTest {
           2,
           work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
               .wakeVersion());
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
       assertFalse(fixture.processor.hasActiveExecution());
     } finally {
       // close 请求中断；只 join 真正运行过 body 的线程，registry 是否清空不作为退出证据。
@@ -2737,14 +2738,15 @@ class ModelProcessorTest {
             .store
             .transaction(
                 tx ->
-                    tx.work().claimNext(WorkTargetType.MODEL, "near-expiry", Duration.ofSeconds(1)))
+                    tx.work()
+                        .claimNext(BuiltinWorkType.MODEL, "near-expiry", Duration.ofSeconds(1)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(30), modelWork.leaseUntil());
     assertEquals("near-expiry", modelWork.leaseToken());
   }
@@ -2759,7 +2761,7 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(claimed.leaseUntil(), modelWork.leaseUntil());
   }
 
@@ -2809,7 +2811,7 @@ class ModelProcessorTest {
     assertTrue(fixture.processor.hasActiveExecution());
     assertEquals(
         "token-" + fixture.invocationId,
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .leaseToken());
   }
 
@@ -2833,7 +2835,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
   }
@@ -2888,7 +2890,7 @@ class ModelProcessorTest {
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
@@ -2930,7 +2932,7 @@ class ModelProcessorTest {
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
     assertNull(modelWork.leaseToken());
@@ -2983,7 +2985,7 @@ class ModelProcessorTest {
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(
         "token-B",
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .leaseToken());
     fresh.succeed(response("done", GenerationStopReason.COMPLETE));
     assertEquals(
@@ -3327,7 +3329,7 @@ class ModelProcessorTest {
         2,
         work(fixtureA.store, new WorkTarget(WorkTargetType.THREAD, fixtureA.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(fixtureA.store, new WorkTarget(WorkTargetType.MODEL, fixtureA.invocationId)));
+    assertNull(work(fixtureA.store, new WorkTarget(BuiltinWorkType.MODEL, fixtureA.invocationId)));
   }
 
   /**
@@ -3415,14 +3417,14 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.MODEL, "partial", Duration.ofSeconds(15)))
+                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "partial", Duration.ofSeconds(15)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(30), modelWork.leaseUntil());
     assertEquals("partial", modelWork.leaseToken());
   }
@@ -3435,14 +3437,14 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.work().claimNext(WorkTargetType.MODEL, "exact", Duration.ofSeconds(30)))
+                tx -> tx.work().claimNext(BuiltinWorkType.MODEL, "exact", Duration.ofSeconds(30)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plusSeconds(30), modelWork.leaseUntil());
   }
 
@@ -3552,7 +3554,7 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertNotNull(
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId))
             .leaseToken());
     assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
     assertTrue(fixture.sink.events.isEmpty());
@@ -3617,21 +3619,21 @@ class ModelProcessorTest {
                 tx ->
                     tx.work()
                         .claimNext(
-                            WorkTargetType.MODEL, "token-" + invocationId, Duration.ofMillis(400)))
+                            BuiltinWorkType.MODEL, "token-" + invocationId, Duration.ofMillis(400)))
             .orElseThrow();
 
     assertEquals(ProcessResult.STARTED, processor.process(claimed));
 
     awaitTrue(
         () ->
-            work(store, new WorkTarget(WorkTargetType.MODEL, invocationId))
+            work(store, new WorkTarget(BuiltinWorkType.MODEL, invocationId))
                 .leaseUntil()
                 .isAfter(claimed.leaseUntil()),
         Duration.ofSeconds(2));
     store.transaction(
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          tx.work().delete(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
           return null;
         });
     awaitTrue(run.interrupted::get, Duration.ofSeconds(2));
@@ -3666,7 +3668,7 @@ class ModelProcessorTest {
     assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
   }
@@ -3690,7 +3692,7 @@ class ModelProcessorTest {
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.admitCalls);
     Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+        work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
   }
 
@@ -3724,7 +3726,7 @@ class ModelProcessorTest {
         1,
         work(busy.store, new WorkTarget(WorkTargetType.THREAD, busy.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(busy.store, new WorkTarget(WorkTargetType.MODEL, busy.invocationId)));
+    assertNull(work(busy.store, new WorkTarget(BuiltinWorkType.MODEL, busy.invocationId)));
     assertFalse(busy.processor.hasActiveExecution());
 
     Fixture rejected = fixture();
@@ -3744,7 +3746,7 @@ class ModelProcessorTest {
         1,
         work(rejected.store, new WorkTarget(WorkTargetType.THREAD, rejected.baseline.threadId()))
             .wakeVersion());
-    assertNull(work(rejected.store, new WorkTarget(WorkTargetType.MODEL, rejected.invocationId)));
+    assertNull(work(rejected.store, new WorkTarget(BuiltinWorkType.MODEL, rejected.invocationId)));
     assertFalse(rejected.processor.hasActiveExecution());
   }
 
@@ -3773,7 +3775,7 @@ class ModelProcessorTest {
       assertEquals(0, model.attempt());
       assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
       assertEquals(0, fixture.gateway.admitCalls);
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
       assertFalse(processor.hasActiveExecution());
     }
   }
@@ -3812,7 +3814,7 @@ class ModelProcessorTest {
           work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
               .wakeVersion());
       assertEquals(0, fixture.gateway.admitCalls);
-      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
       assertFalse(processor.hasActiveExecution());
     }
   }
@@ -4053,7 +4055,7 @@ class ModelProcessorTest {
     fixture.store.transaction(
         tx -> {
           tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-          tx.work().delete(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
           return null;
         });
   }
@@ -4066,7 +4068,7 @@ class ModelProcessorTest {
     fixture.store.transaction(
         tx -> {
           tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-          WorkTarget target = new WorkTarget(WorkTargetType.MODEL, invocationId);
+          WorkTarget target = new WorkTarget(BuiltinWorkType.MODEL, invocationId);
           tx.work().delete(target);
           tx.work().request(target);
           return null;
@@ -4077,7 +4079,7 @@ class ModelProcessorTest {
     fixture.store.transaction(
         tx -> {
           tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
           return null;
         });
   }
@@ -4109,7 +4111,8 @@ class ModelProcessorTest {
   }
 
   private Fixture fixture(
-      InvocationRetryPolicy retryPolicy, ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+      InvocationRetryPolicy retryPolicy,
+      Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
     return new Fixture(
         retryPolicy,
         requestSpec(),
@@ -4174,7 +4177,7 @@ class ModelProcessorTest {
           compactionChild,
           flushConfig,
           null,
-          ModelHttpErrorPolicyProvider.DEFAULT);
+          providerName -> ModelHttpErrorPolicy.DEFAULT);
     }
 
     Fixture(
@@ -4188,7 +4191,7 @@ class ModelProcessorTest {
           false,
           ModelStreamConfig.DEFAULT,
           toolHistoryActionResolver,
-          ModelHttpErrorPolicyProvider.DEFAULT);
+          providerName -> ModelHttpErrorPolicy.DEFAULT);
     }
 
     Fixture(
@@ -4198,7 +4201,7 @@ class ModelProcessorTest {
         boolean compactionChild,
         ModelStreamConfig flushConfig,
         ToolHistoryActionResolver toolHistoryActionResolver,
-        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+        Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
       this(
           retryPolicy,
           requestSpec,
@@ -4218,9 +4221,19 @@ class ModelProcessorTest {
         boolean ownerSettledSummary,
         ModelStreamConfig flushConfig,
         ToolHistoryActionResolver toolHistoryActionResolver,
-        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+        Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
+      if (requestSpec.groupExecution() != null) {
+        store.transaction(
+            tx -> {
+              gateway.setGroupVersion(
+                  tx,
+                  requestSpec.groupExecution().groupName(),
+                  requestSpec.groupExecution().groupVersion());
+              return null;
+            });
+      }
       this.baseline = seedBaseline(store, NOW, constraints);
       if (ownerSettledSummary) {
         seedOwnerSettledTicket(
@@ -4305,7 +4318,7 @@ class ModelProcessorTest {
                           NOW,
                           NOW));
               tx.work().request(new WorkTarget(WorkTargetType.THREAD, basis.threadId()));
-              tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+              tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
               return id;
             });
     return new ReplayHistory(store, basis, invocationId);
@@ -4431,7 +4444,7 @@ class ModelProcessorTest {
                       now,
                       now));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
         });
   }
@@ -4574,7 +4587,7 @@ class ModelProcessorTest {
                           ? null
                           : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0)));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
         });
   }
@@ -4585,7 +4598,8 @@ class ModelProcessorTest {
 
   private static ClaimedWork claim(HarnessStore store, UUID invocationId, String token) {
     return store
-        .transaction(tx -> tx.work().claimNext(WorkTargetType.MODEL, token, Duration.ofSeconds(60)))
+        .transaction(
+            tx -> tx.work().claimNext(BuiltinWorkType.MODEL, token, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 
@@ -4783,7 +4797,7 @@ class ModelProcessorTest {
   private static void freezeGroupMember(Fixture fixture, String member, Instant until) {
     fixture.store.transaction(
         tx -> {
-          builtin(fixture.store, tx).freezeGroupMember("group", 7L, member, "v1", until);
+          fixture.gateway.freezeGroupMember(tx, "group", 7L, member, "v1", until);
           return null;
         });
   }
@@ -4791,7 +4805,7 @@ class ModelProcessorTest {
   /** 在 fixture 当前时钟下该成员是否仍处于组冷却。 */
   private static boolean cooling(Fixture fixture, String member) {
     return fixture.store.transaction(
-        tx -> builtin(fixture.store, tx).isGroupMemberCooling("group", 7L, member, "v1"));
+        tx -> fixture.gateway.isGroupMemberCooling(tx, "group", 7L, member, "v1"));
   }
 
   private static ModelGroupProgress groupProgress(ModelInvocation invocation) {
@@ -4835,7 +4849,7 @@ class ModelProcessorTest {
     assertNull(failed.error().httpStatus());
     assertFalse(failed.error().retryCandidate());
     assertTrue(failed.error().message().contains("no available model in group"));
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId)));
   }
 
   /** 命中 fallback 码立即冻结并推进，不消耗普通重试预算；失败审计带实际成员与请求时间，下一成员立即可执行。 */
@@ -5041,7 +5055,7 @@ class ModelProcessorTest {
    * 可编排的 fake Gateway：每次 admit 取队列头的一个结果。{@link #queueControlled} 排入一次受测试线程控制的阻塞运行——测试通过 {@link
    * ControlledRun} 逐个推送增量并给出终态，运行线程在 {@code run} 内阻塞等待。
    */
-  static final class FakeGateway implements ModelGateway {
+  static final class FakeGateway extends InMemoryModelGateway {
     final LinkedList<Object> results = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
     final List<Thread> executionThreads = new CopyOnWriteArrayList<>();

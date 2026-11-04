@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
@@ -17,11 +18,21 @@ import java.util.function.Consumer;
 final class SessionDeletion {
   private SessionDeletion() {}
 
+  /** 无 Driver 私有状态的删除；仅用于不持有 Driver 私有行的调用方与测试。 */
   static void delete(
       HarnessStore.Transaction tx,
       List<UUID> sessionIds,
       Consumer<List<UUID>> deleteRelations,
       Consumer<List<UUID>> releaseRefs) {
+    delete(tx, sessionIds, deleteRelations, releaseRefs, DriverThreadDeletion.NONE);
+  }
+
+  static void delete(
+      HarnessStore.Transaction tx,
+      List<UUID> sessionIds,
+      Consumer<List<UUID>> deleteRelations,
+      Consumer<List<UUID>> releaseRefs,
+      DriverThreadDeletion driverDeletion) {
     DeletionScope scope = discoverScope(tx, sessionIds);
     for (UUID root : scope.roots()) {
       tx.threads().lockTree(root);
@@ -39,7 +50,7 @@ final class SessionDeletion {
           "harness execution tree changed while acquiring its deletion locks");
     }
     deleteRelations.accept(List.copyOf(presentSessions));
-    deleteThreadsDeep(tx, confirmed.threads());
+    deleteThreadsDeep(tx, confirmed.threads(), driverDeletion);
     for (UUID sessionId : confirmed.sessions()) {
       releaseRefs.accept(List.of(sessionId));
       tx.entries().delete(sessionId);
@@ -47,7 +58,8 @@ final class SessionDeletion {
     }
   }
 
-  private static void deleteThreadsDeep(HarnessStore.Transaction tx, Set<UUID> threadIds) {
+  private static void deleteThreadsDeep(
+      HarnessStore.Transaction tx, Set<UUID> threadIds, DriverThreadDeletion driverDeletion) {
     List<UUID> ordered = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID threadId : ordered) {
       tx.threads().lock(threadId).orElseThrow();
@@ -68,7 +80,7 @@ final class SessionDeletion {
       return;
     }
     tx.joins().deleteForThreads(ordered);
-    if (tx.threads().delete(ordered) != ordered.size()) {
+    if (tx.threads().delete(ordered, driverDeletion) != ordered.size()) {
       throw new IllegalStateException("not all locked threads were deleted");
     }
   }

@@ -9,6 +9,8 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
+import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -23,15 +25,15 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.processor.ClaimAdmissionGuard;
-import fun.fengwk.kkstudio.harness.runtime.processor.ClaimLostSignal;
-import fun.fengwk.kkstudio.harness.runtime.processor.ClaimedExecutionSupport;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedExecutionSupport;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -64,7 +66,7 @@ import java.util.function.Function;
  * attempt + claim 校验同时充当陈旧启动围栏：Stop / 跨实例 recovery 已获胜时绝不发出请求。
  */
 @Slf4j
-public final class ModelProcessor implements AutoCloseable {
+public final class ModelProcessor implements ModelCheckpointRequester, AutoCloseable {
 
   private final HarnessStore store;
   private final BuiltinStore builtinStore;
@@ -103,7 +105,7 @@ public final class ModelProcessor implements AutoCloseable {
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.executionExecutor = Objects.requireNonNull(executionExecutor, "executionExecutor");
     this.executions =
-        new ClaimedExecutionSupport<>(store, WorkTargetType.MODEL, config.leaseConfig());
+        new ClaimedExecutionSupport<>(store, BuiltinWorkType.MODEL, config.leaseConfig());
   }
 
   private static BuiltinStore requireBuiltinStore(HarnessStore store) {
@@ -133,7 +135,8 @@ public final class ModelProcessor implements AutoCloseable {
       return ProcessResult.LOST_OWNERSHIP;
     }
     try (ticket) {
-      Prepare prepare = inTransaction(tx -> prepareLocked(tx, claim, tx.now()));
+      Prepare prepare =
+          store.transaction(core -> prepareLocked(core, builtinStore.in(core), claim, core.now()));
       return switch (prepare) {
         case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
         case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
@@ -161,6 +164,7 @@ public final class ModelProcessor implements AutoCloseable {
    * <p>不匹配（invocation 不在本进程执行、attempt 已被其它 attempt 接管、execution 已终态/取消/abandoned）返回 {@code false}
    * 且不触发任何持久化或发布；只有确实登记为 active 且 attempt 一致时返回 {@code true}。不阻塞调用方，可从实时通道的任意线程调用。
    */
+  @Override
   public boolean requestCheckpoint(UUID invocationId, int attempt) {
     Objects.requireNonNull(invocationId, "invocationId");
     if (attempt <= 0) {
@@ -192,6 +196,7 @@ public final class ModelProcessor implements AutoCloseable {
     ModelExecution execution =
         new ModelExecution(
             store,
+            gateway,
             realtimeEventSink,
             claim,
             dispatched.threadId(),
@@ -391,7 +396,8 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /** 在事务内按 own Thread -> Model -> Work 锁序锁定并校验状态，不取树锁/祖先锁，依据 durable status 路由准备结果。 */
-  private Prepare prepareLocked(BuiltinStore.Transaction tx, ClaimedWork claim, Instant now) {
+  private Prepare prepareLocked(
+      HarnessStore.Transaction core, BuiltinStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
@@ -406,13 +412,14 @@ public final class ModelProcessor implements AutoCloseable {
       return new Prepare.Lost();
     }
     return switch (model.status()) {
-      case READY -> prepareReady(tx, claim, thread, model, now);
+      case READY -> prepareReady(core, tx, claim, thread, model, now);
       case RUNNING -> recoverRunning(tx, claim, thread, model, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, model, now);
     };
   }
 
   private Prepare prepareReady(
+      HarnessStore.Transaction core,
       BuiltinStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -425,7 +432,7 @@ public final class ModelProcessor implements AutoCloseable {
       if (progress == null || progress.groupVersion() != group.groupVersion()) {
         throw new IllegalStateException("group invocation is missing matching durable progress");
       }
-      memberIndex = firstAvailableMember(tx, group, progress.memberIndex());
+      memberIndex = firstAvailableMember(core, group, progress.memberIndex());
       if (memberIndex >= group.members().size()) {
         // 全是本地候选选择失败：不伪装成上游调用错误，也不进入普通重试预算。THREAD Work 先于 MODEL Work 加锁。
         tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
@@ -486,11 +493,12 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /** 从 {@code fromIndex} 起第一个当前不在冷却的成员下标；全部冷却时返回成员数。 */
-  private static int firstAvailableMember(
-      BuiltinStore.Transaction tx, ModelGroupExecution group, int fromIndex) {
+  private int firstAvailableMember(
+      HarnessStore.Transaction tx, ModelGroupExecution group, int fromIndex) {
     int index = fromIndex;
     while (index < group.members().size()
-        && tx.isGroupMemberCooling(
+        && gateway.isGroupMemberCooling(
+            tx,
             group.groupName(),
             group.groupVersion(),
             group.members().get(index).model().modelName(),
@@ -559,8 +567,7 @@ public final class ModelProcessor implements AutoCloseable {
     int budgetAttempt =
         group == null ? model.attempt() : Math.addExact(groupProgress.memberAttempts(), 1);
     InvocationRetryDecision decision =
-        InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), true, budgetAttempt);
+        InvocationRetryDecision.decide(config.retryPolicyProvider().get(), true, budgetAttempt);
     if (decision.retry()) {
       Instant retryAt = now.plus(decision.delay());
       ModelInvocation retried =

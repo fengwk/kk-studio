@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
@@ -95,6 +97,23 @@ public final class ControlProtocolCodec {
   private static final Pattern MEDIA_TYPE_PATTERN =
       Pattern.compile("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$");
   private static final Pattern IDE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
+  private static final Pattern SKILL_PACKAGE_NAME_PATTERN =
+      Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*$");
+
+  /** 单轮期望集合与状态上报的包数上限。 */
+  public static final int MAX_SKILL_PACKAGES = 512;
+
+  /** 技能包下载地址的字符上限。 */
+  public static final int MAX_SKILL_DOWNLOAD_URL_CHARS = 4096;
+
+  /** 技能包本地安装根的字符上限。 */
+  public static final int MAX_SKILL_LOCAL_PATH_CHARS = 4096;
+
+  /** 技能包安装错误的字符上限。 */
+  public static final int MAX_SKILL_ERROR_CHARS = 512;
+
+  /** 技能包名与包版本的字符上限。 */
+  public static final int MAX_SKILL_PACKAGE_NAME_CHARS = 64;
 
   private static final Set<MessageType> BOUND =
       Set.of(
@@ -121,6 +140,8 @@ public final class ControlProtocolCodec {
           MessageType.IDE_COMMAND,
           MessageType.IDE_RESULT,
           MessageType.IDE_LEASE,
+          MessageType.SKILL_SYNC,
+          MessageType.SKILL_STATE,
           MessageType.ERROR);
 
   private static final Set<MessageType> INVOCATION =
@@ -150,7 +171,9 @@ public final class ControlProtocolCodec {
           MessageType.TEMPORARY_RESOURCE_POLICY,
           MessageType.UPDATE,
           MessageType.UPDATE_RESULT,
-          MessageType.IDE_LEASE);
+          MessageType.IDE_LEASE,
+          MessageType.SKILL_SYNC,
+          MessageType.SKILL_STATE);
 
   private ControlProtocolCodec() {}
 
@@ -331,6 +354,14 @@ public final class ControlProtocolCodec {
       case IDE_LEASE -> {
         requirePayload(envelope, Envelope.PayloadCase.IDE_LEASE, "IDE_LEASE");
         validateIdeLease(envelope.getIdeLease());
+      }
+      case SKILL_SYNC -> {
+        requirePayload(envelope, Envelope.PayloadCase.SKILL_SYNC, "SKILL_SYNC");
+        validateSkillSync(envelope.getSkillSync());
+      }
+      case SKILL_STATE -> {
+        requirePayload(envelope, Envelope.PayloadCase.SKILL_STATE, "SKILL_STATE");
+        validateSkillState(envelope.getSkillState());
       }
       case ERROR -> {
         requirePayload(envelope, Envelope.PayloadCase.ERROR, "ERROR");
@@ -714,6 +745,175 @@ public final class ControlProtocolCodec {
     return new DaemonUpdateCommand(proto.getOperationId(), proto.getTargetVersion());
   }
 
+  /** 构建一条完整的期望技能集合并施加与解码相同的校验。 */
+  public static SkillSync toProtoSkillSync(List<DaemonSkillPackage> packages) {
+    Objects.requireNonNull(packages, "packages");
+    SkillSync.Builder sync = SkillSync.newBuilder();
+    for (DaemonSkillPackage skillPackage : packages) {
+      Objects.requireNonNull(skillPackage, "packages[]");
+      sync.addPackages(
+          SkillPackage.newBuilder()
+              .setPackageName(skillPackage.packageName())
+              .setSha256(skillPackage.sha256())
+              .setSizeBytes(skillPackage.sizeBytes())
+              .setDownloadUrl(skillPackage.downloadUrl())
+              .build());
+    }
+    SkillSync proto = sync.build();
+    validateSkillSync(proto);
+    return proto;
+  }
+
+  /** 校验并转换为领域期望集合。 */
+  public static List<DaemonSkillPackage> toDomainSkillSync(SkillSync proto) {
+    Objects.requireNonNull(proto, "proto");
+    validateSkillSync(proto);
+    return proto.getPackagesList().stream()
+        .map(
+            skillPackage ->
+                new DaemonSkillPackage(
+                    skillPackage.getPackageName(),
+                    skillPackage.getSha256(),
+                    skillPackage.getSizeBytes(),
+                    skillPackage.getDownloadUrl()))
+        .toList();
+  }
+
+  /** 校验并转换为领域状态上报。 */
+  public static List<DaemonSkillStatePackage> toDomainSkillState(SkillState proto) {
+    Objects.requireNonNull(proto, "proto");
+    validateSkillState(proto);
+    return proto.getPackagesList().stream()
+        .map(
+            state ->
+                new DaemonSkillStatePackage(
+                    state.getPackageName(),
+                    state.hasInstalledSha256() ? state.getInstalledSha256() : null,
+                    state.hasLocalPath() ? state.getLocalPath() : null,
+                    state.hasError() ? state.getError() : null))
+        .toList();
+  }
+
+  /** 构建一轮完整状态上报；测试与跨语言 fixture 共用同一形状。 */
+  public static SkillState toProtoSkillState(List<DaemonSkillStatePackage> packages) {
+    Objects.requireNonNull(packages, "packages");
+    SkillState.Builder state = SkillState.newBuilder();
+    for (DaemonSkillStatePackage skillPackage : packages) {
+      Objects.requireNonNull(skillPackage, "packages[]");
+      SkillPackageState.Builder entry =
+          SkillPackageState.newBuilder().setPackageName(skillPackage.packageName());
+      if (skillPackage.installedSha256() != null) {
+        entry.setInstalledSha256(skillPackage.installedSha256());
+      }
+      if (skillPackage.localPath() != null) {
+        entry.setLocalPath(skillPackage.localPath());
+      }
+      if (skillPackage.error() != null) {
+        entry.setError(skillPackage.error());
+      }
+      state.addPackages(entry.build());
+    }
+    SkillState proto = state.build();
+    validateSkillState(proto);
+    return proto;
+  }
+
+  /** 期望集合：包名唯一，摘要、大小与预签名地址必须完整。 */
+  public static void validateSkillSync(SkillSync sync) {
+    requireNoUnknown(sync, "skillSync");
+    if (sync.getPackagesCount() > MAX_SKILL_PACKAGES) {
+      throw new ControlProtocolException("skillSync.packages exceeds the entry limit");
+    }
+    Set<String> names = new HashSet<>();
+    for (int index = 0; index < sync.getPackagesCount(); index++) {
+      SkillPackage skillPackage = sync.getPackages(index);
+      String path = "skillSync.packages[" + index + "]";
+      requireNoUnknown(skillPackage, path);
+      String packageName =
+          requireSkillPackageName(
+              skillPackage.hasPackageName(), skillPackage.getPackageName(), path + ".packageName");
+      if (!names.add(packageName)) {
+        throw new ControlProtocolException(
+            "skillSync contains a duplicate package: " + packageName);
+      }
+      requireSha256(skillPackage.hasSha256(), skillPackage.getSha256(), path + ".sha256");
+      if (!skillPackage.hasSizeBytes() || skillPackage.getSizeBytes() < 0) {
+        throw new ControlProtocolException(path + ".sizeBytes must not be negative");
+      }
+      requireSkillDownloadUrl(
+          skillPackage.hasDownloadUrl(), skillPackage.getDownloadUrl(), path + ".downloadUrl");
+    }
+  }
+
+  /** 状态上报：包名唯一，摘要与本地路径成对，错误有界且去敏。 */
+  public static void validateSkillState(SkillState state) {
+    requireNoUnknown(state, "skillState");
+    if (state.getPackagesCount() > MAX_SKILL_PACKAGES) {
+      throw new ControlProtocolException("skillState.packages exceeds the entry limit");
+    }
+    Set<String> names = new HashSet<>();
+    for (int index = 0; index < state.getPackagesCount(); index++) {
+      SkillPackageState entry = state.getPackages(index);
+      String path = "skillState.packages[" + index + "]";
+      requireNoUnknown(entry, path);
+      String packageName =
+          requireSkillPackageName(
+              entry.hasPackageName(), entry.getPackageName(), path + ".packageName");
+      if (!names.add(packageName)) {
+        throw new ControlProtocolException(
+            "skillState contains a duplicate package: " + packageName);
+      }
+      boolean hasSha = entry.hasInstalledSha256();
+      boolean hasPath = entry.hasLocalPath();
+      if (hasSha != hasPath) {
+        throw new ControlProtocolException(
+            path + " must declare installedSha256 and localPath together");
+      }
+      if (hasSha) {
+        requireSha256(true, entry.getInstalledSha256(), path + ".installedSha256");
+        requireSkillLocalPath(true, entry.getLocalPath(), path + ".localPath");
+      }
+      if (entry.hasError()) {
+        requireText(true, entry.getError(), path + ".error", MAX_SKILL_ERROR_CHARS, false);
+        if (entry.getError().codePoints().anyMatch(Character::isISOControl)) {
+          throw new ControlProtocolException(path + ".error must not contain control characters");
+        }
+      }
+    }
+  }
+
+  private static String requireSkillPackageName(boolean present, String value, String name) {
+    String packageName = requireText(present, value, name, MAX_SKILL_PACKAGE_NAME_CHARS, true);
+    if (!SKILL_PACKAGE_NAME_PATTERN.matcher(packageName).matches()) {
+      throw new ControlProtocolException(name + " is not a canonical skill package name");
+    }
+    return packageName;
+  }
+
+  private static void requireSha256(boolean present, String value, String name) {
+    String sha256 = requireText(present, value, name, 64, true);
+    if (!SHA256_LOWER_PATTERN.matcher(sha256).matches()) {
+      throw new ControlProtocolException(name + " must be 64 lowercase hex characters");
+    }
+  }
+
+  private static void requireSkillDownloadUrl(boolean present, String value, String name) {
+    String url = requireText(present, value, name, MAX_SKILL_DOWNLOAD_URL_CHARS, true);
+    int scheme = url.indexOf("://");
+    if (scheme <= 0
+        || !(url.startsWith("http://") || url.startsWith("https://"))
+        || url.codePoints().anyMatch(Character::isISOControl)) {
+      throw new ControlProtocolException(name + " must be an http(s) URL");
+    }
+  }
+
+  private static void requireSkillLocalPath(boolean present, String value, String name) {
+    requireText(present, value, name, MAX_SKILL_LOCAL_PATH_CHARS, false);
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
+      throw new ControlProtocolException(name + " must not contain control characters");
+    }
+  }
+
   public static void validateUpdate(Update update) {
     requireNoUnknown(update, "update");
     String operationId =
@@ -776,7 +976,7 @@ public final class ControlProtocolCodec {
         requireIdePath(command.getDirectory(), "ideCommand.directory");
         rejectOpenFields(command);
       }
-      case FOCUS_TERMINAL, DETACH_VIEW, COLLAPSE_MOBILE -> {
+      case FOCUS_TERMINAL, COLLAPSE_MOBILE -> {
         requireBoundView(command, false);
         if (command.hasDirectory()) {
           throw new ControlProtocolException("ideCommand.directory is not valid for this action");

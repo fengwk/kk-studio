@@ -30,18 +30,17 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.spi.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
@@ -58,6 +57,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Web 组合根装配测试：完整 Spring 上下文（{@code workers-enabled=false}）中验证 bean 构造、资源根目录、PostgreSQL
@@ -119,7 +119,7 @@ class HarnessRuntimeConfigurationTest {
   @Qualifier("realtimeBus")
   private RealtimeEventSource realtimeEventSource;
 
-  @Autowired private InvocationRetryPolicyProvider invocationRetryPolicyProvider;
+  @Autowired private Supplier<InvocationRetryPolicy> invocationRetryPolicyProvider;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
@@ -195,7 +195,7 @@ class HarnessRuntimeConfigurationTest {
             InvocationRetryBackoffStrategy.EXPONENTIAL,
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
-        invocationRetryPolicyProvider.retryPolicy());
+        invocationRetryPolicyProvider.get());
   }
 
   @Test

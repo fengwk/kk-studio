@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,9 +42,10 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
+import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
@@ -59,6 +61,7 @@ import java.util.UUID;
  * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/{@code ${VAR}} 原值、exact commit 恢复、同名
  * upsert、完整七节 settings 校验、显式 {@code allowPartial} 部分导入、预检查零写入、skip、事务回滚与 {@code no-store}。
  */
+@Import(WebStorageS3TestConfiguration.class)
 class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   @Autowired private ConfigSyncParser parser;
@@ -475,7 +478,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String model = "rt_model_" + suffix;
     String agentA = "rt_agent_a_" + suffix;
     String agentB = "rt_agent_b_" + suffix;
-    String pkg = "rt_pkg_" + suffix;
+    String pkg = "rt-pkg-" + suffix;
     String mcpName = "rt_mcp_" + suffix;
     String envName = "rt_env_" + suffix;
     String mcpTool = "mcp_" + mcpName + "_echo";
@@ -596,7 +599,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // Skill exact commit 恢复。
     JsonNode reSkill = getData("/api/skill-packages/" + pkg);
-    assertEquals(commit1, reSkill.path("currentCommit").asText());
+    assertEquals(commit1, reSkill.path("packageVersion").asText());
     assertEquals(1, reSkill.path("skills").size());
 
     // 再次导出逐字段比对，而不是只证明同名条目存在或 imported 列表非空。
@@ -620,7 +623,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String agentA = "cl_agent_a_" + suffix;
     String agentB = "cl_agent_b_" + suffix;
     String unrelatedAgent = "cl_agent_unrelated_" + suffix;
-    String pkg = "cl_pkg_" + suffix;
+    String pkg = "cl-pkg-" + suffix;
     String envName = "cl_env_" + suffix;
     String mcpName = "cl_mcp_" + suffix;
     String mcpTool = "mcp_" + mcpName + "_echo";
@@ -667,23 +670,23 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             && document.containsKey("providers"));
   }
 
-  // ---------------------------------------------------------------- exact commit
+  // ---------------------------------------------------------------- git rebuild
 
-  /** Branch HEAD 前进后导入导出快照：必须恢复到 YAML 记录的 exact commit，而不是最新 HEAD。 */
+  /** Git 渠道只导出仓库事实；导入重新解析 branch HEAD 并重建归档，因此 branch 前进后导入的是新 HEAD。 */
   @Test
-  void skillImportRestoresExactCommitNotLatestHead() throws Exception {
+  void skillImportPublishesTheBranchHeadAfterTheBranchMoved() throws Exception {
     String suffix = unique();
-    String pkg = "ec_pkg_" + suffix;
+    String pkg = "ec-pkg-" + suffix;
     GitFixture git = GitFixture.init("ec" + suffix, Map.of("dev/SKILL.md", DEV_SKILL_MD));
     String commit1 = git.firstCommit();
     JsonNode skillDto = createSkill(git, pkg, "exact commit package");
-    assertEquals(commit1, skillDto.path("currentCommit").asText());
+    assertEquals(commit1, skillDto.path("packageVersion").asText());
 
     String yaml =
         postData("/api/settings/sync/export", exportRequest(ref("skillPackages", pkg)))
             .path("yaml")
             .asText();
-    assertTrue(yaml.contains(commit1), "export must record the published exact commit");
+    assertFalse(yaml.contains(commit1), "export must not pin a published commit");
 
     // HEAD 前进到包含第二个 skill 的 commit。
     String commit2 =
@@ -698,9 +701,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     JsonNode reSkill = getData("/api/skill-packages/" + pkg);
     assertEquals(
-        commit1, reSkill.path("currentCommit").asText(), "must restore exact commit, not HEAD");
-    assertEquals(1, reSkill.path("skills").size(), "manifest must come from the exact commit");
-    assertEquals("dev", reSkill.path("skills").get(0).path("name").asText());
+        commit2, reSkill.path("packageVersion").asText(), "import must publish the branch HEAD");
+    assertEquals(2, reSkill.path("skills").size(), "manifest must come from the rebuilt archive");
+    assertEquals(List.of("dev", "review"), reSkill.path("skills").findValuesAsString("name"));
   }
 
   // ---------------------------------------------------------------- same-name upsert
@@ -1209,12 +1212,12 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode createSkill(GitFixture git, String pkg, String description) throws Exception {
-    SkillPackageCreateDTO dto = new SkillPackageCreateDTO();
+    SkillPackageGitCreateDTO dto = new SkillPackageGitCreateDTO();
     dto.setPackageName(pkg);
     dto.setDescription(description);
     dto.setRepositoryUrl(git.url());
     dto.setBranch("main");
-    return postData("/api/skill-packages", dto);
+    return postData("/api/skill-packages/git", dto);
   }
 
   private JsonNode createMcp(String name, String url, Map<String, String> headers)

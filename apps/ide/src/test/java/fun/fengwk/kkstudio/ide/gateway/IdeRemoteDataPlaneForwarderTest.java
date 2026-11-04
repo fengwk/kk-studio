@@ -22,7 +22,7 @@ import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

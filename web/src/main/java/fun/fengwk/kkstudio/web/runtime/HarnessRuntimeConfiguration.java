@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -29,6 +30,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
@@ -36,11 +39,8 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperti
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
-import fun.fengwk.kkstudio.platform.harness.notification.ThreadVersionHub;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
-import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
@@ -52,7 +52,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import javax.sql.DataSource;
 
 import java.time.Clock;
-import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -63,6 +63,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * Web 组合根：把 platform 的 gateway / resolver 与 infra 的 PostgreSQL 持久化和调度适配装配为完整的 Harness Runtime。
@@ -104,8 +105,11 @@ public class HarnessRuntimeConfiguration {
    * <p>Driver 只在 Runtime 已开启的事务内工作，不执行外部 I/O。
    */
   @Bean
-  public AgentDriver agentDriver(PostgresqlBuiltinHarnessStore store, TurnResolver turnResolver) {
-    return new BuiltinAgentDriver(store, turnResolver);
+  public AgentDriver agentDriver(
+      PostgresqlBuiltinHarnessStore store,
+      TurnResolver turnResolver,
+      ModelProcessor modelProcessor) {
+    return new BuiltinAgentDriver(store, turnResolver, modelProcessor);
   }
 
   /** Builtin debug 专属只读查询；公共快照不暴露 ModelRequestSpec。 */
@@ -143,30 +147,24 @@ public class HarnessRuntimeConfiguration {
       HarnessStore store,
       DriverRegistry driverRegistry,
       CompactionConfigProvider compactionConfigProvider,
-      ModelProcessor modelProcessor,
       ToolProcessor toolProcessor) {
     return new HarnessRuntime(
         store,
         driverRegistry,
         compactionConfigProvider,
-        modelProcessor::cancel,
+        driverRegistry::cancelWork,
         toolProcessor::cancel);
   }
 
   /**
-   * Thread version 变更的公开订阅源：浏览器版本事件与内部观察者（TaskTool / PluginPromptTaskService）的纯 wake 信号共用同一份注册与
-   * resync 语义。
+   * Harness 变更订阅的公开入口，同时充当内部观察者（TaskTool / PluginPromptTaskService）的纯 wake 源：Thread version、执行树与待处理
+   * 交互共用同一份注册与 resync 语义。
    */
   @Bean
-  public ThreadVersionHub threadVersionHub(ObjectProvider<HarnessRuntime> runtime) {
+  public HarnessChangeNotifications harnessChangeNotifications(
+      ObjectProvider<HarnessRuntime> runtime) {
     // Runtime 依赖 ToolProcessor，而工具目录初始化期间会取得这个 wake 源；只在订阅时解析 Runtime。
-    return new ThreadVersionHub(runtime::getObject);
-  }
-
-  /** Harness 变更订阅的公开入口：集中 Thread version、执行树与待处理交互三个通知 channel 的协议与分发。 */
-  @Bean
-  public HarnessChangeNotifications harnessChangeNotifications(ThreadVersionHub threadVersionHub) {
-    return new HarnessChangeNotifications(threadVersionHub);
+    return new HarnessChangeNotifications(runtime::getObject);
   }
 
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
@@ -250,45 +248,33 @@ public class HarnessRuntimeConfiguration {
       @Qualifier("harnessDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("harnessDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
-      ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor) {
-    Duration dispatcherLease = dispatcherProperties.getLeaseDuration();
+      ToolProcessor toolProcessor,
+      DriverRegistry driverRegistry) {
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
-            dispatcherLease,
-            dispatcherLease,
-            dispatcherLease,
-            dispatcherLease,
+            dispatcherProperties.getLeaseDuration(),
             dispatcherProperties.getPollInterval(),
             dispatcherProperties.getRejectionDelay(),
             dispatcherProperties.getMaxDispatchTasks());
+    Map<WorkTargetType, Consumer<ClaimedWork>> handlers = new HashMap<>();
+    handlers.put(WorkTargetType.THREAD, threadProcessor::process);
+    handlers.put(WorkTargetType.TOOL, toolProcessor::process);
+    handlers.putAll(driverRegistry.workHandlers());
     return new HarnessWorkDispatcher(
-        nodeInstanceId,
-        store,
-        config,
-        drainExecutor,
-        workerExecutor,
-        pollScheduler,
-        Map.of(
-            WorkTargetType.THREAD,
-            threadProcessor::process,
-            WorkTargetType.MODEL,
-            modelProcessor::process,
-            WorkTargetType.TOOL,
-            toolProcessor::process));
+        nodeInstanceId, store, config, drainExecutor, workerExecutor, pollScheduler, handlers);
   }
 
   @Bean
   public SmartLifecycle harnessRuntimeLifecycle(
       HarnessRuntimeProperties properties,
       HarnessWorkDispatcher dispatcher,
-      ModelProcessor modelProcessor,
+      DriverRegistry driverRegistry,
       ToolProcessor toolProcessor,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
     return new HarnessRuntimeLifecycle(
         properties.isWorkersEnabled(),
         dispatcher,
-        modelProcessor::hasActiveExecution,
+        driverRegistry::hasActiveWork,
         toolProcessor,
         daemonServerProvider,
         properties.getDrainTimeout());

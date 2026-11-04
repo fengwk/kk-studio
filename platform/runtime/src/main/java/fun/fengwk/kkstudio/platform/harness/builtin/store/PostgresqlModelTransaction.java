@@ -20,9 +20,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
-import fun.fengwk.kkstudio.platform.harness.store.PostgresqlDriverStorage;
+import fun.fengwk.kkstudio.platform.harness.store.PostgresqlDriverWorkStorage;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 
@@ -36,7 +34,7 @@ import java.util.UUID;
 
 /** Builtin 私有模型事务视图；与 Runtime transaction 共享同一连接、时钟、锁序与 poisoning 状态。 */
 final class PostgresqlModelTransaction
-    implements BuiltinStore.Transaction, PostgresqlDriverStorage {
+    implements BuiltinStore.Transaction, PostgresqlDriverWorkStorage {
 
   private final PostgresqlHarnessTransaction tx;
 
@@ -45,29 +43,15 @@ final class PostgresqlModelTransaction
   }
 
   @Override
-  public List<WorkTarget> lockForThreads(List<UUID> threadIds) {
-    List<ModelInvocation> models = new ArrayList<>();
-    for (UUID threadId : threadIds) {
-      models.addAll(
-          tx.queryList(
-              "select * from harness_model_invocation where thread_id = ?",
-              PostgresqlBuiltinRows.MODEL_INVOCATION,
-              threadId));
-    }
+  public List<ModelInvocation> findModelInvocationsByThread(UUID threadId) {
+    List<ModelInvocation> models =
+        new ArrayList<>(
+            tx.queryList(
+                "select * from builtin_model_invocation where thread_id = ?",
+                PostgresqlBuiltinRows.MODEL_INVOCATION,
+                threadId));
     models.sort(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR));
-    List<WorkTarget> locked = new ArrayList<>(models.size());
-    for (ModelInvocation model : models) {
-      lockModelInvocation(model.id())
-          .ifPresent(value -> locked.add(new WorkTarget(WorkTargetType.MODEL, value.id())));
-    }
-    return List.copyOf(locked);
-  }
-
-  @Override
-  public void deleteLocked(List<WorkTarget> targets) {
-    for (WorkTarget target : targets) {
-      deleteModelInvocation(target.id());
-    }
+    return List.copyOf(models);
   }
 
   @Override
@@ -79,7 +63,7 @@ final class PostgresqlModelTransaction
   public boolean workTargetExists(UUID targetId) {
     return Boolean.TRUE.equals(
         tx.queryForObject(
-            "select exists (select 1 from harness_model_invocation where id = ?)",
+            "select exists (select 1 from builtin_model_invocation where id = ?)",
             Boolean.class,
             targetId));
   }
@@ -143,7 +127,7 @@ final class PostgresqlModelTransaction
   public Optional<ModelInvocation> findModelInvocation(UUID id) {
     tx.checkOpen();
     return tx.queryOne(
-        "select * from harness_model_invocation where id = ?",
+        "select * from builtin_model_invocation where id = ?",
         PostgresqlBuiltinRows.MODEL_INVOCATION,
         id);
   }
@@ -155,7 +139,7 @@ final class PostgresqlModelTransaction
     tx.requireCanLock(lockKey);
     Optional<ModelInvocation> invocation =
         tx.queryOne(
-            "select * from harness_model_invocation where id = ? for update",
+            "select * from builtin_model_invocation where id = ? for update",
             PostgresqlBuiltinRows.MODEL_INVOCATION,
             id);
     invocation.ifPresent(ignored -> tx.lockResource(lockKey));
@@ -168,7 +152,7 @@ final class PostgresqlModelTransaction
     return tx.queryOne(
         """
         select *
-        from harness_model_invocation
+        from builtin_model_invocation
         where thread_id = ? and turn_start_entry_id = ?
         """,
         PostgresqlBuiltinRows.MODEL_INVOCATION,
@@ -215,7 +199,7 @@ final class PostgresqlModelTransaction
     tx.requireCanLock(lockKey);
     tx.updateJdbc(
         """
-        insert into harness_model_invocation (
+        insert into builtin_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
             stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at,
             provider_replay_state, group_execution, requested_at
@@ -266,7 +250,7 @@ final class PostgresqlModelTransaction
     int updated =
         tx.updateJdbc(
             """
-            update harness_model_invocation
+            update builtin_model_invocation
             set status = ?,
                 attempt = ?,
                 stream_checkpoint = cast(? as jsonb),
@@ -310,76 +294,6 @@ final class PostgresqlModelTransaction
   }
 
   @Override
-  public boolean isGroupMemberCooling(
-      String groupName, long groupVersion, String memberModelName, String memberVariant) {
-    Instant now = now();
-    return tx.queryOne(
-            """
-            select exists (
-                select 1
-                from agent_model_group_cooldown c
-                join agent_model m on m.name = c.group_name
-                where c.group_name = ?
-                  and c.member_model_name = ?
-                  and c.member_variant = ?
-                  and c.group_version = ?
-                  and m.version = ?
-                  and c.cooldown_until > ?
-            )
-            """,
-            (rs, rowNumber) -> rs.getBoolean(1),
-            groupName,
-            memberModelName,
-            memberVariant,
-            groupVersion,
-            groupVersion,
-            PostgresqlBuiltinRows.timestamp(now))
-        .orElse(false);
-  }
-
-  @Override
-  public void freezeGroupMember(
-      String groupName,
-      long groupVersion,
-      String memberModelName,
-      String memberVariant,
-      Instant cooldownUntil) {
-    Instant now = now();
-    // 与组配置写入共用 agent_model 行锁：先锁定当前版本，旧版本 callback 不得写入/延长新配置的冷却。
-    Long currentVersion =
-        tx.queryOne(
-                "select version from agent_model where name = ? for share",
-                (rs, rowNumber) -> rs.getLong(1),
-                groupName)
-            .orElse(null);
-    if (currentVersion == null || currentVersion != groupVersion) {
-      return;
-    }
-    tx.updateJdbc(
-        """
-        insert into agent_model_group_cooldown (
-            group_name, member_model_name, member_variant, group_version, cooldown_until,
-            created_at, updated_at
-        )
-        values (?, ?, ?, ?, ?, ?, ?)
-        on conflict (group_name, member_model_name, member_variant) do update
-        set cooldown_until = greatest(
-                agent_model_group_cooldown.cooldown_until,
-                excluded.cooldown_until),
-            group_version = excluded.group_version,
-            updated_at = excluded.updated_at
-        where agent_model_group_cooldown.group_version = excluded.group_version
-        """,
-        groupName,
-        memberModelName,
-        memberVariant,
-        groupVersion,
-        PostgresqlBuiltinRows.timestamp(cooldownUntil),
-        PostgresqlBuiltinRows.timestamp(now),
-        PostgresqlBuiltinRows.timestamp(now));
-  }
-
-  @Override
   public boolean deleteModelInvocation(UUID modelInvocationId) {
     tx.checkOpen();
     Objects.requireNonNull(modelInvocationId, "modelInvocationId");
@@ -393,7 +307,7 @@ final class PostgresqlModelTransaction
           "model invocation " + modelInvocationId + " has tool invocation children");
     }
     int deleted =
-        tx.updateJdbc("delete from harness_model_invocation where id = ?", modelInvocationId);
+        tx.updateJdbc("delete from builtin_model_invocation where id = ?", modelInvocationId);
     PostgresqlHarnessTransaction.requireSingleUpdate(
         deleted, "model invocation", modelInvocationId);
     return true;
@@ -427,7 +341,7 @@ final class PostgresqlModelTransaction
             """
             select exists (
                 select 1
-                from harness_model_invocation
+                from builtin_model_invocation
                 where thread_id = ? and turn_start_entry_id = ?
             )
             """,
@@ -488,7 +402,7 @@ final class PostgresqlModelTransaction
             """
             select exists (
                 select 1
-                from harness_model_invocation
+                from builtin_model_invocation
                 where result_entry_id = ? and id <> ?
             )
             """,

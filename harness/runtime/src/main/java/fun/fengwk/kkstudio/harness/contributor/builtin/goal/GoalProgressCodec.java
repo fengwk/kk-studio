@@ -1,14 +1,12 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.goal;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -25,11 +23,7 @@ import java.util.UUID;
 final class GoalProgressCodec {
 
   private static final Set<String> FIELDS = Set.of("goalId", "status", "reason", "reportedAt");
-  private static final ObjectMapper MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   String encode(GoalProgress progress) {
     return write(encodeNode(progress));

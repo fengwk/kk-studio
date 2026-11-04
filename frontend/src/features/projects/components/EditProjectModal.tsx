@@ -1,31 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge } from '@/shared/ui/data/Badge'
+import { AlertTriangle, CheckCircle2, Pencil, RefreshCw } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  CheckCircle2,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Trash2,
-} from 'lucide-react'
 import { ApiError, isConflictError } from '@/shared/api/client'
 import { environmentService } from '@/features/environment/environment-service'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { HelpHint } from '@/shared/ui/controls/HelpHint'
-import { IconButton } from '@/shared/ui/controls/IconButton'
-import { NumberInput } from '@/shared/ui/controls/NumberInput'
-import { Select } from '@/shared/ui/controls/Select'
-import { Tabs } from '@/shared/ui/controls/Tabs'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Tabs } from '@/shared/ui/controls/Tabs'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isNetworkUnknownError } from '../pending-action-sidecar'
 import { useCatalogAgentNames } from '../useCatalogAgentNames'
@@ -35,15 +21,13 @@ import {
   buildWorkflowDTO,
   createDraftState,
   hasActiveRun,
-  isReservedStateCode,
-  MAX_RUNS,
-  parseMaxRuns,
   toDraftStates,
   validateWorkflowDraft,
   workflowErrorKey,
   workflowErrorParams,
   type WorkflowDraftState,
 } from '../workflow-draft'
+import { WorkflowStageEditor } from './workflow-editor/WorkflowStageEditor'
 import type { ProjectDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
 
 export interface EditProjectModalProps {
@@ -59,7 +43,28 @@ export interface EditProjectModalProps {
 }
 
 type TabKey = 'basic' | 'workflow'
-type ActiveSubmission = 'basic' | 'yolo' | 'workflow' | 'reload' | null
+type SaveScope = 'basic' | 'yolo' | 'workflow'
+type SubmissionScope = SaveScope | 'reload'
+type ActiveSubmission = SubmissionScope | null
+type ScopeMessages = { error: string | null; success: string | null }
+
+const SAVE_SUCCESS_KEY: Record<SaveScope, TranslationKey> = {
+  basic: 'projects.basicSaved',
+  yolo: 'projects.yoloSaved',
+  workflow: 'projects.workflowSaved',
+}
+
+const SAVE_FAILURE_KEY: Record<SaveScope, TranslationKey> = {
+  basic: 'projects.edit.updateBasicFailed',
+  yolo: 'projects.edit.updateYoloFailed',
+  workflow: 'projects.edit.updateWorkflowFailed',
+}
+
+const SAVE_LABEL_KEY: Record<SaveScope, TranslationKey> = {
+  basic: 'projects.edit.labelBasic',
+  yolo: 'projects.edit.labelYolo',
+  workflow: 'projects.edit.labelWorkflow',
+}
 
 export function EditProjectModal({
   isOpen,
@@ -122,12 +127,11 @@ function EditProjectModalContent({
   const [activeSubmission, setActiveSubmission] = useState<ActiveSubmission>(null)
   const activeSubmissionRef = useRef<ActiveSubmission>(null)
 
-  const [basicErrorMessage, setBasicErrorMessage] = useState<string | null>(null)
-  const [basicSuccessMessage, setBasicSuccessMessage] = useState<string | null>(null)
-  const [yoloErrorMessage, setYoloErrorMessage] = useState<string | null>(null)
-  const [yoloSuccessMessage, setYoloSuccessMessage] = useState<string | null>(null)
-  const [workflowErrorMessage, setWorkflowErrorMessage] = useState<string | null>(null)
-  const [workflowSuccessMessage, setWorkflowSuccessMessage] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Record<SaveScope, ScopeMessages>>({
+    basic: { error: null, success: null },
+    yolo: { error: null, success: null },
+    workflow: { error: null, success: null },
+  })
   // 仅 409 / 网络结果未知时给出「加载最新 + 保留/放弃草稿」的显式恢复入口。
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null)
 
@@ -177,10 +181,11 @@ function EditProjectModalContent({
     queryFn: () => environmentService.listEnvironments(),
   })
 
-  const selectedState =
-    draftStates.find((state) => state.key === selectedKey) ?? draftStates[0] ?? null
+  const setScopeMessage = (scope: SaveScope, patch: Partial<ScopeMessages>) => {
+    setMessages((prev) => ({ ...prev, [scope]: { ...prev[scope], ...patch } }))
+  }
 
-  const beginSubmission = (scope: Exclude<ActiveSubmission, null>): boolean => {
+  const beginSubmission = (scope: SubmissionScope): boolean => {
     if (activeSubmissionRef.current !== null) {
       return false
     }
@@ -197,130 +202,78 @@ function EditProjectModalContent({
     }
   }
 
-  const handleSaveBasic = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!beginSubmission('basic')) {
-      return
-    }
-    const trimmedTitle = title.trim()
-    if (!trimmedTitle) {
-      setBasicErrorMessage(t('projects.edit.nameRequired'))
-      setBasicSuccessMessage(null)
-      endSubmission()
-      return
-    }
-    setBasicErrorMessage(null)
-    setBasicSuccessMessage(null)
-    try {
-      const updated = await api.updateProject(project.id, {
-        expectedVersion: frozenVersion,
-        title: trimmedTitle,
-        description: description.trim(),
-      })
-      if (!isMountedRef.current) return
-      setFrozenVersion(updated.version)
-      setBasicSuccessMessage(t('projects.basicSaved'))
-      onSuccess(updated)
-    } catch (err) {
-      if (!isMountedRef.current) return
-      handleSubmissionFailure(
-        err,
-        t('projects.edit.updateBasicFailed'),
-        setBasicErrorMessage,
-        t('projects.edit.labelBasic'),
-      )
-    } finally {
-      endSubmission()
-    }
-  }
-
-  const handleSaveYolo = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!beginSubmission('yolo')) {
-      return
-    }
-    setYoloErrorMessage(null)
-    setYoloSuccessMessage(null)
-    try {
-      const updated = await api.updateYolo(project.id, {
-        expectedVersion: frozenVersion,
-        yoloEnabled,
-      })
-      if (!isMountedRef.current) return
-      setFrozenVersion(updated.version)
-      setYoloSuccessMessage(t('projects.yoloSaved'))
-      onSuccess(updated)
-    } catch (err) {
-      if (!isMountedRef.current) return
-      handleSubmissionFailure(
-        err,
-        t('projects.edit.updateYoloFailed'),
-        setYoloErrorMessage,
-        t('projects.edit.labelYolo'),
-      )
-    } finally {
-      endSubmission()
-    }
-  }
-
-  const handleSaveWorkflow = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!beginSubmission('workflow')) {
-      return
-    }
-    setWorkflowErrorMessage(null)
-    setWorkflowSuccessMessage(null)
-    if (workflowLockedReason) {
-      setWorkflowErrorMessage(workflowLockedReason)
-      endSubmission()
-      return
-    }
-    const validationError = validateWorkflowDraft(draftStates, referencedStates)
-    if (validationError) {
-      setWorkflowErrorMessage(
-        t(workflowErrorKey(validationError), workflowErrorParams(validationError)),
-      )
-      endSubmission()
-      return
-    }
-    try {
-      const updated = await api.updateWorkflow(project.id, {
-        expectedVersion: frozenVersion,
-        workflow: buildWorkflowDTO(draftStates),
-      })
-      if (!isMountedRef.current) return
-      setFrozenVersion(updated.version)
-      setWorkflowSuccessMessage(t('projects.workflowSaved'))
-      onSuccess(updated)
-    } catch (err) {
-      if (!isMountedRef.current) return
-      handleSubmissionFailure(
-        err,
-        t('projects.edit.updateWorkflowFailed'),
-        setWorkflowErrorMessage,
-        t('projects.edit.labelWorkflow'),
-      )
-    } finally {
-      endSubmission()
-    }
-  }
-
   /**
-   * 只有 409 与传输结果未知（网络中断、5xx、超时/限流）才需要显式恢复：此时草稿与
-   * 版本基线保持不变，用户自行选择加载最新数据的方式。其它错误只提示并允许重试提交。
+   * 三个子表单共用的保存路径：串行互斥、按 scope 校验、成功后推进冻结版本。
+   * 只有 409 与传输结果未知（网络中断、5xx、超时/限流）才转入显式恢复；其它错误只提示并允许重试提交。
    */
-  const handleSubmissionFailure = (
-    err: unknown,
-    fallbackMessage: string,
-    setError: (message: string | null) => void,
-    label: string,
-  ) => {
-    if (isConflictError(err) || (err instanceof ApiError && isNetworkUnknownError(err))) {
-      setError(null)
-      setRecoveryMessage(t('projects.edit.unconfirmed', { label }))
+  const saveProject = async (scope: SaveScope, event: React.FormEvent) => {
+    event.preventDefault()
+    if (!beginSubmission(scope)) {
       return
     }
-    setError(err instanceof Error ? err.message : fallbackMessage)
+    setScopeMessage(scope, { error: null, success: null })
+    const validationError = validateScope(scope)
+    if (validationError) {
+      setScopeMessage(scope, { error: validationError })
+      endSubmission()
+      return
+    }
+    try {
+      const updated = await submitSave(scope)
+      if (!isMountedRef.current) return
+      setFrozenVersion(updated.version)
+      setScopeMessage(scope, { success: t(SAVE_SUCCESS_KEY[scope]) })
+      onSuccess(updated)
+    } catch (err) {
+      if (!isMountedRef.current) return
+      handleSubmissionFailure(err, t(SAVE_FAILURE_KEY[scope]), scope)
+    } finally {
+      endSubmission()
+    }
+  }
+
+  const validateScope = (scope: SaveScope): string | null => {
+    if (scope === 'basic') {
+      return title.trim() ? null : t('projects.edit.nameRequired')
+    }
+    if (scope === 'yolo') {
+      return null
+    }
+    if (workflowLockedReason) {
+      return workflowLockedReason
+    }
+    const error = validateWorkflowDraft(draftStates, referencedStates)
+    return error ? t(workflowErrorKey(error), workflowErrorParams(error)) : null
+  }
+
+  const submitSave = (scope: SaveScope): Promise<ProjectDTO> => {
+    switch (scope) {
+      case 'basic':
+        return api.updateProject(project.id, {
+          expectedVersion: frozenVersion,
+          title: title.trim(),
+          description: description.trim(),
+        })
+      case 'yolo':
+        return api.updateYolo(project.id, {
+          expectedVersion: frozenVersion,
+          yoloEnabled,
+        })
+      case 'workflow':
+        return api.updateWorkflow(project.id, {
+          expectedVersion: frozenVersion,
+          workflow: buildWorkflowDTO(draftStates),
+        })
+    }
+  }
+
+  const handleSubmissionFailure = (err: unknown, fallbackMessage: string, scope: SaveScope) => {
+    if (isConflictError(err) || (err instanceof ApiError && isNetworkUnknownError(err))) {
+      setScopeMessage(scope, { error: null })
+      setRecoveryMessage(t('projects.edit.unconfirmed', { label: t(SAVE_LABEL_KEY[scope]) }))
+      return
+    }
+    setScopeMessage(scope, { error: err instanceof Error ? err.message : fallbackMessage })
   }
 
   const handleRecover = async (discardDraft: boolean) => {
@@ -341,12 +294,16 @@ function EditProjectModalContent({
         setDraftStates(toDraftStates(fresh.workflow))
         setSelectedKey(null)
       }
-      setBasicErrorMessage(null)
-      setYoloErrorMessage(null)
-      setWorkflowErrorMessage(null)
+      setMessages((prev) => ({
+        basic: { ...prev.basic, error: null },
+        yolo: { ...prev.yolo, error: null },
+        workflow: { ...prev.workflow, error: null },
+      }))
     } catch (err) {
       if (!isMountedRef.current) return
-      setBasicErrorMessage(err instanceof Error ? err.message : t('projects.edit.reloadFailed'))
+      setScopeMessage('basic', {
+        error: err instanceof Error ? err.message : t('projects.edit.reloadFailed'),
+      })
     } finally {
       if (isMountedRef.current) {
         activeSubmissionRef.current = null
@@ -359,7 +316,7 @@ function EditProjectModalContent({
     setDraftStates((prev) =>
       prev.map((state) => (state.key === key ? { ...state, ...patch } : state)),
     )
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   /** 改码是重命名：同步改写所有引用该编码的转移边，保持图自洽。 */
@@ -381,7 +338,7 @@ function EditProjectModalContent({
         return state
       })
     })
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   const toggleNext = (key: string, target: string, checked: boolean) => {
@@ -394,7 +351,7 @@ function EditProjectModalContent({
         return { ...state, next }
       }),
     )
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   const moveState = (index: number, delta: number) => {
@@ -408,14 +365,14 @@ function EditProjectModalContent({
       next.splice(target, 0, moved)
       return next
     })
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   const addState = () => {
     const created = createDraftState()
     setDraftStates((prev) => [...prev, created])
     setSelectedKey(created.key)
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   const removeState = (key: string) => {
@@ -424,7 +381,7 @@ function EditProjectModalContent({
     }
     setDraftStates((prev) => prev.filter((state) => state.key !== key))
     setSelectedKey((current) => (current === key ? null : current))
-    setWorkflowSuccessMessage(null)
+    setScopeMessage('workflow', { success: null })
   }
 
   const isPending = activeSubmission !== null
@@ -450,20 +407,20 @@ function EditProjectModalContent({
   ) : null
 
   const basicPanel = (
-    <div className="edit-project-panel">
-      <form className="edit-project-section" onSubmit={handleSaveBasic}>
+    <div className="modal-body edit-project-panel">
+      <form className="edit-project-section" onSubmit={(event) => void saveProject('basic', event)}>
         <h3 className="edit-project-section-title">{t('projects.edit.tabBasic')}</h3>
 
-        {basicErrorMessage && (
+        {messages.basic.error && (
           <div className="form-error-banner" role="alert">
             <AlertTriangle size={16} aria-hidden="true" />
-            <span>{basicErrorMessage}</span>
+            <span>{messages.basic.error}</span>
           </div>
         )}
-        {basicSuccessMessage && (
+        {messages.basic.success && (
           <div className="form-success-banner" role="status">
             <CheckCircle2 size={16} aria-hidden="true" />
-            <span>{basicSuccessMessage}</span>
+            <span>{messages.basic.success}</span>
           </div>
         )}
 
@@ -476,7 +433,7 @@ function EditProjectModalContent({
             disabled={isPending}
             onChange={(event) => {
               setTitle(event.target.value)
-              setBasicSuccessMessage(null)
+              setScopeMessage('basic', { success: null })
             }}
           />
         </label>
@@ -490,7 +447,7 @@ function EditProjectModalContent({
             disabled={isPending}
             onChange={(event) => {
               setDescription(event.target.value)
-              setBasicSuccessMessage(null)
+              setScopeMessage('basic', { success: null })
             }}
           />
         </label>
@@ -506,19 +463,19 @@ function EditProjectModalContent({
         </div>
       </form>
 
-      <form className="edit-project-section" onSubmit={handleSaveYolo}>
+      <form className="edit-project-section" onSubmit={(event) => void saveProject('yolo', event)}>
         <h3 className="edit-project-section-title">{t('projects.edit.yoloSection')}</h3>
 
-        {yoloErrorMessage && (
+        {messages.yolo.error && (
           <div className="form-error-banner" role="alert">
             <AlertTriangle size={16} aria-hidden="true" />
-            <span>{yoloErrorMessage}</span>
+            <span>{messages.yolo.error}</span>
           </div>
         )}
-        {yoloSuccessMessage && (
+        {messages.yolo.success && (
           <div className="form-success-banner" role="status">
             <CheckCircle2 size={16} aria-hidden="true" />
-            <span>{yoloSuccessMessage}</span>
+            <span>{messages.yolo.success}</span>
           </div>
         )}
 
@@ -529,7 +486,7 @@ function EditProjectModalContent({
             label={t('projects.edit.yoloToggle')}
             onChange={(checked) => {
               setYoloEnabled(checked)
-              setYoloSuccessMessage(null)
+              setScopeMessage('yolo', { success: null })
             }}
           />
           <HelpHint
@@ -553,315 +510,80 @@ function EditProjectModalContent({
   )
 
   const workflowPanel = (
-    <form className="edit-project-workflow" onSubmit={handleSaveWorkflow}>
-      {workflowLockedReason && (
-        <div className="form-warning-banner" role="status">
-          <AlertTriangle size={16} aria-hidden="true" />
-          <span>{workflowLockedReason}</span>
-        </div>
-      )}
-      {constraintsError && (
-        <Button
-          variant="ghost"
-          disabled={isPending || constraintsQuery.isFetching}
-          onClick={() => void constraintsQuery.refetch()}
-        >
-          {t('projects.retry')}
-        </Button>
-      )}
-
-      {workflowErrorMessage && (
-        <div className="form-error-banner" role="alert">
-          <AlertTriangle size={16} aria-hidden="true" />
-          <span>{workflowErrorMessage}</span>
-        </div>
-      )}
-      {workflowSuccessMessage && (
-        <div className="form-success-banner" role="status">
-          <CheckCircle2 size={16} aria-hidden="true" />
-          <span>{workflowSuccessMessage}</span>
-        </div>
-      )}
-
-      {missingCatalogAgents.length > 0 && (
-        <div className="form-warning-banner" role="status">
-          <AlertTriangle size={16} aria-hidden="true" />
-          <span>
-            {t('projects.edit.missingAgents', { names: missingCatalogAgents.join(', ') })}
-          </span>
-        </div>
-      )}
-
-      <div className="workflow-editor">
-        <div
-          className="workflow-stage-list"
-          role="list"
-          aria-label={t('projects.edit.stageListLabel')}
-        >
-          {draftStates.map((state, index) => {
-            const reserved = isReservedStateCode(state.state)
-            const active = selectedState?.key === state.key
-            const label = state.name.trim() || state.state || t('projects.edit.untitledStage')
-            const referenced =
-              referencedStates.has(state.state)
-              || draftStates.some((other) => other.key !== state.key && other.next.includes(state.state))
-            const deleteDisabled = isPending || !constraintsReady || reserved || referenced
-            const deleteReason = reserved
-              ? t('projects.edit.deleteReservedReason')
-              : referenced
-                ? t('projects.edit.deleteReferencedReason')
-                : undefined
-            return (
-              <div key={state.key} className={`workflow-stage-row${active ? ' is-active' : ''}`} role="listitem">
-                <button
-                  type="button"
-                  className="workflow-stage-select"
-                  aria-pressed={active}
-                  onClick={() => setSelectedKey(state.key)}
-                >
-                  <span className="workflow-stage-order">{index + 1}</span>
-                  <span className="workflow-stage-label">{label}</span>
-                  <Badge tone="info" mono>{state.state || '—'}</Badge>
-                  {reserved ? (
-                    <Badge tone="neutral">{t('projects.edit.badgeReserved')}</Badge>
-                  ) : state.agent !== null ? (
-                    <Badge tone="accent">{t('projects.edit.badgeAgent')}</Badge>
-                  ) : (
-                    <Badge tone="neutral">{t('projects.edit.badgeManual')}</Badge>
-                  )}
-                  {!state.enabled && (
-                    <Badge tone="warning">{t('projects.edit.badgeDisabled')}</Badge>
-                  )}
-                </button>
-                <IconButton
-                  label={t('projects.edit.moveUp', { label })}
-                  size="compact"
-                  disabled={isPending || index === 0}
-                  onClick={() => moveState(index, -1)}
-                >
-                  <ArrowUp aria-hidden="true" />
-                </IconButton>
-                <IconButton
-                  label={t('projects.edit.moveDown', { label })}
-                  size="compact"
-                  disabled={isPending || index === draftStates.length - 1}
-                  onClick={() => moveState(index, 1)}
-                >
-                  <ArrowDown aria-hidden="true" />
-                </IconButton>
-                <IconButton
-                  label={t('projects.edit.deleteStage', { label })}
-                  size="compact"
-                  danger
-                  disabled={deleteDisabled}
-                  title={deleteReason}
-                  onClick={() => removeState(state.key)}
-                >
-                  <Trash2 aria-hidden="true" />
-                </IconButton>
-              </div>
-            )
-          })}
-
+    <form className="modal-card-form" onSubmit={(event) => void saveProject('workflow', event)}>
+      <div className="modal-body">
+        {workflowLockedReason && (
+          <div className="form-warning-banner" role="status">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{workflowLockedReason}</span>
+          </div>
+        )}
+        {constraintsError && (
           <Button
             variant="ghost"
-            size="compact"
-            disabled={isPending}
-            onClick={addState}
+            disabled={isPending || constraintsQuery.isFetching}
+            onClick={() => void constraintsQuery.refetch()}
           >
-            <Plus size={14} aria-hidden="true" />
-            <span>{t('projects.edit.addStage')}</span>
+            {t('projects.retry')}
+          </Button>
+        )}
+
+        {messages.workflow.error && (
+          <div className="form-error-banner" role="alert">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{messages.workflow.error}</span>
+          </div>
+        )}
+        {messages.workflow.success && (
+          <div className="form-success-banner" role="status">
+            <CheckCircle2 size={16} aria-hidden="true" />
+            <span>{messages.workflow.success}</span>
+          </div>
+        )}
+
+        {missingCatalogAgents.length > 0 && (
+          <div className="form-warning-banner" role="status">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>
+              {t('projects.edit.missingAgents', { names: missingCatalogAgents.join(', ') })}
+            </span>
+          </div>
+        )}
+
+        <WorkflowStageEditor
+          draftStates={draftStates}
+          selectedKey={selectedKey}
+          referencedStates={referencedStates}
+          constraintsReady={constraintsReady}
+          isPending={isPending}
+          agentOptions={agentOptions}
+          agentsLoading={agentsLoading}
+          environments={environments}
+          onSelect={setSelectedKey}
+          onRename={renameState}
+          onUpdate={updateState}
+          onToggleNext={toggleNext}
+          onMove={moveState}
+          onAdd={addState}
+          onRemove={removeState}
+        />
+
+        <div className="edit-project-form-actions">
+          <Button
+            type="submit"
+            loading={activeSubmission === 'workflow'}
+            disabled={(isPending && activeSubmission !== 'workflow') || Boolean(workflowLockedReason)}
+          >
+            {activeSubmission === 'workflow' ? t('projects.edit.saving') : t('projects.workflowSave')}
           </Button>
         </div>
-
-        {selectedState ? (
-          <div className="workflow-stage-form">
-            {(() => {
-              const state = selectedState
-              const reserved = isReservedStateCode(state.state)
-              const targetOptions = draftStates
-                .filter((other) => other.key !== state.key && other.state && other.state !== 'BLOCKED')
-                .map((other) => ({
-                  code: other.state,
-                  label: t('projects.edit.stageLabel', {
-                    name: other.name.trim() || other.state,
-                    state: other.state,
-                  }),
-                }))
-              return (
-                <>
-                  <label className="edit-project-field" htmlFor="workflow-state-code">
-                    <FieldLabel required>{t('projects.edit.stateCode')}</FieldLabel>
-                    <TextInput
-                      id="workflow-state-code"
-                      value={state.state}
-                      disabled={isPending || !constraintsReady || reserved || referencedStates.has(state.state)}
-                      invalid={!state.state}
-                      placeholder={t('projects.edit.stateCodePlaceholder')}
-                      onChange={(event) => renameState(state.key, event.target.value)}
-                    />
-                  </label>
-
-                  <label className="edit-project-field" htmlFor="workflow-state-name">
-                    <FieldLabel required>{t('projects.edit.displayName')}</FieldLabel>
-                    <TextInput
-                      id="workflow-state-name"
-                      value={state.name}
-                      disabled={isPending}
-                      invalid={!state.name.trim()}
-                      onChange={(event) => updateState(state.key, { name: event.target.value })}
-                    />
-                  </label>
-
-                  {reserved ? (
-                    <StateBlock title={t('projects.edit.reservedShape')} />
-                  ) : (
-                    <>
-                      <div className="edit-project-field">
-                        <FieldLabel>{t('projects.edit.mode')}</FieldLabel>
-                        <Select
-                          value={state.agent !== null ? 'agent' : 'manual'}
-                          disabled={isPending}
-                          aria-label={t('projects.edit.mode')}
-                          options={[
-                            { value: 'manual', label: t('projects.edit.modeManual') },
-                            { value: 'agent', label: t('projects.edit.modeAgent') },
-                          ]}
-                          onChange={(value) =>
-                            updateState(
-                              state.key,
-                              value === 'agent'
-                                ? { agent: state.agent ?? (agentOptions[0] ?? '') }
-                                : { agent: null, environment: null, maxRuns: '' },
-                            )
-                          }
-                        />
-                      </div>
-
-                      {state.agent !== null ? (
-                        <>
-                          <div className="edit-project-field">
-                            <FieldLabel required>{t('projects.edit.agent')}</FieldLabel>
-                            <Select
-                              value={state.agent}
-                              disabled={isPending || agentsLoading}
-                              aria-label={t('projects.edit.agent')}
-                              required
-                              aria-invalid={!state.agent.trim()}
-                              options={agentOptions.map((name) => ({ value: name, label: name }))}
-                              onChange={(value) => updateState(state.key, { agent: value })}
-                            />
-                          </div>
-
-                          <div className="edit-project-field">
-                            <FieldLabel>{t('projects.edit.environment')}</FieldLabel>
-                            <Select
-                              value={state.environment ?? ''}
-                              disabled={isPending}
-                              aria-label={t('projects.edit.environment')}
-                              placeholder={t('projects.edit.environmentUnset')}
-                              options={[
-                                { value: '', label: t('projects.edit.environmentUnset') },
-                                ...environmentOptions(environments, state.environment).map(
-                                  (name) => ({ value: name, label: name }),
-                                ),
-                              ]}
-                              onChange={(value) =>
-                                updateState(state.key, { environment: value || null })
-                              }
-                            />
-                          </div>
-
-                          <div className="edit-project-field">
-                            <FieldLabel required>{t('projects.edit.maxRuns')}</FieldLabel>
-                            <NumberInput
-                              value={state.maxRuns}
-                              min={1}
-                              max={MAX_RUNS}
-                              aria-label={t('projects.edit.maxRuns')}
-                              disabled={isPending}
-                              invalid={parseMaxRuns(state.maxRuns) === null}
-                              onChange={(value) => updateState(state.key, { maxRuns: value })}
-                            />
-                          </div>
-                        </>
-                      ) : null}
-
-                      <label className="edit-project-field" htmlFor="workflow-state-instructions">
-                        <FieldLabel>{t('projects.edit.instructions')}</FieldLabel>
-                        <TextArea
-                          id="workflow-state-instructions"
-                          rows={3}
-                          value={state.instructions}
-                          disabled={isPending}
-                          onChange={(event) =>
-                            updateState(state.key, { instructions: event.target.value })
-                          }
-                        />
-                      </label>
-
-                      <Checkbox
-                        checked={state.enabled}
-                        disabled={isPending}
-                        label={t('projects.edit.enableStage')}
-                        onChange={(checked) => updateState(state.key, { enabled: checked })}
-                      />
-                    </>
-                  )}
-
-                  <div className="edit-project-field">
-                    <div className="field-label-row">
-                      <FieldLabel>{t('projects.edit.nextStates')}</FieldLabel>
-                      <HelpHint
-                        label={t('shared.helpAbout', { topic: t('projects.edit.nextStates') })}
-                      >
-                        {t('projects.edit.nextStatesHelp')}
-                      </HelpHint>
-                    </div>
-                    {reserved && state.state !== 'INIT' ? (
-                      <p className="edit-project-hint">{t('projects.edit.reservedNoEdges')}</p>
-                    ) : targetOptions.length === 0 ? (
-                      <p className="edit-project-hint">{t('projects.edit.noNextOptions')}</p>
-                    ) : (
-                      <div className="workflow-next-options">
-                        {targetOptions.map((option) => (
-                          <Checkbox
-                            key={option.code}
-                            checked={state.next.includes(option.code)}
-                            disabled={isPending}
-                            label={option.label}
-                            onChange={(checked) =>
-                              toggleNext(state.key, option.code, checked)
-                            }
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-        ) : (
-          <StateBlock title={t('projects.edit.selectStage')} />
-        )}
-      </div>
-
-      <div className="edit-project-form-actions">
-        <Button
-          type="submit"
-          loading={activeSubmission === 'workflow'}
-          disabled={(isPending && activeSubmission !== 'workflow') || Boolean(workflowLockedReason)}
-        >
-          {activeSubmission === 'workflow' ? t('projects.edit.saving') : t('projects.workflowSave')}
-        </Button>
       </div>
     </form>
   )
 
   return (
     <Dialog
-      className="resource-modal-card edit-project-modal-card"
+      className="resource-modal-card edit-project-modal-card modal-touch-target"
       title={t('projects.edit.title')}
       headerIcon={<Pencil size={18} aria-hidden="true" />}
       pending={isPending}
@@ -896,16 +618,4 @@ function EditProjectModalContent({
       </div>
     </Dialog>
   )
-}
-
-/** Environment 候选：现有环境名 ∪ 草稿中已配置但当前查询不到的旧名，避免静默丢弃。 */
-function environmentOptions(
-  environments: ReadonlyArray<{ name: string }>,
-  configured: string | null,
-): string[] {
-  const names = new Set(environments.map((environment) => environment.name))
-  if (configured) {
-    names.add(configured)
-  }
-  return Array.from(names).sort((a, b) => a.localeCompare(b))
 }

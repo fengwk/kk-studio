@@ -1,16 +1,21 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
+
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -35,8 +40,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -56,13 +59,7 @@ import java.util.UUID;
  */
 public final class ProviderRequestJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // variant.protocolOptions 交给共享 model codec 前必须先按 BigDecimal 读回，否则 1e309 会先退化为 Infinity。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -396,35 +393,9 @@ public final class ProviderRequestJsonCodec {
 
   // ---------- 工具方法 ----------
 
-  private static ObjectNode object(JsonNode value, String name) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(name + " must be an object");
-    }
-    return object;
-  }
-
-  private static ArrayNode array(JsonNode value, String name) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(name + " must be an array");
-    }
-    return array;
-  }
-
-  private static String text(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isString()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    return value.stringValue();
-  }
-
   /** 必填文本但允许空字符串（如 resource preview 的 empty 形态）。 */
   private static String textAllowEmpty(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isString()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    return value.stringValue();
+    return text(node, field);
   }
 
   /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
@@ -440,17 +411,6 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
     }
     return parsed;
-  }
-
-  private static String decodeNullableText(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isString()) {
-      throw new IllegalArgumentException(field + " must be text or null");
-    }
-    return value.stringValue();
   }
 
   private static Long decodeNullableLong(ObjectNode node, String field) {
@@ -483,14 +443,6 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be a positive integer");
     }
     return value.intValue();
-  }
-
-  private static boolean bool(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isBoolean()) {
-      throw new IllegalArgumentException(field + " must be boolean");
-    }
-    return value.booleanValue();
   }
 
   private static String jsonText(ObjectNode node, String field) {
@@ -532,22 +484,5 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must contain a JSON object");
     }
     return value;
-  }
-
-  private static void requireFields(ObjectNode node, Set<String> expected, String name) {
-    Set<String> actual = new HashSet<>();
-    node.propertyNames().forEach(actual::add);
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");
-    }
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return set;
   }
 }

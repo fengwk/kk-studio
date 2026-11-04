@@ -60,9 +60,10 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
-import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
@@ -71,7 +72,6 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.time.Instant;
@@ -414,7 +414,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.tools[1].state").value("FILTERED"))
         .andExpect(jsonPath("$.data.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
         .andExpect(jsonPath("$.data.skills[0].delivery").value("PLATFORM"))
-        .andExpect(jsonPath("$.data.skills[0].observedHeadCommit").value(nullValue()))
+        .andExpect(jsonPath("$.data.skills[0].headCommit").value(nullValue()))
         .andExpect(jsonPath("$.data.subagents[0].name").value("coder"))
         .andExpect(jsonPath("$.data.subagents[0].tools[0]").value("read"))
         .andExpect(jsonPath("$.data.subagents[0].skills[0].packageName").value("pkg"))
@@ -561,9 +561,10 @@ class StudioHarnessThreadControllerTest {
     skill.setDescription("dev description");
     skill.setPath("vfs:/skills/test-package/dev/SKILL.md");
     skill.setDelivery("PLATFORM");
-    skill.setCurrentCommit("0123456789abcdef0123456789abcdef01234567");
-    skill.setObservedHeadCommit(null);
-    skill.setInstalledCommit(null);
+    skill.setPackageVersion("0123456789abcdef0123456789abcdef01234567");
+    skill.setHeadCommit(null);
+    skill.setArtifactSha256("a".repeat(64));
+    skill.setInstalledSha256(null);
     skill.setPromptXml("  <skill>");
 
     HarnessModelRequestDebugDTO.SubagentDTO subagent =

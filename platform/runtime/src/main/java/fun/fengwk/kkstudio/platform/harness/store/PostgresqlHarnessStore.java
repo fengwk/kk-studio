@@ -34,7 +34,8 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final Supplier<UUID> idGenerator;
-  private final Function<PostgresqlHarnessTransaction, PostgresqlDriverStorage> driverFactory;
+  private final Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage>
+      driverWorkFactory;
   private final Object transactionSource = new Object();
   private final ThreadLocal<Boolean> active = new ThreadLocal<>();
   private final ThreadLocal<List<Runnable>> afterCommitActions = new ThreadLocal<>();
@@ -43,7 +44,7 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
       DataSource dataSource,
       PlatformTransactionManager transactionManager,
       Supplier<UUID> idGenerator,
-      Function<PostgresqlHarnessTransaction, PostgresqlDriverStorage> driverFactory) {
+      Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage> driverWorkFactory) {
     DataSource requiredDataSource = Objects.requireNonNull(dataSource, "dataSource");
     this.jdbc = new JdbcTemplate(requiredDataSource);
     this.transactions =
@@ -52,18 +53,18 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
     this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
-    this.driverFactory = Objects.requireNonNull(driverFactory, "driverFactory");
+    this.driverWorkFactory = Objects.requireNonNull(driverWorkFactory, "driverWorkFactory");
   }
 
   /** 取得本 Store 事务内的 Driver 视图，同时校验同源、线程和生命周期。 */
-  protected PostgresqlDriverStorage driverView(HarnessStore.Transaction tx) {
+  protected PostgresqlDriverWorkStorage driverWorkView(HarnessStore.Transaction tx) {
     Objects.requireNonNull(tx, "tx");
     if (!(tx instanceof PostgresqlHarnessTransaction transaction)) {
       throw new IllegalArgumentException(
           "store view requires a transaction created by this PostgresqlHarnessStore");
     }
     transaction.requireView(transactionSource);
-    return transaction.driver();
+    return transaction.driverWorkStorage();
   }
 
   /**
@@ -91,7 +92,7 @@ public abstract class PostgresqlHarnessStore implements HarnessStore {
               status -> {
                 PostgresqlHarnessTransaction transaction =
                     new PostgresqlHarnessTransaction(
-                        jdbc, idGenerator, transactionSource, driverFactory);
+                        jdbc, idGenerator, transactionSource, driverWorkFactory);
                 try {
                   T value = callback.apply(transaction);
                   transaction.rethrowDatabaseFailure();

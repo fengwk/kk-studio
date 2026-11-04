@@ -2,964 +2,360 @@ package fun.fengwk.kkstudio.platform.environment.skill;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.atLeast;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.platform.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
+import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
-import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
 
-/**
- * EnvironmentSkillSyncOrchestrator 的收敛、围栏与失败隔离测试。
- *
- * <p>测试以「可变的连接行快照」模拟 {@code environment_connection} 行：{@code find} 返回当前行，
- * 写回只在围栏成立时更新该行，因此断言能区分「算出了结果」与「结果真的落库」。
- */
+/** {@link EnvironmentSkillSyncOrchestrator} 的期望集合下发、单飞合并与状态投影测试。 */
 class EnvironmentSkillSyncOrchestratorTest {
 
-  private static final ObjectMapper JSON = JsonMapper.builder().build();
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId OTHER =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-  private static final UUID NODE = UUID.randomUUID();
-  private static final UUID LEASE_TOKEN = UUID.randomUUID();
-  private static final String COMMIT_A = "aaaaaaaabbbbbbbbccccccccddddddddaaaaaaaa";
-  private static final String COMMIT_B = "bbbbbbbbccccccccddddddddaaaaaaaabbbbbbbb";
-  private static final String PREVIOUS_COMMIT = "ccccccccddddddddaaaaaaaabbbbbbbbcccccccc";
+  private static final UUID LEASE_TOKEN = UUID.fromString("33333333-3333-3333-3333-333333333333");
+  private static final UUID NODE = UUID.fromString("44444444-4444-4444-4444-444444444444");
+  private static final String COMMIT = "a".repeat(64);
+  private static final String ARTIFACT_A = "a".repeat(64);
+  private static final String ARTIFACT_B = "b".repeat(64);
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
-  private static final Duration SYNC_TIMEOUT = Duration.ZERO;
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
-  private static final DaemonCapabilities CAPABILITIES =
-      new DaemonCapabilities(
-          "1.0.9",
-          new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX,
-              "UTC",
-              "dev",
-              "/home/dev",
-              "Linux environment.",
-              "/tmp/kk-studio",
-              "amd64"));
-
-  private final Map<String, SkillPackage> catalog = new LinkedHashMap<>();
-  private final List<EnvironmentSkillState> rowSkillState = new ArrayList<>();
-  private final Map<EnvironmentId, LiveEnvironmentStatus> rowStatus = new LinkedHashMap<>();
-  private final Map<EnvironmentId, DaemonCapabilities> rowCapabilities = new LinkedHashMap<>();
-  private final ScriptedTransport transport = new ScriptedTransport();
 
   private EnvironmentRegistry registry;
-  private SkillPackageRepository catalogQuery;
+  private SkillPackageRepository packageRepository;
+  private StorageBlobManager blobManager;
+  private ExecutorService executor;
+  private RecordingTransport transport;
   private EnvironmentSkillSyncOrchestrator orchestrator;
 
   @BeforeEach
   void setUp() {
     registry = mock(EnvironmentRegistry.class);
-    catalogQuery = mock(SkillPackageRepository.class);
-    rowStatus.put(ENV, LiveEnvironmentStatus.READY);
-    rowStatus.put(OTHER, LiveEnvironmentStatus.READY);
-
-    when(registry.find(any()))
-        .thenAnswer(invocation -> Optional.of(row(invocation.getArgument(0))));
-    when(registry.recordEvent(any(), any(), any())).thenReturn(true);
-    when(registry.replaceSkillState(any(), any(), any(), any()))
-        .thenAnswer(
-            invocation -> {
-              List<EnvironmentSkillState> state = invocation.getArgument(2);
-              rowSkillState.clear();
-              rowSkillState.addAll(state);
-              return true;
-            });
-    when(registry.listReadyOwnedByNode()).thenReturn(List.of());
-    when(catalogQuery.listPackages()).thenAnswer(invocation -> List.copyOf(catalog.values()));
-    when(catalogQuery.getPackage(any()))
-        .thenAnswer(invocation -> catalog.get(invocation.getArgument(0)));
-
-    // 直接执行的 executor：异步边界在测试里退化为同步调用，无需等待。
+    packageRepository = mock(SkillPackageRepository.class);
+    blobManager = mock(StorageBlobManager.class);
+    executor = Executors.newFixedThreadPool(2);
+    transport = new RecordingTransport();
     orchestrator =
         new EnvironmentSkillSyncOrchestrator(
-            registry, catalogQuery, transport, new DirectExecutor(), CLOCK);
+            registry, packageRepository, blobManager, transport, executor, CLOCK);
+    when(registry.find(ENV)).thenReturn(Optional.of(connection(ENV, List.of())));
+    when(registry.find(OTHER)).thenReturn(Optional.of(connection(OTHER, List.of())));
+    when(registry.listReadyOwnedByNode()).thenReturn(List.of(connection(ENV, List.of())));
   }
 
-  /**
-   * 测试意图：READY 触发对该 Environment 的全量同步，每个 Package 一次 skill.sync 调用，调用参数只含 Git 事实且不带 workdir，
-   * 每次调用使用新的 callId；成功结果在同一围栏下写入安装投影与 SKILL_SYNC_SUCCEEDED 事件。
-   */
+  @AfterEach
+  void tearDown() {
+    executor.shutdownNow();
+  }
+
+  /** 意图：READY 下发完整期望集合，包含归档摘要、大小与预签名下载地址，不含任何 Git 或凭据事实。 */
   @Test
-  void readyTriggersFullSyncOfEveryCatalogPackage() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    catalog.put("bbb", skillPackage("bbb", COMMIT_B));
+  void sendsTheCompleteDesiredSet() throws Exception {
+    when(packageRepository.listPackages())
+        .thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A), packageRow("pkg-b", ARTIFACT_B)));
+    stubArtifact(ARTIFACT_A, 11, "https://s3.example.com/a");
+    stubArtifact(ARTIFACT_B, 22, "https://s3.example.com/b");
 
     orchestrator.onEnvironmentReady(ENV);
 
-    assertEquals(2, transport.requests.size());
-    for (EnvironmentCapabilityExecutionRequest request : transport.requests) {
-      assertEquals(EnvironmentCapabilityIds.SKILL_SYNC, request.descriptor().id());
-      assertEquals(SYNC_TIMEOUT, request.timeout());
-    }
-    assertNotEquals(transport.requests.get(0).call().id(), transport.requests.get(1).call().id());
-    assertDoesNotThrow(() -> UUID.fromString(transport.requests.get(0).call().id()));
-
-    JsonNode firstArguments = JSON.readTree(transport.requests.get(0).call().argumentsJson());
-    assertEquals("aaa", firstArguments.get("packageName").textValue());
-    assertEquals(
-        "https://git.example.com/aaa.git", firstArguments.get("repositoryUrl").textValue());
-    assertEquals("main", firstArguments.get("branch").textValue());
-    assertEquals(COMMIT_A, firstArguments.get("targetCommit").textValue());
-    assertFalse(firstArguments.has("workdir"));
-
-    assertEquals(
-        List.of(
-            EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa"),
-            EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb")),
-        rowSkillState);
-    assertEquals(List.of("aaa", "bbb"), startedPackageNames());
-    assertEquals(
-        List.of(
-            EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED, EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED),
-        terminalEvents().stream().map(EnvironmentEvent::type).toList());
-    assertTrue(terminalEvents().stream().allMatch(event -> !event.isAlert()));
+    List<DaemonSkillPackage> sent = transport.awaitSends(1).getFirst();
+    assertEquals(2, sent.size());
+    assertEquals("pkg-a", sent.get(0).packageName());
+    assertEquals(ARTIFACT_A, sent.get(0).sha256());
+    assertEquals(11, sent.get(0).sizeBytes());
+    assertEquals("https://s3.example.com/a", sent.get(0).downloadUrl());
+    assertEquals("pkg-b", sent.get(1).packageName());
   }
 
-  /** 测试意图：单包失败只影响该包：失败的包保留上一次成功安装的 commit 与本地路径并记录有界去敏错误，其它包继续收敛成功。 */
+  /** 意图：运行中的新触发合并为结束后恰好再跑一次，并使用最新期望集合。 */
   @Test
-  void singlePackageFailureDoesNotBlockOtherPackagesAndPreservesInstalledFact() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    catalog.put("bbb", skillPackage("bbb", COMMIT_B));
-    rowSkillState.add(
-        EnvironmentSkillState.installed(
-            "aaa", PREVIOUS_COMMIT, "/home/dev/.kkstudio/skills/aaa-old"));
-    transport.responder =
-        request -> {
-          String packageName = packageName(request);
-          if ("aaa".equals(packageName)) {
-            return EnvironmentCapabilityResult.codedError(
-                request.call().id(), "COMMIT_NOT_FOUND", "commit is not reachable");
-          }
-          return success(request);
-        };
+  void triggerDuringARoundMergesIntoExactlyOneMoreRound() throws Exception {
+    when(packageRepository.listPackages()).thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A)));
+    stubArtifact(ARTIFACT_A, 11, "https://s3.example.com/a");
+    transport.blockFirstSend();
 
     orchestrator.onEnvironmentReady(ENV);
+    assertTrue(transport.awaitFirstSendStarted());
+    // 第一次下发阻塞期间，catalog 增加到两个包并再次触发。
+    when(packageRepository.listPackages())
+        .thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A), packageRow("pkg-b", ARTIFACT_B)));
+    stubArtifact(ARTIFACT_B, 22, "https://s3.example.com/b");
+    orchestrator.onEnvironmentReady(ENV);
+    orchestrator.onPackageChanged("pkg-b");
+    transport.releaseFirstSend();
 
-    assertEquals(2, rowSkillState.size());
-    EnvironmentSkillState failed = rowSkillState.get(0);
-    assertEquals("aaa", failed.packageName());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, failed.status());
-    assertEquals(PREVIOUS_COMMIT, failed.installedCommit());
-    assertEquals("/home/dev/.kkstudio/skills/aaa-old", failed.localPath());
-    assertEquals("skill package sync failed: COMMIT_NOT_FOUND", failed.error());
-    assertEquals(
-        EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb"),
-        rowSkillState.get(1));
-
-    List<EnvironmentEvent> terminals = terminalEvents();
-    assertEquals(
-        List.of(
-            EnvironmentEvent.TYPE_SKILL_SYNC_FAILED, EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED),
-        terminals.stream().map(EnvironmentEvent::type).toList());
-    assertEquals(EnvironmentEvent.LEVEL_ERROR, terminals.get(0).level());
-    assertTrue(terminals.get(0).isAlert());
-    assertEquals("skill package sync failed: aaa", terminals.get(0).message());
+    List<List<DaemonSkillPackage>> sends = transport.awaitSends(2);
+    assertEquals(2, sends.size(), "a single merged round must follow the blocked round");
+    assertEquals(2, sends.get(1).size());
+    assertEquals("pkg-b", sends.get(1).get(1).packageName());
+    // 合并后的第三、四次触发不会再产生额外轮次。
+    Thread.sleep(50);
+    assertEquals(2, transport.sent().size());
   }
 
-  /**
-   * 测试意图：结果解析必须是精确安装事实。Package 名不匹配、commit 不等于本次请求的 currentCommit、commit 非 canonical 形状、localPath
-   * 不是目标 OS 上的绝对路径或最后一段不是该 Package 根目录时，一律收敛为固定的去敏失败摘要，绝不写入安装投影。
-   */
+  /** 意图：不同 Environment 互不阻塞。 */
   @Test
-  void malformedOrMismatchedResultsBecomeFixedSanitizedFailure() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    List<String> malformedResults =
-        List.of(
-            // Package 名与请求不符
-            "{\"packageName\":\"bbb\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}",
-            // commit 与本次请求的 currentCommit 不符
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_B
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}",
-            // commit 不是 canonical 形状（大写 / 长度不足）
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A.toUpperCase()
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}",
-            "{\"packageName\":\"aaa\",\"installedCommit\":\"abc123\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}",
-            // localPath 是相对路径
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"skills/aaa\"}",
-            // localPath 未展开占位符
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"~/skills/aaa\"}",
-            // localPath 最后一段不是该 Package 根目录
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills\"}",
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa/\"}",
-            // 缺少字段
-            "{\"packageName\":\"aaa\",\"installedCommit\":\"" + COMMIT_A + "\"}",
-            // 多余字段
-            "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\",\"extra\":\"x\"}",
-            // 非 object
-            "[]",
-            // 非文本
-            "{\"packageName\":\"aaa\",\"installedCommit\":123,\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}",
-            "{\"packageName\":123,\"installedCommit\":\""
-                + COMMIT_A
-                + "\",\"localPath\":\"/home/dev/.kkstudio/skills/aaa\"}");
-
-    for (String malformed : malformedResults) {
-      transport.responder =
-          request -> EnvironmentCapabilityResult.json(request.call().id(), malformed);
-
-      orchestrator.onEnvironmentReady(ENV);
-
-      EnvironmentSkillState failed = rowSkillState.get(0);
-      assertEquals(EnvironmentSkillState.STATUS_FAILED, failed.status(), malformed);
-      assertEquals(null, failed.installedCommit(), malformed);
-      assertEquals(null, failed.localPath(), malformed);
-      assertEquals("skill package sync failed", failed.error(), malformed);
-      assertEquals(
-          EnvironmentEvent.TYPE_SKILL_SYNC_FAILED, terminalEvents().get(0).type(), malformed);
-      assertTrue(terminalEvents().get(0).isAlert(), malformed);
-    }
-  }
-
-  /** 测试意图：目标 Daemon 是 Windows 时接受 drive path 与 UNC 的本地根，但仍要求最后一段是该 Package 根目录。 */
-  @Test
-  void windowsLocalPathMustStillResolveToPackageRoot() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    rowCapabilities.put(
-        ENV,
-        new DaemonCapabilities(
-            "1.0.9",
-            new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.WINDOWS,
-                "UTC",
-                "dev",
-                "C:\\Users\\dev",
-                "Windows environment.",
-                "/tmp/kk-studio",
-                "amd64")));
-    transport.responder =
-        request ->
-            EnvironmentCapabilityResult.json(
-                request.call().id(),
-                "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                    + COMMIT_A
-                    + "\",\"localPath\":\"C:\\\\Users\\\\dev\\\\.kkstudio\\\\skills\\\\aaa\"}");
+  void differentEnvironmentsAreNotSerialized() throws Exception {
+    when(packageRepository.listPackages()).thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A)));
+    stubArtifact(ARTIFACT_A, 11, "https://s3.example.com/a");
+    transport.blockFirstSend();
 
     orchestrator.onEnvironmentReady(ENV);
+    assertTrue(transport.awaitFirstSendStarted());
+    orchestrator.onEnvironmentReady(OTHER);
 
-    assertEquals(
-        List.of(
-            EnvironmentSkillState.installed(
-                "aaa", COMMIT_A, "C:\\Users\\dev\\.kkstudio\\skills\\aaa")),
-        rowSkillState);
-
-    transport.responder =
-        request ->
-            EnvironmentCapabilityResult.json(
-                request.call().id(),
-                "{\"packageName\":\"aaa\",\"installedCommit\":\""
-                    + COMMIT_A
-                    + "\",\"localPath\":\"skills\\\\aaa\"}");
-
-    orchestrator.onEnvironmentReady(ENV);
-
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
-    assertEquals("skill package sync failed", rowSkillState.get(0).error());
+    List<List<DaemonSkillPackage>> sends = transport.awaitSends(2);
+    assertEquals(2, sends.size());
+    transport.releaseFirstSend();
   }
 
-  /** 测试意图：围栏在发送前就失效（事件写不进 READY 持有者的行）时，编排器必须放弃整次同步，绝不执行调用也绝不写回。 */
+  /** 意图：Package 变更只向本节点持有的 READY Environment 重新下发。 */
   @Test
-  void fenceLostBeforeSendSkipsInvocationEntirely() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    when(registry.recordEvent(any(), any(), any())).thenReturn(false);
-
-    orchestrator.onEnvironmentReady(ENV);
-
-    assertEquals(List.of(), transport.requests);
-    verify(registry, never()).replaceSkillState(any(), any(), any(), any());
-  }
-
-  /** 测试意图：READY 之外的连接状态（离线 / 重新 CONNECTING）不参与同步，绝不向非 READY 行发送调用。 */
-  @Test
-  void nonReadyConnectionIsNeverSentTo() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    rowStatus.put(ENV, LiveEnvironmentStatus.CONNECTING);
-
-    orchestrator.onPackageChanged("aaa");
-
-    assertEquals(List.of(), transport.requests);
-    verify(registry, never()).replaceSkillState(any(), any(), any(), any());
-  }
-
-  /** 测试意图：调用已发出但结果写回时围栏失效（租约被接管）必须静默放弃：不抛异常、不污染当前行。 */
-  @Test
-  void lateResultIsDiscardedWhenFenceIsLostDuringSend() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    doReturn(false).when(registry).replaceSkillState(any(), any(), any(), any());
-
-    assertDoesNotThrow(() -> orchestrator.onEnvironmentReady(ENV));
-
-    assertEquals(1, transport.requests.size());
-    assertEquals(List.of(), rowSkillState);
-  }
-
-  /** 测试意图：发送结果不确定（send-uncertain）绝不重放：只尝试一次，并把该 Package 记为失败。 */
-  @Test
-  void sendUncertainIsNeverReplayed() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    transport.responder =
-        request -> {
-          throw new EnvironmentCapabilitySendUncertainException("transport lost the reply");
-        };
-
-    orchestrator.onEnvironmentReady(ENV);
-
-    assertEquals(1, transport.requests.size());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
-    assertEquals("skill package sync could not be sent", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
-  }
-
-  /** 测试意图：能力调用以 onError 失败（如 Daemon 侧拒绝或超时）时只收敛为固定去敏失败摘要，绝不重放，也不写入任何安装事实。 */
-  @Test
-  void invocationErrorCallbackConvergesToFixedFailure() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    transport.errorCallback = true;
-
-    orchestrator.onEnvironmentReady(ENV);
-
-    assertEquals(1, transport.requests.size());
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
-    assertEquals("skill package sync failed", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
-    assertEquals(EnvironmentEvent.TYPE_SKILL_SYNC_FAILED, terminalEvents().get(0).type());
-  }
-
-  /** 测试意图：非 JSON 文本的成功结果不构成安装事实，一律收敛为固定失败摘要。 */
-  @Test
-  void successfulResultWithoutJsonContentIsAFixedFailure() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    transport.responder = request -> EnvironmentCapabilityResult.success(request.call().id(), "ok");
-
-    orchestrator.onEnvironmentReady(ENV);
-
-    assertEquals(EnvironmentSkillState.STATUS_FAILED, rowSkillState.get(0).status());
-    assertEquals("skill package sync failed", rowSkillState.get(0).error());
-    assertEquals(null, rowSkillState.get(0).installedCommit());
-  }
-
-  /** 测试意图：registry / catalog 的读取故障只被记录，绝不抛给触发方，也绝不发送任何调用。 */
-  @Test
-  void listingFailuresAreContainedWithoutSending() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
+  void packageChangeResyncsReadyOwnedEnvironments() throws Exception {
+    when(packageRepository.listPackages()).thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A)));
+    stubArtifact(ARTIFACT_A, 11, "https://s3.example.com/a");
     when(registry.listReadyOwnedByNode())
-        .thenThrow(new IllegalStateException("database unavailable"));
-    assertDoesNotThrow(() -> orchestrator.onPackageChanged("aaa"));
-    assertDoesNotThrow(orchestrator::reconcileReadyEnvironments);
+        .thenReturn(List.of(connection(ENV, List.of()), connection(OTHER, List.of())));
 
-    when(catalogQuery.listPackages()).thenThrow(new IllegalStateException("database unavailable"));
-    assertDoesNotThrow(() -> orchestrator.onEnvironmentReady(ENV));
+    orchestrator.onPackageChanged("pkg-a");
 
-    assertEquals(List.of(), transport.requests);
+    assertEquals(2, transport.awaitSends(2).size());
   }
 
-  /** 测试意图：结果写回自身失败只被记录，绝不把异常抛给 executor 线程。 */
+  /** 意图：连接未 READY 时不下发；下一次 READY 触发会重新收敛。 */
   @Test
-  void failedResultWriteBackIsContained() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    doThrow(new IllegalStateException("database unavailable"))
-        .when(registry)
-        .replaceSkillState(any(), any(), any(), any());
-
-    assertDoesNotThrow(() -> orchestrator.onEnvironmentReady(ENV));
-
-    assertEquals(1, transport.requests.size());
-    assertEquals(List.of(), rowSkillState);
-  }
-
-  /** 测试意图：单个 Package 在同步过程中的意外失败（例如 catalog 读取抛异常）不中断其它 Package 的收敛。 */
-  @Test
-  void onePackageFailureDoesNotAbortTheRemainingPackages() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    catalog.put("bbb", skillPackage("bbb", COMMIT_B));
-    when(catalogQuery.getPackage("aaa")).thenThrow(new IllegalStateException("package exploded"));
+  void unreadyConnectionIsNotSent() {
+    when(registry.find(ENV))
+        .thenReturn(Optional.of(connection(ENV, LiveEnvironmentStatus.CONNECTING, List.of())));
 
     orchestrator.onEnvironmentReady(ENV);
 
-    assertEquals(1, transport.requests.size());
-    assertEquals("bbb", packageName(transport.requests.get(0)));
-    assertEquals(
-        List.of(EnvironmentSkillState.installed("bbb", COMMIT_B, "/home/dev/.kkstudio/skills/bbb")),
-        rowSkillState);
+    assertTrue(transport.sent().isEmpty());
   }
 
-  /** 测试意图：Package 变更通知只做单 Package 增量同步，且目标集合严格来自本节点持有的 READY 行。 */
+  /** 意图：状态上报按 owner + lease token 整体替换投影，并记录一次状态更新事件。 */
   @Test
-  void packageChangedSyncsOnlyLocallyOwnedReadyEnvironments() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    catalog.put("bbb", skillPackage("bbb", COMMIT_B));
-    rowStatus.put(OTHER, LiveEnvironmentStatus.CONNECTING);
-    when(registry.listReadyOwnedByNode()).thenReturn(List.of(row(ENV), row(OTHER)));
+  void stateReportReplacesTheProjection() {
+    when(registry.find(ENV))
+        .thenReturn(
+            Optional.of(
+                connection(
+                    ENV,
+                    List.of(
+                        EnvironmentSkillState.installed("pkg-a", "c".repeat(64), "/old/pkg-a")))));
 
-    orchestrator.onPackageChanged("aaa");
+    orchestrator.onSkillState(
+        ENV,
+        List.of(
+            new DaemonSkillStatePackage("pkg-a", ARTIFACT_A, "/home/dev/skills/pkg-a", null),
+            new DaemonSkillStatePackage("pkg-b", null, null, "INSTALL_FAILED")));
 
-    assertEquals(1, transport.requests.size());
-    assertEquals("aaa", packageName(transport.requests.get(0)));
-    assertEquals(
-        List.of(EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa")),
-        rowSkillState);
+    verify(registry)
+        .replaceSkillState(
+            eq(ENV),
+            eq(LEASE_TOKEN),
+            eq(
+                List.of(
+                    EnvironmentSkillState.installed("pkg-a", ARTIFACT_A, "/home/dev/skills/pkg-a"),
+                    new EnvironmentSkillState("pkg-b", null, null, "INSTALL_FAILED"))),
+            any(EnvironmentEvent.class));
   }
 
-  /** 测试意图：catalog 中已不存在的 Package 不做任何写：残留投影只由下一次 READY 全量同步重建。 */
+  /** 意图：与当前投影相同的上报不写数据库，避免无意义的环境失效通知。 */
   @Test
-  void packageChangedForUnknownPackageDoesNothing() {
-    when(registry.listReadyOwnedByNode()).thenReturn(List.of(row(ENV)));
+  void identicalStateReportDoesNotWrite() {
+    EnvironmentSkillState installed =
+        EnvironmentSkillState.installed("pkg-a", ARTIFACT_A, "/home/dev/skills/pkg-a");
+    when(registry.find(ENV)).thenReturn(Optional.of(connection(ENV, List.of(installed))));
 
-    orchestrator.onPackageChanged("gone");
+    orchestrator.onSkillState(
+        ENV,
+        List.of(new DaemonSkillStatePackage("pkg-a", ARTIFACT_A, "/home/dev/skills/pkg-a", null)));
 
-    assertEquals(List.of(), transport.requests);
     verify(registry, never()).replaceSkillState(any(), any(), any(), any());
   }
 
-  /** 测试意图：通知重连对账对本节点全部 READY Environment 各做一次全量同步，并对缺少 catalog 事实的调用保持 no-op。 */
+  /** 意图：摘要与路径不成对的整轮上报被拒绝，绝不写入半份投影。 */
   @Test
-  void reconcileResyncsEveryOwnedReadyEnvironment() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    when(registry.listReadyOwnedByNode()).thenReturn(List.of(row(ENV), row(OTHER)));
+  void malformedStateReportIsRejectedAsAWhole() {
+    orchestrator.onSkillState(
+        ENV, List.of(new DaemonSkillStatePackage("pkg-a", ARTIFACT_A, null, null)));
 
-    orchestrator.reconcileReadyEnvironments();
-
-    assertEquals(2, transport.requests.size());
-    // 两个 READY Environment 各做一次全量同步。
-    assertEquals(List.of("aaa", "aaa"), startedPackageNames());
-    assertDoesNotThrow(() -> orchestrator.onEnvironmentReady(null));
-    assertDoesNotThrow(() -> orchestrator.onPackageChanged(" "));
-    assertEquals(2, transport.requests.size());
-  }
-
-  /** 测试意图：executor 拒绝 admission 时只记录并放弃本次同步，绝不把拒绝抛给触发方，也绝不绕过 admission 直接发送。 */
-  @Test
-  void rejectedAdmissionDropsTheSyncWithoutSending() {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    ExecutorService rejecting = Executors.newSingleThreadExecutor();
-    rejecting.shutdown();
-    EnvironmentSkillSyncOrchestrator rejected =
-        new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, rejecting, CLOCK);
-
-    assertDoesNotThrow(() -> rejected.onEnvironmentReady(ENV));
-
-    assertEquals(List.of(), transport.requests);
     verify(registry, never()).replaceSkillState(any(), any(), any(), any());
   }
 
-  /** 意图：无 deadline 的等待仍可通过 transport 断线错误或线程中断取消句柄，并提交唯一失败终态。 */
+  /** 意图：下发失败只记录，不向触发方抛异常；下一次触发重新收敛。 */
   @Test
-  void unboundedWaitStillConvergesOnDisconnectAndInterruption() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    for (boolean interrupt : List.of(false, true)) {
-      CountDownLatch invoked = new CountDownLatch(1);
-      AtomicReference<EnvironmentCapabilityExecutionListener> listener = new AtomicReference<>();
-      EnvironmentCapabilityExecutionHandle handle =
-          mock(EnvironmentCapabilityExecutionHandle.class);
-      EnvironmentCapabilityTransport pending =
-          new EnvironmentCapabilityTransport() {
-            @Override
-            public EnvironmentCapabilityExecutionHandle invoke(
-                EnvironmentId environment,
-                EnvironmentCapabilityExecutionRequest request,
-                EnvironmentCapabilityExecutionListener callback) {
-              assertEquals(Duration.ZERO, request.timeout());
-              listener.set(callback);
-              invoked.countDown();
-              return handle;
-            }
+  void sendFailureIsContained() throws Exception {
+    transport.failure = new IllegalStateException("queue full");
+    when(packageRepository.listPackages()).thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A)));
+    stubArtifact(ARTIFACT_A, 11, "https://s3.example.com/a");
 
-            @Override
-            public EnvironmentCapabilityExecutionHandle attach(
-                EnvironmentId environmentId,
-                UUID invocationId,
-                EnvironmentCapabilityExecutionListener callback) {
-              throw new UnsupportedOperationException();
-            }
-          };
-      ExecutorService executor = Executors.newSingleThreadExecutor();
-      try {
-        EnvironmentSkillSyncOrchestrator async =
-            new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
-        async.onEnvironmentReady(ENV);
-        assertTrue(invoked.await(2, TimeUnit.SECONDS));
-        if (interrupt) {
-          executor.shutdownNow();
-        } else {
-          listener.get().onError(new IllegalStateException("disconnected"));
-          executor.shutdown();
-        }
-        assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
-        verify(handle).cancel();
-      } finally {
-        executor.shutdownNow();
-      }
+    assertDoesNotThrow(() -> orchestrator.onEnvironmentReady(ENV));
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (transport.attempts() == 0 && System.nanoTime() < deadline) {
+      Thread.sleep(10);
     }
-    assertEquals(2, terminalEvents().size());
-    assertTrue(
-        terminalEvents().stream()
-            .allMatch(event -> EnvironmentEvent.TYPE_SKILL_SYNC_FAILED.equals(event.type())));
+    assertEquals(1, transport.attempts());
   }
 
-  /** 意图：ZERO 是真正等待终态而非 get(0)；跨过短测试 budget 后仍接受成功结果，不提前取消。 */
+  /** 意图：缺失归档的 Package 被跳过，不影响其它包的期望集合。 */
   @Test
-  void unboundedWaitAllowsDelayedSuccessfulTerminal() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    CountDownLatch invoked = new CountDownLatch(1);
-    AtomicReference<EnvironmentCapabilityExecutionListener> listener = new AtomicReference<>();
-    AtomicReference<EnvironmentCapabilityExecutionRequest> request = new AtomicReference<>();
-    EnvironmentCapabilityExecutionHandle handle = mock(EnvironmentCapabilityExecutionHandle.class);
-    EnvironmentCapabilityTransport pending =
-        new EnvironmentCapabilityTransport() {
-          @Override
-          public EnvironmentCapabilityExecutionHandle invoke(
-              EnvironmentId environment,
-              EnvironmentCapabilityExecutionRequest call,
-              EnvironmentCapabilityExecutionListener callback) {
-            request.set(call);
-            listener.set(callback);
-            invoked.countDown();
-            return handle;
-          }
+  void missingArtifactIsSkipped() throws Exception {
+    when(packageRepository.listPackages())
+        .thenReturn(List.of(packageRow("pkg-a", ARTIFACT_A), packageRow("pkg-b", ARTIFACT_B)));
+    when(blobManager.getBlob(any())).thenReturn(null);
 
-          @Override
-          public EnvironmentCapabilityExecutionHandle attach(
-              EnvironmentId environmentId,
-              UUID invocationId,
-              EnvironmentCapabilityExecutionListener callback) {
-            throw new UnsupportedOperationException();
-          }
-        };
-    ExecutorService executor = Executors.newSingleThreadExecutor();
-    try {
-      EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
-      async.onEnvironmentReady(ENV);
-      assertTrue(invoked.await(2, TimeUnit.SECONDS));
-      assertEquals(Duration.ZERO, request.get().timeout());
-      var barrier = executor.submit(() -> {});
-      assertThrows(TimeoutException.class, () -> barrier.get(100, TimeUnit.MILLISECONDS));
-      verify(handle, never()).cancel();
-      listener.get().onComplete(success(request.get()));
-      barrier.get(2, TimeUnit.SECONDS);
-      assertEquals(COMMIT_A, rowSkillState.getFirst().installedCommit());
-      assertEquals(EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED, terminalEvents().getFirst().type());
-    } finally {
-      executor.shutdownNow();
-    }
+    orchestrator.onEnvironmentReady(ENV);
+
+    assertEquals(1, transport.awaitSends(1).size());
+    assertTrue(transport.sent().getFirst().isEmpty());
   }
 
-  /** 测试意图：onEnvironmentReady 绝不在会话核心线程上执行发送或数据库 IO，发送只在 executor 上发生。 */
-  @Test
-  void readyEventReturnsBeforeAnySendHappens() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    CountDownLatch sendStarted = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    transport.beforeComplete =
-        () -> {
-          sendStarted.countDown();
-          await(release);
-        };
-    ExecutorService executor = Executors.newSingleThreadExecutor();
-    try {
-      EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
-
-      assertTimeoutPreemptively(
-          Duration.ofSeconds(5),
-          () -> {
-            async.onEnvironmentReady(ENV);
-            async.onEnvironmentReady(ENV);
-          });
-      assertTrue(sendStarted.await(5, TimeUnit.SECONDS));
-    } finally {
-      release.countDown();
-      executor.shutdown();
-    }
-
-    assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+  private void stubArtifact(String sha256, long size, String url) {
+    UUID blobId = blobIdFor(sha256);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setSha256(sha256);
+    blob.setSizeBytes(size);
+    blob.setMediaType("application/zip");
+    blob.setRefCount(1);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobManager.getBlob(blobId)).thenReturn(blob);
+    StoragePresignedUrlDTO presigned = StoragePresignedUrlDTO.builder().url(url).build();
+    when(blobManager.presignOriginalUrl(blobId)).thenReturn(presigned);
   }
 
-  /** 测试意图：同一 Environment 的同步在进程内串行，两个并发触发的同步绝不并发进入发送路径。 */
-  @Test
-  void concurrentTriggersForSameEnvironmentAreSerialized() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    CountDownLatch firstSendStarted = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    transport.beforeComplete =
-        () -> {
-          if (firstSendStarted.getCount() > 0) {
-            firstSendStarted.countDown();
-            await(release);
-          }
-        };
-    ExecutorService executor = Executors.newFixedThreadPool(2);
-    try {
-      EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
-      async.onEnvironmentReady(ENV);
-      assertTrue(firstSendStarted.await(5, TimeUnit.SECONDS));
-      async.onEnvironmentReady(ENV);
-      release.countDown();
-    } finally {
-      executor.shutdown();
-    }
-
-    assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
-    assertEquals(2, transport.requests.size());
-    assertEquals(1, transport.maxInFlight.get());
-    assertEquals(1, rowSkillState.size());
-    assertEquals(
-        EnvironmentSkillState.installed("aaa", COMMIT_A, "/home/dev/.kkstudio/skills/aaa"),
-        rowSkillState.get(0));
+  private static UUID blobIdFor(String artifactSha256) {
+    return UUID.nameUUIDFromBytes(artifactSha256.getBytes(StandardCharsets.UTF_8));
   }
 
-  /**
-   * 测试意图：不同 stripe 的 Environment 真正相互独立。第一个 Environment 仍阻塞在发送里时，落在另一个 stripe 的 Environment
-   * 已经完成发送，说明两者不共享同一把锁（同步发送路径上并发度为 2）。
-   */
-  @Test
-  void differentStripeEnvironmentsRunIndependently() throws Exception {
-    EnvironmentId otherStripe = environmentIdOnDifferentStripeThan(ENV);
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    // 两个 Environment 会并发写回同一份行快照：写回加锁，本用例只验证锁与发送事实。
-    doAnswer(
-            invocation -> {
-              List<EnvironmentSkillState> state = invocation.getArgument(2);
-              synchronized (rowSkillState) {
-                rowSkillState.clear();
-                rowSkillState.addAll(state);
-              }
-              return true;
-            })
-        .when(registry)
-        .replaceSkillState(any(), any(), any(), any());
-    CountDownLatch firstSendStarted = new CountDownLatch(1);
-    CountDownLatch releaseFirst = new CountDownLatch(1);
-    CountDownLatch secondSendStarted = new CountDownLatch(1);
-    AtomicInteger sends = new AtomicInteger();
-    transport.beforeComplete =
-        () -> {
-          if (sends.incrementAndGet() == 1) {
-            firstSendStarted.countDown();
-            await(releaseFirst);
-          } else {
-            secondSendStarted.countDown();
-          }
-        };
-    ExecutorService executor = Executors.newFixedThreadPool(2);
-    try {
-      EnvironmentSkillSyncOrchestrator async =
-          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, transport, executor, CLOCK);
-      async.onEnvironmentReady(ENV);
-      assertTrue(firstSendStarted.await(5, TimeUnit.SECONDS));
-      async.onEnvironmentReady(otherStripe);
-      assertTrue(secondSendStarted.await(5, TimeUnit.SECONDS));
-      assertEquals(2, transport.maxInFlight.get());
-      releaseFirst.countDown();
-    } finally {
-      executor.shutdown();
-    }
-
-    assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
-    assertEquals(2, transport.requests.size());
+  private static SkillPackage packageRow(String packageName, String artifactSha256) {
+    return new SkillPackage(
+        packageName,
+        null,
+        "v1",
+        blobIdFor(artifactSha256),
+        List.of(new SkillManifestEntry("dev", "d")),
+        NOW,
+        0L,
+        NOW,
+        NOW,
+        null);
   }
 
-  /**
-   * 测试意图：锁数量与见过的 Environment 数量解耦。处理远超 stripe 数的 Environment 后，锁数组长度恒等于固定的 stripe 数（历史 key
-   * 不会无界增长），而这些同步全部正常完成。
-   */
-  @Test
-  void lockStripesStayBoundedAcrossManyEnvironments() throws Exception {
-    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    int distinctEnvironments = EnvironmentSkillSyncOrchestrator.LOCK_STRIPES * 4;
-    for (int i = 0; i < distinctEnvironments; i++) {
-      orchestrator.onEnvironmentReady(EnvironmentId.of(new UUID(0L, i)));
-    }
-
-    assertEquals(distinctEnvironments, transport.requests.size());
-    Field field = EnvironmentSkillSyncOrchestrator.class.getDeclaredField("environmentLocks");
-    field.setAccessible(true);
-    assertEquals(
-        EnvironmentSkillSyncOrchestrator.LOCK_STRIPES,
-        ((ReentrantLock[]) field.get(orchestrator)).length);
+  private static EnvironmentConnection connection(
+      EnvironmentId environmentId, List<EnvironmentSkillState> skillState) {
+    return connection(environmentId, LiveEnvironmentStatus.READY, skillState);
   }
 
-  /** 找一个与给定 Environment 落在不同 stripe 的 EnvironmentId。 */
-  private static EnvironmentId environmentIdOnDifferentStripeThan(EnvironmentId environmentId) {
-    int stripe = EnvironmentSkillSyncOrchestrator.stripeIndexOf(environmentId);
-    for (long i = 0; i < 1_000; i++) {
-      EnvironmentId candidate = EnvironmentId.of(new UUID(0L, i));
-      if (EnvironmentSkillSyncOrchestrator.stripeIndexOf(candidate) != stripe) {
-        return candidate;
-      }
-    }
-    throw new IllegalStateException("no EnvironmentId maps to a different stripe");
-  }
-
-  private List<String> startedPackageNames() {
-    List<String> packages = new ArrayList<>();
-    for (EnvironmentEvent event : recordedEvents()) {
-      if (EnvironmentEvent.TYPE_SKILL_SYNC_STARTED.equals(event.type())) {
-        packages.add(event.message().substring("skill package sync started: ".length()));
-      }
-    }
-    return packages;
-  }
-
-  private List<EnvironmentEvent> terminalEvents() {
-    return recordedEvents().stream()
-        .filter(event -> !EnvironmentEvent.TYPE_SKILL_SYNC_STARTED.equals(event.type()))
-        .toList();
-  }
-
-  private List<EnvironmentEvent> recordedEvents() {
-    @SuppressWarnings("unchecked")
-    ArgumentCaptor<EnvironmentEvent> captor = ArgumentCaptor.forClass(EnvironmentEvent.class);
-    verify(registry, atLeast(0)).recordEvent(any(), any(), captor.capture());
-    List<EnvironmentEvent> events = new ArrayList<>(captor.getAllValues());
-    @SuppressWarnings("unchecked")
-    ArgumentCaptor<EnvironmentEvent> terminalCaptor =
-        ArgumentCaptor.forClass(EnvironmentEvent.class);
-    verify(registry, atLeast(0)).replaceSkillState(any(), any(), any(), terminalCaptor.capture());
-    events.addAll(terminalCaptor.getAllValues());
-    return events;
-  }
-
-  private static String packageName(EnvironmentCapabilityExecutionRequest request) {
-    try {
-      return JSON.readTree(request.call().argumentsJson()).get("packageName").textValue();
-    } catch (Exception error) {
-      throw new IllegalStateException(error);
-    }
-  }
-
-  private static EnvironmentCapabilityResult success(
-      EnvironmentCapabilityExecutionRequest request) {
-    String packageName = packageName(request);
-    String targetCommit;
-    try {
-      targetCommit = JSON.readTree(request.call().argumentsJson()).get("targetCommit").textValue();
-    } catch (Exception error) {
-      throw new IllegalStateException(error);
-    }
-    return EnvironmentCapabilityResult.json(
-        request.call().id(),
-        "{\"packageName\":\""
-            + packageName
-            + "\",\"installedCommit\":\""
-            + targetCommit
-            + "\",\"localPath\":\"/home/dev/.kkstudio/skills/"
-            + packageName
-            + "\"}");
-  }
-
-  private EnvironmentConnection row(EnvironmentId environmentId) {
+  private static EnvironmentConnection connection(
+      EnvironmentId environmentId,
+      LiveEnvironmentStatus status,
+      List<EnvironmentSkillState> skillState) {
     return new EnvironmentConnection(
         environmentId,
         NODE,
         LEASE_TOKEN,
-        rowStatus.getOrDefault(environmentId, LiveEnvironmentStatus.READY),
-        rowCapabilities.getOrDefault(environmentId, CAPABILITIES),
-        List.copyOf(rowSkillState),
+        status,
+        status == LiveEnvironmentStatus.READY ? mock(DaemonCapabilities.class) : null,
+        skillState,
         List.of(),
         NOW,
         NOW.plusSeconds(60));
   }
 
-  private static SkillPackage skillPackage(String packageName, String commit) {
-    SkillPackage skillPackage =
-        SkillPackage.builder()
-            .packageName(packageName)
-            .repositoryUrl("https://git.example.com/" + packageName + ".git")
-            .branch("main")
-            .currentCommit(commit)
-            .build();
-    return skillPackage;
-  }
+  /** 记录下发并可选择阻塞第一次，用于验证单飞与合并语义。 */
+  private static final class RecordingTransport implements EnvironmentSkillTransport {
+    private final List<List<DaemonSkillPackage>> sends = new CopyOnWriteArrayList<>();
+    private final CountDownLatch firstStarted = new CountDownLatch(1);
+    private final CountDownLatch firstRelease = new CountDownLatch(1);
+    private volatile boolean blockFirst;
+    private volatile RuntimeException failure;
+    private final AtomicInteger attempts = new AtomicInteger();
 
-  private static void await(CountDownLatch latch) {
-    try {
-      latch.await(5, TimeUnit.SECONDS);
-    } catch (InterruptedException error) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException(error);
-    }
-  }
-
-  /** 在当前线程直接执行任务的 ExecutorService：把编排器的异步边界变成可断言的同步路径。 */
-  private static final class DirectExecutor extends AbstractExecutorService {
-
-    private volatile boolean shutdown;
-
-    @Override
-    public void execute(Runnable command) {
-      command.run();
+    void blockFirstSend() {
+      blockFirst = true;
     }
 
-    @Override
-    public void shutdown() {
-      shutdown = true;
+    boolean awaitFirstSendStarted() throws InterruptedException {
+      return firstStarted.await(5, TimeUnit.SECONDS);
     }
 
-    @Override
-    public List<Runnable> shutdownNow() {
-      shutdown = true;
-      return List.of();
+    void releaseFirstSend() {
+      firstRelease.countDown();
     }
 
-    @Override
-    public boolean isShutdown() {
-      return shutdown;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return shutdown;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return shutdown;
-    }
-  }
-
-  /** 记录请求并同步回调终态结果的传输桩；responder 可抛出异常以模拟发送前/不确定失败。 */
-  private static final class ScriptedTransport implements EnvironmentCapabilityTransport {
-
-    private final List<EnvironmentCapabilityExecutionRequest> requests =
-        Collections.synchronizedList(new ArrayList<>());
-    private final AtomicInteger inFlight = new AtomicInteger();
-    private final AtomicInteger maxInFlight = new AtomicInteger();
-    private Function<EnvironmentCapabilityExecutionRequest, EnvironmentCapabilityResult> responder =
-        EnvironmentSkillSyncOrchestratorTest::success;
-    private Runnable beforeComplete = () -> {};
-
-    /** true 时改为回调 onError，模拟能力调用在远端失败。 */
-    private boolean errorCallback;
-
-    @Override
-    public EnvironmentCapabilityExecutionHandle invoke(
-        EnvironmentId environmentId,
-        EnvironmentCapabilityExecutionRequest request,
-        EnvironmentCapabilityExecutionListener listener) {
-      requests.add(request);
-      maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
-      try {
-        beforeComplete.run();
-        // skill.sync 是环境管理任务：远端退出通知不属于 Thread 执行账本。
-        listener.onExitConfirmed();
-        if (errorCallback) {
-          listener.onError(new IllegalStateException("capability execution failed"));
-        } else {
-          listener.onComplete(responder.apply(request));
-        }
-      } finally {
-        inFlight.decrementAndGet();
+    List<List<DaemonSkillPackage>> awaitSends(int count) throws InterruptedException {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (sends.size() < count && System.nanoTime() < deadline) {
+        Thread.sleep(10);
       }
-      return new Handle();
+      return List.copyOf(sends);
+    }
+
+    List<List<DaemonSkillPackage>> sent() {
+      return List.copyOf(sends);
+    }
+
+    int attempts() {
+      return attempts.get();
     }
 
     @Override
-    public EnvironmentCapabilityExecutionHandle attach(
-        EnvironmentId environmentId,
-        UUID invocationId,
-        EnvironmentCapabilityExecutionListener listener) {
-      throw new UnsupportedOperationException();
-    }
-  }
-
-  private static final class Handle implements EnvironmentCapabilityExecutionHandle {
-
-    @Override
-    public void cancel() {}
-
-    @Override
-    public boolean isCancelled() {
-      return false;
-    }
-
-    @Override
-    public void terminate(EnvironmentCapabilityTerminationCause cause) {
-      Objects.requireNonNull(cause, "cause");
-    }
-
-    @Override
-    public Duration terminalDeliveryGrace() {
-      return Duration.ZERO;
+    public void sendSkillSync(EnvironmentId environmentId, List<DaemonSkillPackage> packages) {
+      attempts.incrementAndGet();
+      if (blockFirst && sends.isEmpty()) {
+        firstStarted.countDown();
+        try {
+          firstRelease.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      if (failure != null) {
+        throw failure;
+      }
+      sends.add(packages);
     }
   }
 }

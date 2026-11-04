@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import java.util.Objects;
 
 /**
- * 持久化为 {@code harness_model_invocation} 上 {@code error} JSONB 列的最小 terminal error snapshot，对应
+ * 持久化为 {@code builtin_model_invocation} 上 {@code error} JSONB 列的最小 terminal error snapshot，对应
  * {@code FAILED} / {@code UNKNOWN} 状态。
  *
  * <p>snapshot 刻意保持最小：非空的 {@link ProviderErrorKind} 加上一条非空的可读 {@code message}，外加可选的 {@code

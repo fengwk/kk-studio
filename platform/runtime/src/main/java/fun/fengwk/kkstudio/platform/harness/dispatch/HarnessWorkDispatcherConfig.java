@@ -1,54 +1,35 @@
 package fun.fengwk.kkstudio.platform.harness.dispatch;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * HarnessWorkDispatcher 的部署级配置。
  *
- * <p>THREAD / MODEL / AGENT / TOOL 各自独立的 {@code leaseDuration} 决定 claim 有效期；{@code
- * periodicPollInterval} 是 fixed-delay 周期 poll 的间隔；{@code executorRejectionDelay} 是 worker executor
- * 拒绝 handoff task 后仍 owned claim 的归还重排延迟。所有 Duration 必须为正的整毫秒，与 HarnessStore
- * 的毫秒精度时间边界一致；宿主派发准入的拒绝重排延迟属于 Processor 配置（{@code ModelProcessorConfig}/{@code
- * ToolProcessorConfig}），因为它与 invocation 仍为 READY、肯定未发出请求的准入结果一起决策。
+ * <p>{@code leaseDuration} 是所有已注册 Work 类型的 claim 有效期；{@code periodicPollInterval} 是 fixed-delay 周期
+ * poll 的间隔；{@code executorRejectionDelay} 是 worker executor 拒绝 handoff task 后仍 owned claim 的归还重排延迟。
+ * 所有 Duration 必须为正的整毫秒，与 HarnessStore 的毫秒精度时间边界一致；宿主派发准入的拒绝重排延迟属于 Processor 配置（{@code
+ * ModelProcessorConfig}/{@code ToolProcessorConfig}），因为它与 invocation 仍为 READY、肯定未发出请求的准入结果一起决策。
  *
  * <p>{@code maxDispatchTasks} 明确只约束 dispatcher 本地 queued/running 的 processor handoff task 总数（drain
  * 在达到上限后停止 claim）；它绝不约束异步 Model / Tool execution 的并发总数 —— 那些由各 Processor 及其注入的 Gateway / executor
  * 自行控制。
  */
 public record HarnessWorkDispatcherConfig(
-    Duration threadLeaseDuration,
-    Duration modelLeaseDuration,
-    Duration agentLeaseDuration,
-    Duration toolLeaseDuration,
+    Duration leaseDuration,
     Duration periodicPollInterval,
     Duration executorRejectionDelay,
     int maxDispatchTasks) {
 
   public HarnessWorkDispatcherConfig {
-    threadLeaseDuration = requireWholeMillisPositive(threadLeaseDuration, "threadLeaseDuration");
-    modelLeaseDuration = requireWholeMillisPositive(modelLeaseDuration, "modelLeaseDuration");
-    agentLeaseDuration = requireWholeMillisPositive(agentLeaseDuration, "agentLeaseDuration");
-    toolLeaseDuration = requireWholeMillisPositive(toolLeaseDuration, "toolLeaseDuration");
+    leaseDuration = requireWholeMillisPositive(leaseDuration, "leaseDuration");
     periodicPollInterval = requireWholeMillisPositive(periodicPollInterval, "periodicPollInterval");
     executorRejectionDelay =
         requireWholeMillisPositive(executorRejectionDelay, "executorRejectionDelay");
     if (maxDispatchTasks <= 0) {
       throw new IllegalArgumentException("maxDispatchTasks must be positive");
     }
-  }
-
-  /** 按 target type 查找对应 lease duration。 */
-  public Duration leaseDuration(WorkTargetType type) {
-    return switch (Objects.requireNonNull(type, "type")) {
-      case THREAD -> threadLeaseDuration;
-      case MODEL -> modelLeaseDuration;
-      case AGENT -> agentLeaseDuration;
-      case TOOL -> toolLeaseDuration;
-    };
   }
 
   private static Duration requireWholeMillisPositive(Duration value, String name) {

@@ -298,7 +298,7 @@ class RemoteExitReconcilerTest {
               invocationId,
               1,
               OWNER_LEASE,
-              ExecutionExitKind.AGENT,
+              ExecutionExitKind.DRIVER,
               null);
           UUID remoteExecId = tx.nextId();
           ExecutionExitLedger.register(

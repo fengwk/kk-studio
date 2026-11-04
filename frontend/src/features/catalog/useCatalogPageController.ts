@@ -49,27 +49,26 @@ export function useCatalogPageController(scope: CatalogPageScope) {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase())
   const resourceQueryEnabled = resourceQueryEnabledByScope[scope]
   const resourceController = useAiConsoleResourceController(resourceQueryEnabled)
+  const { queries, resources, deletePending, editorActions, deleteResource } = resourceController
   const agents = useMemo(
-    () => filterAgents(resourceController.agents, deferredSearch),
-    [deferredSearch, resourceController.agents],
+    () => filterAgents(resources.agents, deferredSearch),
+    [deferredSearch, resources.agents],
   )
   const models = useMemo(
-    () => filterModels(resourceController.models, deferredSearch),
-    [deferredSearch, resourceController.models],
+    () => filterModels(resources.models, deferredSearch),
+    [deferredSearch, resources.models],
   )
   const providers = useMemo(
-    () => filterProviders(resourceController.providers, deferredSearch),
-    [deferredSearch, resourceController.providers],
+    () => filterProviders(resources.providers, deferredSearch),
+    [deferredSearch, resources.providers],
   )
   const queryResults = [
-    ...(resourceQueryEnabled.providers ? [resourceController.providersQuery] : []),
-    ...(resourceQueryEnabled.models ? [resourceController.modelsQuery] : []),
-    ...(resourceQueryEnabled.agents ? [resourceController.agentsQuery] : []),
-    ...(resourceQueryEnabled.tools ? [resourceController.toolsQuery] : []),
-    ...(resourceQueryEnabled.skills ? [resourceController.skillsQuery] : []),
-    ...(resourceQueryEnabled.environments
-      ? [resourceController.environmentsQuery]
-      : []),
+    ...(resourceQueryEnabled.providers ? [queries.providers] : []),
+    ...(resourceQueryEnabled.models ? [queries.models] : []),
+    ...(resourceQueryEnabled.agents ? [queries.agents] : []),
+    ...(resourceQueryEnabled.tools ? [queries.tools] : []),
+    ...(resourceQueryEnabled.skills ? [queries.skills] : []),
+    ...(resourceQueryEnabled.environments ? [queries.environments] : []),
   ]
   const resourceModalOpen = Boolean(resourceController.resourceEditorModal.modal)
   const rawMutationError = resourceModalOpen
@@ -91,34 +90,28 @@ export function useCatalogPageController(scope: CatalogPageScope) {
     mutationError,
     agentPanelProps: {
       agents,
-      models: resourceController.models,
-      deletePending: resourceController.agentDeletePending,
-      onCreate: resourceController.openCreateAgent,
-      onEdit: (agent: AgentDefinitionDTO) =>
-        resourceController.openEditAgent(agent.name),
+      models: resources.models,
+      deletePending: deletePending.agent,
+      onCreate: editorActions.createAgent,
+      onEdit: (agent: AgentDefinitionDTO) => editorActions.editAgent(agent.name),
       onDelete: (agent: AgentDefinitionDTO) =>
-        resourceController.deleteAgent(agent.name, agent.version),
+        deleteResource.agent(agent.name, agent.version),
     },
     modelPanelProps: {
       models,
-      deletePending: resourceController.modelDeletePending,
-      onCreate: resourceController.openCreateModel,
-      onEdit: (model: AgentModelView) =>
-        resourceController.openEditModel(model.name),
+      deletePending: deletePending.model,
+      onCreate: editorActions.createModel,
+      onEdit: (model: AgentModelView) => editorActions.editModel(model.name),
       onDelete: (model: AgentModelView) =>
-        resourceController.deleteModel(model.name, model.version),
+        deleteResource.model(model.name, model.version),
     },
     providerPanelProps: {
       providers,
-      deletePending: resourceController.providerDeletePending,
-      onCreate: resourceController.openCreateProvider,
-      onEdit: (provider: AgentProviderDTO) =>
-        resourceController.openEditProvider(provider.name),
+      deletePending: deletePending.provider,
+      onCreate: editorActions.createProvider,
+      onEdit: (provider: AgentProviderDTO) => editorActions.editProvider(provider.name),
       onDelete: (provider: AgentProviderDTO) =>
-        resourceController.deleteProvider(
-          provider.name,
-          provider.version,
-        ),
+        deleteResource.provider(provider.name, provider.version),
     },
     resourceEditorModal: resourceController.resourceEditorModal,
     resourceDeleteConfirmModal: resourceController.deleteConfirmModal,

@@ -19,25 +19,28 @@ import java.util.UUID;
  * {@code storage_blob} 的 JdbcClient 仓库：去重、引用计数与两阶段删除的原子操作。
  *
  * <p>引用计数与状态切换全部使用条件 UPDATE（{@code state = 'ACTIVE'} 或 {@code ref_count} 边界），由数据库行锁串行化并发
- * retain/release，应用层不持有长事务；去重插入使用部分唯一索引的 {@code on conflict do nothing}。
+ * retain/release，应用层不持有长事务；去重插入或 retain 由部分唯一索引的 {@code on conflict do update} 原子完成。
  */
 @Repository
 public class StorageBlobRepository {
 
   private static final String COLUMNS =
-      "id, sha256, size_bytes, media_type, width, height, duration_ms, ref_count, state, "
-          + "created_at as create_time, updated_at as update_time";
+      "id, sha256, size_bytes, media_type, width, height, duration_ms, archive_index, ref_count, "
+          + "state, created_at as create_time, updated_at as update_time";
 
   private static final String INSERT_ACTIVE_SQL =
       """
       insert into storage_blob (
-          id, sha256, size_bytes, media_type, width, height, duration_ms,
+          id, sha256, size_bytes, media_type, width, height, duration_ms, archive_index,
           ref_count, state, created_at, updated_at
       ) values (
           :id, :sha256, :sizeBytes, :mediaType, :width, :height, :durationMs,
+          cast(:archiveIndex as jsonb),
           :refCount, 'ACTIVE', current_timestamp, current_timestamp
       )
-      on conflict (sha256, size_bytes) where state = 'ACTIVE' do nothing
+      on conflict (sha256, size_bytes) where state = 'ACTIVE'
+      do update set ref_count = storage_blob.ref_count + 1, updated_at = current_timestamp
+      returning id
       """;
 
   private static final String INSERT_DELETING_SQL =
@@ -83,12 +86,9 @@ public class StorageBlobRepository {
         .orElse(null);
   }
 
-  /**
-   * 以完整事实插入 ACTIVE 候选行（{@code ref_count} 由调用方给出，complete 时调用）。 与 ACTIVE 行同内容的并发插入由部分唯一索引消解， 本方法返回
-   * false 表示插入被消解，调用方应改读现有 ACTIVE 行并自行 retain。
-   */
-  public boolean insertActiveCandidate(StorageBlob blob) {
-    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob, true).update() == 1;
+  /** 原子插入候选或 retain 同内容的 ACTIVE 行，返回实际取得引用的 blob id。 */
+  public UUID retainOrInsertActive(StorageBlob blob) {
+    return bindBlob(jdbcClient.sql(INSERT_ACTIVE_SQL), blob, true).query(UUID.class).single();
   }
 
   /** 为事务失败/去重落败后已存在的候选对象记录 DELETING 清理事实。 */
@@ -129,6 +129,22 @@ public class StorageBlobRepository {
         == 1;
   }
 
+  /** 记录服务端校验通过的归档索引；对同一内容重复写入相同索引是幂等的。 */
+  public boolean updateArchiveIndex(UUID id, String archiveIndex) {
+    Objects.requireNonNull(archiveIndex, "archiveIndex");
+    return jdbcClient
+            .sql(
+                """
+                update storage_blob
+                set archive_index = cast(:archiveIndex as jsonb), updated_at = current_timestamp
+                where id = :id and state = 'ACTIVE'
+                """)
+            .param("id", id)
+            .param("archiveIndex", archiveIndex)
+            .update()
+        == 1;
+  }
+
   /** 条件删除 DELETING 行：仅在 S3 对象已删除后调用（{@code ref_count = 0} 兜底）。 */
   public boolean deleteDeleting(UUID id) {
     return jdbcClient
@@ -158,7 +174,8 @@ public class StorageBlobRepository {
             .param("mediaType", blob.getMediaType())
             .param("width", blob.getWidth())
             .param("height", blob.getHeight())
-            .param("durationMs", blob.getDurationMs());
+            .param("durationMs", blob.getDurationMs())
+            .param("archiveIndex", blob.getArchiveIndex());
     if (withRefCount) {
       statement = statement.param("refCount", blob.getRefCount());
     }
@@ -174,6 +191,7 @@ public class StorageBlobRepository {
     blob.setWidth(nullableLong(rs, "width"));
     blob.setHeight(nullableLong(rs, "height"));
     blob.setDurationMs(nullableLong(rs, "duration_ms"));
+    blob.setArchiveIndex(rs.getString("archive_index"));
     blob.setRefCount(rs.getLong("ref_count"));
     blob.setState(StorageBlobState.valueOf(rs.getString("state")));
     blob.setCreateTime(

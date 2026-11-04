@@ -3,20 +3,15 @@ package fun.fengwk.kkstudio.share.ai.skill;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/**
- * {@code POST /api/skill-packages/{packageName}/check} 请求体：只观察 branch HEAD。
- *
- * <p>检查只更新 observedHeadCommit / headCheckedAt / headCheckError（失败时保留 current commit 与
- * manifest），并在实际事实变化时推进 Package version，因此必须携带客户端 Card 已展示的 expectedVersion。
- */
+/** 检查 Git 渠道 branch HEAD；只更新观察值，不改变当前版本。 */
 @Data
 public class SkillPackageCheckDTO {
 
-  /** 客户端读到的当前 Package version（十进制字符串）；陈旧 Card 返回 version conflict。 */
+  /** 客户端已展示的 CAS 版本号（十进制字符串）。 */
   private String expectedVersion;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {
-    throw new IllegalArgumentException("unknown skill package check field: " + fieldName);
+    throw new IllegalArgumentException("unknown skill package field: " + fieldName);
   }
 }

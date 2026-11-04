@@ -32,27 +32,29 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
-import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Duration;
 import java.util.List;
@@ -325,7 +327,7 @@ class StudioEnvironmentIdeControllerTest {
     EnvironmentIdeService service =
         new EnvironmentIdeServiceImpl(
             transport,
-            new InMemoryIdeBootstrapTicketService(),
+            new IdeBootstrapTicketService(),
             mock(IdeBrowserUseGateway.class),
             new IdeViewBindingRegistry(),
             Duration.ofSeconds(5),
@@ -388,7 +390,11 @@ class StudioEnvironmentIdeControllerTest {
   }
 
   /** 记录发出的 IDE 命令的传输替身：真实服务链路只需证明坏目录未产生任何命令。 */
-  private static final class RecordingIdeTransport implements IdeCommandTransport {
+  private static final class RecordingIdeTransport extends IdeCommandTransport {
+
+    private RecordingIdeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private static final String DAEMON_INSTANCE = "33333333-3333-3333-3333-333333333333";
     private static final UUID LEASE = new UUID(0L, 77L);

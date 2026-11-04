@@ -1,30 +1,26 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
-import git from 'isomorphic-git'
+import { randomUUID, createHash } from 'node:crypto'
+import type { Readable } from 'node:stream'
+import { request } from 'undici'
+import yauzl from 'yauzl'
+import { create } from '@bufbuild/protobuf'
+
 import type { DaemonConfig } from '../contracts.js'
+import { SkillPackageStateSchema, type SkillPackageState } from '../generated/control_pb.js'
 import {
   type DirectoryMover,
-  type InstalledSkillPackage,
   type PrivateFs,
   type SkillPackageInstallerOptions,
-  SkillSyncException,
 } from './types.js'
-import {
-  DEFAULT_CONNECT_MILLIS,
-  DEFAULT_READ_MILLIS,
-  createGitHttpClient,
-  classifyGitError,
-  canFallback,
-  isAbortError,
-} from './http.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
-import { isPosixHost } from '../native/host.js'
 
-const SHA1_PATTERN = /^[0-9a-f]{40}$/
-const SHA256_PATTERN = /^[0-9a-f]{64}$/
-const SUPPORTED_REPOSITORY_SCHEMES = new Set(['http', 'https', 'file'])
+export const MARKER_FILENAME = '.kkstudio-sha256'
+export const MAX_ZIP_ENTRIES = 5000
+export const MAX_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024 // 256 MiB
+export const MAX_SKILL_PACKAGE_NAME_CHARS = 64
+export const SKILL_PACKAGE_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
+export const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/
 
 class PackageLocks {
   private chains = new Map<string, Promise<unknown>>()
@@ -50,10 +46,6 @@ class PackageLocks {
 
 export class SkillPackageInstaller {
   private readonly _skillsRoot: string
-  private readonly _stagingRoot: string
-  private readonly _backupRoot: string
-  private readonly connectMillis: number
-  private readonly readMillis: number
   private readonly directoryMover: DirectoryMover
   private readonly packageLocks = new PackageLocks()
   private readonly privateFs: PrivateFs
@@ -61,18 +53,18 @@ export class SkillPackageInstaller {
 
   constructor(
     skillsRoot: string,
-    stagingRoot: string,
-    backupRoot: string,
+    optionsOrStaging?: string | SkillPackageInstallerOptions,
+    _backupRoot?: string,
     options?: SkillPackageInstallerOptions,
   ) {
     this._skillsRoot = path.resolve(skillsRoot)
-    this._stagingRoot = path.resolve(stagingRoot)
-    this._backupRoot = path.resolve(backupRoot)
-    this.connectMillis = options?.connectMillis ?? DEFAULT_CONNECT_MILLIS
-    this.readMillis = options?.readMillis ?? DEFAULT_READ_MILLIS
-    this.privateFs = options?.privateFs ?? { ensurePrivateDirectory, writePrivateFile }
+    const resolvedOptions =
+      typeof optionsOrStaging === 'object' && optionsOrStaging !== null
+        ? optionsOrStaging
+        : (options ?? {})
+    this.privateFs = resolvedOptions.privateFs ?? { ensurePrivateDirectory, writePrivateFile }
     this.directoryMover =
-      options?.directoryMover ??
+      resolvedOptions.directoryMover ??
       (async (source: string, target: string): Promise<void> => {
         await fs.promises.rename(source, target)
       })
@@ -80,37 +72,18 @@ export class SkillPackageInstaller {
 
   static open(config: DaemonConfig, options?: SkillPackageInstallerOptions): SkillPackageInstaller {
     const dataDir = path.resolve(config.dataDir)
-    return new SkillPackageInstaller(
-      path.join(dataDir, 'skills'),
-      path.join(dataDir, 'skill-work', 'staging'),
-      path.join(dataDir, 'skill-work', 'backup'),
-      options,
-    )
+    return new SkillPackageInstaller(path.join(dataDir, 'skills'), options)
   }
 
   skillsRoot(): string {
     return this._skillsRoot
   }
 
-  stagingRoot(): string {
-    return this._stagingRoot
-  }
-
-  backupRoot(): string {
-    return this._backupRoot
-  }
-
   private async ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
       this.initPromise = (async () => {
         await this.privateFs.ensurePrivateDirectory(this._skillsRoot)
-        await this.privateFs.ensurePrivateDirectory(this._stagingRoot)
-        await this.privateFs.ensurePrivateDirectory(this._backupRoot)
-
         await assertRealDirectory(this._skillsRoot, 'skillsRoot')
-        await assertRealDirectory(this._stagingRoot, 'stagingRoot')
-        await assertRealDirectory(this._backupRoot, 'backupRoot')
-
         await this.recoverArtifacts()
       })()
     }
@@ -118,704 +91,531 @@ export class SkillPackageInstaller {
   }
 
   async recoverArtifacts(): Promise<void> {
-    // 1. Staging cleanup: only remove entries whose name matches ^<validPackageName>\.<uuid>(\.clone)?$
     try {
-      const entries = await fs.promises.readdir(this._stagingRoot)
+      const entries = await fs.promises.readdir(this._skillsRoot, { withFileTypes: true })
       for (const entry of entries) {
-        if (parseStagingArtifact(entry)) {
-          await deleteRecursivelyQuietly(path.join(this._stagingRoot, entry))
+        if (entry.name.startsWith('.staging-') || entry.name.startsWith('.old-')) {
+          await deleteRecursivelyQuietly(path.join(this._skillsRoot, entry.name))
+        } else if (entry.name.startsWith('.archive-') && entry.name.endsWith('.tmp')) {
+          await deleteFileQuietly(path.join(this._skillsRoot, entry.name))
         }
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new Error(`failed to clean staging root during recovery: ${(error as Error).message}`)
+        throw error
       }
     }
+  }
 
-    // 2. Backup recovery: only consider names matching ^<validPackageName>\.<uuid>$
+  async readMarker(packageName: string): Promise<string | null> {
     try {
-      const entries = await fs.promises.readdir(this._backupRoot)
+      validatePackageName(packageName)
+    } catch {
+      return null
+    }
+    const packageDir = path.join(this._skillsRoot, packageName)
+    try {
+      const stat = await fs.promises.lstat(packageDir)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        return null
+      }
+      const markerFile = path.join(packageDir, MARKER_FILENAME)
+      const markerStat = await fs.promises.lstat(markerFile)
+      if (!markerStat.isFile() || markerStat.isSymbolicLink()) {
+        return null
+      }
+      const content = await fs.promises.readFile(markerFile, 'utf8')
+      const trimmed = content.trim().toLowerCase()
+      if (SHA256_LOWER_PATTERN.test(trimmed)) {
+        return trimmed
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  async listInstalledPackages(): Promise<
+    Array<{ packageName: string; installedSha256: string; localPath: string }>
+  > {
+    await this.ensureInitialized()
+    const results: Array<{ packageName: string; installedSha256: string; localPath: string }> = []
+    try {
+      const entries = await fs.promises.readdir(this._skillsRoot, { withFileTypes: true })
       for (const entry of entries) {
-        const parsed = parseBackupArtifact(entry)
-        if (!parsed) {
-          // Non-conforming names are LEFT UNTOUCHED (do not delete)
+        if (!entry.isDirectory() || entry.name.startsWith('.')) {
           continue
         }
-        const fullPath = path.join(this._backupRoot, entry)
-        const target = path.join(this._skillsRoot, parsed.packageName)
-        let targetExists = false
         try {
-          await fs.promises.lstat(target)
-          targetExists = true
+          validatePackageName(entry.name)
         } catch {
-          targetExists = false
+          continue
         }
-
-        if (!targetExists) {
-          try {
-            await this.directoryMover(fullPath, target)
-          } catch (err) {
-            // If restoring a matching backup via rename fails, DO NOT delete the backup — throw a clear safe failure
-            throw new Error(`failed to restore backup ${entry} to ${target}: ${(err as Error).message}`)
-          }
-        } else {
-          await deleteRecursivelyQuietly(fullPath)
+        const marker = await this.readMarker(entry.name)
+        if (marker !== null) {
+          results.push({
+            packageName: entry.name,
+            installedSha256: marker,
+            localPath: path.join(this._skillsRoot, entry.name),
+          })
         }
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new Error(`failed to recover backup root during recovery: ${(error as Error).message}`)
-      }
-    }
+    } catch {}
+    return results
   }
 
   async install(
     packageName: string,
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    credential?: string | null,
+    sha256: string,
+    sizeBytes: number | bigint,
+    downloadUrl: string,
     signal?: AbortSignal,
-  ): Promise<InstalledSkillPackage> {
-    validatePackageName(packageName)
-    validateTargetCommit(targetCommit)
-    validateRepositoryUrl(repositoryUrl)
-    validateBranch(branch)
+  ): Promise<SkillPackageState> {
+    try {
+      validatePackageName(packageName)
+      validateSha256(sha256)
+      validateSizeBytes(sizeBytes)
+      validateDownloadUrl(downloadUrl)
+      await this.ensureInitialized()
 
-    await this.ensureInitialized()
+      const numericSize = typeof sizeBytes === 'bigint' ? Number(sizeBytes) : sizeBytes
 
-    return this.packageLocks.acquire(packageName, async () => {
-      return this.doInstall(packageName, repositoryUrl, branch, targetCommit, credential, signal)
-    })
+      return await this.packageLocks.acquire(packageName, async () => {
+        return await this.doInstall(packageName, sha256, numericSize, downloadUrl, signal)
+      })
+    } catch (error) {
+      const prev = await this.readInstalledPackageQuietly(packageName)
+      return create(SkillPackageStateSchema, {
+        packageName,
+        installedSha256: prev?.installedSha256,
+        localPath: prev?.localPath,
+        error: sanitizeErrorMessage(error),
+      })
+    }
   }
 
   private async doInstall(
     packageName: string,
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    credential?: string | null,
+    sha256: string,
+    sizeBytes: number,
+    downloadUrl: string,
     signal?: AbortSignal,
-  ): Promise<InstalledSkillPackage> {
-    checkAbort(signal)
+  ): Promise<SkillPackageState> {
+    const packageDir = path.join(this._skillsRoot, packageName)
+    const currentMarker = await this.readMarker(packageName)
+    if (currentMarker !== null && currentMarker === sha256.toLowerCase()) {
+      return create(SkillPackageStateSchema, {
+        packageName,
+        installedSha256: currentMarker,
+        localPath: packageDir,
+      })
+    }
 
     const uuid = randomUUID()
-    const stagingDir = path.join(this._stagingRoot, `${packageName}.${uuid}`)
-    const backupDir = path.join(this._backupRoot, `${packageName}.${uuid}`)
-    const packageDir = path.join(this._skillsRoot, packageName)
+    const stagingDir = path.join(this._skillsRoot, `.staging-${uuid}`)
+    let tempZipPath: string | null = null
+    let backupDir: string | null = null
 
-    const cleanCredential = credential && credential.trim().length > 0 ? credential.trim() : null
-    const isFileScheme = repositoryUrl.toLowerCase().startsWith('file:')
-
-    if (isFileScheme) {
-      return this.installFromFileRepo(
-        packageName,
-        repositoryUrl,
-        branch,
-        targetCommit,
-        stagingDir,
-        backupDir,
-        packageDir,
-        signal,
-      )
-    }
-
-    return this.installFromHttpRepo(
-      packageName,
-      repositoryUrl,
-      branch,
-      targetCommit,
-      cleanCredential,
-      uuid,
-      stagingDir,
-      backupDir,
-      packageDir,
-      signal,
-    )
-  }
-
-  private async installFromFileRepo(
-    packageName: string,
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    stagingDir: string,
-    backupDir: string,
-    packageDir: string,
-    signal?: AbortSignal,
-  ): Promise<InstalledSkillPackage> {
-    checkAbort(signal)
-
-    let sourcePath: string
-    try {
-      sourcePath = fileURLToPath(repositoryUrl)
-    } catch {
-      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-    }
-
-    const dotGit = path.join(sourcePath, '.git')
-    let dotGitStat: fs.Stats | null = null
-    try {
-      dotGitStat = await fs.promises.lstat(dotGit)
-    } catch {
-      dotGitStat = null
-    }
-
-    let gitdir: string
-    if (dotGitStat && dotGitStat.isDirectory()) {
-      gitdir = dotGit
-    } else if (dotGitStat && dotGitStat.isFile()) {
-      const content = await fs.promises.readFile(dotGit, 'utf8')
-      const trimmed = content.trim()
-      const prefix = 'gitdir:'
-      if (!trimmed.startsWith(prefix)) {
-        throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-      }
-      const rawTarget = trimmed.slice(prefix.length).trim()
-      gitdir = path.resolve(sourcePath, rawTarget)
-    } else {
-      try {
-        const headStat = await fs.promises.lstat(path.join(sourcePath, 'HEAD'))
-        if (headStat.isFile()) {
-          gitdir = sourcePath
-        } else {
-          throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-        }
-      } catch {
-        throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-      }
-    }
-
-    const commondirFile = path.join(gitdir, 'commondir')
-    let objectsGitdir = gitdir
-    try {
-      const commondirStat = await fs.promises.lstat(commondirFile)
-      if (commondirStat.isFile()) {
-        const commonRaw = (await fs.promises.readFile(commondirFile, 'utf8')).trim()
-        objectsGitdir = path.resolve(gitdir, commonRaw)
-      }
-    } catch {}
-
-    // Verify branch ref exists (parity with Java clone setBranch)
-    let branchResolved = false
-    try {
-      await git.resolveRef({ fs, dir: sourcePath, gitdir: objectsGitdir, ref: branch })
-      branchResolved = true
-    } catch {
-      if (gitdir !== objectsGitdir) {
-        try {
-          await git.resolveRef({ fs, dir: sourcePath, gitdir, ref: branch })
-          branchResolved = true
-        } catch {}
-      }
-    }
-    if (!branchResolved) {
-      throw new SkillSyncException('GIT_FETCH_FAILED', 'Git branch fetch failed')
-    }
-
-    checkAbort(signal)
-
-    // Verify commit exists
-    try {
-      await git.readCommit({ fs, dir: sourcePath, gitdir: objectsGitdir, oid: targetCommit })
-    } catch {
-      throw new SkillSyncException(
-        'COMMIT_NOT_FOUND',
-        'Target commit could not be resolved from remote repository',
-      )
-    }
-
-    checkAbort(signal)
-
-    return this.materializeAndPublish(
-      packageName,
-      { dir: sourcePath, gitdir: objectsGitdir },
-      targetCommit,
-      stagingDir,
-      backupDir,
-      packageDir,
-      signal,
-    )
-  }
-
-  private async installFromHttpRepo(
-    packageName: string,
-    repositoryUrl: string,
-    branch: string,
-    targetCommit: string,
-    credential: string | null,
-    uuid: string,
-    stagingDir: string,
-    backupDir: string,
-    packageDir: string,
-    signal?: AbortSignal,
-  ): Promise<InstalledSkillPackage> {
-    checkAbort(signal)
-
-    const cloneDir = path.join(this._stagingRoot, `${packageName}.${uuid}.clone`)
-    await this.privateFs.ensurePrivateDirectory(cloneDir)
-
-    try {
-      const http = createGitHttpClient({
-        connectMillis: this.connectMillis,
-        readMillis: this.readMillis,
-        signal,
-      })
-
-      const onAuth = credential
-        ? (): { username: string; password: string } => ({
-            username: 'x-access-token',
-            password: credential,
-          })
-        : undefined
-
-      try {
-        await git.clone({
-          fs,
-          http,
-          dir: cloneDir,
-          url: repositoryUrl,
-          ref: branch,
-          singleBranch: false,
-          noCheckout: true,
-          onAuth,
-        })
-      } catch (error) {
-        if (isAbortError(error) || signal?.aborted) {
-          const abortErr = new Error('Operation cancelled')
-          abortErr.name = 'AbortError'
-          throw abortErr
-        }
-        const code = classifyGitError(error)
-        throw new SkillSyncException(code, 'Git branch fetch failed', error)
-      }
-
-      checkAbort(signal)
-
-      let hasCommit = false
-      try {
-        await git.readCommit({
-          fs,
-          dir: cloneDir,
-          oid: targetCommit,
-        })
-        hasCommit = true
-      } catch {
-        hasCommit = false
-      }
-
-      if (!hasCommit) {
-        try {
-          await git.fetch({
-            fs,
-            http,
-            dir: cloneDir,
-            url: repositoryUrl,
-            ref: targetCommit,
-            singleBranch: true,
-            onAuth,
-          })
-        } catch (error) {
-          if (isAbortError(error) || signal?.aborted) {
-            const abortErr = new Error('Operation cancelled')
-            abortErr.name = 'AbortError'
-            throw abortErr
-          }
-          if (!canFallback(error)) {
-            const code = classifyGitError(error)
-            throw new SkillSyncException(code, 'Git remote fetch failed', error)
-          }
-        }
-      }
-
-      checkAbort(signal)
-
-      try {
-        await git.readCommit({
-          fs,
-          dir: cloneDir,
-          oid: targetCommit,
-        })
-      } catch {
-        throw new SkillSyncException(
-          'COMMIT_NOT_FOUND',
-          'Target commit could not be resolved from remote repository',
-        )
-      }
-
-      checkAbort(signal)
-
-      return await this.materializeAndPublish(
-        packageName,
-        { dir: cloneDir, gitdir: path.join(cloneDir, '.git') },
-        targetCommit,
-        stagingDir,
-        backupDir,
-        packageDir,
-        signal,
-      )
-    } finally {
-      await deleteRecursivelyQuietly(cloneDir)
-    }
-  }
-
-  private async materializeAndPublish(
-    packageName: string,
-    source: { dir: string; gitdir: string },
-    targetCommit: string,
-    stagingDir: string,
-    backupDir: string,
-    packageDir: string,
-    signal?: AbortSignal,
-  ): Promise<InstalledSkillPackage> {
-    let backedUp = false
     try {
       await this.privateFs.ensurePrivateDirectory(stagingDir)
 
-      await this.materializeTree(source, targetCommit, stagingDir, signal)
+      tempZipPath = await this.downloadArchive(downloadUrl, sha256, sizeBytes, signal)
 
-      checkAbort(signal)
+      await this.unzipArchive(tempZipPath, stagingDir, signal)
 
-      const commitFile = path.join(stagingDir, '.kkstudio-commit')
-      try {
-        await fs.promises.unlink(commitFile)
-      } catch {}
-      await this.privateFs.writePrivateFile(commitFile, `${targetCommit}\n`)
+      const markerPath = path.join(stagingDir, MARKER_FILENAME)
+      await this.privateFs.writePrivateFile(markerPath, `${sha256.toLowerCase()}\n`)
 
-      checkAbort(signal)
-
-      let packageDirExists = false
-      try {
-        await fs.promises.lstat(packageDir)
-        packageDirExists = true
-      } catch {
-        packageDirExists = false
-      }
-
-      if (packageDirExists) {
+      const existingStat = await fs.promises.lstat(packageDir).catch(() => null)
+      if (existingStat !== null) {
+        backupDir = path.join(this._skillsRoot, `.old-${uuid}`)
         await this.directoryMover(packageDir, backupDir)
-        backedUp = true
       }
 
       try {
         await this.directoryMover(stagingDir, packageDir)
-      } catch (moveError) {
-        if (backedUp) {
+      } catch (moveErr) {
+        if (backupDir !== null) {
           try {
             await this.directoryMover(backupDir, packageDir)
-          } catch (rollbackError) {
-            throw new SkillSyncException(
-              'INSTALL_FAILED',
-              'Failed to swap installed package directory and rollback of the previous package failed',
-              rollbackError,
-            )
-          }
+            backupDir = null
+          } catch {}
         }
-        throw new SkillSyncException(
-          'INSTALL_FAILED',
-          'Failed to swap installed package directory',
-          moveError,
+        throw moveErr
+      }
+
+      if (backupDir !== null) {
+        await deleteRecursivelyQuietly(backupDir)
+      }
+      await deleteFileQuietly(tempZipPath)
+
+      return create(SkillPackageStateSchema, {
+        packageName,
+        installedSha256: sha256.toLowerCase(),
+        localPath: packageDir,
+      })
+    } catch (err) {
+      if (tempZipPath) {
+        await deleteFileQuietly(tempZipPath)
+      }
+      await deleteRecursivelyQuietly(stagingDir)
+      throw err
+    }
+  }
+
+  private async downloadArchive(
+    downloadUrl: string,
+    sha256: string,
+    sizeBytes: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const tempZipPath = path.join(this._skillsRoot, `.archive-${randomUUID()}.tmp`)
+    const hash = createHash('sha256')
+    let downloadedBytes = 0
+    let fileHandle: fs.promises.FileHandle | null = null
+
+    try {
+      if (signal?.aborted) {
+        throw new Error('Operation aborted')
+      }
+
+      const response = await request(downloadUrl, {
+        method: 'GET',
+        signal,
+      })
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw new Error(`Download failed with HTTP status ${response.statusCode}`)
+      }
+
+      fileHandle = await fs.promises.open(
+        tempZipPath,
+        fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+        0o600,
+      )
+
+      for await (const chunk of response.body) {
+        if (signal?.aborted) {
+          throw new Error('Operation aborted')
+        }
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        downloadedBytes += buffer.length
+        if (downloadedBytes > sizeBytes) {
+          throw new Error(`Download exceeded declared size (${sizeBytes} bytes)`)
+        }
+        hash.update(buffer)
+        await fileHandle.write(buffer)
+      }
+
+      await fileHandle.sync()
+      await fileHandle.close()
+      fileHandle = null
+
+      if (downloadedBytes !== sizeBytes) {
+        throw new Error(
+          `Downloaded size (${downloadedBytes}) does not match declared size (${sizeBytes})`,
         )
       }
 
-      if (backedUp) {
-        await deleteRecursivelyQuietly(backupDir)
+      const digest = hash.digest('hex').toLowerCase()
+      if (digest !== sha256.toLowerCase()) {
+        throw new Error('Downloaded archive sha256 mismatch')
       }
 
-      return {
-        packageName,
-        installedCommit: targetCommit,
-        localPath: path.resolve(packageDir),
-      }
+      return tempZipPath
     } catch (error) {
-      if (error instanceof SkillSyncException) {
-        throw error
+      if (fileHandle !== null) {
+        try {
+          await fileHandle.close()
+        } catch {}
       }
-      if (isAbortError(error) || signal?.aborted) {
-        const abortErr = new Error('Operation cancelled')
-        abortErr.name = 'AbortError'
-        throw abortErr
-      }
-      throw new SkillSyncException('INSTALL_FAILED', 'Skill package installation failed', error)
-    } finally {
-      await deleteRecursivelyQuietly(stagingDir)
+      await deleteFileQuietly(tempZipPath)
+      throw error
     }
   }
 
-  private async materializeTree(
-    source: { dir: string; gitdir: string },
-    targetCommit: string,
+  private async unzipArchive(
+    zipPath: string,
     stagingDir: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const normalizedStaging = path.resolve(stagingDir)
+    return new Promise<void>((resolve, reject) => {
+      let closed = false
+      let currentStream: Readable | null = null
 
-    await git.walk({
-      fs,
-      dir: source.dir,
-      gitdir: source.gitdir,
-      trees: [git.TREE({ ref: targetCommit })],
-      map: async (filepath, [entry]): Promise<string | undefined> => {
-        checkAbort(signal)
-
-        if (filepath === '.') return filepath
-        if (!entry) return filepath
-
-        const type = await entry.type()
-        const mode = await entry.mode()
-
-        if (type === 'tree') {
-          validatePackageEntryPath(filepath)
-          const targetDir = path.resolve(stagingDir, filepath)
-          if (!targetDir.startsWith(normalizedStaging + path.sep) || targetDir === normalizedStaging) {
-            throw new SkillSyncException(
-              'UNSAFE_PACKAGE_ENTRY',
-              'Path traversal detected in package entry',
-            )
-          }
-          await this.createParentDirectories(normalizedStaging, targetDir)
-          return filepath
+      const onAbort = () => {
+        cleanup(new Error('Operation aborted'))
+      }
+      if (signal) {
+        if (signal.aborted) {
+          return reject(new Error('Operation aborted'))
         }
+        signal.addEventListener('abort', onAbort, { once: true })
+      }
 
-        if (type === 'commit' || mode === 0o160000) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Submodules are not allowed in skill package',
-          )
+      function cleanup(error?: unknown) {
+        if (closed) return
+        closed = true
+        if (signal) signal.removeEventListener('abort', onAbort)
+        if (currentStream) {
+          try {
+            currentStream.destroy()
+          } catch {}
+          currentStream = null
         }
-
-        if (mode === 0o120000) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Symbolic links are not allowed in skill package',
-          )
-        }
-
-        if (mode !== 0o100644 && mode !== 0o100755) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Unsupported file mode in skill package',
-          )
-        }
-
-        validatePackageEntryPath(filepath)
-
-        const targetFile = path.resolve(stagingDir, filepath)
-        if (!targetFile.startsWith(normalizedStaging + path.sep) || targetFile === normalizedStaging) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Path traversal detected in package entry',
-          )
-        }
-
-        const parent = path.dirname(targetFile)
-        if (parent !== normalizedStaging) {
-          await this.createParentDirectories(normalizedStaging, parent)
-        }
-
-        const content = await entry.content()
-        if (!content) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Unable to read content for package entry',
-          )
-        }
-
-        // Refuse to overwrite if target already exists or is a symbolic link
-        let stat: fs.Stats | null = null
         try {
-          stat = await fs.promises.lstat(targetFile)
-        } catch {
-          stat = null
+          zipfileInstance?.close()
+        } catch {}
+        if (error) {
+          reject(error)
         }
-        if (stat !== null) {
-          throw new SkillSyncException(
-            'UNSAFE_PACKAGE_ENTRY',
-            'Target file already exists or is a symbolic link',
-          )
+      }
+
+      let zipfileInstance: yauzl.ZipFile | null = null
+
+      yauzl.open(
+        zipPath,
+        { lazyEntries: true, autoClose: false, strictFileNames: true },
+        (err, zipfile) => {
+        if (err || !zipfile) {
+          if (signal) signal.removeEventListener('abort', onAbort)
+          return reject(new Error(`Failed to open zip archive: ${err?.message ?? 'unknown'}`))
         }
+        zipfileInstance = zipfile
 
-        await this.privateFs.writePrivateFile(targetFile, content)
+        let entryCount = 0
+        let totalUncompressedBytes = 0
 
-        // For executable entries (mode 100755):
-        // ONLY on POSIX, set the exec bit (chmod 0o700); on Windows rely on writePrivateFile DACL.
-        if (mode === 0o100755 && isPosixHost()) {
-          await fs.promises.chmod(targetFile, 0o700)
-        }
+        zipfile.on('error', (zipErr) => {
+          cleanup(zipErr)
+        })
 
-        return filepath
-      },
+        zipfile.on('end', () => {
+          if (!closed) {
+            closed = true
+            if (signal) signal.removeEventListener('abort', onAbort)
+            try {
+              zipfile.close()
+            } catch {}
+            resolve()
+          }
+        })
+
+        zipfile.on('entry', async (entry: yauzl.Entry) => {
+          if (closed) return
+          try {
+            if (signal?.aborted) {
+              throw new Error('Operation aborted')
+            }
+
+            entryCount++
+            if (entryCount > MAX_ZIP_ENTRIES) {
+              throw new Error(`Archive exceeds maximum entry limit (${MAX_ZIP_ENTRIES})`)
+            }
+
+            validateZipEntryName(entry.fileName)
+
+            const hostOs = entry.versionMadeBy >> 8
+            if (hostOs === 3) {
+              const unixMode = (entry.externalFileAttributes >> 16) & 0xffff
+              const fileType = unixMode & 0o170000
+              if (fileType === 0o120000) {
+                throw new Error('Archive contains forbidden symbolic link entry')
+              }
+              if (fileType !== 0 && fileType !== 0o100000 && fileType !== 0o040000) {
+                throw new Error('Archive contains unsupported special entry')
+              }
+            }
+
+            totalUncompressedBytes += entry.uncompressedSize
+            if (totalUncompressedBytes > MAX_ZIP_UNCOMPRESSED_BYTES) {
+              throw new Error(
+                `Archive exceeds uncompressed size limit (${MAX_ZIP_UNCOMPRESSED_BYTES} bytes)`,
+              )
+            }
+
+            const targetPath = path.resolve(stagingDir, entry.fileName)
+            const rel = path.relative(stagingDir, targetPath)
+            if (rel.startsWith('..') || path.isAbsolute(rel)) {
+              throw new Error('Archive contains entry resolving outside staging root')
+            }
+
+            if (entry.fileName.endsWith('/')) {
+              await this.privateFs.ensurePrivateDirectory(targetPath)
+              zipfile.readEntry()
+              return
+            }
+
+            await this.privateFs.ensurePrivateDirectory(path.dirname(targetPath))
+
+            zipfile.openReadStream(entry, (streamErr, readStream) => {
+              if (streamErr || !readStream) {
+                cleanup(streamErr ?? new Error('Failed to open entry stream'))
+                return
+              }
+              currentStream = readStream
+              const chunks: Buffer[] = []
+              let entryBytesRead = 0
+
+              readStream.on('data', (chunk: Buffer) => {
+                entryBytesRead += chunk.length
+                if (entryBytesRead > entry.uncompressedSize) {
+                  cleanup(new Error('Archive entry uncompressed size exceeds header declaration'))
+                  return
+                }
+                chunks.push(chunk)
+              })
+
+              readStream.on('error', (sErr) => {
+                cleanup(sErr)
+              })
+
+              readStream.on('end', async () => {
+                currentStream = null
+                if (closed) return
+                try {
+                  const data = Buffer.concat(chunks)
+                  await this.privateFs.writePrivateFile(targetPath, data)
+                  zipfile.readEntry()
+                } catch (writeErr) {
+                  cleanup(writeErr)
+                }
+              })
+            })
+          } catch (entryErr) {
+            cleanup(entryErr)
+          }
+        })
+
+        zipfile.readEntry()
+      })
     })
   }
 
-  private async createParentDirectories(root: string, target: string): Promise<void> {
-    const relative = path.relative(root, target)
-    if (!relative || relative === '.') return
-    const parts = relative.split(path.sep)
-    let current = root
-    for (const part of parts) {
-      current = path.join(current, part)
-      let stat: fs.Stats | null = null
-      try {
-        stat = await fs.promises.lstat(current)
-      } catch {
-        stat = null
+  async remove(packageName: string): Promise<void> {
+    validatePackageName(packageName)
+    await this.ensureInitialized()
+    return this.packageLocks.acquire(packageName, async () => {
+      const packageDir = path.join(this._skillsRoot, packageName)
+      const marker = await this.readMarker(packageName)
+      if (marker === null) {
+        // Only delete an install root that contains the marker file (never an arbitrary directory)
+        return
       }
-      if (stat !== null) {
-        if (stat.isSymbolicLink()) {
-          throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Symbolic link encountered in path')
-        }
-        if (!stat.isDirectory()) {
-          throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Path element is not a directory')
-        }
-      } else {
-        await this.privateFs.ensurePrivateDirectory(current)
-      }
-    }
+      await deleteRecursivelyQuietly(packageDir)
+    })
   }
-}
 
-function checkAbort(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    const err = new Error('Operation cancelled')
-    err.name = 'AbortError'
-    throw err
+  private async readInstalledPackageQuietly(
+    packageName: string,
+  ): Promise<{ installedSha256: string; localPath: string } | null> {
+    try {
+      const marker = await this.readMarker(packageName)
+      if (marker !== null) {
+        return {
+          installedSha256: marker,
+          localPath: path.join(this._skillsRoot, packageName),
+        }
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 }
 
 export function validatePackageName(packageName: unknown): asserts packageName is string {
-  if (packageName == null || typeof packageName !== 'string' || packageName.trim().length === 0) {
-    throw new SkillSyncException('INVALID_PACKAGE_NAME', 'Package name must not be blank')
+  if (typeof packageName !== 'string' || packageName.length === 0) {
+    throw new Error('Package name must not be blank')
   }
-  if (packageName.length > 128) {
-    throw new SkillSyncException('INVALID_PACKAGE_NAME', 'Package name must not exceed 128 characters')
+  if (packageName.length > MAX_SKILL_PACKAGE_NAME_CHARS) {
+    throw new Error(`Package name must not exceed ${MAX_SKILL_PACKAGE_NAME_CHARS} characters`)
   }
-  if (packageName !== packageName.trim()) {
-    throw new SkillSyncException(
-      'INVALID_PACKAGE_NAME',
-      'Package name must not contain leading or trailing whitespace',
-    )
+  if (!SKILL_PACKAGE_NAME_PATTERN.test(packageName)) {
+    throw new Error('Package name is not a canonical skill package name')
   }
-  for (let i = 0; i < packageName.length; i++) {
-    const code = packageName.charCodeAt(i)
-    const ch = packageName[i]
+}
+
+export function validateSha256(sha256: unknown): asserts sha256 is string {
+  if (typeof sha256 !== 'string' || !SHA256_LOWER_PATTERN.test(sha256)) {
+    throw new Error('Archive sha256 must be 64 lowercase hex characters')
+  }
+}
+
+export function validateSizeBytes(sizeBytes: unknown): asserts sizeBytes is number | bigint {
+  if (typeof sizeBytes === 'bigint') {
+    if (sizeBytes < 0n) {
+      throw new Error('Archive sizeBytes must not be negative')
+    }
+    return
+  }
+  if (typeof sizeBytes === 'number') {
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+      throw new Error('Archive sizeBytes must be a non-negative integer')
+    }
+    return
+  }
+  throw new Error('Archive sizeBytes must be a number or bigint')
+}
+
+export function validateDownloadUrl(downloadUrl: unknown): asserts downloadUrl is string {
+  if (typeof downloadUrl !== 'string' || downloadUrl.trim().length === 0) {
+    throw new Error('Download URL must not be blank')
+  }
+  for (let i = 0; i < downloadUrl.length; i++) {
+    const code = downloadUrl.charCodeAt(i)
     if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      throw new SkillSyncException('INVALID_PACKAGE_NAME', 'Package name must not contain control characters')
-    }
-    if (ch === ':' || ch === '/' || ch === '@' || ch === '\\') {
-      throw new SkillSyncException('INVALID_PACKAGE_NAME', 'Package name contains invalid characters')
+      throw new Error('Download URL must not contain control characters')
     }
   }
-  if (packageName === '.' || packageName === '..') {
-    throw new SkillSyncException('INVALID_PACKAGE_NAME', 'Package name must not be . or ..')
+  if (!downloadUrl.startsWith('http://') && !downloadUrl.startsWith('https://')) {
+    throw new Error('Download URL must use http or https scheme')
   }
 }
 
-export function validateTargetCommit(targetCommit: unknown): asserts targetCommit is string {
-  if (targetCommit == null || typeof targetCommit !== 'string') {
-    throw new SkillSyncException(
-      'INVALID_TARGET_COMMIT',
-      'Target commit must be 40 or 64 lowercase hex characters',
-    )
+export function validateZipEntryName(fileName: string): void {
+  if (!fileName || fileName.length === 0) {
+    throw new Error('Zip entry path must not be blank')
   }
-  if (SHA256_PATTERN.test(targetCommit)) {
-    throw new SkillSyncException(
-      'INVALID_TARGET_COMMIT',
-      'Target commit must be a 40-character SHA-1 commit; SHA-256 commits are not supported by the local Git backend',
-    )
+  if (fileName.includes('\\')) {
+    throw new Error('Zip entry path must not contain backslash')
   }
-  if (!SHA1_PATTERN.test(targetCommit)) {
-    throw new SkillSyncException(
-      'INVALID_TARGET_COMMIT',
-      'Target commit must be 40 or 64 lowercase hex characters',
-    )
+  if (fileName.startsWith('/') || /^[a-zA-Z]:/.test(fileName)) {
+    throw new Error('Zip entry path must be relative and not start with slash or drive letter')
   }
-}
-
-export function validateRepositoryUrl(repositoryUrl: unknown): asserts repositoryUrl is string {
-  if (
-    repositoryUrl == null ||
-    typeof repositoryUrl !== 'string' ||
-    repositoryUrl.trim().length === 0
-  ) {
-    throw new SkillSyncException('INVALID_REPOSITORY_URL', 'Repository URL must not be blank')
-  }
-  if (repositoryUrl.length > 2048) {
-    throw new SkillSyncException(
-      'INVALID_REPOSITORY_URL',
-      'Repository URL must not exceed 2048 characters',
-    )
-  }
-
-  let parsed: URL
-  try {
-    parsed = new URL(repositoryUrl)
-  } catch {
-    throw new SkillSyncException('INVALID_REPOSITORY_URL', 'Repository URL is malformed')
-  }
-
-  if (parsed.username !== '' || parsed.password !== '') {
-    throw new SkillSyncException('INVALID_REPOSITORY_URL', 'Repository URL must not contain user info')
-  }
-
-  const schemeIndex = repositoryUrl.indexOf('://')
-  if (schemeIndex !== -1) {
-    const afterScheme = repositoryUrl.slice(schemeIndex + 3)
-    const slashIndex = afterScheme.indexOf('/')
-    const authority = slashIndex === -1 ? afterScheme : afterScheme.slice(0, slashIndex)
-    if (authority.includes('@')) {
-      throw new SkillSyncException('INVALID_REPOSITORY_URL', 'Repository URL must not contain user info')
-    }
-  }
-
-  const scheme = parsed.protocol.replace(/:$/, '').toLowerCase()
-  if (!SUPPORTED_REPOSITORY_SCHEMES.has(scheme)) {
-    throw new SkillSyncException(
-      'INVALID_REPOSITORY_URL',
-      'Repository URL must use a supported http/https/file scheme',
-    )
-  }
-}
-
-export function validateBranch(branch: unknown): asserts branch is string {
-  if (branch == null || typeof branch !== 'string' || branch.trim().length === 0) {
-    throw new SkillSyncException('INVALID_BRANCH', 'Branch must not be blank')
-  }
-  if (branch.length > 255) {
-    throw new SkillSyncException('INVALID_BRANCH', 'Branch must not exceed 255 characters')
-  }
-  if (branch !== branch.trim()) {
-    throw new SkillSyncException(
-      'INVALID_BRANCH',
-      'Branch must not contain leading or trailing whitespace',
-    )
-  }
-  for (let i = 0; i < branch.length; i++) {
-    const code = branch.charCodeAt(i)
+  for (let i = 0; i < fileName.length; i++) {
+    const code = fileName.charCodeAt(i)
     if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      throw new SkillSyncException('INVALID_BRANCH', 'Branch must not contain control characters')
+      throw new Error('Zip entry path must not contain control characters')
+    }
+  }
+  const segments = fileName.split('/')
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (i === segments.length - 1 && seg === '') {
+      continue
+    }
+    if (seg === '' || seg === '.' || seg === '..') {
+      throw new Error(`Zip entry path contains invalid segment "${seg}"`)
     }
   }
 }
 
-export function validatePackageEntryPath(pathString: string): void {
-  if (!pathString || pathString.trim().length === 0) {
-    throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Package entry path must not be blank')
+export function sanitizeErrorMessage(error: unknown): string {
+  let message = error instanceof Error ? error.message : String(error)
+  message = message.replace(/https?:\/\/[^\s"'<>]+/gi, '[redacted-url]')
+  message = message.replace(
+    /(?:bearer|token|secret|password|credential)[=:\s]+[^\s"'<>]+/gi,
+    '[redacted]',
+  )
+  message = message.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()
+  if (message.length === 0) {
+    message = 'Skill package installation failed'
   }
-  if (
-    pathString.startsWith('/') ||
-    pathString.startsWith('\\') ||
-    path.isAbsolute(pathString) ||
-    /^[a-zA-Z]:/.test(pathString)
-  ) {
-    throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Package entry path must not be absolute')
+  if (message.length > 500) {
+    message = message.slice(0, 500).trimEnd()
   }
-  const segments = pathString.split(/[/\\]/)
-  for (const segment of segments) {
-    if (!segment || segment === '.' || segment === '..') {
-      throw new SkillSyncException('UNSAFE_PACKAGE_ENTRY', 'Package entry path contains invalid segment')
-    }
-  }
+  return message
 }
 
 export async function assertRealDirectory(dir: string, name: string): Promise<void> {
@@ -839,53 +639,8 @@ async function deleteRecursivelyQuietly(targetPath: string): Promise<void> {
   } catch {}
 }
 
-function parseStagingArtifact(entryName: string): { packageName: string; uuid: string } | null {
-  let name = entryName
-  if (name.endsWith('.clone')) {
-    name = name.slice(0, -6)
-  }
-  const lastDot = name.lastIndexOf('.')
-  if (lastDot <= 0) return null
-  const pkg = name.slice(0, lastDot)
-  const uuid = name.slice(lastDot + 1)
-  if (!isValidUuid(uuid) || !isValidPackageNameQuietly(pkg)) {
-    return null
-  }
-  return { packageName: pkg, uuid }
-}
-
-function parseBackupArtifact(entryName: string): { packageName: string; uuid: string } | null {
-  const lastDot = entryName.lastIndexOf('.')
-  if (lastDot <= 0) return null
-  const pkg = entryName.slice(0, lastDot)
-  const uuid = entryName.slice(lastDot + 1)
-  if (!isValidUuid(uuid) || !isValidPackageNameQuietly(pkg)) {
-    return null
-  }
-  return { packageName: pkg, uuid }
-}
-
-function isValidUuid(text: string | null | undefined): boolean {
-  if (!text || text.length !== 36) return false
-  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(text)
-}
-
-function isValidPackageNameQuietly(name: string | null | undefined): boolean {
-  if (!name || name.trim().length === 0 || name.length > 128 || name !== name.trim()) {
-    return false
-  }
-  if (name === '.' || name === '..') {
-    return false
-  }
-  for (let i = 0; i < name.length; i++) {
-    const code = name.charCodeAt(i)
-    const ch = name[i]
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
-      return false
-    }
-    if (ch === ':' || ch === '/' || ch === '@' || ch === '\\') {
-      return false
-    }
-  }
-  return true
+async function deleteFileQuietly(filePath: string): Promise<void> {
+  try {
+    await fs.promises.unlink(filePath)
+  } catch {}
 }

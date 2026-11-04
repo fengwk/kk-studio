@@ -7,15 +7,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
-import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotificationCodec;
-import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterRealtimePayloadClient;
+import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupNotificationCodec;
+import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSink;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
@@ -85,20 +85,20 @@ public class HarnessRealtimeConfiguration {
   /**
    * 流式追帧应用服务：本地 active owner 优先，只有存在其它活跃节点时才向专用 channel 发布一次提示。
    *
-   * <p>本服务不创建任何 durable 写入；checkpoint 仍由 {@link ModelProcessor} 的 active execution 在提交后发布既有 {@code
+   * <p>本服务不创建任何 durable 写入；checkpoint 仍由 Builtin 的 active execution 在提交后发布既有 {@code
    * MODEL_CHECKPOINT}。
    */
   @Bean
   public HarnessStreamCatchupService harnessStreamCatchupService(
       HarnessRuntime runtime,
-      ModelProcessor modelProcessor,
+      ModelCheckpointRequester checkpointRequester,
       ClusterNodePresence clusterNodePresence,
       DataSource dataSource,
       @Qualifier("nodeInstanceId") UUID nodeInstanceId,
       HarnessStreamCatchupNotificationCodec notificationCodec) {
     return new HarnessStreamCatchupService(
         runtime,
-        modelProcessor,
+        checkpointRequester,
         clusterNodePresence,
         new JdbcTemplate(dataSource),
         nodeInstanceId,

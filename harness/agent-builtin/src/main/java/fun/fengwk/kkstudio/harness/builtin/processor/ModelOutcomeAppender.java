@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
+import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 
 import java.time.Instant;
 import java.util.ArrayList;

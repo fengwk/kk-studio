@@ -1,6 +1,10 @@
 import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
+// .thread-dialogue/.thread-blocks 的滚动与布局随 styles 拆分移入 thread 面板样式；
+// 本 harness 只挂载 MessageList 而不经过 ThreadPanel，因此必须显式引入产品样式，
+// 不能复制一份布局，否则外层滚动区退化为不可滚动的普通块。
+import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
 import { transcriptStreamRevision } from '@/features/thread/runtime/transcript-reading'

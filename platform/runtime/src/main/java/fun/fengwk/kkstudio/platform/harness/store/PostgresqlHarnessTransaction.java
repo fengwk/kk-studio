@@ -82,7 +82,8 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
           .thenComparing(ToolInvocation::id, UuidOrder.COMPARATOR);
 
   static final Comparator<WorkTarget> WORK_LOCK_ORDER =
-      Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
+      Comparator.comparingInt((WorkTarget target) -> target.type().rank())
+          .thenComparing(target -> target.type().value())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
   /** 全局 Join 准入锁的两个 int 键（"{@code kkST}"/"{@code join}"）：与 tree 使用的单 bigint 键空间隔离。 */
@@ -118,18 +119,19 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
   private Instant transactionNow;
 
   private final PostgresqlHarnessLocks locks;
-  private final PostgresqlDriverStorage driver;
+  private final PostgresqlDriverWorkStorage driverWorkStorage;
 
   PostgresqlHarnessTransaction(
       JdbcTemplate jdbc,
       Supplier<UUID> idGenerator,
       Object storeToken,
-      Function<PostgresqlHarnessTransaction, PostgresqlDriverStorage> driverFactory) {
+      Function<PostgresqlHarnessTransaction, PostgresqlDriverWorkStorage> driverWorkFactory) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.storeToken = Objects.requireNonNull(storeToken, "storeToken");
     this.locks = new PostgresqlHarnessLocks(this);
-    this.driver = Objects.requireNonNull(driverFactory.apply(this), "driver");
+    this.driverWorkStorage =
+        Objects.requireNonNull(driverWorkFactory.apply(this), "driverWorkStorage");
   }
 
   /** 校验 typed view 来自当前 Store、仍在本回调生命周期内且由 owner thread 使用。 */
@@ -227,7 +229,7 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
   }
 
   void notifyWorkAvailable(WorkTargetType type) {
-    notifyChannel(DurableWorkStore.CHANNEL, type.name());
+    notifyChannel(DurableWorkStore.CHANNEL, type.value());
   }
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
@@ -582,8 +584,8 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
     return exits;
   }
 
-  PostgresqlDriverStorage driver() {
+  PostgresqlDriverWorkStorage driverWorkStorage() {
     checkOpen();
-    return driver;
+    return driverWorkStorage;
   }
 }

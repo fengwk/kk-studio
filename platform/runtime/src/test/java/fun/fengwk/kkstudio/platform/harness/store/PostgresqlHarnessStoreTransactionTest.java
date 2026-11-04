@@ -264,7 +264,7 @@ class PostgresqlHarnessStoreTransactionTest {
   void caughtBuiltinDatabaseFailurePoisonsTheSharedTransaction() {
     // Driver 视图上的数据库故障即使被捕获，也必须回滚同一事务中的通用状态。
     JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
-    jdbc.execute("alter table harness_model_invocation rename to harness_model_unavailable");
+    jdbc.execute("alter table builtin_model_invocation rename to builtin_model_unavailable");
     AtomicReference<DataAccessException> caught = new AtomicReference<>();
 
     DataAccessException thrown =

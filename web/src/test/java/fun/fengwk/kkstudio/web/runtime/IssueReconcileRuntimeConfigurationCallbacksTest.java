@@ -20,6 +20,7 @@ import org.springframework.transaction.support.AbstractPlatformTransactionManage
 import org.springframework.transaction.support.DefaultTransactionStatus;
 
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileWorkHandler;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.DurableWork;
@@ -43,6 +44,45 @@ import java.util.concurrent.ScheduledFuture;
 class IssueReconcileRuntimeConfigurationCallbacksTest {
 
   private static final Instant LEASE_UNTIL = Instant.parse("2026-09-27T10:00:30Z");
+
+  /** 成功领取后交给 reconciler，不主动重排。 */
+  @Test
+  void successfulClaimRunsReconciler() {
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
+    IssueReconciler reconciler = mock(IssueReconciler.class);
+    WorkClaim work = claim();
+    when(workStore.claimNext(anyString(), any(Duration.class)))
+        .thenReturn(Optional.of(work), Optional.empty());
+    BoundedWorkDispatcher<WorkClaim> dispatcher =
+        dispatcher(workStore, reconciler, properties(), Runnable::run, Runnable::run);
+
+    dispatcher.start();
+
+    verify(reconciler).reconcile(work);
+    verify(workStore, times(0)).reschedule(any(), any());
+    dispatcher.stop();
+  }
+
+  /** reconciler 失败且租约仍有效时按 retryDelay 重排。 */
+  @Test
+  void reconcilerFailureReschedulesOwnedClaim() {
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
+    IssueReconciler reconciler = mock(IssueReconciler.class);
+    IssueReconcileProperties properties = properties();
+    properties.setRetryDelay(Duration.ofSeconds(7));
+    WorkClaim work = claim();
+    when(workStore.claimNext(anyString(), any(Duration.class)))
+        .thenReturn(Optional.of(work), Optional.empty());
+    when(workStore.lockClaimed(work)).thenReturn(Optional.of(mock(DurableWork.class)));
+    when(reconciler.reconcile(work)).thenThrow(new RuntimeException("reconcile failed"));
+    BoundedWorkDispatcher<WorkClaim> dispatcher =
+        dispatcher(workStore, reconciler, properties, Runnable::run, Runnable::run);
+
+    dispatcher.start();
+
+    verify(workStore).reschedule(work, Duration.ofSeconds(7));
+    dispatcher.stop();
+  }
 
   /** 工作者拒绝时按 rejectionDelay 归还仍持有的租约，且不再把 claim 交给 reconciler。 */
   @Test
@@ -199,13 +239,12 @@ class IssueReconcileRuntimeConfigurationCallbacksTest {
         .thenReturn(mock(ScheduledFuture.class));
     return new IssueReconcileRuntimeConfiguration()
         .issueReconcileDispatcher(
-            workStore,
-            reconciler,
+            new IssueReconcileWorkHandler(
+                workStore, reconciler, properties, new CallbackTransactionManager()),
             properties,
             drainExecutor,
             workerExecutor,
-            pollScheduler,
-            new CallbackTransactionManager());
+            pollScheduler);
   }
 
   /** 只执行 TransactionTemplate 回调，不引入真实数据库事务。 */

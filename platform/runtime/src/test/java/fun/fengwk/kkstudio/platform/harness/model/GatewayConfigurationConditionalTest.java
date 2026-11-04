@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.HarnessToolGatewayConfiguration;
@@ -43,7 +44,7 @@ class GatewayConfigurationConditionalTest {
             () -> (frozenType, frozenConnectionGenerationId, request) -> null)
         .withBean(
             ModelGateway.class,
-            () -> (ModelGateway) execution -> new ModelGateway.Busy(Duration.ofSeconds(1)))
+            () -> SingleModelGateway.of(execution -> new ModelGateway.Busy(Duration.ofSeconds(1))))
         .run(
             context -> {
               assertFalse(context.containsBean("platformModelGateway"));

@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
@@ -38,6 +37,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinModelBudget;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
@@ -47,6 +47,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -80,7 +81,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentProviderRepository providerRepository;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final AgentModelGroupConfigCodec groupConfigCodec;
-  private final ProviderFactories providerFactories;
+  private final Map<ProviderType, ProviderFactory> providerFactories;
   private final CompactionConfigProvider compactionConfigProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
   private final RequestTokenEstimator requestTokenEstimator;
@@ -92,7 +93,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentProviderRepository providerRepository,
       AgentModelRuntimeConfigParser modelConfigParser,
       AgentModelGroupConfigCodec groupConfigCodec,
-      ProviderFactories providerFactories,
+      Map<ProviderType, ProviderFactory> providerFactories,
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
       RequestTokenEstimator requestTokenEstimator,
@@ -103,7 +104,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.groupConfigCodec = Objects.requireNonNull(groupConfigCodec, "groupConfigCodec");
-    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    this.providerFactories =
+        Map.copyOf(Objects.requireNonNull(providerFactories, "providerFactories"));
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.contextResolver = Objects.requireNonNull(contextResolver, "contextResolver");
@@ -400,7 +402,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             "provider connection generation id must not be null");
     ProviderFactory factory =
         require(
-            providerFactories.lookup(providerType).orElse(null),
+            providerFactories.get(providerType),
             "provider factory not found for " + provider.name() + " (" + providerType + ")");
     ParsedAgentModelConfig parsed = parseModel(model);
     ModelVariant variant = findVariant(parsed, variantName);
@@ -468,12 +470,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
             .mapToInt(member -> outputTokens(member.parsed()))
             .min()
             .orElseThrow();
-    long outputBudget =
-        compactionConfigProvider
-            .compactionConfig()
-            .outputBudget(preparation.phase(), maxOutputTokens, preparation.removedPrefixTokens());
-    if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
-      throw rejection("compaction output budget must be a positive int, got " + outputBudget);
+    int outputBudget;
+    try {
+      outputBudget =
+          BuiltinModelBudget.compactionOutputBudget(
+              compactionConfigProvider.compactionConfig(),
+              preparation.phase(),
+              maxOutputTokens,
+              preparation.removedPrefixTokens());
+    } catch (IllegalArgumentException error) {
+      throw rejection(error.getMessage());
     }
     ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
     BranchSettings childSettings =
@@ -482,44 +488,30 @@ public final class DatabaseTurnResolver implements TurnResolver {
         compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }
 
-  /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
+  /** Builtin 预算口径集中在 platform.harness.builtin；这里只把非法配置转换为确定性拒绝。 */
   private static int contextWindow(ParsedAgentModelConfig parsedModel) {
-    long contextWindow = parsedModel.contextWindow();
-    if (contextWindow <= 0 || contextWindow > Integer.MAX_VALUE) {
-      throw rejection("model limit.context must be a positive int, got " + contextWindow);
+    try {
+      return BuiltinModelBudget.contextWindow(parsedModel);
+    } catch (IllegalArgumentException error) {
+      throw rejection(error.getMessage());
     }
-    return (int) contextWindow;
   }
 
-  /**
-   * 普通请求输出预算：严格取 model 级 {@code limit.output} 与剩余上下文（{@code contextWindow -
-   * 估算输入}）的较小者。剩余上下文无法提供正预算时 明确拒绝，绝不伪造一个可执行预算，也不回落到 variant 或请求体的自定义字段。
-   */
   private static int outputTokens(
       ParsedAgentModelConfig parsedModel, int contextWindow, long estimatedInputTokens) {
-    long limit = parsedModel.maxOutputTokens();
-    if (limit <= 0 || limit > Integer.MAX_VALUE) {
-      throw rejection("model limit.output must be a positive int, got " + limit);
+    try {
+      return BuiltinModelBudget.outputTokens(parsedModel, contextWindow, estimatedInputTokens);
+    } catch (IllegalArgumentException error) {
+      throw rejection(error.getMessage());
     }
-    long remaining = contextWindow - estimatedInputTokens;
-    long outputTokens = Math.min(limit, remaining);
-    if (outputTokens <= 0) {
-      throw rejection(
-          "remaining context leaves no positive output budget: contextWindow="
-              + contextWindow
-              + ", estimatedInputTokens="
-              + estimatedInputTokens);
-    }
-    return (int) outputTokens;
   }
 
-  /** 压缩阶段预算上限：model 级 {@code limit.output}，必须是可表示的正 int。 */
   private static int outputTokens(ParsedAgentModelConfig parsedModel) {
-    long outputTokens = parsedModel.maxOutputTokens();
-    if (outputTokens <= 0 || outputTokens > Integer.MAX_VALUE) {
-      throw rejection("model limit.output must be a positive int, got " + outputTokens);
+    try {
+      return BuiltinModelBudget.outputTokens(parsedModel);
+    } catch (IllegalArgumentException error) {
+      throw rejection(error.getMessage());
     }
-    return (int) outputTokens;
   }
 
   private ParsedAgentModelConfig parseModel(AgentModel model) {

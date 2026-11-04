@@ -14,8 +14,15 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * {@code storage_blob} 可空列（{@code width}/{@code height}/{@code duration_ms}）在真实 PostgreSQL 上的映射回归：旧
@@ -56,7 +63,7 @@ class StorageBlobRepositoryIntegrationTest {
     blob.setWidth(null);
     blob.setHeight(null);
     blob.setDurationMs(null);
-    assertThat(repository.insertActiveCandidate(blob)).isTrue();
+    assertThat(repository.retainOrInsertActive(blob)).isEqualTo(blob.getId());
 
     StorageBlob byId = repository.getById(blob.getId());
     assertThat(byId.getWidth()).isNull();
@@ -76,7 +83,7 @@ class StorageBlobRepositoryIntegrationTest {
     blob.setWidth(1920L);
     blob.setHeight(1080L);
     blob.setDurationMs(5000L);
-    assertThat(repository.insertActiveCandidate(blob)).isTrue();
+    assertThat(repository.retainOrInsertActive(blob)).isEqualTo(blob.getId());
 
     StorageBlob loaded = repository.getById(blob.getId());
     assertThat(loaded.getWidth()).isEqualTo(1920L);
@@ -91,12 +98,76 @@ class StorageBlobRepositoryIntegrationTest {
     blob.setWidth(640L);
     blob.setHeight(480L);
     blob.setDurationMs(null);
-    assertThat(repository.insertActiveCandidate(blob)).isTrue();
+    assertThat(repository.retainOrInsertActive(blob)).isEqualTo(blob.getId());
 
     StorageBlob loaded = repository.getById(blob.getId());
     assertThat(loaded.getWidth()).isEqualTo(640L);
     assertThat(loaded.getHeight()).isEqualTo(480L);
     assertThat(loaded.getDurationMs()).isNull();
+  }
+
+  @Test
+  void conflictingCandidateRetainsExistingBlobWithoutReplacingMediaFacts() {
+    // 冲突与 retain 是同一语句，不能覆盖胜方的媒体事实。
+    StorageBlob first = blob(4);
+    first.setWidth(640L);
+    first.setHeight(480L);
+    StorageBlob second = blob(4);
+    second.setWidth(1280L);
+    second.setHeight(720L);
+    assertThat(repository.retainOrInsertActive(first)).isEqualTo(first.getId());
+    assertThat(repository.retainOrInsertActive(second)).isEqualTo(first.getId());
+    StorageBlob retained = repository.getById(first.getId());
+    assertThat(retained.getRefCount()).isEqualTo(2);
+    assertThat(retained.getWidth()).isEqualTo(640L);
+    assertThat(repository.getById(second.getId())).isNull();
+  }
+
+  @Test
+  void candidateWaitsForLastReleaseAndInsertsAfterOldBlobBecomesDeleting() throws Exception {
+    // 最后一次 release 未提交时，去重插入必须等待数据库裁决，而不是读到旧快照后丢失引用。
+    StorageBlob old = blob(5);
+    StorageBlob candidate = blob(5);
+    repository.retainOrInsertActive(old);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try (Connection connection = PostgresSchemaSupport.newConnection()) {
+      connection.setAutoCommit(false);
+      int backendPid;
+      try (Statement statement = connection.createStatement();
+          ResultSet result = statement.executeQuery("select pg_backend_pid()")) {
+        result.next();
+        backendPid = result.getInt(1);
+      }
+      try (PreparedStatement release =
+          connection.prepareStatement(
+              "update storage_blob set ref_count = 0, state = 'DELETING' where id = ?")) {
+        release.setObject(1, old.getId());
+        assertThat(release.executeUpdate()).isEqualTo(1);
+      }
+      Future<UUID> resolved = executor.submit(() -> repository.retainOrInsertActive(candidate));
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      boolean blocked = false;
+      while (System.nanoTime() < deadline && !blocked) {
+        Integer waiting =
+            jdbcClient
+                .sql(
+                    "select count(*) from pg_stat_activity where :pid = any(pg_blocking_pids(pid))")
+                .param("pid", backendPid)
+                .query(Integer.class)
+                .single();
+        blocked = waiting > 0;
+        if (!blocked) {
+          Thread.sleep(20);
+        }
+      }
+      assertThat(blocked).as("candidate is waiting on the uncommitted release").isTrue();
+      connection.commit();
+      assertThat(resolved.get(10, TimeUnit.SECONDS)).isEqualTo(candidate.getId());
+      assertThat(repository.getById(old.getId()).getState()).isEqualTo(StorageBlobState.DELETING);
+      assertThat(repository.getById(candidate.getId()).getRefCount()).isEqualTo(1);
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private StorageBlob blob(int seed) {

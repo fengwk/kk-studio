@@ -39,7 +39,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId PROD =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-  private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
+  private static final String COMMIT = "0123456789abcdef".repeat(4);
   private static final String DEV_TOKEN = "token-1";
   private static final String PROD_TOKEN = "token-2";
   private static final DaemonCapabilities CAPABILITIES =

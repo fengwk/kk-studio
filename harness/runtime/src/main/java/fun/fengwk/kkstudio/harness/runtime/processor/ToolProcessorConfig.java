@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.spi.retry.InvocationRetryPolicyProvider;
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * ToolProcessor 的部署级配置。
@@ -17,7 +19,7 @@ import java.util.Objects;
  */
 public record ToolProcessorConfig(
     ProcessorLeaseConfig leaseConfig,
-    InvocationRetryPolicyProvider retryPolicyProvider,
+    Supplier<InvocationRetryPolicy> retryPolicyProvider,
     Duration preflightFailureDelay,
     Duration admitFailureDelay,
     Duration reattachWindow) {

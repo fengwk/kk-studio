@@ -1561,9 +1561,9 @@ export const chatCatalog = {
     'en-US': 'Platform only · NONE',
     'zh-CN': '平台独立 · NONE',
   },
-  'ai.runtime.debug.envSupport.optional': {
-    'en-US': 'Optional environment · OPTIONAL',
-    'zh-CN': '可选环境 · OPTIONAL',
+  'ai.runtime.debug.envSupport.routed': {
+    'en-US': 'Routed per call · ROUTED',
+    'zh-CN': '按调用路由 · ROUTED',
   },
   'ai.runtime.debug.envSupport.required': {
     'en-US': 'Environment required · REQUIRED',
@@ -1657,17 +1657,21 @@ export const chatCatalog = {
     'en-US': 'Path',
     'zh-CN': '路径',
   },
-  'ai.runtime.debug.inspector.currentCommit': {
-    'en-US': 'Current Commit',
-    'zh-CN': '当前提交',
+  'ai.runtime.debug.inspector.packageVersion': {
+    'en-US': 'Package Version',
+    'zh-CN': '包版本',
   },
-  'ai.runtime.debug.inspector.observedHeadCommit': {
-    'en-US': 'Observed HEAD Commit',
-    'zh-CN': '观察到的 HEAD 提交',
+  'ai.runtime.debug.inspector.headCommit': {
+    'en-US': 'HEAD Commit',
+    'zh-CN': 'HEAD 提交',
   },
-  'ai.runtime.debug.inspector.daemonInstalledCommit': {
-    'en-US': 'Daemon Installed Commit',
-    'zh-CN': 'Daemon 安装提交',
+  'ai.runtime.debug.inspector.artifactSha256': {
+    'en-US': 'Artifact SHA-256',
+    'zh-CN': '工件 SHA-256',
+  },
+  'ai.runtime.debug.inspector.daemonInstalledSha256': {
+    'en-US': 'Daemon Installed SHA-256',
+    'zh-CN': 'Daemon 安装 SHA-256',
   },
   'ai.runtime.debug.inspector.promptXml': {
     'en-US': 'Prompt XML:',

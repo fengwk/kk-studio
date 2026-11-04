@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.OneTimeTicketStore;
 
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -11,20 +13,43 @@ import java.util.Optional;
  * <p>票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管 workspace，一次性且短时；消费时仍须复核当前 {@link
  * IdeGenerationState} 与视图绑定。关闭/恢复换代/实例接管都会撤销尚未消费的旧票据。
  */
-public interface IdeBootstrapTicketService {
+public final class IdeBootstrapTicketService {
 
-  String issue(
-      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath);
+  private final OneTimeTicketStore<Ticket> store = new OneTimeTicketStore<>();
 
-  Optional<Ticket> consume(String ticket);
+  public String issue(
+      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+    Objects.requireNonNull(identity, "identity");
+    Objects.requireNonNull(viewId, "viewId");
+    Objects.requireNonNull(workspacePath, "workspacePath");
+    return store.issue(new Ticket(identity, viewId, bindingEpoch, workspacePath));
+  }
+
+  public Optional<Ticket> consume(String ticket) {
+    return store.consume(ticket);
+  }
 
   /** 撤销某代际尚未消费的票据（另一个 Daemon 实例接管时调用）。 */
-  void revoke(DaemonConnectionIdentity identity);
+  public void revoke(DaemonConnectionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    store.revoke(ticket -> ticket.identity().equals(identity));
+  }
 
   /** 撤销某视图全部尚未消费的入口票据（关闭、恢复换代时调用）。 */
-  void revokeView(EnvironmentId environmentId, String viewId);
+  public void revokeView(EnvironmentId environmentId, String viewId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(viewId, "viewId");
+    store.revoke(
+        ticket ->
+            ticket.identity().environmentId().equals(environmentId)
+                && ticket.viewId().equals(viewId));
+  }
 
-  record Ticket(
+  public int pendingCount() {
+    return store.pendingCount();
+  }
+
+  public record Ticket(
       DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
 
     public Ticket {

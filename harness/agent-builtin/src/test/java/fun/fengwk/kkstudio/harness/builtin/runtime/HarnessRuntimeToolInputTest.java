@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
@@ -509,7 +510,8 @@ class HarnessRuntimeToolInputTest {
     Optional<ClaimedWork> modelWork =
         store.transaction(
             tx ->
-                tx.work().claimNext(WorkTargetType.MODEL, "probe-model", Duration.between(T5, T6)));
+                tx.work()
+                    .claimNext(BuiltinWorkType.MODEL, "probe-model", Duration.between(T5, T6)));
     assertTrue(modelWork.isEmpty());
     Optional<ClaimedWork> toolWork =
         store.transaction(

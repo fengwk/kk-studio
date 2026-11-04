@@ -5,6 +5,9 @@ import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/message
 import { TaskToolRenderer } from '@/features/thread/runtime/thread-panel/messages/TaskToolRenderer'
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
 import '@/styles.css'
+// .thread-dialogue/.thread-blocks 的滚动布局随 styles 拆分移入 thread 面板样式；
+// 本 harness 直接挂载 ThreadConversationView 而不经过 ThreadPanel，必须显式引入。
+import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { ResourceBlobUrlContext } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { ThreadConversationView } from '@/features/thread/runtime/thread-panel/ThreadConversationView'
 import type {

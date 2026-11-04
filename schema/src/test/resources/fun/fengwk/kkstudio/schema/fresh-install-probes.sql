@@ -821,16 +821,16 @@ select pg_temp.rejects('a work lease token and its deadline are stored together'
     $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
       values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
     'ck_durable_work_lease_pair');
-select pg_temp.rejects('only TOOL and AGENT work may require an Environment',
+select pg_temp.rejects('work type must start with an uppercase letter',
     $$insert into durable_work (target_type, target_id, available_at, wake_version,
           required_environment_id)
-      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
-    'ck_durable_work_required_environment');
+      values ('_CUSTOM', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
+    'ck_durable_work_target_type');
 insert into durable_work (target_type, target_id, available_at, wake_version, required_environment_id)
-    values ('AGENT', pg_temp.uid(700), now(), 1, pg_temp.uid(9000));
-select pg_temp.assert_true('AGENT work accepts required environment',
-    (select count(*) = 1 from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700)));
-delete from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700);
+    values ('CUSTOM_DRIVER', pg_temp.uid(700), now(), 1, pg_temp.uid(9000));
+select pg_temp.assert_true('a module-defined work type accepts required environment',
+    (select count(*) = 1 from durable_work where target_type = 'CUSTOM_DRIVER' and target_id = pg_temp.uid(700)));
+delete from durable_work where target_type = 'CUSTOM_DRIVER' and target_id = pg_temp.uid(700);
 insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
     values (pg_temp.uid(800), pg_temp.uid(700), pg_temp.uid(1000), 'INPUT', pg_temp.uid(900));
 select pg_temp.rejects('a pin cannot reference a missing Resource',
@@ -900,7 +900,7 @@ select pg_temp.rejects('unknown entry type is rejected',
     $$insert into harness_entry(id,session_id,parent_entry_id,entry_type,payload,created_at)
       values(pg_temp.uid(212),pg_temp.uid(102),pg_temp.uid(211),'UNKNOWN_ENTRY_TYPE','{}',now())$$,
     '23514', 'ck_harness_entry_type');
-insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id,
+insert into builtin_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id,
     request_spec, status, attempt, failed_attempts, result, result_entry_id, created_at, updated_at)
     values (pg_temp.uid(1100), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(210),
         '{}', 'SUCCEEDED', 1, '[]', '{}', pg_temp.uid(211), now(), now());
@@ -931,7 +931,7 @@ select pg_temp.rejects('invalid tool status is rejected',
     '23514', 'ck_harness_tool_invocation_status');
 select pg_temp.assert_true('waiting tools remain queryable after their model has succeeded',
     (select status = 'WAITING_INPUT' from harness_tool_invocation where id = pg_temp.uid(1200))
-    and (select status = 'SUCCEEDED' from harness_model_invocation where id = pg_temp.uid(1100)));
+    and (select status = 'SUCCEEDED' from builtin_model_invocation where id = pg_temp.uid(1100)));
 select pg_temp.assert_true('pending input joins back through the public Tool owner',
     (select count(*) = 1 from harness_tool_invocation t
         join harness_thread th on th.id = t.thread_id
@@ -1286,7 +1286,7 @@ select pg_temp.assert_true('unconfirmed remote execution partial index exists',
 
 -- ---------------------------------------------------------------------------
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload
--- expiry, encrypted skill token envelope, and managed update admission.
+-- expiry, the current-version skill package model, and managed update admission.
 -- ---------------------------------------------------------------------------
 select pg_temp.assert_true('default HTTP retry list matches the runtime policy',
     (select config->'aiRuntime'->'modelHttpRetryStatusCodes' = '[408,429,500,502,503,504]'::jsonb
@@ -1303,21 +1303,89 @@ select pg_temp.assert_true('storage_upload no longer persists an expiry fact',
     and exists(select 1 from pg_indexes where schemaname = 'public'
         and indexname = 'idx_storage_upload_cleanup_claim'
         and strpos(indexdef, 'created_at') > 0));
-select pg_temp.assert_true('skill_package stores an optional access token',
+select pg_temp.assert_true('skill_package stores the current version only',
     exists(select 1 from information_schema.columns
-        where table_name = 'skill_package' and column_name = 'token'
-        and data_type = 'text' and is_nullable = 'YES'));
-select pg_temp.rejects('an empty access token is rejected',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit,token)
-      values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),'')$$,
-    '23514', 'ck_skill_package_token');
+        where table_name = 'skill_package' and column_name = 'package_version'
+        and data_type = 'character varying' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'artifact_blob_id'
+        and data_type = 'uuid' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'manifest'
+        and data_type = 'jsonb' and is_nullable = 'NO')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'skill_package' and column_name = 'published_at'
+        and data_type = 'timestamp with time zone' and is_nullable = 'NO')
+    and not exists(select 1 from information_schema.columns
+        where table_name = 'skill_package'
+        and column_name in ('repository_url','branch','current_commit','observed_head_commit',
+            'head_checked_at','head_check_error','skills','token')));
+select pg_temp.assert_true('skill_package_git_source stores an optional access token',
+    exists(select 1 from information_schema.columns
+        where table_name = 'skill_package_git_source' and column_name = 'token'
+        and data_type = 'text' and is_nullable = 'YES')
+    and exists(select 1 from pg_constraint
+        where conrelid = 'skill_package_git_source'::regclass
+        and conname = 'pk_skill_package_git_source'));
+select pg_temp.assert_true('storage_blob carries a nullable archive index',
+    exists(select 1 from information_schema.columns
+        where table_name = 'storage_blob' and column_name = 'archive_index'
+        and data_type = 'jsonb' and is_nullable = 'YES')
+    and exists(select 1 from pg_constraint
+        where conrelid = 'storage_blob'::regclass
+        and conname = 'ck_storage_blob_archive_index'));
+insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state)
+    values (pg_temp.uid(3000), repeat('a', 64), 1, 'application/zip', 1, 'ACTIVE');
+select pg_temp.rejects('an archive index must be a JSON object',
+    $$update storage_blob set archive_index = '[]'::jsonb where id = pg_temp.uid(3000)$$,
+    '23514', 'ck_storage_blob_archive_index');
+select pg_temp.rejects('skill package names reject repeated hyphens',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe--pkg','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_name');
+select pg_temp.rejects('skill package names reject uppercase',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('Probe','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_name');
+select pg_temp.rejects('skill package names reject non-ASCII letters',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('é','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_name');
+select pg_temp.rejects('padded skill package descriptions are rejected',
+    $$insert into skill_package(package_name,description,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg',' padded ','v1',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_description');
+select pg_temp.rejects('blank skill package versions are rejected',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg',' ',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23514', 'ck_skill_package_version_text');
+select pg_temp.rejects('skill package manifests must be JSON objects',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg','v1',pg_temp.uid(3000),'[]'::jsonb,now())$$,
+    '23514', 'ck_skill_package_manifest');
+insert into skill_package (package_name, package_version, artifact_blob_id, manifest, published_at)
+    values ('probe-pkg', 'v1', pg_temp.uid(3000), '{"skills":[]}'::jsonb, now());
+select pg_temp.rejects('duplicate skill package names are rejected',
+    $$insert into skill_package(package_name,package_version,artifact_blob_id,manifest,published_at)
+      values('probe-pkg','v2',pg_temp.uid(3000),'{"skills":[]}'::jsonb,now())$$,
+    '23505', 'pk_skill_package');
+insert into skill_package (package_name, package_version, artifact_blob_id, manifest, published_at)
+    values ('probe-git-pkg', 'v1', pg_temp.uid(3000), '{"skills":[]}'::jsonb, now());
+insert into skill_package_git_source (package_name, repository_url, branch, head_commit, checked_at)
+    values ('probe-git-pkg', 'https://example.invalid/repo.git', 'main', repeat('b', 40), now());
+delete from skill_package where package_name = 'probe-git-pkg';
+select pg_temp.assert_true('deleting a skill package removes its git source',
+    not exists(select 1 from skill_package_git_source where package_name = 'probe-git-pkg'));
+select pg_temp.rejects('a referenced skill archive cannot be deleted',
+    $$delete from storage_blob where id = pg_temp.uid(3000)$$,
+    '23503', 'fk_skill_package_artifact');
 
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.
 -- ---------------------------------------------------------------------------
-select pg_temp.rejects('durable work accepts only the known target types',
+select pg_temp.rejects('durable work rejects lowercase target types',
     $$insert into durable_work (target_type, target_id, available_at, wake_version)
-      values ('BOGUS', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
+      values ('custom', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
 
 -- The dedicated run-free, call-free Thread of Issue 11: only the Agent Thread
 -- binding keeps it alive.

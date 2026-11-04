@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -56,12 +57,12 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
-import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -168,7 +169,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             Map.of(
                 WorkTargetType.THREAD,
                 threadProcessor::process,
-                WorkTargetType.MODEL,
+                BuiltinWorkType.MODEL,
                 modelProcessor::process,
                 WorkTargetType.TOOL,
                 toolProcessor::process));
@@ -788,13 +789,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   private HarnessWorkDispatcherConfig fixtureDispatcherConfig() {
     return new HarnessWorkDispatcherConfig(
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofMinutes(1),
-        Duration.ofHours(1),
-        Duration.ofMillis(50),
-        64);
+        Duration.ofMinutes(1), Duration.ofHours(1), Duration.ofMillis(50), 64);
   }
 
   private long blobRefCount(UUID blobId) {

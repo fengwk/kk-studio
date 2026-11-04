@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -13,10 +13,9 @@ import {
   Send,
   Square,
   Trash2,
-  Upload,
   X,
 } from 'lucide-react'
-import { validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
+import type { HashFile } from '@/shared/lib/upload-file'
 import { isConflictError } from '@/shared/api/client'
 import {
   storageService as defaultStorageService,
@@ -26,14 +25,11 @@ import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
-import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { Tabs } from '@/shared/ui/controls/Tabs'
 import { TextArea } from '@/shared/ui/controls/TextArea'
-import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Badge } from '@/shared/ui/data/Badge'
-import { EmptyState } from '@/shared/ui/feedback/EmptyState'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { IssueActionKind } from '../pending-action-sidecar'
@@ -42,19 +38,19 @@ import { projectsApi } from '../projects-api'
 import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
 import { DeleteIssueDialog, ResetBudgetDialog, TextActionDialog } from './issue-detail/IssueActionDialogs'
 import { IssueAlerts } from './issue-detail/IssueAlerts'
+import { IssueEvidencePane } from './issue-detail/IssueEvidencePane'
+import { IssueSpecPane } from './issue-detail/IssueSpecPane'
 import {
   IssueActivityTimeline,
   IssueAgentThreadsPane,
   IssueRunsPane,
-  IssueSpecView,
   IssueStageBudgetList,
 } from './issue-detail/IssueTabPanes'
-import { EvidenceRow } from './issue-detail/EvidenceRow'
-import { calculateFileSha256, mergeEvidences } from './issue-detail/evidence-files'
 import { useIssueActionRunner } from './issue-detail/useIssueActionRunner'
+import { useIssueEvidence } from './issue-detail/useIssueEvidence'
 import { useKeyedRequest } from './issue-detail/useKeyedRequest'
 import './issue-detail-alerts.css'
-import type { IssueEvidenceDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
+import type { ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueDetailModalProps {
   isOpen: boolean
@@ -108,13 +104,6 @@ export function IssueDetailModal({
     enabled: isOpen && Boolean(issueId),
   })
 
-  const evidenceQueryKey = queryKeys.projects.evidence(projectId, issueId ?? '')
-  const { data: serverEvidences = [] } = useQuery({
-    queryKey: evidenceQueryKey,
-    queryFn: () => (api.listIssueEvidence ? api.listIssueEvidence(issueId!) : Promise.resolve([])),
-    enabled: isOpen && Boolean(issueId),
-  })
-
   const [activeTab, setActiveTab] = useState<TabKey>('spec')
 
   // 1. Spec 编辑草稿状态与 409 保护
@@ -138,15 +127,6 @@ export function IssueDetailModal({
   const [stopDetail, setStopDetail] = useState('')
   const stopRequest = useKeyedRequest<{ detail: string | null }>()
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
-
-  // 3. Evidence 状态
-  const [localEvidences, setLocalEvidences] = useState<IssueEvidenceDTO[]>([])
-  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const allEvidences = useMemo(
-    () => mergeEvidences(localEvidences, serverEvidences),
-    [localEvidences, serverEvidences],
-  )
 
   const resetBlockForm = () => {
     setIsBlockModalOpen(false)
@@ -199,6 +179,27 @@ export function IssueDetailModal({
     isWriteBlocked,
     executeIssueAction,
   } = runner
+
+  // 3. Evidence：服务端事实 + 本地上传由 useIssueEvidence 统一持有
+  const {
+    evidences: allEvidences,
+    isUploading: isUploadingEvidence,
+    fileInputRef,
+    handleFileSelected,
+  } = useIssueEvidence({
+    isOpen,
+    issueId,
+    projectId,
+    issue: detail?.issue,
+    api,
+    storageService,
+    hashFile,
+    isWriteBlocked,
+    isActionPendingRef,
+    setActionError,
+    issueQueryKey,
+  })
+
   const displayError = actionError || (queryError instanceof Error ? queryError.message : null)
 
   // 初始化草稿与版本基线
@@ -212,7 +213,7 @@ export function IssueDetailModal({
     }
   }, [detail, isEditingSpec])
 
-  // 关闭时清理临时对话框、未提交草稿与本地证据 (I09)
+  // 关闭时清理临时对话框与未提交草稿 (I09)
   useEffect(() => {
     if (!isOpen) {
       setIsEditingSpec(false)
@@ -225,7 +226,6 @@ export function IssueDetailModal({
       setActivityBody('')
       setBlockReason('')
       setStopDetail('')
-      setLocalEvidences([])
       activityRequest.reset()
       blockRequest.reset()
       stopRequest.reset()
@@ -478,56 +478,9 @@ export function IssueDetailModal({
     }
   }
 
-  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !issue) return
-    if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError(t('projects.issue.uploadEvidenceBlockedByPending'))
-      return
-    }
-    try {
-      validateUploadFile(file)
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('projects.issue.fileValidationFailed'))
-      return
-    }
-
-    isActionPendingRef.current = true
-    setIsUploadingEvidence(true)
-    setActionError(null)
-    try {
-      const sha256 = await calculateFileSha256(file, hashFile)
-      const upload = await storageService.reserveUpload({
-        filename: file.name,
-        sizeBytes: file.size,
-        mediaType: file.type || 'application/octet-stream',
-        sha256,
-      })
-      if (upload.state === 'PENDING') {
-        await storageService.uploadFile(upload.presignedPut, file)
-      }
-      await storageService.completeUpload(upload.id)
-
-      const published = await api.addIssueEvidence(issue.id, {
-        uploadId: upload.id,
-      })
-      setLocalEvidences((prev) => [published, ...prev])
-      await queryClient.invalidateQueries({ queryKey: evidenceQueryKey })
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('projects.issue.uploadEvidenceFailed'))
-    } finally {
-      isActionPendingRef.current = false
-      setIsUploadingEvidence(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-    }
-  }
-
   return (
     <Dialog
-      className="issue-detail-modal-card"
+      className="issue-detail-modal-card modal-touch-target"
       ariaLabel={t('projects.issue.modalAriaLabel', { number: issue?.number || '' })}
       onClose={onClose}
       header={
@@ -738,60 +691,25 @@ export function IssueDetailModal({
             <>
               {/* TAB 1: 需求事实 (Spec) */}
               {activeTab === 'spec' && (
-                <div className="tab-pane">
-                  {isEditingSpec ? (
-                    <form onSubmit={handleSaveSpec} className="spec-edit-form">
-                      <label className="edit-project-field" htmlFor="issue-spec-title">
-                        <FieldLabel required>{t('projects.issue.specTitleLabel')}</FieldLabel>
-                        <TextInput
-                          id="issue-spec-title"
-                          value={draftTitle}
-                          invalid={!draftTitle.trim()}
-                          onChange={(e) => setDraftTitle(e.target.value)}
-                          disabled={isWriteBlocked}
-                          autoFocus
-                        />
-                      </label>
-                      <label className="edit-project-field" htmlFor="issue-spec-desc">
-                        <FieldLabel>{t('projects.issue.specDescLabel')}</FieldLabel>
-                        <TextArea
-                          id="issue-spec-desc"
-                          rows={8}
-                          value={draftDescription}
-                          onChange={(e) => setDraftDescription(e.target.value)}
-                          disabled={isWriteBlocked}
-                        />
-                      </label>
-                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            setIsEditingSpec(false)
-                            setDraftTitle(issue.title)
-                            setDraftDescription(issue.description)
-                            setSpecVersion(issue.version)
-                            setConflictDetail(null)
-                          }}
-                          disabled={isActionPending}
-                        >
-                          {t('projects.cancel')}
-                        </Button>
-                        <Button
-                          type="submit"
-                          disabled={isWriteBlocked}
-                        >
-                          {isActionPending ? t('projects.issue.saving') : t('projects.issue.saveChanges')}
-                        </Button>
-                      </div>
-                    </form>
-                  ) : (
-                    <IssueSpecView
-                      issue={issue}
-                      editDisabled={isWriteBlocked}
-                      onEdit={() => setIsEditingSpec(true)}
-                    />
-                  )}
-                </div>
+                <IssueSpecPane
+                  issue={issue}
+                  isEditing={isEditingSpec}
+                  draftTitle={draftTitle}
+                  draftDescription={draftDescription}
+                  isWriteBlocked={isWriteBlocked}
+                  isActionPending={isActionPending}
+                  onStartEdit={() => setIsEditingSpec(true)}
+                  onCancel={() => {
+                    setIsEditingSpec(false)
+                    setDraftTitle(issue.title)
+                    setDraftDescription(issue.description)
+                    setSpecVersion(issue.version)
+                    setConflictDetail(null)
+                  }}
+                  onTitleChange={setDraftTitle}
+                  onDescriptionChange={setDraftDescription}
+                  onSubmit={handleSaveSpec}
+                />
               )}
 
               {/* TAB 2: 活动时间线 (Activities - 区分 COMMENT 与 INSTRUCTION) */}
@@ -890,39 +808,14 @@ export function IssueDetailModal({
 
               {/* TAB 6: 公开证据 (Evidence) */}
               {activeTab === 'evidence' && (
-                <div className="tab-pane">
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      style={{ display: 'none' }}
-                      onChange={handleFileSelected}
-                      disabled={isUploadingEvidence || isWriteBlocked}
-                    />
-                    <Button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploadingEvidence || isWriteBlocked}
-                      style={{ fontSize: 'var(--font-size-sm)' }}
-                    >
-                      <Upload size={14} aria-hidden="true" />
-                      <span>{isUploadingEvidence ? t('projects.issue.uploading') : t('projects.issue.uploadEvidenceAction')}</span>
-                    </Button>
-                  </div>
-
-                  {allEvidences.length === 0 ? (
-                    <EmptyState title={t('projects.issue.emptyEvidence')} />
-                  ) : (
-                    <div className="evidence-list">
-                      {allEvidences.map((ev) => (
-                        <EvidenceRow
-                          key={ev.blobId}
-                          evidence={ev}
-                          storageService={storageService}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <IssueEvidencePane
+                  evidences={allEvidences}
+                  storageService={storageService}
+                  isUploading={isUploadingEvidence}
+                  uploadDisabled={isWriteBlocked}
+                  fileInputRef={fileInputRef}
+                  onFileSelected={handleFileSelected}
+                />
               )}
             </>
           )}
@@ -993,7 +886,6 @@ export function IssueDetailModal({
         {isDeleteModalOpen && (
           <DeleteIssueDialog
             issueNumber={issue?.number ?? ''}
-            isPending={isActionPending}
             isBlocked={isWriteBlocked}
             onConfirm={handleDeleteIssue}
             onClose={() => setIsDeleteModalOpen(false)}

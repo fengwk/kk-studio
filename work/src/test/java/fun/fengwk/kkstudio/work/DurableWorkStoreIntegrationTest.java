@@ -372,6 +372,15 @@ class DurableWorkStoreIntegrationTest {
         IllegalArgumentException.class, () -> new DurableWorkStore(" ", jdbc, transactions));
     assertThrows(
         IllegalArgumentException.class, () -> new DurableWorkStore(null, jdbc, transactions));
+    assertThrows(
+        IllegalArgumentException.class, () -> new DurableWorkStore("custom", jdbc, transactions));
+    assertThrows(
+        IllegalArgumentException.class, () -> new DurableWorkStore("_CUSTOM", jdbc, transactions));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new DurableWorkStore("A".repeat(17), jdbc, transactions));
+    assertEquals(
+        "CUSTOM_DRIVER", new DurableWorkStore("CUSTOM_DRIVER", jdbc, transactions).targetType());
     assertThrows(NullPointerException.class, () -> issues.request(null));
     assertThrows(IllegalArgumentException.class, () -> issues.claimNext("lease", Duration.ZERO));
     assertThrows(IllegalArgumentException.class, () -> issues.claimNext(" ", LEASE));

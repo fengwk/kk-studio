@@ -38,6 +38,7 @@ import {
   RuntimeSnapshotSchema,
   RuntimeStatusSchema,
   SettingsSchema,
+  SkillStateSchema,
   StartedSchema,
   TextContentSchema,
   UpdateProgressSchema,
@@ -60,6 +61,8 @@ import {
   type ResourceUploadTicket,
   type RuntimeSnapshot,
   type Settings,
+  type SkillPackageState,
+  type SkillSync,
   type Started,
   type TemporaryResourcePolicy,
   type Update,
@@ -98,6 +101,7 @@ import {
   type UpdateReceipt,
 } from './runtime-update.js'
 import type { ControlConnection, ControlTransport, ControlTransportListener } from './transport/index.js'
+import type { SkillReconciler } from './skill/reconcile.js'
 
 /**
  * Environment Daemon 的连接、协议与本地 Capability 执行基座。
@@ -185,6 +189,7 @@ export class Runtime {
   private readonly ide: IdeService | null
   private readonly ideLease: IdeLeaseHandler | null
   private readonly temporaryResources: TemporaryResourceSweeper | null
+  private skillReconciler: SkillReconciler | null
   private readonly heartbeatIntervalMillis: number
   private readonly initialReconnectDelayMillis: number
   private readonly maxReconnectDelayMillis: number
@@ -242,6 +247,7 @@ export class Runtime {
     this.ide = options.ide ?? null
     this.ideLease = options.ideLease ?? null
     this.temporaryResources = options.temporaryResources ?? null
+    this.skillReconciler = options.skillReconciler ?? null
     this.monotonicNow = options.monotonicNow ?? (() => performance.now())
     this.runtimeStatus = new RuntimeStatusTracker(this.daemonVersion)
     this.heartbeatIntervalMillis = requirePositive(
@@ -309,6 +315,27 @@ export class Runtime {
 
   getBoundEnvironmentId(): string | null {
     return this.boundEnvironmentId
+  }
+
+  setSkillReconciler(reconciler: SkillReconciler): void {
+    this.skillReconciler = reconciler
+  }
+
+  sendSkillState(states: SkillPackageState[]): boolean {
+    if (this.state !== 'READY' || this.boundEnvironmentId === null) {
+      return false
+    }
+    const envelope = create(EnvelopeSchema, {
+      messageType: MessageType.SKILL_STATE,
+      environmentId: this.boundEnvironmentId,
+      payload: {
+        case: 'skillState',
+        value: create(SkillStateSchema, {
+          packages: states,
+        }),
+      },
+    })
+    return this.send(envelope)
   }
 
   getJournal(): InvocationJournal {
@@ -593,6 +620,9 @@ export class Runtime {
         case MessageType.IDE_COMMAND:
           this.handleIdeCommand(envelope)
           return
+        case MessageType.SKILL_SYNC:
+          this.handleSkillSync(envelope)
+          return
         default:
           throw new Error(`daemon must not receive ${envelope.messageType} from server`)
       }
@@ -678,6 +708,16 @@ export class Runtime {
     const ttl = Number(policy.temporaryResourceTtlSeconds)
     const cleanup = Number(policy.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
+  }
+
+  private handleSkillSync(envelope: Envelope): void {
+    if (this.state !== 'READY' || !envelope.environmentId || this.boundEnvironmentId === null) {
+      throw new Error('SKILL_SYNC requires a READY bound connection')
+    }
+    const sync = envelope.payload.value as SkillSync
+    if (this.skillReconciler !== null) {
+      this.skillReconciler.onDesiredSet(sync.packages ?? [])
+    }
   }
 
   private applyTemporaryResourcePolicy(ttlSeconds: number, cleanupIntervalSeconds: number): void {

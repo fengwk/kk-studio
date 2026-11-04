@@ -9,7 +9,7 @@ import {
 } from '@/features/catalog/agent-capability-candidates'
 import type {
   AgentDefinitionDTO,
-  SkillPackageDTO,
+  SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -30,19 +30,15 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
 function skillPackage(
   packageName: string,
   skills: { name: string; description: string }[],
-): SkillPackageDTO {
+): SkillPackageSummaryDTO {
   return {
     packageName,
     description: null,
-    repositoryUrl: 'https://example.com/repo.git',
-    branch: 'main',
-    hasToken: false,
-    currentCommit: '1111111111111111111111111111111111111111',
-    observedHeadCommit: null,
-    headCheckedAt: null,
-    headCheckError: null,
-    checkStatus: 'UP_TO_DATE',
+    packageVersion: '1111111111111111111111111111111111111111',
+    publishedAt: 1784505600,
     skills,
+    source: 'GIT',
+    updateAvailable: false,
     version: '1',
     createTime: 1784505600,
     updateTime: 1784509200,

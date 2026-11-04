@@ -68,13 +68,11 @@ public class ConfigSyncApplier {
     applyProviders(plan.providers());
     applyModels(plan.models());
     for (ConfigSyncPlan.SkillImport skill : plan.skillPackages()) {
-      skillCatalogService.importPackage(
+      skillCatalogService.importGitPackage(
           skill.packageName(),
           skill.description(),
           skill.repositoryUrl(),
           skill.branch(),
-          skill.currentCommit(),
-          skill.manifest(),
           skill.token());
     }
     for (ConfigSyncPlan.McpImport mcp : plan.mcpServers()) {

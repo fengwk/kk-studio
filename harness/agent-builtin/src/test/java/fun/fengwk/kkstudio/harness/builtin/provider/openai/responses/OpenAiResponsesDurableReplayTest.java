@@ -33,9 +33,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesEncodedRequest;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoder;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStreamAccumulator;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEncodedRequest;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesRequestEncoder;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesStreamAccumulator;
 
 import java.time.Duration;
 import java.util.List;

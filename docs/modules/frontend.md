@@ -353,7 +353,11 @@ execution，用户创建的 Agent 必须配置。无法编辑的其他 Driver �
 Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
-pricing；金额输入按十进制字符串提交，不引入 currency 或 unpriced 开关。
+pricing；金额输入按十进制字符串提交，不引入 currency 或 unpriced 开关。pricing 编辑器按基础价格、
+规则列表、费率字段与条件编辑器拆分，override 与 multiplier 共用同一规则列表和费率字段渲染。
+Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责搜索、过滤与查询聚合；
+资源控制器持有编辑器草稿、打开计划、校验、保存与删除确认；查询和写入分别由数据 Hook 承担。
+全局弹窗贡献只从上下文读取控制器，不复制状态。
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
@@ -406,10 +410,13 @@ Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列�
 Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
 ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
-Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
-共用单一提交互斥。版本基线仅在成功写入或显式 reload 后推进，409 保留草稿与原版本。
-看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。工作流用阶段列表与表单配置，
-支持重排、转移边及人工/Agent 执行；缺失 Agent 或非法额度不能保存。
+Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；基础信息、YOLO 与工作流
+三个子表单共用单一提交互斥与按子表单隔离的结果提示。版本基线仅在成功写入或显式 reload 后推进，
+409 保留草稿与原版本。看板的编辑入口直接打开工作流页签，列表编辑默认打开基础信息。
+工作流阶段编辑器独立为列表与属性表单组件，支持重排、转移边及人工/Agent 执行；
+缺失 Agent 或非法额度不能保存。Projects 的删除确认复用共享 ConfirmActionModal，
+复杂弹窗统一使用 Dialog 的 modal-body/modal-footer，并在窄屏通过 modal-touch-target
+提供 44px 触区与安全区留白；Issue 详情的规格编辑与证据上传分别由独立 pane 与 hook 承担。
 快照的 `referencedStateCodes` 汇总所有 Issue（含归档）的阶段与阻塞恢复点，
 因此可见列表为空也不能删除或改码这些阶段。项目级推送同时失效该项目下的 Issue 与 Evidence，
 订阅与重连共用既有 WebSocket。
@@ -524,7 +531,8 @@ data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
 焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、
 遮罩与关闭按钮。普通确认使用 `ConfirmActionModal`，复杂表单使用 `Dialog` 的
-`modal-body` 与 `modal-footer`；已迁移的弹窗通过 `modal-touch-target` 在窄屏提供 44px 操作触区、
+`modal-body` 与 `modal-footer`；Catalog 资源编辑与删除确认等已迁移的弹窗通过
+`modal-touch-target` 在窄屏提供 44px 操作触区、
 安全区留白和正文滚动，弹窗内 Select 的 portal 选项也遵循相同触区。
 [`NumberInput`](../../frontend/src/shared/ui/controls/NumberInput.tsx) 是整数输入
 （字符串值、自绘步进），十进制参数保留原生 `step=any` 输入语义。Escape 优先级由

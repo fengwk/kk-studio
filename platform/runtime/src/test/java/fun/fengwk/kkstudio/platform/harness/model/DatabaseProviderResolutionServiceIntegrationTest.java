@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -33,6 +32,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 基于 PostgreSQL 的 attempt-time Provider 解析证据：冻结 Provider type 与 connection generation 必须和当前 {@code
@@ -166,7 +167,9 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     return new DatabaseProviderResolutionService(
         providerRepository,
         configurationCodec,
-        new ProviderFactories(List.of(factories)),
+        List.of(factories).stream()
+            .collect(
+                Collectors.toUnmodifiableMap(ProviderFactory::providerType, Function.identity())),
         providerResourceMaterializer);
   }
 

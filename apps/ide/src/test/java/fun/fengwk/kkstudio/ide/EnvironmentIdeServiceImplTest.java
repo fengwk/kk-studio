@@ -2,13 +2,22 @@ package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -16,14 +25,9 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -40,8 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的
- * detach/close 立即冻结本地授权且不重放不确定结果。
+ * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的 close
+ * 立即撤销本地授权且不重放不确定结果。
  */
 class EnvironmentIdeServiceImplTest {
 
@@ -57,7 +61,7 @@ class EnvironmentIdeServiceImplTest {
   private FakeTransport transport;
   private FakeBrowserUse browserUse;
   private FakeAuthorization authorization;
-  private InMemoryIdeBootstrapTicketService tickets;
+  private IdeBootstrapTicketService tickets;
   private IdeViewBindingRegistry bindings;
   private EnvironmentIdeServiceImpl service;
 
@@ -66,7 +70,7 @@ class EnvironmentIdeServiceImplTest {
     transport = new FakeTransport();
     browserUse = new FakeBrowserUse();
     authorization = new FakeAuthorization();
-    tickets = new InMemoryIdeBootstrapTicketService();
+    tickets = new IdeBootstrapTicketService();
     bindings = new IdeViewBindingRegistry();
     service =
         new EnvironmentIdeServiceImpl(
@@ -189,7 +193,7 @@ class EnvironmentIdeServiceImplTest {
   }
 
   @Test
-  void allBoundCommandsCarryDocumentAndEpochAndDetachFreezesTheEpoch() {
+  void boundCommandsCarryDocumentAndEpochAndCloseRevokesTheBinding() {
     open();
 
     EnvironmentIdeViewBindingDTO binding = binding(7L);
@@ -200,12 +204,16 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(DOCUMENT.toString(), focus.getDocumentId());
     assertEquals(7L, focus.getBindingEpoch());
 
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+    close.setDocumentId(DOCUMENT.toString());
+    close.setBindingEpoch("7");
+    close.setDiscard(true);
     transport.replies.add(success(VIEW));
-    service.detachView(ENV, VIEW.toString(), binding);
-    IdeCommand detach = transport.commands.getLast();
-    assertEquals(IdeAction.DETACH_VIEW, detach.getAction());
-    assertEquals(DOCUMENT.toString(), detach.getDocumentId());
-    assertEquals(7L, detach.getBindingEpoch());
+    service.closeView(ENV, VIEW.toString(), close);
+    IdeCommand command = transport.commands.getLast();
+    assertEquals(IdeAction.CLOSE_VIEW, command.getAction());
+    assertEquals(DOCUMENT.toString(), command.getDocumentId());
+    assertEquals(7L, command.getBindingEpoch());
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
 
     int before = transport.commands.size();
@@ -287,11 +295,26 @@ class EnvironmentIdeServiceImplTest {
             .setViewId(VIEW.toString())
             .setDirectory("/daemon/next")
             .build());
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    7L,
+                    "/daemon/next",
+                    "/daemon/ws",
+                    IdeViewState.CLOSING))));
 
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
-    assertEquals("/daemon/next", bindings.find(ENV, VIEW).orElseThrow().directory());
-    assertEquals("/client/link/.", transport.commands.getLast().getDirectory());
+    assertEquals("CLOSING", changed.getState());
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertEquals("/client/link/.", transport.commands.get(1).getDirectory());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().getAction());
 
     transport.replies.add(
         viewsReply(
@@ -332,6 +355,44 @@ class EnvironmentIdeServiceImplTest {
                         && command.getBindingEpoch() == 7L));
   }
 
+  /**
+   * 意图：切目录已被 Daemon 确认后，刷新缓存的回读失败不能把成功结果改成失败。
+   *
+   * <p>响应只使用命令确认的目录与已知绑定身份，不伪造 workspace/state；缓存中的绑定保持原值，已执行的目录命令不重放。
+   */
+  @Test
+  void changeDirectorySucceedsWhenReadbackFailsAfterConfirmation() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/daemon/next");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(true)
+            .setViewId(VIEW.toString())
+            .setDirectory("/daemon/next")
+            .build());
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(false)
+            .setCode("UNAVAILABLE")
+            .setMessage("daemon restarted")
+            .build());
+
+    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
+
+    assertEquals("/daemon/next", changed.getDirectory());
+    assertEquals(VIEW.toString(), changed.getViewId());
+    assertEquals(DOCUMENT.toString(), changed.getDocumentId());
+    assertEquals("7", changed.getBindingEpoch());
+    assertNull(changed.getWorkspacePath(), "回读失败时不得伪造 Daemon workspace");
+    assertNull(changed.getState(), "回读失败时不得伪造 Daemon 视图状态");
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+    assertEquals(
+        List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY, IdeAction.LIST_VIEWS), actions());
+  }
+
   @Test
   void changeDirectoryRejectsUnconfirmedOrMismatchedReplyWithoutUpdatingBinding() {
     open();
@@ -362,7 +423,7 @@ class EnvironmentIdeServiceImplTest {
               () -> service.changeDirectory(ENV, VIEW.toString(), request));
       assertFalse(error.getMessage().contains(request.getDirectory()));
       assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-      assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
+      assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
     }
     // No directory in reply fails validation.
     transport.replies.add(IdeResult.newBuilder().setOk(true).setViewId(VIEW.toString()).build());
@@ -373,7 +434,41 @@ class EnvironmentIdeServiceImplTest {
             () -> service.changeDirectory(ENV, VIEW.toString(), request));
     assertFalse(error.getMessage().contains(request.getDirectory()));
     assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
-    assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 7L));
+  }
+
+  /** 目录回执后若视图已换代，不得以旧 epoch 构造成功响应。 */
+  @Test
+  void changeDirectoryRejectsReplyWhenAuthoritativeBindingChanged() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/next");
+    transport.replies.add(
+        IdeResult.newBuilder()
+            .setOk(true)
+            .setViewId(VIEW.toString())
+            .setDirectory("/next")
+            .build());
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    8L,
+                    "/next",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+    assertTrue(bindings.find(ENV, VIEW).orElseThrow().matches(DOCUMENT, 8L));
   }
 
   @Test
@@ -697,7 +792,11 @@ class EnvironmentIdeServiceImplTest {
 
   private record OpenedEvent(UUID viewId, long epoch, String workspacePath) {}
 
-  private static final class FakeTransport implements IdeCommandTransport {
+  private static final class FakeTransport extends IdeCommandTransport {
+
+    private FakeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<IdeCommand> commands = new ArrayList<>();
     private final Deque<IdeResult> replies = new ArrayDeque<>();
@@ -744,7 +843,11 @@ class EnvironmentIdeServiceImplTest {
     }
   }
 
-  private static final class FakeBrowserUse implements IdeBrowserUseGateway {
+  private static final class FakeBrowserUse extends IdeBrowserUseGateway {
+
+    private FakeBrowserUse() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     private final List<IntentQuery> queries = new ArrayList<>();
     private boolean matched = true;

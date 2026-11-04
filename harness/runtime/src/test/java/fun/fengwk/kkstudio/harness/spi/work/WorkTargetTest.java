@@ -6,13 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestWorkTypes;
+
 /** WorkTarget identity 校验。 */
 class WorkTargetTest {
 
   @Test
-  void acceptsAllTargetTypes() {
+  void acceptsCoreAndDriverTargetTypes() {
     assertEquals(WorkTargetType.THREAD, new WorkTarget(WorkTargetType.THREAD, id(1L)).type());
-    assertEquals(id(2L), new WorkTarget(WorkTargetType.MODEL, id(2L)).id());
+    assertEquals(id(2L), new WorkTarget(TestWorkTypes.MODEL, id(2L)).id());
     assertEquals(WorkTargetType.TOOL, new WorkTarget(WorkTargetType.TOOL, id(3L)).type());
   }
 

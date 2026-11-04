@@ -72,7 +72,7 @@ export function CreateProjectModal({
 
   return (
     <Dialog
-      className="resource-modal-card"
+      className="resource-modal-card modal-touch-target"
       title={t('projects.create')}
       headerIcon={<FolderPlus size={18} aria-hidden="true" />}
       pending={isSubmitting}
