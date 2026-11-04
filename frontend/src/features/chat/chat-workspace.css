@@ -89,7 +89,8 @@
 }
 
 @media (max-width: 760px) {
-  .chat-workspace-actions .chat-ide-toggle {
+  .chat-workspace-actions .chat-ide-toggle,
+  .chat-workspace-actions .chat-files-toggle {
     min-width: 44px;
     min-height: 44px;
   }
@@ -124,6 +125,16 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 10px;
+}
+
+.chat-files-toggle {
+  gap: 6px;
+}
+
+@container chat-workspace (max-width: 560px) {
+  .chat-files-toggle-label {
+    display: none;
+  }
 }
 
 .chat-workspace-title {

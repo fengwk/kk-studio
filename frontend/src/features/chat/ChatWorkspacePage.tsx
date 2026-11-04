@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ArrowLeft, PanelRight } from 'lucide-react'
+import { ArrowLeft, FolderOpen, PanelRight } from 'lucide-react'
 import { useOptionalIdePanel } from '@/features/environment/ide/ide-panel-context'
 import { ChatWorkspacePane } from '@/features/chat/ChatWorkspacePane'
 import { NewBranchDialog } from '@/features/chat/NewBranchDialog'
+import { SessionFilesDialog } from '@/features/chat/session-files/SessionFilesDialog'
 import { loadPendingAcceptance, samePaneTarget, type PaneTarget } from '@/features/thread/runtime/agent-pane'
 import { hasThreadNameConflict } from '@/features/chat/thread-name-conflict'
 import { harnessService } from '@/shared/api/harness-service'
@@ -102,6 +103,7 @@ function ChatWorkspaceContent({
   const location = useLocation()
   const idePanel = useOptionalIdePanel()
   const ideHintId = useId()
+  const filesHintId = useId()
   const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
   const ideEnvironment = chatEnvironment && isCanonicalUuid(chatEnvironment.id)
     ? { id: chatEnvironment.id, name: chatEnvironment.name, ready: chatEnvironment.ready }
@@ -157,6 +159,7 @@ function ChatWorkspaceContent({
   const [branchFormError, setBranchFormError] = useState<string | null>(null)
   const [overwritePaneId, setOverwritePaneId] = useState<string | null>(null)
   const [branchChecking, setBranchChecking] = useState(false)
+  const [filesOpen, setFilesOpen] = useState(false)
   const branchCheckId = useRef(0)
   // Bootstrap hidden local drafts without loading any Thread snapshots. Subsequent
   // target changes flow through the shared tab state and PaneReport only.
@@ -205,6 +208,15 @@ function ChatWorkspaceContent({
   const focusedSessionName = focusedSessionId == null
     ? null
     : sessionsQuery.data?.find((session) => session.sessionId === focusedSessionId)?.name ?? null
+  const filesHint = focusedSessionId == null
+    ? t('ai.sessionFiles.noSession')
+    : t('ai.sessionFiles.title')
+  // 焦点 pane 回到尚无 Session 的草稿时关闭面板，避免下次选中会话后意外重新出现。
+  useEffect(() => {
+    if (focusedSessionId == null) {
+      setFilesOpen(false)
+    }
+  }, [focusedSessionId])
 
   // 目标 pane 成功消费后清空该 pane 的待应用目标；命中 deep-link query 时一并清 URL。
   const handleTargetConsumed = useCallback((paneId: string, consumed: PaneTarget) => {
@@ -430,6 +442,24 @@ function ChatWorkspaceContent({
             }}
           /> : null}
           {debugSource == null ? (
+            <span title={filesHint}>
+              <Button
+                variant="ghost"
+                size="compact"
+                className="chat-files-toggle"
+                aria-label={t('ai.sessionFiles.title')}
+                aria-describedby={focusedSessionId == null ? filesHintId : undefined}
+                disabled={focusedSessionId == null}
+                onClick={() => setFilesOpen(true)}
+                data-testid="chat-files-toggle"
+              >
+                <FolderOpen size={16} aria-hidden="true" />
+                <span className="chat-files-toggle-label">{t('ai.sessionFiles.action')}</span>
+              </Button>
+              {focusedSessionId == null ? <span id={filesHintId} className="sr-only">{filesHint}</span> : null}
+            </span>
+          ) : null}
+          {debugSource == null ? (
             <span title={ideHint}>
               <Button
                 variant="ghost"
@@ -496,6 +526,14 @@ function ChatWorkspaceContent({
           overwriteWarning={overwritePaneId == null ? null : t('ai.chat.branch.overwriteDraft')}
           onConfirm={handleBranchConfirm}
           onClose={closeBranchDialog}
+        />
+      ) : null}
+      {filesOpen && focusedSessionId != null ? (
+        <SessionFilesDialog
+          key={focusedSessionId}
+          sessionId={focusedSessionId}
+          owner={{ kind: 'CHAT', id: chat.id }}
+          onClose={() => setFilesOpen(false)}
         />
       ) : null}
     </section>
