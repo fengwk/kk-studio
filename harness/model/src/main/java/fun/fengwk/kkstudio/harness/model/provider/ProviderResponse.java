@@ -1,12 +1,10 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 
@@ -43,11 +41,7 @@ public record ProviderResponse(
     Long decodeDurationMillis,
     RequestBodyPricingSnapshot requestBodyPricing) {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
+  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT;
 
   private static final String EMPTY_USAGE_JSON = "{}";
 

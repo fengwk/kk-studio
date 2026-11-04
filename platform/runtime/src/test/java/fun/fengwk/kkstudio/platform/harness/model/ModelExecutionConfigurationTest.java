@@ -7,11 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -19,16 +23,15 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicConfiguration;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicThinkingMode;
-import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicConfiguration;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicThinkingMode;
+import fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.net.InetSocketAddress;
@@ -40,16 +43,14 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 验证 {@link ModelExecutionConfiguration} 暴露的 4 个 named ProviderFactory bean 全部被收集到 {@link
- * ProviderFactories}，避免 Spring 按返回类型匹配时丢失 bean；同时验证生产 {@link PlatformModelGateway} 被组合进上下文。
- */
+/** 验证 4 个 named ProviderFactory bean 全部被收集到类型索引，同时验证生产 {@link PlatformModelGateway} 被组合进上下文。 */
 class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
 
   @Autowired
@@ -68,7 +69,7 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   @Qualifier("googleProviderFactory")
   private ProviderFactory googleProviderFactory;
 
-  @Autowired private ProviderFactories providerFactories;
+  @Autowired private Map<ProviderType, ProviderFactory> providerFactories;
 
   @Autowired private PlatformModelGateway platformModelGateway;
 
@@ -174,17 +175,35 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
 
   @Test
   void providerFactoriesLookupAllFourTypes() {
-    assertNotNull(providerFactories.lookup(ProviderType.OPENAI).orElseThrow());
-    assertNotNull(providerFactories.lookup(ProviderType.OPENAI_RESPONSES).orElseThrow());
-    assertNotNull(providerFactories.lookup(ProviderType.ANTHROPIC).orElseThrow());
-    assertNotNull(providerFactories.lookup(ProviderType.GOOGLE).orElseThrow());
-    assertSame(openaiProviderFactory, providerFactories.lookup(ProviderType.OPENAI).orElseThrow());
+    assertSame(openaiProviderFactory, providerFactories.get(ProviderType.OPENAI));
     assertSame(
-        openaiResponsesProviderFactory,
-        providerFactories.lookup(ProviderType.OPENAI_RESPONSES).orElseThrow());
-    assertSame(
-        anthropicProviderFactory, providerFactories.lookup(ProviderType.ANTHROPIC).orElseThrow());
-    assertSame(googleProviderFactory, providerFactories.lookup(ProviderType.GOOGLE).orElseThrow());
+        openaiResponsesProviderFactory, providerFactories.get(ProviderType.OPENAI_RESPONSES));
+    assertSame(anthropicProviderFactory, providerFactories.get(ProviderType.ANTHROPIC));
+    assertSame(googleProviderFactory, providerFactories.get(ProviderType.GOOGLE));
+    assertThrows(UnsupportedOperationException.class, () -> providerFactories.clear());
+  }
+
+  /** 意图：重复类型和空类型在建立索引时立即失败，而非覆盖已有注册。 */
+  @Test
+  void rejectsDuplicateAndNullProviderTypes() {
+    DefaultListableBeanFactory beans = new DefaultListableBeanFactory();
+    ProviderFactory first = mock(ProviderFactory.class);
+    ProviderFactory second = mock(ProviderFactory.class);
+    when(first.providerType()).thenReturn(ProviderType.OPENAI);
+    when(second.providerType()).thenReturn(ProviderType.OPENAI);
+    beans.registerSingleton("first", first);
+    beans.registerSingleton("second", second);
+    ModelExecutionConfiguration configuration = new ModelExecutionConfiguration();
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> configuration.providerFactories(beans.getBeanProvider(ProviderFactory.class)));
+    assertTrue(error.getMessage().contains("duplicate ProviderFactory for OPENAI"));
+    when(second.providerType()).thenReturn(null);
+    assertThrows(
+        NullPointerException.class,
+        () -> configuration.providerFactories(beans.getBeanProvider(ProviderFactory.class)));
+    assertThrows(NullPointerException.class, () -> configuration.providerFactories(null));
   }
 
   /** 意图：验证 Spring 装配的 ProviderFactory 返回原生 Harness Provider 适配器，并共享 transport。 */

@@ -1,22 +1,22 @@
 package fun.fengwk.kkstudio.harness.model.provider.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.objectNode;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFieldsWithCount;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
+
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -28,13 +28,7 @@ import java.util.UUID;
  */
 public final class ProviderReplayStateJsonCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // 自由 JSON number 以 BigDecimal 读回，避免 1e309 -> "Infinity"、1e-324 -> 0.0 的精度/类型失真。
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
+  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -62,8 +56,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   public ProviderReplayState decodeNode(JsonNode node) {
-    ObjectNode root = object(node, "providerReplayState");
-    requireFields(root, ROOT_FIELDS, "providerReplayState");
+    ObjectNode root = objectNode(node, "providerReplayState");
+    requireFieldsWithCount(root, ROOT_FIELDS, "providerReplayState");
 
     ProviderReplayFormat format;
     try {
@@ -90,8 +84,8 @@ public final class ProviderReplayStateJsonCodec {
   }
 
   private ProviderReplayAffinity decodeAffinity(JsonNode node) {
-    ObjectNode object = object(node, "affinity");
-    requireFields(object, AFFINITY_FIELDS, "affinity");
+    ObjectNode object = objectNode(node, "affinity");
+    requireFieldsWithCount(object, AFFINITY_FIELDS, "affinity");
 
     ProviderType providerType;
     try {
@@ -130,38 +124,5 @@ public final class ProviderReplayStateJsonCodec {
     } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode provider replay state JSON");
     }
-  }
-
-  private static ObjectNode object(JsonNode value, String context) {
-    if (value == null || !value.isObject()) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return (ObjectNode) value;
-  }
-
-  private static String text(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value == null || !value.isString()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    return value.stringValue();
-  }
-
-  private static void requireFields(ObjectNode node, Set<String> expected, String context) {
-    if (node.size() != expected.size()) {
-      throw new IllegalArgumentException(
-          context + " field count mismatch: expected " + expected.size() + " fields");
-    }
-    for (String name : expected) {
-      if (!node.has(name)) {
-        throw new IllegalArgumentException(context + " missing required field: " + name);
-      }
-    }
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    Collections.addAll(set, values);
-    return Collections.unmodifiableSet(set);
   }
 }

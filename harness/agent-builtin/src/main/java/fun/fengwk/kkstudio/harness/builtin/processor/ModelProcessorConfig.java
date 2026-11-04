@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
-import fun.fengwk.kkstudio.harness.spi.retry.InvocationRetryPolicyProvider;
-import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * ModelProcessor 的部署级配置。
@@ -21,11 +23,11 @@ import java.util.Objects;
  */
 public record ModelProcessorConfig(
     ProcessorLeaseConfig leaseConfig,
-    InvocationRetryPolicyProvider retryPolicyProvider,
+    Supplier<InvocationRetryPolicy> retryPolicyProvider,
     Duration admitFailureDelay,
     ModelStreamConfig streamConfig,
     ToolHistoryActionResolver toolHistoryActionResolver,
-    ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+    Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
 
   public ModelProcessorConfig {
     leaseConfig = Objects.requireNonNull(leaseConfig, "leaseConfig");
@@ -39,7 +41,7 @@ public record ModelProcessorConfig(
 
   public ModelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
+      Supplier<InvocationRetryPolicy> retryPolicyProvider,
       Duration admitFailureDelay,
       ModelStreamConfig streamConfig,
       ToolHistoryActionResolver toolHistoryActionResolver) {
@@ -49,12 +51,12 @@ public record ModelProcessorConfig(
         admitFailureDelay,
         streamConfig,
         toolHistoryActionResolver,
-        ModelHttpErrorPolicyProvider.DEFAULT);
+        providerName -> ModelHttpErrorPolicy.DEFAULT);
   }
 
   public ModelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
+      Supplier<InvocationRetryPolicy> retryPolicyProvider,
       Duration admitFailureDelay,
       ModelStreamConfig streamConfig) {
     this(leaseConfig, retryPolicyProvider, admitFailureDelay, streamConfig, null);
@@ -62,7 +64,7 @@ public record ModelProcessorConfig(
 
   public ModelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
+      Supplier<InvocationRetryPolicy> retryPolicyProvider,
       Duration admitFailureDelay) {
     this(leaseConfig, retryPolicyProvider, admitFailureDelay, ModelStreamConfig.DEFAULT, null);
   }

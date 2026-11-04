@@ -84,13 +84,16 @@ public final class AgentModelRuntimeConfigParser {
    * @throws IllegalArgumentException JSON 为 null/空白/格式错误，或类型化 DTO 校验失败时抛出
    */
   public AgentModelConfigDTO decode(String configJson) {
+    return decodeValidated(configJson).config();
+  }
+
+  private ValidatedConfig decodeValidated(String configJson) {
     if (configJson == null || configJson.isBlank()) {
       throw invalid("config must not be blank");
     }
     try {
       AgentModelConfigDTO config = configReader.readValue(configJson);
-      validate(config);
-      return config;
+      return new ValidatedConfig(config, validate(config));
     } catch (DatabindException error) {
       if (mappingPath(error).endsWith(".protocolOptionsJson")) {
         throw invalid(mappingPath(error) + " must be a JSON string");
@@ -113,21 +116,25 @@ public final class AgentModelRuntimeConfigParser {
 
   /** 从持久化 JSON 构建 runtime descriptor 视图。 */
   public ParsedAgentModelConfig parse(String configJson) {
-    return toParsedConfig(decode(configJson));
+    ValidatedConfig validated = decodeValidated(configJson);
+    return toParsedConfig(validated.config(), validated.options());
   }
 
   /** 从类型化 config DTO 构建 runtime descriptor 视图。 */
   public ParsedAgentModelConfig parse(AgentModelConfigDTO config) {
-    validate(config);
-    return toParsedConfig(config);
+    return toParsedConfig(config, validate(config));
   }
 
-  private ParsedAgentModelConfig toParsedConfig(AgentModelConfigDTO config) {
+  private record ValidatedConfig(
+      AgentModelConfigDTO config, List<ProviderProtocolOptions> options) {}
+
+  private ParsedAgentModelConfig toParsedConfig(
+      AgentModelConfigDTO config, List<ProviderProtocolOptions> options) {
     AgentModelLimitDTO limit = config.getLimit();
     AgentModelAbilitiesDTO abilities = config.getAbilities();
     List<ModelVariant> variants = new ArrayList<>();
-    for (AgentModelVariantDTO variant : config.getVariants()) {
-      variants.add(toModelVariant(variant));
+    for (int index = 0; index < config.getVariants().size(); index++) {
+      variants.add(toModelVariant(config.getVariants().get(index), options.get(index)));
     }
     return new ParsedAgentModelConfig(
         limit.getContext(),
@@ -140,14 +147,15 @@ public final class AgentModelRuntimeConfigParser {
         AgentModelPricingCodec.toModelPricing(config.getPricing()));
   }
 
-  private void validate(AgentModelConfigDTO config) {
+  private List<ProviderProtocolOptions> validate(AgentModelConfigDTO config) {
     if (config == null) {
       throw invalid("config is required");
     }
     validateLimit(config.getLimit());
     AgentModelAbilitiesDTO abilities = validateAbilities(config.getAbilities());
-    validateVariants(config, abilities);
+    List<ProviderProtocolOptions> options = validateVariants(config, abilities);
     config.setPricing(AgentModelPricingCodec.normalizeAndValidate(config.getPricing()));
+    return options;
   }
 
   private static void validateLimit(AgentModelLimitDTO limit) {
@@ -192,13 +200,14 @@ public final class AgentModelRuntimeConfigParser {
     return abilities;
   }
 
-  private static void validateVariants(
+  private static List<ProviderProtocolOptions> validateVariants(
       AgentModelConfigDTO config, AgentModelAbilitiesDTO abilities) {
     List<AgentModelVariantDTO> variants = config.getVariants();
     if (variants == null || variants.isEmpty()) {
       throw invalid("config.variants must not be empty");
     }
     Set<String> ids = new HashSet<>();
+    List<ProviderProtocolOptions> options = new ArrayList<>();
     for (int index = 0; index < variants.size(); index++) {
       AgentModelVariantDTO variant = variants.get(index);
       String path = "config.variants[" + index + "]";
@@ -223,8 +232,10 @@ public final class AgentModelRuntimeConfigParser {
       if (variant.getReasoningEffort() != null) {
         variant.setReasoningEffort(variant.getReasoningEffort().trim());
       }
-      variant.setProtocolOptionsJson(
-          normalizeProtocolOptionsJson(variant.getProtocolOptionsJson(), path));
+      String json = variant.getProtocolOptionsJson();
+      ProviderProtocolOptions parsed = parseProtocolOptions(json, path);
+      variant.setProtocolOptionsJson(parsed.isEmpty() ? "{}" : json.trim());
+      options.add(parsed);
     }
     String defaultVariant = config.getDefaultVariant();
     if (defaultVariant == null || defaultVariant.isBlank()) {
@@ -236,6 +247,7 @@ public final class AgentModelRuntimeConfigParser {
     if (!ids.contains(defaultVariant)) {
       throw invalid("config.defaultVariant must match a variants[].id");
     }
+    return options;
   }
 
   private static void validateReasoningEffort(String reasoningEffort, String path) {
@@ -255,11 +267,10 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  /** 只去除外层空白；ProviderProtocolOptions 严格校验但不替换用户的内部数值文本。 */
-  private static String normalizeProtocolOptionsJson(String json, String path) {
+  /** 严格校验选项；调用方保留用户的内部数值文本。 */
+  private static ProviderProtocolOptions parseProtocolOptions(String json, String path) {
     try {
-      ProviderProtocolOptions parsed = new ProviderProtocolOptions(json);
-      return parsed.isEmpty() ? "{}" : json.trim();
+      return new ProviderProtocolOptions(json);
     } catch (IllegalArgumentException error) {
       // 丢弃 cause：底层异常可能包含原始输入，HTTP 和日志不能泄露选项值。
       if (error.getMessage() != null
@@ -295,12 +306,10 @@ public final class AgentModelRuntimeConfigParser {
     return Set.copyOf(result);
   }
 
-  private static ModelVariant toModelVariant(AgentModelVariantDTO variant) {
+  private static ModelVariant toModelVariant(
+      AgentModelVariantDTO variant, ProviderProtocolOptions options) {
     try {
-      return new ModelVariant(
-          variant.getId(),
-          variant.getReasoningEffort(),
-          new ProviderProtocolOptions(variant.getProtocolOptionsJson()));
+      return new ModelVariant(variant.getId(), variant.getReasoningEffort(), options);
     } catch (IllegalArgumentException error) {
       throw invalid(
           "config.variants[" + variant.getId() + "] is invalid: " + error.getMessage(), error);

@@ -567,8 +567,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     int budgetAttempt =
         group == null ? model.attempt() : Math.addExact(groupProgress.memberAttempts(), 1);
     InvocationRetryDecision decision =
-        InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), true, budgetAttempt);
+        InvocationRetryDecision.decide(config.retryPolicyProvider().get(), true, budgetAttempt);
     if (decision.retry()) {
       Instant retryAt = now.plus(decision.delay());
       ModelInvocation retried =

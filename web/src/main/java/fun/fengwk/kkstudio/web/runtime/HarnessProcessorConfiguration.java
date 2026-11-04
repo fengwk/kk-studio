@@ -27,8 +27,6 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.spi.retry.InvocationRetryPolicyProvider;
-import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
@@ -46,12 +44,14 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Processor 组合：重试与 HTTP 策略、lease/processor 配置、调度与心跳执行器、退出确认 journal，以及三个 Processor 工厂。
  *
  * <p>Advanced 软策略在装配期从共享 {@link SystemSettingsSnapshot} 读取（DB 变更需重启）；aiRuntime 的 retry 经 {@link
- * InvocationRetryPolicyProvider} 每次判定点现读。本组合不持有任何硬编码的重复默认值。
+ * Supplier} 每次判定点现读。本组合不持有任何硬编码的重复默认值。
  *
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod} 交给 Spring 持有生命周期。processor 关闭与 executor
  * shutdown 由 Spring 按依赖逆序 destroy 保证。
@@ -61,7 +61,7 @@ public class HarnessProcessorConfiguration {
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */
   @Bean
-  public InvocationRetryPolicyProvider invocationRetryPolicyProvider(
+  public Supplier<InvocationRetryPolicy> invocationRetryPolicyProvider(
       SystemSettingsSnapshot systemSettingsSnapshot) {
     return () -> {
       SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
@@ -75,7 +75,7 @@ public class HarnessProcessorConfiguration {
 
   /** 模型 HTTP 状态策略现读通道：每次带 HTTP 状态的失败 retry 判定点按冻结 Provider 身份解析，Provider 覆盖优先于系统名单。 */
   @Bean
-  public ModelHttpErrorPolicyProvider modelHttpErrorPolicyProvider(
+  public Function<String, ModelHttpErrorPolicy> modelHttpErrorPolicyProvider(
       SystemSettingsSnapshot systemSettingsSnapshot,
       AgentProviderRepository agentProviderRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec) {
@@ -120,8 +120,8 @@ public class HarnessProcessorConfiguration {
   @Bean
   public ModelProcessorConfig modelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
-      ModelHttpErrorPolicyProvider modelHttpErrorPolicyProvider,
+      Supplier<InvocationRetryPolicy> retryPolicyProvider,
+      Function<String, ModelHttpErrorPolicy> modelHttpErrorPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot,
       ToolHistoryActionResolver toolHistoryActionResolver) {
     return new ModelProcessorConfig(
@@ -137,7 +137,7 @@ public class HarnessProcessorConfiguration {
   @Bean
   public ToolProcessorConfig toolProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
+      Supplier<InvocationRetryPolicy> retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(

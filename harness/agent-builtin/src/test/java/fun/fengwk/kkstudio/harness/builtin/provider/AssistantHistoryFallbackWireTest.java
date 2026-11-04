@@ -36,11 +36,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 
 import java.net.http.HttpClient;
 import java.time.Duration;

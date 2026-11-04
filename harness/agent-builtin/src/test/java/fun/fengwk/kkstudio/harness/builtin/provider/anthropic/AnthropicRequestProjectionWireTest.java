@@ -34,8 +34,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEncodedRequest;
-import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicRequestEncoder;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicEncodedRequest;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicRequestEncoder;
 
 import java.io.IOException;
 import java.time.Duration;

@@ -1,12 +1,10 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -29,16 +27,9 @@ import java.util.Set;
  */
 final class ModelResponseValidator {
 
-  private static final ObjectMapper OBJECT_MAPPER = strictObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT;
 
   private ModelResponseValidator() {}
-
-  private static ObjectMapper strictObjectMapper() {
-    return JsonMapper.builder()
-        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-        .build();
-  }
 
   static ProviderResponse validate(ProviderResponse response) {
     Objects.requireNonNull(response, "response");

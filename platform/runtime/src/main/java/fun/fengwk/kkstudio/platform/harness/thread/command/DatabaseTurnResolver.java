@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
@@ -48,6 +47,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -81,7 +81,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentProviderRepository providerRepository;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final AgentModelGroupConfigCodec groupConfigCodec;
-  private final ProviderFactories providerFactories;
+  private final Map<ProviderType, ProviderFactory> providerFactories;
   private final CompactionConfigProvider compactionConfigProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
   private final RequestTokenEstimator requestTokenEstimator;
@@ -93,7 +93,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentProviderRepository providerRepository,
       AgentModelRuntimeConfigParser modelConfigParser,
       AgentModelGroupConfigCodec groupConfigCodec,
-      ProviderFactories providerFactories,
+      Map<ProviderType, ProviderFactory> providerFactories,
       CompactionConfigProvider compactionConfigProvider,
       DatabaseAgentTurnContextResolver contextResolver,
       RequestTokenEstimator requestTokenEstimator,
@@ -104,7 +104,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.groupConfigCodec = Objects.requireNonNull(groupConfigCodec, "groupConfigCodec");
-    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    this.providerFactories =
+        Map.copyOf(Objects.requireNonNull(providerFactories, "providerFactories"));
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.contextResolver = Objects.requireNonNull(contextResolver, "contextResolver");
@@ -401,7 +402,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             "provider connection generation id must not be null");
     ProviderFactory factory =
         require(
-            providerFactories.lookup(providerType).orElse(null),
+            providerFactories.get(providerType),
             "provider factory not found for " + provider.name() + " (" + providerType + ")");
     ParsedAgentModelConfig parsed = parseModel(model);
     ModelVariant variant = findVariant(parsed, variantName);

@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -14,7 +13,9 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -33,18 +34,19 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
 
   private final AgentProviderRepository providerRepository;
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
-  private final ProviderFactories providerFactories;
+  private final Map<ProviderType, ProviderFactory> providerFactories;
   private final ProviderResourceMaterializer resourceMaterializer;
 
   public DatabaseProviderResolutionService(
       AgentProviderRepository providerRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec,
-      ProviderFactories providerFactories,
+      Map<ProviderType, ProviderFactory> providerFactories,
       ProviderResourceMaterializer resourceMaterializer) {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.providerConfigurationCodec =
         Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
-    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    this.providerFactories =
+        Map.copyOf(Objects.requireNonNull(providerFactories, "providerFactories"));
     this.resourceMaterializer =
         Objects.requireNonNull(resourceMaterializer, "resourceMaterializer");
   }
@@ -69,8 +71,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
           "provider type drift: frozen=" + frozenType + " current=" + providerType);
     }
     ProviderFactory factory =
-        providerFactories
-            .lookup(providerType)
+        Optional.ofNullable(providerFactories.get(providerType))
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(

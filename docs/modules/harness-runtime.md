@@ -323,7 +323,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 | [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ToolHistoryActionResolver.java) | 按冻结 binding 找到 Tool 并渲染历史动作文本 |
 | [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/RealtimeEventSink.java) | best-effort 写入有损的 delta / checkpoint / partial 事件，失败不回滚任何事实 |
 
-同一命名空间还放专用契约子包：[`spi.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/) 是领域模型与物理持久化的唯一边界，[`spi.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/) 是 Agent Driver 契约，见 [Agent Driver](#agent-driver)；它投影出的 generation 公开快照在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)。两者共同引用的 Work 邮箱值契约在 [`spi.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/)，不反向依赖 `runtime.*`。压缩配置与重试策略这些部署配置同样是反向依赖，分别经 [`spi.compaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/) 与 [`spi.retry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/retry/) 在每个决策点现读，不缓存快照；Tool 权限策略与工具设置不是内核端口，由平台在 Tool 网关边界实现，见 [Platform](platform.md#model-与-tool-执行)。
+同一命名空间还放专用契约子包：[`spi.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/) 是领域模型与物理持久化的唯一边界，[`spi.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/) 是 Agent Driver 契约，见 [Agent Driver](#agent-driver)；它投影出的 generation 公开快照在 [`api.generation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/generation/)。两者共同引用的 Work 邮箱值契约在 [`spi.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/)，不反向依赖 `runtime.*`。压缩配置与重试策略这些部署配置同样是反向依赖：压缩配置经 [`spi.compaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/) 在每个决策点现读，重试策略直接使用 JDK `Supplier` / `Function`，都不缓存快照；Tool 权限策略与工具设置不是内核端口，由平台在 Tool 网关边界实现，见 [Platform](platform.md#model-与-tool-执行)。
 
 三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查 owner、Issue 或阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
 
@@ -398,6 +398,8 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 持久状态与 wire 载荷由各自的 Jackson 3 codec 校验：拒绝重复键、尾随内容，以及未声明、缺失或类型错误的字段；自由 JSON 子树（厂商选项、Contributor state、CUSTOM payload、native replay、工具详情）允许自有字段，并以 `BigDecimal` 搬运，`1e309` 与高精度小数不会经 double 丢失数量级或有效位。以字符串保存的 `argumentsJson`、`detailsJson`、`rawUsageJson` 保留原文；厂商选项的 canonical 编码移除无意义的尾零，无法映射为 JSON 的输入明确拒绝。
 
+Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/HarnessJson.java)：普通树、保精度树和选项 canonical 化各使用对应的共享 mapper；请求体定价另保留自己的字节与嵌套深度限制。各 codec 仍负责自己的字段校验和错误语义。
+
 ## 包架构
 
 生产源码位于 `fun.fengwk.kkstudio.harness` 之下，公开值类型集中在 `api` 根与 `api.*` 子包，它们的 wire codec 在 `codec`，`runtime.*` 只保留实现与仅内核可见的内部值；表中省略该前缀：
@@ -414,7 +416,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `api.interaction` | 等待输入/审批的只读投影与冻结环境的待领取 Work 候选；先按执行根和环境聚合再按代表键分页，也可按调用读取 Work 可领取性与时间边界。环境在线状态、名称及产品归属由平台判断 |
 | `api.join` | Join 票据与交付凭据：`ThreadJoin`、`JoinDelivery`、`ThreadJoinOutcome`、`ThreadJoinReceipt` 与完成通知渲染 `ThreadJoinCompletionRenderer`；持久化推进与交付在 `runtime.join` |
 | `api.realtime` | 有损实时投影的公开契约：sealed `RealtimeEvent`（Model delta / Model checkpoint / Tool partial）及其 wire 种类 `RealtimeEventType`、oversize payload 的跨节点上限 `RealtimePayloadLimits` 与不可用错误 `RealtimePayloadUnavailableException`；wire 编解码在 `codec`，通知信封、缓冲与恢复在平台实现，本包不持有 durable state |
-| `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现与端口分别在 `runtime.retry`、`spi.retry` |
+| `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现在 `runtime.retry`，部署配置以 JDK `Supplier` / `Function` 现读 |
 | `api.session` | Session 聚合、sealed 消息内容家族与 `AssistantMessageMetadata`；`SystemReminder` 用精确定界符构造与判别运行时注入的 USER 上下文提醒；wire codec 在 `codec` |
 | `api.thread` | Thread 级公开值：`ThreadState`、`ThreadSnapshot`、`ThreadExecutionControl`、`ThreadRuntimeStatus`、`ThreadExecutionFacts` 与记录 live 分类的 `ThreadLiveState`、创建时冻结的 `ThreadConstraints` / `SpawnTrigger`，以及停止 / 执行根开关 / 手动压缩的控制请求形状；不引用 Store、Driver 或 `runtime` 内部类型 |
 | `api.tool` | Tool invocation 的公开值：`ToolInvocation` 与 `ToolInvocationStatus`、`ToolBinding` / `ContributorBinding` 及 `ToolBindingIdentifiers`、审批与输入回执、`ToolEffectBatch` 与 `ToolInvocationError`；只含不变量与纯状态转换，执行、调度在 `runtime`，wire 编解码在 `codec` |
@@ -429,9 +431,8 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `spi` | 内核对外部设施的窄端口：Tool 网关及其 transient 执行请求 `ToolInvocationRequest`、Tool 结果编码尺寸契约 `ToolResultSizeLimits`、结果物化、历史动作、实时事件与内部 Thread 变更唤醒源；Builtin 的 Model/Turn 端口在 harness/agent-builtin |
 | `spi.compaction` | `CompactionConfigProvider`：Runtime 对部署配置的反向依赖，每个压缩决策点现读 `CompactionConfig`，不缓存快照、不持有订阅；`RequestTokenEstimator`：Turn 解析对请求输入 token 估算的反向依赖，只接收 `EntryPath` 与 system instruction，实现由组合根绑定到 `runtime.compaction.TokenEstimator`，消费方不接触 runtime 实现类型 |
 | `spi.driver` | Agent Driver SPI：`AgentDriver`、`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等，以及共用工具构件 `ToolDeclarationPlanner` / `ToolOutcomeAppender`；组合根与外部 Driver 依赖此包，Runtime 不读取具体 Driver 私有状态，其投影出的 `GenerationProjection` 在 `api.generation`，见 [Agent Driver](#agent-driver) |
-| `spi.retry` | `InvocationRetryPolicyProvider` 与 `ModelHttpErrorPolicyProvider`：在 retry 判定点现读重试预算与模型 HTTP 状态策略；策略值属于 `api.retry`，判定实现在 `runtime.retry` |
 | `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行与 Processor 配置；共用执行骨架在 `spi.work`，Builtin 的 MODEL Work 在 harness/agent-builtin |
-| `runtime.retry` | 调用重试判定 `InvocationRetryDecision`：把 `api.retry` 策略、错误是否可重试与已消耗 attempt 合成唯一决策，只计算可行性与延迟，不读时钟、不写状态；策略值在 `api.retry`，provider 端口在 `spi.retry` |
+| `runtime.retry` | 调用重试判定 `InvocationRetryDecision`：把 `api.retry` 策略、错误是否可重试与已消耗 attempt 合成唯一决策，只计算可行性与延迟，不读时钟、不写状态；策略值在 `api.retry`，部署配置以 JDK `Supplier` / `Function` 现读 |
 | `spi.store` | `HarnessStore` 事务原语，领域模型与物理持久化的唯一边界 |
 | `spi.work` | Work 调度邮箱的持久化与分发值契约，以及已认领执行骨架 `ClaimedExecutionSupport`、准入、租约心跳和失权信号；不依赖 `runtime.*` |
 | `runtime.thread` | Thread 的 live/historical 分类与活动事实评估；`ThreadState`、执行控制与状态投影在 `api.thread` |
