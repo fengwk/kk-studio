@@ -194,25 +194,30 @@ describe('CanvasContextMenu resource target', () => {
     expect(controller.renameNode).not.toHaveBeenCalled()
   })
 
-  it('deletes a resource only after the in-menu confirmation', async () => {
+  it('deletes a resource only after confirmation and keeps the menu on cancel', async () => {
     const controller = makeController()
+    const onClose = vi.fn()
     const { view } = renderMenu({
       kind: 'resource',
       node: resourceNode({ name: 'Note' }),
       model: null,
-    }, vi.fn(), controller)
+    }, onClose, controller)
 
     const menu = view.container.querySelector('.canvas-context-menu') as HTMLElement
     await userEvent.click(within(menu).getByRole('menuitem', { name: '删除' }))
-    const confirm = await within(menu).findByRole('alertdialog', { name: '删除「Note」？' })
+    const confirm = await screen.findByRole('alertdialog', { name: '删除「Note」？' })
+    expect(within(confirm).getByRole('button', { name: '取消' })).toHaveFocus()
     expect(controller.deleteNode).not.toHaveBeenCalled()
+    // Portal 内的 pointerdown 不应被菜单的外部点击监听器误判。
+    fireEvent.pointerDown(confirm)
+    expect(onClose).not.toHaveBeenCalled()
 
     await userEvent.click(within(confirm).getByRole('button', { name: '取消' }))
     expect(controller.deleteNode).not.toHaveBeenCalled()
     expect(within(menu).getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
 
     await userEvent.click(within(menu).getByRole('menuitem', { name: '删除' }))
-    const confirmAgain = await within(menu).findByRole('alertdialog')
+    const confirmAgain = await screen.findByRole('alertdialog')
     await userEvent.click(within(confirmAgain).getByRole('button', { name: '确认删除' }))
     expect(controller.deleteNode).toHaveBeenCalledWith(NODE_ID)
   })
@@ -326,7 +331,7 @@ describe('CanvasContextMenu group and multi targets', () => {
     const { view: freshView } = renderMenu({ kind: 'group', group: group() }, onClose, controller)
     const freshMenu = freshView.container.querySelector('.canvas-context-menu') as HTMLElement
     await userEvent.click(within(freshMenu).getByRole('menuitem', { name: '删除' }))
-    const confirm = await within(freshMenu).findByRole('alertdialog', { name: '删除分组「Frame」？' })
+    const confirm = await screen.findByRole('alertdialog', { name: '删除分组「Frame」？' })
     expect(controller.deleteGroup).not.toHaveBeenCalled()
     await userEvent.click(within(confirm).getByRole('button', { name: '确认删除' }))
     expect(controller.deleteGroup).toHaveBeenCalledWith(GROUP_ID)
@@ -434,8 +439,9 @@ describe('CanvasContextMenu keyboard and dismissal', () => {
     expect(within(menu).getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
 
     await userEvent.click(within(menu).getByRole('menuitem', { name: '删除' }))
-    fireEvent.keyDown(menu, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(within(menu).getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
   })
 

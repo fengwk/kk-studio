@@ -161,10 +161,6 @@ export const canvasCatalog = {
     'en-US': 'This removes the node and its links from the canvas.',
     'zh-CN': '该节点及其关联连线将从画布中移除。',
   },
-  'canvas.node.deleteCancel': {
-    'en-US': 'Cancel',
-    'zh-CN': '取消',
-  },
   'canvas.node.deleteConfirm': {
     'en-US': 'Delete',
     'zh-CN': '确认删除',

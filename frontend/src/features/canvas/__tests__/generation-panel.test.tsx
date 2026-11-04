@@ -848,7 +848,7 @@ describe('Canvas generic generation panel', () => {
     expect(screen.getByTestId('discard-pending-btn')).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId('discard-pending-btn'))
-    const confirmBtn = screen.getByTestId('confirm-discard-btn')
+    const confirmBtn = screen.getByRole('button', { name: '确认放弃' })
     fireEvent.click(confirmBtn)
     expect(view.discardPendingRun).toHaveBeenCalledWith(targetId, corruptRaw)
     expect(screen.queryByTestId('local-pending-error')).not.toBeInTheDocument()
