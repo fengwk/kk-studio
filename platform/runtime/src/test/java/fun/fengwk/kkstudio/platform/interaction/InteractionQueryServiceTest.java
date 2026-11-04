@@ -82,8 +82,7 @@ class InteractionQueryServiceTest {
   @Test
   void differentProductsOnDifferentRootsAreVisible() {
     SessionOwnership other = mock(SessionOwnership.class);
-    service =
-        new InteractionQueryService(List.of(ownership, other), environmentService, runtimes);
+    service = new InteractionQueryService(List.of(ownership, other), environmentService, runtimes);
     UUID root1 = id(101);
     UUID session1 = id(102);
     UUID root2 = id(201);

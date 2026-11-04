@@ -141,8 +141,7 @@ class InteractionRootAttributionConsistencyTest {
     UUID session = id(2);
     SessionOwnership other = mock(SessionOwnership.class);
     queryService =
-        new InteractionQueryService(
-            List.of(sessionOwnership, other), environmentService, runtimes);
+        new InteractionQueryService(List.of(sessionOwnership, other), environmentService, runtimes);
     when(sessionOwnership.findOwner(root, session))
         .thenReturn(Optional.of(new SessionOwnerDisplay("A", "1", null, null)));
     when(other.findOwner(root, session))
