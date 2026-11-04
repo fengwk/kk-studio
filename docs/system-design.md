@@ -152,11 +152,11 @@ Daemon 在线状态用于实际执行路由。执行入口继续校验绑定，�
 `read.path` 支持当前 Daemon 的本地路径与 Platform 只读 URI：
 
 ```text
-kkstudio:/skills/<package>/<skill>/...
-kkstudio:/resources/<blobId>
+vfs:/skills/<package>/<skill>/...
+vfs:/resources/<blobId>
 ```
 
-本地文件与 LSP 路径必须是绝对路径，相对路径直接拒绝；本地读取要求绑定 Environment。`kkstudio:` URI
+本地文件与 LSP 路径必须是绝对路径，相对路径直接拒绝；本地读取要求绑定 Environment。`vfs:` URI
 不接受 `workdir`；只有 `process.exec`（bash）要求显式绝对 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
 Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
 按自己的地址、响应预算与凭据约束承担。
