@@ -30,10 +30,9 @@ import java.util.UUID;
  * <p>在单工具 terminal 的同一 store 事务内：
  *
  * <ul>
- *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 {@code kkstudio} 引用，不执行对象 I/O；
+ *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 {@code vfs} 引用，不执行对象 I/O；
  *   <li>上传引用走 {@code lockReady → 校验权威事实 → retainRef → delete} 原子转移；
- *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code kkstudio:/resources/<blobId>}，绝不保留临时 upload
- *       URI；
+ *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code vfs:/resources/<blobId>}，绝不保留临时 upload URI；
  *   <li>任一项确定性校验失败抛 {@link ToolOutcomeMaterializationException} 并整体回滚，绝不产生部分 history。
  * </ul>
  */

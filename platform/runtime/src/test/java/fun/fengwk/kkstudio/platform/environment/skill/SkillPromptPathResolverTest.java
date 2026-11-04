@@ -71,7 +71,7 @@ class SkillPromptPathResolverTest {
   /** 测试意图：未选环境、无连接行、从未同步、同步失败、提交不一致与本地路径缺失全部回退 platform URI。 */
   @Test
   void everyNonExactCaseFallsBackToPlatformUri() {
-    String expected = "kkstudio:/skills/pkg/dev/SKILL.md";
+    String expected = "vfs:/skills/pkg/dev/SKILL.md";
 
     // 未选择 Environment 时不查询 registry。
     assertEquals(expected, resolver.resolve(null, "pkg", "dev", COMMIT));
@@ -111,7 +111,7 @@ class SkillPromptPathResolverTest {
   void detailsSeparateDeliveryFromInstalledCommit() {
     // 未选择 Environment：无已安装事实，交付方式恒为 PLATFORM。
     SkillPromptResolution unselected = resolver.resolveDetails(null, "pkg", "dev", COMMIT);
-    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", unselected.path());
+    assertEquals("vfs:/skills/pkg/dev/SKILL.md", unselected.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, unselected.delivery());
     assertNull(unselected.installedCommit());
 
@@ -124,7 +124,7 @@ class SkillPromptPathResolverTest {
 
     // 提交不一致：仍暴露实际安装的 commit，但交付方式是 PLATFORM。
     SkillPromptResolution outdated = resolver.resolveDetails(ENV, "pkg", "dev", OTHER_COMMIT);
-    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", outdated.path());
+    assertEquals("vfs:/skills/pkg/dev/SKILL.md", outdated.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, outdated.delivery());
     assertEquals(COMMIT, outdated.installedCommit());
 
@@ -136,7 +136,7 @@ class SkillPromptPathResolverTest {
                 EnvironmentSkillState.installed("pkg", OTHER_COMMIT, "/home/dev/old"),
                 "boom")));
     SkillPromptResolution failed = resolver.resolveDetails(ENV, "pkg", "dev", COMMIT);
-    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", failed.path());
+    assertEquals("vfs:/skills/pkg/dev/SKILL.md", failed.path());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, failed.delivery());
     assertEquals(OTHER_COMMIT, failed.installedCommit());
   }
@@ -145,7 +145,7 @@ class SkillPromptPathResolverTest {
   @Test
   void platformPathIsStable() {
     assertEquals(
-        "kkstudio:/skills/pkg/dev/SKILL.md", SkillPromptPathResolver.platformPath("pkg", "dev"));
+        "vfs:/skills/pkg/dev/SKILL.md", SkillPromptPathResolver.platformPath("pkg", "dev"));
   }
 
   /** 测试意图：package 与 skill 名是必填事实，缺失时立即失败而不是产生含糊路径。 */

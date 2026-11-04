@@ -7,7 +7,7 @@ import java.util.Objects;
  *
  * @param name Skill 名称
  * @param description Skill 描述
- * @param path Skill 文件的稳定读取路径（例如 {@code kkstudio:/skills/<packageName>/<skillName>/SKILL.md}）
+ * @param path Skill 文件的稳定读取路径（例如 {@code vfs:/skills/<packageName>/<skillName>/SKILL.md}）
  */
 public record SkillPromptEntry(String name, String description, String path) {
 

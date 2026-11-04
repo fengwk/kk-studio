@@ -9,7 +9,7 @@ import java.util.function.Consumer;
 /**
  * 统一 {@code read} 工具的执行窄端口。
  *
- * <p>Platform（{@code kkstudio:} 稳定地址）与可选 {@link BoundEnvironment}（本地文件系统路径）的路由由实现方承担，本模块不注册专用模型工具。
+ * <p>Platform（{@code vfs:} 稳定地址）与可选 {@link BoundEnvironment}（本地文件系统路径）的路由由实现方承担，本模块不注册专用模型工具。
  */
 @FunctionalInterface
 public interface ReadToolExecutor {

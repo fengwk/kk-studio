@@ -105,7 +105,7 @@ public class HarnessModelRequestDebugDTO {
     /** manifest 中的 Skill 描述。 */
     private String description;
 
-    /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code kkstudio:/skills/...}）。 */
+    /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code vfs:/skills/...}）。 */
     private String path;
 
     /** 交付方式：{@code LOCAL}（Daemon 已安装该 commit）或 {@code PLATFORM}（读取 Platform cache）。 */

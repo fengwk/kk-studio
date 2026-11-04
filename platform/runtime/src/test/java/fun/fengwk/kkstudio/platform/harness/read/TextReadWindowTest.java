@@ -17,8 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * {@link TextReadWindow} 的行为测试：分页窗口、正文预算、Unicode/换行精确性、截断元数据、失败映射与 BOM 剥离边界。
  *
- * <p>本类守护本地与受管读取共用的状态机本身；两侧适配器（本地 {@code LocalTextReadWindow}、受管 {@code ReadTextWindow}）另有端到端用例，
- * 覆盖解码、BOM、超时与异常映射。
+ * <p>本类守护本地与受管读取共用的状态机本身；受管文本格式化入口另有契约用例， 覆盖解码、BOM、超时与异常映射。
  *
  * <p>长文本 fixture 由确定性生成（{@code "a".repeat(n)}）而不是资源文件：用例唯一的事实就是“精确到某个码点/行的长度”。
  */

@@ -69,7 +69,7 @@ class PlatformResourceContentReaderMediaTest {
         capabilities(
             ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
 
-    ResourceRead read = read(capabilities, "kkstudio:/resources/" + blobId, deadline());
+    ResourceRead read = read(capabilities, "vfs:/resources/" + blobId, deadline());
 
     ResourceRead.Media media = assertInstanceOf(ResourceRead.Media.class, read);
     assertEquals(blobId, media.resource().sessionBlobId());
@@ -167,7 +167,7 @@ class PlatformResourceContentReaderMediaTest {
             });
 
     ReadDeadline deadline = deadline();
-    ResourceRead read = read(TurnMediaCapabilities.NONE, "kkstudio:/resources/" + blobId, deadline);
+    ResourceRead read = read(TurnMediaCapabilities.NONE, "vfs:/resources/" + blobId, deadline);
 
     ResourceRead.Text text = assertInstanceOf(ResourceRead.Text.class, read);
     assertTrue(text.text().contains("1|blob-content"), text.text());
@@ -184,7 +184,7 @@ class PlatformResourceContentReaderMediaTest {
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () -> read(TurnMediaCapabilities.NONE, "kkstudio:/resources/" + blobId, deadline()));
+            () -> read(TurnMediaCapabilities.NONE, "vfs:/resources/" + blobId, deadline()));
 
     assertEquals("failed to read resource: " + blobId, error.getMessage());
     assertFalse(error.getMessage().contains("sentinel-secret-7f3a"));
@@ -204,7 +204,7 @@ class PlatformResourceContentReaderMediaTest {
     PlatformReadException error =
         assertThrows(
             PlatformReadException.class,
-            () -> read(capabilities, "kkstudio:/resources/" + blobId, expired));
+            () -> read(capabilities, "vfs:/resources/" + blobId, expired));
 
     assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
     verifyNoInteractions(blobs);
@@ -222,7 +222,7 @@ class PlatformResourceContentReaderMediaTest {
       PlatformReadException error =
           assertThrows(
               PlatformReadException.class,
-              () -> read(capabilities, "kkstudio:/resources/" + blobId, deadline()));
+              () -> read(capabilities, "vfs:/resources/" + blobId, deadline()));
 
       assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
       verifyNoInteractions(blobs);

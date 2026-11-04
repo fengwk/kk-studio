@@ -330,9 +330,8 @@ class BuiltinHarnessContributorTest {
     assertEquals(fsRead.defaultTimeout(), descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
     assertFalse(descriptor.description().contains("workdir"));
-    assertTrue(descriptor.description().contains("kkstudio:/resources/<blobId>"));
-    assertTrue(
-        descriptor.description().contains("kkstudio:/skills/<package>/<skill>/<relativePath>"));
+    assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
+    assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }

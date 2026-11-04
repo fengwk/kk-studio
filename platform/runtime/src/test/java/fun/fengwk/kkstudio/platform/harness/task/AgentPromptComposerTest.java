@@ -27,7 +27,7 @@ class AgentPromptComposerTest {
 
   private static SkillPromptEntry skill(String name, String description) {
     return new SkillPromptEntry(
-        name, description, "kkstudio:/skills/test-package/" + name + "/SKILL.md");
+        name, description, "vfs:/skills/test-package/" + name + "/SKILL.md");
   }
 
   /** 无 Environment 时只渲染 name: none 与 date；绝不出现任何宿主事实或 root/workspace/cwd 语义。 */
@@ -210,8 +210,7 @@ class AgentPromptComposerTest {
         result.contains(
             "<description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>"),
         result);
-    assertTrue(
-        result.contains("<path>kkstudio:/skills/test-package/a&amp;b/SKILL.md</path>"), result);
+    assertTrue(result.contains("<path>vfs:/skills/test-package/a&amp;b/SKILL.md</path>"), result);
     assertTrue(result.contains("<name>x&lt;y&gt;</name>"), result);
     assertTrue(result.contains("<description>desc &amp; more</description>"), result);
   }

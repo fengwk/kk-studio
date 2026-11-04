@@ -28,9 +28,9 @@ import java.util.regex.Pattern;
  * <p>根据 {@code path} 路由：
  *
  * <ul>
- *   <li>{@code kkstudio:/skills/<package>/<skill>/<relative...>}：读取 Platform bare Git cache 的 Skill
+ *   <li>{@code vfs:/skills/<package>/<skill>/<relative...>}：读取 Platform bare Git cache 的 Skill
  *       内容，无需 Environment。
- *   <li>{@code kkstudio:/resources/<blobId>}：校验当前 Session 引用后读取已授权 Blob 文本，无需 Environment。
+ *   <li>{@code vfs:/resources/<blobId>}：校验当前 Session 引用后读取已授权 Blob 文本，无需 Environment。
  *   <li>其它 URI scheme（如 {@code http:}、{@code https:}）：直接拒绝，不透传外部网络读取。
  *   <li>本地文件系统路径：必须是目标 Environment 上的绝对路径；若 execution context 存在绑定的 {@link BoundEnvironment}，原样委托至
  *       {@code fs.read} capability 执行；无绑定时同步报错。
@@ -41,8 +41,8 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
   private static final Pattern SCHEME_URI_PATTERN = Pattern.compile("^[A-Za-z][A-Za-z0-9+.-]*:.*");
   private static final Pattern WINDOWS_DRIVE_PATTERN = Pattern.compile("^[A-Za-z]:[\\\\/].*");
 
-  private static final String KKSTUDIO_SKILLS_PREFIX = "kkstudio:/skills/";
-  private static final String KKSTUDIO_RESOURCES_PREFIX = "kkstudio:/resources/";
+  private static final String VFS_SKILLS_PREFIX = "vfs:/skills/";
+  private static final String VFS_RESOURCES_PREFIX = "vfs:/resources/";
 
   private final PlatformSkillContentReader skillReader;
   private final PlatformResourceContentReader resourceReader;
@@ -80,9 +80,9 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer limit = parsePositiveInt(args, "limit");
       Integer columnOffset = parsePositiveInt(args, "column_offset");
 
-      if (path.startsWith("kkstudio:")) {
+      if (path.startsWith("vfs:")) {
         ReadDeadline deadline = ReadDeadline.after(request.timeout());
-        return handleKkstudioUri(callId, path, offset, limit, columnOffset, request, deadline);
+        return handleVfsUri(callId, path, offset, limit, columnOffset, request, deadline);
       }
 
       if (isRemoteSchemeUri(path)) {
@@ -100,7 +100,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
     }
   }
 
-  private ToolResult handleKkstudioUri(
+  private ToolResult handleVfsUri(
       String callId,
       String path,
       Integer offset,
@@ -108,15 +108,15 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer columnOffset,
       ToolExecutionRequest request,
       ReadDeadline deadline) {
-    if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)) {
+    if (path.startsWith(VFS_SKILLS_PREFIX)) {
       return handleSkillUri(callId, path, offset, limit, columnOffset, deadline);
     }
 
-    if (path.startsWith(KKSTUDIO_RESOURCES_PREFIX)) {
+    if (path.startsWith(VFS_RESOURCES_PREFIX)) {
       return handleResourceUri(callId, path, offset, limit, columnOffset, request, deadline);
     }
 
-    return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
+    return ToolResult.error(callId, "unsupported vfs: URI: " + path);
   }
 
   private ToolResult handleSkillUri(
@@ -126,30 +126,30 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer limit,
       Integer columnOffset,
       ReadDeadline deadline) {
-    String sub = path.substring(KKSTUDIO_SKILLS_PREFIX.length());
+    String sub = path.substring(VFS_SKILLS_PREFIX.length());
 
     int firstSlash = sub.indexOf('/');
     if (firstSlash <= 0) {
-      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
+      return ToolResult.error(callId, "unsupported vfs: URI: " + path);
     }
     String packageName = sub.substring(0, firstSlash);
     String rest = sub.substring(firstSlash + 1);
 
     int secondSlash = rest.indexOf('/');
     if (secondSlash <= 0) {
-      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
+      return ToolResult.error(callId, "unsupported vfs: URI: " + path);
     }
     String skillName = rest.substring(0, secondSlash);
     String relativePath = rest.substring(secondSlash + 1);
 
     if (packageName.isBlank() || skillName.isBlank() || relativePath.isBlank()) {
-      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
+      return ToolResult.error(callId, "unsupported vfs: URI: " + path);
     }
 
     try {
       byte[] bytes = skillReader.readSkillFile(packageName, skillName, relativePath);
       String text =
-          ReadTextWindow.format(bytes, offset, limit, columnOffset, path, "unsupported", deadline);
+          TextReadWindow.format(bytes, offset, limit, columnOffset, path, "unsupported", deadline);
       return new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}");
     } catch (PlatformReadException e) {
       return ToolResult.error(callId, e.getMessage());
@@ -167,10 +167,10 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer columnOffset,
       ToolExecutionRequest request,
       ReadDeadline deadline) {
-    String blobIdStr = path.substring(KKSTUDIO_RESOURCES_PREFIX.length());
+    String blobIdStr = path.substring(VFS_RESOURCES_PREFIX.length());
 
     if (blobIdStr.isBlank() || blobIdStr.contains("/")) {
-      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
+      return ToolResult.error(callId, "unsupported vfs: URI: " + path);
     }
 
     UUID blobId;
@@ -188,7 +188,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
 
     ToolExecutionContext context = request.context();
     if (context == null) {
-      return ToolResult.error(callId, "execution context is required to read kkstudio: resources");
+      return ToolResult.error(callId, "execution context is required to read vfs: resources");
     }
 
     try {

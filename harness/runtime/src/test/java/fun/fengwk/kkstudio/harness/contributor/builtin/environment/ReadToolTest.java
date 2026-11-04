@@ -69,9 +69,8 @@ class ReadToolTest {
     assertEquals(FS_READ.defaultTimeout(), descriptor.defaultTimeout());
     assertFalse(descriptor.inputSchema().properties().containsKey("workdir"));
     assertFalse(descriptor.inputSchema().required().contains("workdir"));
-    assertTrue(descriptor.description().contains("kkstudio:/resources/<blobId>"));
-    assertTrue(
-        descriptor.description().contains("kkstudio:/skills/<package>/<skill>/<relativePath>"));
+    assertTrue(descriptor.description().contains("vfs:/resources/<blobId>"));
+    assertTrue(descriptor.description().contains("vfs:/skills/<package>/<skill>/<relativePath>"));
     assertFalse(descriptor.description().contains("workdir"));
   }
 
@@ -196,9 +195,9 @@ class ReadToolTest {
     assertTrue(error.getMessage().contains("unknownField is not allowed"), error.getMessage());
   }
 
-  /** 验证 read 工具参数接受 kkstudio: resources 与 skills 两种稳定 URI 格式并委托执行。 */
+  /** 验证 read 工具参数接受 vfs: resources 与 skills 两种稳定 URI 格式并委托执行。 */
   @Test
-  void executeAcceptsKkstudioResourceAndSkillUris() throws Exception {
+  void executeAcceptsVfsResourceAndSkillUris() throws Exception {
     AtomicReference<ToolExecutionRequest> capturedRequest = new AtomicReference<>();
     ToolResult ok = okResult();
     ReadTool tool =
@@ -208,7 +207,7 @@ class ReadToolTest {
               return ok;
             });
 
-    String resourceUri = "kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f";
+    String resourceUri = "vfs:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f";
     ToolExecutionRequest resourceRequest =
         new ToolExecutionRequest(
             tool.descriptor(),
@@ -217,7 +216,7 @@ class ReadToolTest {
     assertSame(ok, tool.execute(resourceRequest, partial -> {}).result());
     assertTrue(capturedRequest.get().call().argumentsJson().contains(resourceUri));
 
-    String skillUri = "kkstudio:/skills/review/checklist/SKILL.md";
+    String skillUri = "vfs:/skills/review/checklist/SKILL.md";
     ToolExecutionRequest skillRequest =
         new ToolExecutionRequest(
             tool.descriptor(),
@@ -227,8 +226,8 @@ class ReadToolTest {
   }
 
   /**
-   * read 的模型可见错误由 builtin 补足纠正指引：无绑定、空/非法 path、{@code kkstudio:} URI 声明未执行；仅本地路径且绑定 Environment
-   * 时才可能进入 capability 执行，不得用 NOT_EXECUTED 掩盖潜在执行。
+   * read 的模型可见错误由 builtin 补足纠正指引：无绑定、空/非法 path、{@code vfs:} URI 声明未执行；仅本地路径且绑定 Environment 时才可能进入
+   * capability 执行，不得用 NOT_EXECUTED 掩盖潜在执行。
    */
   @Test
   void executeWrapsErrorResultsWithCorrectiveGuidance() throws Exception {
@@ -241,7 +240,7 @@ class ReadToolTest {
     assertReadGuidance(
         tool,
         mock(BoundEnvironment.class),
-        "{\"path\":\"kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f\"}",
+        "{\"path\":\"vfs:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f\"}",
         "The tool was not executed.");
     assertReadGuidance(tool, null, "{\"path\":\" \"}", "The tool was not executed.");
   }

@@ -103,7 +103,7 @@ class StoragePluginResourceGatewayTest {
     StoragePresignedUrlDTO presigned = StoragePresignedUrlDTO.builder().url(signedUrl).build();
     when(storageBlobManager.presignOriginalUrl(blobId)).thenReturn(presigned);
 
-    URI resolved = gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId);
+    URI resolved = gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId);
 
     assertEquals(URI.create(signedUrl), resolved);
     verify(storageBlobManager).presignOriginalUrl(blobId);
@@ -113,13 +113,14 @@ class StoragePluginResourceGatewayTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "kkstudio:/resources/00000000-0000-0000-0000-00000000000A",
-        "kkstudio:/resources/A87D0E54-6A92-4C61-B9D1-331B2D98822A",
-        "kkstudio:/resources/00000000-0000-0000-0000-000000000001/extra",
-        "kkstudio:/other/00000000-0000-0000-0000-000000000001",
-        "kkstudio:/resources/00000000-0000-0000-0000-000000000001?download=true",
-        "kkstudio:/resources/00000000-0000-0000-0000-000000000001#fragment",
-        "kkstudio:/resources/",
+        "vfs:/resources/00000000-0000-0000-0000-00000000000A",
+        "vfs:/resources/A87D0E54-6A92-4C61-B9D1-331B2D98822A",
+        "vfs:/resources/00000000-0000-0000-0000-000000000001/extra",
+        "vfs:/other/00000000-0000-0000-0000-000000000001",
+        "vfs:/resources/00000000-0000-0000-0000-000000000001?download=true",
+        "vfs:/resources/00000000-0000-0000-0000-000000000001#fragment",
+        "vfs:/resources/",
+        "kks:/resources/00000000-0000-0000-0000-000000000001",
         "http://example.com/resources/00000000-0000-0000-0000-000000000001",
         "https://example.com/resources/00000000-0000-0000-0000-000000000001",
         "",
@@ -132,7 +133,7 @@ class StoragePluginResourceGatewayTest {
         assertThrows(
             PluginResourceUnavailableException.class,
             () -> gateway.resolveSessionResource(sessionId, invalidUri));
-    assertTrue(exception.getMessage().contains("must be kkstudio:/resources/<blobId>"));
+    assertTrue(exception.getMessage().contains("must be vfs:/resources/<blobId>"));
     verifyNoInteractions(sessionBlobRefManager, storageBlobManager);
   }
 
@@ -145,7 +146,7 @@ class StoragePluginResourceGatewayTest {
         assertThrows(
             PluginResourceUnavailableException.class,
             () -> gateway.resolveSessionResource(sessionId, null));
-    assertTrue(exception.getMessage().contains("must be kkstudio:/resources/<blobId>"));
+    assertTrue(exception.getMessage().contains("must be vfs:/resources/<blobId>"));
     verifyNoInteractions(sessionBlobRefManager, storageBlobManager);
   }
 
@@ -153,7 +154,7 @@ class StoragePluginResourceGatewayTest {
   @Test
   void resolveSessionResourceRejectsNullSessionIdWithoutStoreCalls() {
     UUID blobId = UUID.randomUUID();
-    String uri = "kkstudio:/resources/" + blobId;
+    String uri = "vfs:/resources/" + blobId;
 
     PluginResourceUnavailableException exception =
         assertThrows(
@@ -173,7 +174,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("does not reference this resource"));
     verifyNoInteractions(storageBlobManager);
   }
@@ -190,7 +191,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("is no longer available"));
     assertTrue(exception.getCause() instanceof StorageResourceNotFoundException);
   }
@@ -214,7 +215,7 @@ class StoragePluginResourceGatewayTest {
 
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+        () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
   }
 
   /** 预签名 DTO 或其内部 URL 为空时必须拒绝。 */
@@ -227,13 +228,13 @@ class StoragePluginResourceGatewayTest {
     when(storageBlobManager.presignOriginalUrl(blobId)).thenReturn(null);
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+        () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
 
     when(storageBlobManager.presignOriginalUrl(blobId))
         .thenReturn(StoragePresignedUrlDTO.builder().url("").build());
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+        () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
   }
 
   /**
@@ -249,7 +250,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException authEx =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
     assertTrue(authEx.getMessage().contains("cannot verify session resource ownership"));
   }
 
@@ -1106,7 +1107,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.resolveSessionResource(sessionId, "kkstudio:/resources/" + blobId));
+            () -> gateway.resolveSessionResource(sessionId, "vfs:/resources/" + blobId));
     assertTrue(exception.getMessage().contains("cannot sign this session resource"));
   }
 

@@ -322,7 +322,7 @@ Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只�
 检查失败保留已发布内容。状态由观察事实派生为 `UNCHECKED`、`UP_TO_DATE`、
 `UPDATE_AVAILABLE` 或 `CHECK_FAILED`。
 
-稳定路径为 `kkstudio:/skills/<package>/<skill>/...`，每次读取 Package 当前 commit。
+稳定路径为 `vfs:/skills/<package>/<skill>/...`，每次读取 Package 当前 commit。
 Git cache 由 Catalog 拥有，根目录通过 `kk-studio.catalog.skill.cache-root` 配置，
 默认是进程当前目录下的 `.kkstudio/skills`。
 发布后的通知唤醒各节点回读、补齐 exact commit cache，并同步本节点在线 Daemon；

@@ -42,8 +42,8 @@ import java.util.UUID;
  * <p>两条路径都不信任调用方给出的字符串或响应头：
  *
  * <ul>
- *   <li><b>输入</b>：URI 必须是规范的 {@code kkstudio:/resources/<blobId>}；<b>调用方显式传入执行上下文冻结的 sessionId</b>，
- *       只有该 Session 的 {@code session_blob_ref} 确实引用该 blob 时才签发短期预签名 GET。没有 sessionId 时确定性失败，绝不退化成
+ *   <li><b>输入</b>：URI 必须是规范的 {@code vfs:/resources/<blobId>}；<b>调用方显式传入执行上下文冻结的 sessionId</b>， 只有该
+ *       Session 的 {@code session_blob_ref} 确实引用该 blob 时才签发短期预签名 GET。没有 sessionId 时确定性失败，绝不退化成
  *       「未鉴权下载」，也不查询 Harness 存储。
  *   <li><b>输出</b>：远端地址必须是 HTTPS 且没有 userinfo/fragment；地址准入由下载传输在真正解析 socket 目标时执行，
  *       解析出的每个地址都必须是公网地址，且校验通过的那批地址就是建连使用的地址，因此不存在「先校验、再第二次解析」 的 DNS rebinding 窗口；宿主授权检查（{@code
@@ -123,7 +123,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
             .orElseThrow(
                 () ->
                     new PluginResourceUnavailableException(
-                        "session resource uri must be kkstudio:/resources/<blobId>"));
+                        "session resource uri must be vfs:/resources/<blobId>"));
     if (sessionId == null) {
       throw new PluginResourceUnavailableException(
           "session resource access requires an invocation session id");

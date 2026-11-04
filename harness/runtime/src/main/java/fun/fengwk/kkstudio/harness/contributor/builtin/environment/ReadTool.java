@@ -29,18 +29,18 @@ import java.util.function.Consumer;
  * 统一文件与资源读取工具。
  *
  * <p>复用 {@code fs.read} capability 的 schema 与默认超时，声明 {@link
- * ToolRequirements#optionalEnvironment()}。 执行全量委托至注入的 {@link ReadToolExecutor}，由实现方承担 {@code
- * kkstudio:} 稳定地址与可选环境本地路径的路由。
+ * ToolRequirements#optionalEnvironment()}。 执行全量委托至注入的 {@link ReadToolExecutor}，由实现方承担 {@code vfs:}
+ * 稳定地址与可选环境本地路径的路由。
  *
  * <p>read 的模型可见错误统一在 builtin 层补足纠正指引：本地路径且绑定了 Environment 时才可能进入 capability 执行，此时不得声称未执行，
- * 其余（无绑定、空/非文本 path、{@code kkstudio:} URI）都是派发前或纯平台本地读取，声明未执行。
+ * 其余（无绑定、空/非文本 path、{@code vfs:} URI）都是派发前或纯平台本地读取，声明未执行。
  */
 public final class ReadTool implements Tool {
 
   public static final String NAME = "read";
 
   private static final String READ_NEXT_ACTION =
-      "Use read with an absolute local path or a supported kkstudio: URI";
+      "Use read with an absolute local path or a supported vfs: URI";
 
   private final ReadToolExecutor executor;
   private final EnvironmentCapabilityDescriptor capability;
@@ -95,7 +95,7 @@ public final class ReadTool implements Tool {
         request.context() != null && request.context().environment().isPresent();
     JsonNode arguments = ToolArguments.parse(request.call().argumentsJson());
     String path = ToolArguments.text(arguments, "path");
-    if (!environmentBound || path == null || path.startsWith("kkstudio:")) {
+    if (!environmentBound || path == null || path.startsWith("vfs:")) {
       return ExecutionFact.NOT_EXECUTED;
     }
     return ExecutionFact.UNCERTAIN;

@@ -16,7 +16,7 @@ class SessionResourceUriTest {
   @Test
   void parsesCanonicalFormSuccessfully() {
     UUID expectedBlobId = UUID.randomUUID();
-    String uri = "kkstudio:/resources/" + expectedBlobId;
+    String uri = "vfs:/resources/" + expectedBlobId;
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -28,7 +28,7 @@ class SessionResourceUriTest {
   @Test
   void rejectsUppercaseUuid() {
     String uppercaseUuid = "A87D0E54-6A92-4C61-B9D1-331B2D98822A";
-    String uri = "kkstudio:/resources/" + uppercaseUuid;
+    String uri = "vfs:/resources/" + uppercaseUuid;
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -39,7 +39,7 @@ class SessionResourceUriTest {
   @Test
   void rejectsExtraPathSegments() {
     UUID blobId = UUID.randomUUID();
-    String uri = "kkstudio:/resources/" + blobId + "/extra";
+    String uri = "vfs:/resources/" + blobId + "/extra";
 
     Optional<UUID> actual = SessionResourceUri.parse(uri);
 
@@ -51,9 +51,9 @@ class SessionResourceUriTest {
   void rejectsNonCanonicalPrefix() {
     UUID blobId = UUID.randomUUID();
 
-    assertTrue(SessionResourceUri.parse("kkstudio:/other/" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("kkstudio:/resources" + blobId).isEmpty());
-    assertTrue(SessionResourceUri.parse("kkstudio:resources/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:/other/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:/resources" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:resources/" + blobId).isEmpty());
   }
 
   /** 其他 scheme（如 http/https）必须确定性拒绝。 */
@@ -63,6 +63,8 @@ class SessionResourceUriTest {
 
     assertTrue(SessionResourceUri.parse("https://example.com/resources/" + blobId).isEmpty());
     assertTrue(SessionResourceUri.parse("http://example.com/resources/" + blobId).isEmpty());
+    assertTrue(SessionResourceUri.parse("kks:/resources/" + blobId).isEmpty());
+    assertEquals(List.of(), SessionResourceUri.scan("kks:/resources/" + blobId));
   }
 
   /** 携带查询参数或锚点片段的 URI 必须确定性拒绝。 */
@@ -70,8 +72,8 @@ class SessionResourceUriTest {
   void rejectsQueryAndFragment() {
     UUID blobId = UUID.randomUUID();
 
-    assertTrue(SessionResourceUri.parse("kkstudio:/resources/" + blobId + "?download=1").isEmpty());
-    assertTrue(SessionResourceUri.parse("kkstudio:/resources/" + blobId + "#section").isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:/resources/" + blobId + "?download=1").isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:/resources/" + blobId + "#section").isEmpty());
   }
 
   /** 空 UUID、空串或 null 必须确定性拒绝。 */
@@ -80,19 +82,17 @@ class SessionResourceUriTest {
     assertTrue(SessionResourceUri.parse(null).isEmpty());
     assertTrue(SessionResourceUri.parse("").isEmpty());
     assertTrue(SessionResourceUri.parse("   ").isEmpty());
-    assertTrue(SessionResourceUri.parse("kkstudio:/resources/").isEmpty());
+    assertTrue(SessionResourceUri.parse("vfs:/resources/").isEmpty());
   }
 
   /** 格式错误（如缺少连字符或包含非法字符）的 UUID 必须确定性拒绝。 */
   @Test
   void rejectsMalformedUuidCharacters() {
+    assertTrue(SessionResourceUri.parse("vfs:/resources/not-a-valid-uuid-format-here").isEmpty());
     assertTrue(
-        SessionResourceUri.parse("kkstudio:/resources/not-a-valid-uuid-format-here").isEmpty());
+        SessionResourceUri.parse("vfs:/resources/00000000000000000000000000000000").isEmpty());
     assertTrue(
-        SessionResourceUri.parse("kkstudio:/resources/00000000000000000000000000000000").isEmpty());
-    assertTrue(
-        SessionResourceUri.parse("kkstudio:/resources/00000000-0000-0000-0000-00000000000g")
-            .isEmpty());
+        SessionResourceUri.parse("vfs:/resources/00000000-0000-0000-0000-00000000000g").isEmpty());
   }
 
   /**
@@ -102,7 +102,7 @@ class SessionResourceUriTest {
   @Test
   void scanRejectsContinuationSuffixes() {
     UUID blobId = UUID.randomUUID();
-    String canonical = "kkstudio:/resources/" + blobId;
+    String canonical = "vfs:/resources/" + blobId;
     List<String> suffixes =
         List.of(
             "/suffix", // 路径续写
@@ -140,7 +140,7 @@ class SessionResourceUriTest {
   @Test
   void scanAcceptsCanonicalUrisFollowedByTextDelimiters() {
     UUID blobId = UUID.randomUUID();
-    String canonical = "kkstudio:/resources/" + blobId;
+    String canonical = "vfs:/resources/" + blobId;
     List<String> delimiters =
         List.of(
             " ", "\n", "\t", ",", ";", ":", "!", ")", "]", "}", ">", "\"", "'", "`", "*", "|", "。",
@@ -171,17 +171,17 @@ class SessionResourceUriTest {
     UUID third = UUID.randomUUID();
     String text =
         "delivered "
-            + "kkstudio:/resources/"
+            + "vfs:/resources/"
             + first
             + ", then "
-            + "kkstudio:/resources/"
+            + "vfs:/resources/"
             + second
             + ".\n"
             + "attachment "
-            + "kkstudio:/resources/"
+            + "vfs:/resources/"
             + third
             + "\nagain "
-            + "kkstudio:/resources/"
+            + "vfs:/resources/"
             + first;
 
     List<UUID> scanned = SessionResourceUri.scan(text);
@@ -198,7 +198,7 @@ class SessionResourceUriTest {
     assertEquals(List.of(), SessionResourceUri.scan(""));
     assertEquals(List.of(), SessionResourceUri.scan("no resources here"));
     assertEquals(
-        List.of(), SessionResourceUri.scan("https://example.com/kkstudio:/resources/" + blobId));
-    assertEquals(List.of(), SessionResourceUri.scan("xkkstudio:/resources/" + blobId));
+        List.of(), SessionResourceUri.scan("https://example.com/vfs:/resources/" + blobId));
+    assertEquals(List.of(), SessionResourceUri.scan("xvfs:/resources/" + blobId));
   }
 }

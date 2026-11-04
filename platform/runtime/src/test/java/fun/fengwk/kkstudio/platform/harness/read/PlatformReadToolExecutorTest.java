@@ -66,6 +66,19 @@ class PlatformReadToolExecutorTest {
     progress = mock(Consumer.class);
   }
 
+  /** vfs: Skill 路径走平台读取，不派发到环境。 */
+  @Test
+  void vfsSkillIsRead() throws Exception {
+    when(skillReader.readSkillFile("pkg", "dev", "SKILL.md"))
+        .thenReturn("hello\n".getBytes(StandardCharsets.UTF_8));
+    ToolResult result =
+        executor.read(mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\"}", null), progress);
+    assertFalse(result.error());
+    assertTrue(firstText(result).contains("1|hello"));
+    verify(skillReader).readSkillFile("pkg", "dev", "SKILL.md");
+    verifyNoInteractions(resourceReader);
+  }
+
   /** 传入空的 request 或 progress 时抛出 NullPointerException */
   @Test
   void nullRequestOrListenerThrowsException() throws Exception {
@@ -85,8 +98,7 @@ class PlatformReadToolExecutorTest {
     when(skillReader.readSkillFile("pkg", "dev", "SKILL.md")).thenReturn(bytes);
 
     ToolExecutionRequest request =
-        mockRequest(
-            "{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\",\"offset\":2,\"limit\":1}", null);
+        mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\",\"offset\":2,\"limit\":1}", null);
 
     ToolResult result = executor.read(request, progress);
     assertFalse(result.error());
@@ -102,8 +114,7 @@ class PlatformReadToolExecutorTest {
     when(skillReader.readSkillFile("pkg", "dev", "SKILL.md"))
         .thenReturn(new byte[] {0x00, 0x01, 0x02});
 
-    ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null);
+    ToolExecutionRequest request = mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
@@ -130,49 +141,48 @@ class PlatformReadToolExecutorTest {
     assertTrue(firstText(result).contains("offset must be a positive integer"));
   }
 
-  /** kkstudio URI 即使携带无意义的 workdir 也不做拦截，workdir 参数被静默忽略。 */
+  /** vfs URI 即使携带无意义的 workdir 也不做拦截，workdir 参数被静默忽略。 */
   @Test
-  void kkstudioUriIgnoresWorkdirArgument() throws Exception {
+  void vfsUriIgnoresWorkdirArgument() throws Exception {
     byte[] bytes = "# Dev Skill\nline2\n".getBytes(StandardCharsets.UTF_8);
     when(skillReader.readSkillFile("p", "s", "SKILL.md")).thenReturn(bytes);
 
     ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/skills/p/s/SKILL.md\",\"workdir\":\"/tmp\"}", null);
+        mockRequest("{\"path\":\"vfs:/skills/p/s/SKILL.md\",\"workdir\":\"/tmp\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertFalse(result.error());
     assertTrue(firstText(result).contains("# Dev Skill"));
   }
 
-  /** kkstudio Skill URI 无需 Environment 即可成功读取并格式化 */
+  /** vfs Skill URI 无需 Environment 即可成功读取并格式化 */
   @Test
-  void kkstudioSkillUriSucceedsWithoutEnvironment() throws Exception {
+  void vfsSkillUriSucceedsWithoutEnvironment() throws Exception {
     byte[] bytes = "# Dev Skill\nline2\n".getBytes(StandardCharsets.UTF_8);
     when(skillReader.readSkillFile("pkg", "dev", "SKILL.md")).thenReturn(bytes);
 
-    ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null);
+    ToolExecutionRequest request = mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertFalse(result.error());
-    assertTrue(firstText(result).contains("path: kkstudio:/skills/pkg/dev/SKILL.md"));
+    assertTrue(firstText(result).contains("path: vfs:/skills/pkg/dev/SKILL.md"));
     assertTrue(firstText(result).contains("1|# Dev Skill"));
     assertTrue(firstText(result).contains("2|line2"));
   }
 
-  /** kkstudio Skill URI 缺失段时返回不支持错误 */
+  /** vfs Skill URI 缺失段时返回不支持错误 */
   @Test
-  void kkstudioSkillUriWithMissingSegmentsCompletesWithError() throws Exception {
-    ToolExecutionRequest request = mockRequest("{\"path\":\"kkstudio:/skills/pkg\"}", null);
+  void vfsSkillUriWithMissingSegmentsCompletesWithError() throws Exception {
+    ToolExecutionRequest request = mockRequest("{\"path\":\"vfs:/skills/pkg\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
-    assertTrue(firstText(result).contains("unsupported kkstudio: URI: kkstudio:/skills/pkg"));
+    assertTrue(firstText(result).contains("unsupported vfs: URI: vfs:/skills/pkg"));
   }
 
-  /** kkstudio Resource URI 使用规范 UUID 成功读取并格式化 */
+  /** vfs Resource URI 使用规范 UUID 成功读取并格式化 */
   @Test
-  void kkstudioResourceUriSucceedsWithCanonicalUuid() throws Exception {
+  void vfsResourceUriSucceedsWithCanonicalUuid() throws Exception {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
@@ -186,23 +196,22 @@ class PlatformReadToolExecutorTest {
             eq(null),
             eq(null),
             eq(null),
-            eq("kkstudio:/resources/" + blobId),
+            eq("vfs:/resources/" + blobId),
             any(ReadDeadline.class)))
-        .thenReturn(
-            new ResourceRead.Text("path: kkstudio:/resources/" + blobId + "\n\n1|blob-data"));
+        .thenReturn(new ResourceRead.Text("path: vfs:/resources/" + blobId + "\n\n1|blob-data"));
 
     ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context);
+        mockRequest("{\"path\":\"vfs:/resources/" + blobId + "\"}", context);
 
     ToolResult result = executor.read(request, progress);
     assertFalse(result.error());
-    assertTrue(firstText(result).contains("path: kkstudio:/resources/" + blobId));
+    assertTrue(firstText(result).contains("path: vfs:/resources/" + blobId));
     assertTrue(firstText(result).contains("1|blob-data"));
   }
 
-  /** kkstudio Resource URI 指向支持的媒体时返回 durable ResourceResultContent，而不是把字节塞进结果。 */
+  /** vfs Resource URI 指向支持的媒体时返回 durable ResourceResultContent，而不是把字节塞进结果。 */
   @Test
-  void kkstudioMediaResourceUriReturnsDurableResourceResult() throws Exception {
+  void vfsMediaResourceUriReturnsDurableResourceResult() throws Exception {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
@@ -222,13 +231,13 @@ class PlatformReadToolExecutorTest {
             eq(null),
             eq(null),
             eq(null),
-            eq("kkstudio:/resources/" + blobId),
+            eq("vfs:/resources/" + blobId),
             any(ReadDeadline.class)))
         .thenReturn(new ResourceRead.Media(ref, null));
 
     ToolResult result =
         executor.read(
-            mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context), progress);
+            mockRequest("{\"path\":\"vfs:/resources/" + blobId + "\"}", context), progress);
     assertFalse(result.error());
     ResourceResultContent content =
         assertInstanceOf(ResourceResultContent.class, result.contents().get(0));
@@ -236,37 +245,36 @@ class PlatformReadToolExecutorTest {
     assertEquals("image/png", content.resource().mediaType());
   }
 
-  /** kkstudio Resource URI 使用非规范 UUID 时返回错误结果 */
+  /** vfs Resource URI 使用非规范 UUID 时返回错误结果 */
   @Test
-  void kkstudioResourceUriWithNonCanonicalUuidCompletesWithError() throws Exception {
-    ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/resources/not-a-uuid\"}", null);
+  void vfsResourceUriWithNonCanonicalUuidCompletesWithError() throws Exception {
+    ToolExecutionRequest request = mockRequest("{\"path\":\"vfs:/resources/not-a-uuid\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
     assertTrue(firstText(result).contains("invalid resource blobId"));
   }
 
-  /** kkstudio Resource URI 缺失 execution context 时返回错误结果 */
+  /** vfs Resource URI 缺失 execution context 时返回错误结果 */
   @Test
-  void kkstudioResourceUriWithoutContextCompletesWithError() throws Exception {
+  void vfsResourceUriWithoutContextCompletesWithError() throws Exception {
     UUID blobId = UUID.randomUUID();
     ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", null);
+        mockRequest("{\"path\":\"vfs:/resources/" + blobId + "\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
     assertTrue(firstText(result).contains("execution context is required"));
   }
 
-  /** 不支持的 kkstudio URI 形式返回错误结果 */
+  /** 不支持的 vfs URI 形式返回错误结果 */
   @Test
-  void unsupportedKkstudioUriCompletesWithError() throws Exception {
-    ToolExecutionRequest request = mockRequest("{\"path\":\"kkstudio:/unknown/foo\"}", null);
+  void unsupportedVfsUriCompletesWithError() throws Exception {
+    ToolExecutionRequest request = mockRequest("{\"path\":\"vfs:/unknown/foo\"}", null);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
-    assertTrue(firstText(result).contains("unsupported kkstudio: URI: kkstudio:/unknown/foo"));
+    assertTrue(firstText(result).contains("unsupported vfs: URI: vfs:/unknown/foo"));
   }
 
   /** 远程 HTTP/HTTPS URI 拒绝透传并返回错误结果 */
@@ -329,7 +337,7 @@ class PlatformReadToolExecutorTest {
             new PlatformSkillContentReader(skillPackageRepository, gitCache),
             resourceReader,
             objectMapper);
-    String uri = "kkstudio:/skills/pkg/dev/" + relativePath;
+    String uri = "vfs:/skills/pkg/dev/" + relativePath;
 
     ToolResult result =
         executor.read(
@@ -346,8 +354,8 @@ class PlatformReadToolExecutorTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "kkstudio://skills/pkg/dev/SKILL.md",
-        "kkstudio://resources/12345678-1234-1234-1234-123456789abc"
+        "vfs://skills/pkg/dev/SKILL.md",
+        "vfs://resources/12345678-1234-1234-1234-123456789abc"
       })
   void doubleSlashUrisAreUnsupportedWithoutSideEffects(String uri) throws Exception {
     ToolExecutionContext context = mock(ToolExecutionContext.class);
@@ -356,7 +364,7 @@ class PlatformReadToolExecutorTest {
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
-    assertTrue(firstText(result).contains("unsupported kkstudio: URI: " + uri));
+    assertTrue(firstText(result).contains("unsupported vfs: URI: " + uri));
     verifyNoInteractions(skillReader, resourceReader, context);
   }
 
@@ -402,7 +410,7 @@ class PlatformReadToolExecutorTest {
     ToolExecutionContext context = mock(ToolExecutionContext.class);
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.fromString("12345678-1234-1234-1234-123456789abc");
-    String uri = "kkstudio:/resources/" + blobId;
+    String uri = "vfs:/resources/" + blobId;
     ToolResult missing = executor.read(mockRequest("{\"path\":\"" + uri + "\"}", null), progress);
     verifyNoInteractions(resourceReader);
     assertTrue(missing.error());
@@ -458,12 +466,12 @@ class PlatformReadToolExecutorTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "kkstudio:/skills/pkg/dev",
-        "kkstudio:/skills/pkg/dev/",
-        "kkstudio:/skills/ /dev/SKILL.md",
-        "kkstudio:/resources/",
-        "kkstudio:/resources/id/extra",
-        "kkstudio:/resources/1-1-1-1-1"
+        "vfs:/skills/pkg/dev",
+        "vfs:/skills/pkg/dev/",
+        "vfs:/skills/ /dev/SKILL.md",
+        "vfs:/resources/",
+        "vfs:/resources/id/extra",
+        "vfs:/resources/1-1-1-1-1"
       })
   void malformedCanonicalUrisHaveNoSideEffects(String uri) throws Exception {
     ToolResult result =
@@ -484,8 +492,7 @@ class PlatformReadToolExecutorTest {
     for (RuntimeException failure : failures) {
       doThrow(failure).when(skillReader).readSkillFile("pkg", "dev", "SKILL.md");
       ToolResult result =
-          executor.read(
-              mockRequest("{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null), progress);
+          executor.read(mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\"}", null), progress);
       assertTrue(result.error());
       assertTrue(
           firstText(result)
@@ -499,7 +506,7 @@ class PlatformReadToolExecutorTest {
   void resourceUnexpectedFailuresCompleteOnce() throws Exception {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
-    String uri = "kkstudio:/resources/" + blobId;
+    String uri = "vfs:/resources/" + blobId;
     ToolExecutionContext context = mock(ToolExecutionContext.class);
     when(context.sessionId()).thenReturn(sessionId);
     when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
@@ -528,7 +535,7 @@ class PlatformReadToolExecutorTest {
 
   /** 测试意图：受管资源读取以 request.timeout 构造 ReadDeadline 并完整传递给下游。 */
   @Test
-  void kkstudioResourcePassesConfiguredDeadline() throws Exception {
+  void vfsResourcePassesConfiguredDeadline() throws Exception {
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     ToolExecutionContext context = mock(ToolExecutionContext.class);
@@ -543,13 +550,13 @@ class PlatformReadToolExecutorTest {
             eq(null),
             eq(null),
             eq(null),
-            eq("kkstudio:/resources/" + blobId),
+            eq("vfs:/resources/" + blobId),
             deadlineCaptor.capture()))
         .thenReturn(new ResourceRead.Text("1|data"));
 
     Duration customTimeout = Duration.ofSeconds(45);
     ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context, customTimeout);
+        mockRequest("{\"path\":\"vfs:/resources/" + blobId + "\"}", context, customTimeout);
 
     ToolResult delivered = executor.read(request, progress);
 
@@ -572,8 +579,7 @@ class PlatformReadToolExecutorTest {
             });
 
     ToolExecutionRequest request =
-        mockRequest(
-            "{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null, Duration.ofMillis(10));
+        mockRequest("{\"path\":\"vfs:/skills/pkg/dev/SKILL.md\"}", null, Duration.ofMillis(10));
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());
@@ -589,7 +595,7 @@ class PlatformReadToolExecutorTest {
     when(context.mediaCapabilities()).thenReturn(TurnMediaCapabilities.NONE);
 
     ToolExecutionRequest request =
-        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context, Duration.ZERO);
+        mockRequest("{\"path\":\"vfs:/resources/" + blobId + "\"}", context, Duration.ZERO);
 
     ToolResult result = executor.read(request, progress);
     assertTrue(result.error());

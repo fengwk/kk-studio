@@ -552,7 +552,7 @@ class StudioHarnessThreadControllerTest {
     skill.setPackageName("test-package");
     skill.setName("dev");
     skill.setDescription("dev description");
-    skill.setPath("kkstudio:/skills/test-package/dev/SKILL.md");
+    skill.setPath("vfs:/skills/test-package/dev/SKILL.md");
     skill.setDelivery("PLATFORM");
     skill.setCurrentCommit("0123456789abcdef0123456789abcdef01234567");
     skill.setObservedHeadCommit(null);

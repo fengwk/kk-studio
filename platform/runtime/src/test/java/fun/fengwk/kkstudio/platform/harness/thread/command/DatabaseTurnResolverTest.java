@@ -525,7 +525,7 @@ class DatabaseTurnResolverTest {
     assertTrue(
         skillSpec
             .systemInstruction()
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
     assertEquals(
         List.of("read"),
         skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
@@ -715,7 +715,7 @@ class DatabaseTurnResolverTest {
     assertTrue(
         requestSpec
             .systemInstruction()
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
     assertFalse(instructionText(requestSpec).contains("- system:"));
   }
 
@@ -779,7 +779,7 @@ class DatabaseTurnResolverTest {
     assertTrue(
         requestSpec
             .systemInstruction()
-            .contains("<path>kkstudio:/skills/test-package/dev-b/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev-b/SKILL.md</path>"));
   }
 
   @Test
@@ -854,7 +854,7 @@ class DatabaseTurnResolverTest {
     assertTrue(
         requestSpec
             .systemInstruction()
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
   }
 
   @Test
@@ -874,7 +874,7 @@ class DatabaseTurnResolverTest {
     assertTrue(
         requestSpec
             .systemInstruction()
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
 
     // 全局目录缺少该 Package：不静默丢弃，typed 拒绝；缺失形态统一为同一条不含目录内部细节的消息。
     fixture = new Fixture(List.of(), List.of("dev"), List.of());
@@ -1082,8 +1082,7 @@ class DatabaseTurnResolverTest {
         instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
     assertTrue(
-        instruction.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"),
-        instruction);
+        instruction.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), instruction);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(3, messages.size());
@@ -1322,8 +1321,7 @@ class DatabaseTurnResolverTest {
     String system = instructionText(requestSpec);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
-    assertTrue(
-        system.contains("<path>kkstudio:/skills/test-package/a&amp;b&lt;c&gt;/SKILL.md</path>"));
+    assertTrue(system.contains("<path>vfs:/skills/test-package/a&amp;b&lt;c&gt;/SKILL.md</path>"));
   }
 
   /**
@@ -1352,7 +1350,7 @@ class DatabaseTurnResolverTest {
         ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherCommit, localPath)));
     assertTrue(
         instructionText(mismatched.resolved(mismatched.path(settings("default"))))
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
 
     Fixture failed = new Fixture(List.of(), List.of("dev"), List.of());
     failed.readyEnvironment(ENV_A, List.of("dev"));
@@ -1365,7 +1363,7 @@ class DatabaseTurnResolverTest {
                 "skill package sync failed: COMMIT_NOT_FOUND")));
     assertTrue(
         instructionText(failed.resolved(failed.path(settings("default"))))
-            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+            .contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"));
   }
 
   /**
@@ -1482,14 +1480,13 @@ class DatabaseTurnResolverTest {
     assertEquals("dev", platformSkill.name());
     assertEquals("dev description", platformSkill.description());
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, platformSkill.delivery());
-    assertEquals("kkstudio:/skills/test-package/dev/SKILL.md", platformSkill.path());
+    assertEquals("vfs:/skills/test-package/dev/SKILL.md", platformSkill.path());
     assertEquals(CURRENT_COMMIT, platformSkill.currentCommit());
     assertEquals(observedHead, platformSkill.observedHeadCommit());
     assertNull(platformSkill.installedCommit());
     String platformXml = AgentPromptComposer.skillFragment(platformSkill.promptEntry());
     assertTrue(
-        platformXml.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"),
-        platformXml);
+        platformXml.contains("<path>vfs:/skills/test-package/dev/SKILL.md</path>"), platformXml);
     assertTrue(platformPlan.spec().systemInstruction().contains(platformXml));
 
     Fixture alreadyInstalled = new Fixture(List.of(), List.of("dev"), List.of());
@@ -1522,7 +1519,7 @@ class DatabaseTurnResolverTest {
         failedSync.planned(failedSync.path(settings("default"))).skills().getFirst();
     assertEquals(SkillPromptResolution.Delivery.PLATFORM, failedSkill.delivery());
     assertEquals(otherCommit, failedSkill.installedCommit());
-    assertEquals("kkstudio:/skills/test-package/dev/SKILL.md", failedSkill.path());
+    assertEquals("vfs:/skills/test-package/dev/SKILL.md", failedSkill.path());
   }
 
   /**

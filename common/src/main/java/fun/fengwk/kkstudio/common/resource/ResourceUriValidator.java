@@ -68,7 +68,7 @@ final class ResourceUriValidator {
         validateBlobUpload(parsed, size, sha256);
         yield null;
       }
-      case "kkstudio" -> {
+      case "vfs" -> {
         validateSessionResource(parsed, size, sha256);
         yield null;
       }
@@ -194,23 +194,22 @@ final class ResourceUriValidator {
   }
 
   /**
-   * Session 资源 URI：精确 {@code kkstudio:/resources/<canonical-uuid>}，无
-   * authority/query/fragment，必须携带非空 size/sha。
+   * Session 资源 URI：精确 {@code vfs:/resources/<canonical-uuid>}，无 authority/query/fragment，必须携带非空
+   * size/sha。
    *
    * <p>它只表示「字节已在全局对象存储且已由当前 Session 引用」这一 durable 引用；它不是可解引用的取数地址，消费方只能通过 Session 引用权限与 Blob
    * 状态核验后复用同一 blob。
    */
   private static void validateSessionResource(URI parsed, Long size, String sha256) {
-    requireSizeAndSha(size, sha256, "kkstudio");
+    requireSizeAndSha(size, sha256, "vfs");
     if (parsed.getRawAuthority() != null
         || parsed.getRawQuery() != null
         || parsed.getRawFragment() != null) {
-      throw new IllegalArgumentException("kkstudio uri must not carry authority/query/fragment");
+      throw new IllegalArgumentException("vfs uri must not carry authority/query/fragment");
     }
     String ssp = parsed.getRawSchemeSpecificPart();
     if (ssp == null || !SESSION_RESOURCE_SSP.matcher(ssp).matches()) {
-      throw new IllegalArgumentException(
-          "kkstudio uri must be exactly kkstudio:/resources/<canonical-uuid>");
+      throw new IllegalArgumentException("vfs uri must be exactly vfs:/resources/<canonical-uuid>");
     }
   }
 

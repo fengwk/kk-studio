@@ -20,7 +20,7 @@ import java.util.UUID;
 /**
  * 平台侧 Session 授权 Blob 资源内容读取器。
  *
- * <p>按 {@code kkstudio:/resources/<blobId>} 读取当前会话授权的 Blob：
+ * <p>按 {@code vfs:/resources/<blobId>} 读取当前会话授权的 Blob：
  *
  * <ol>
  *   <li>会话身份由工具执行上下文给出，只校验该 Session 已引用该 Blob（鉴权失败与不存在无法区分地拒绝，避免信息泄露）；
@@ -167,7 +167,7 @@ public class PlatformResourceContentReader {
               blobId,
               deadline,
               stream ->
-                  ReadTextWindow.format(
+                  TextReadWindow.format(
                       stream, offset, limit, columnOffset, displayPath, "unsupported", deadline));
       if (text == null) {
         throw new PlatformReadException("resource content is unavailable: " + blobId);

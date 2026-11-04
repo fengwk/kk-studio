@@ -286,7 +286,7 @@ describe('projects codecs', () => {
       const ev = decodeIssueEvidence({
         issueId: validIssue.id,
         blobId: 'blob-1',
-        uri: 'kkstudio:/resources/blob-1',
+        uri: 'vfs:/resources/blob-1',
         name: 'spec.pdf',
         actorAgentName: 'designer',
         runId: 'd0000000-0000-0000-0000-000000000001',

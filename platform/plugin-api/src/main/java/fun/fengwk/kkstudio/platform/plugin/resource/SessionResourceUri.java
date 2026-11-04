@@ -9,7 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 平台托管资源 URI 的规范形态：精确 {@code kkstudio:/resources/<canonical-uuid>}。
+ * 平台托管资源 URI 的规范形态：精确 {@code vfs:/resources/<canonical-uuid>}。
  *
  * <p>只接受完整且规范的形态（固定前缀、单个规范小写 UUID、无其余成分）。任何近似但非法的形态（大写 UUID、查询参数、多余路径、其它 scheme）都返回空，由调用方按自己的
  * 协议语义报错，绝不被宽容解析成某个 blob 而放大越权面。
@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 public final class SessionResourceUri {
 
   /** 规范前缀。 */
-  public static final String PREFIX = "kkstudio:/resources/";
+  public static final String PREFIX = "vfs:/resources/";
 
   /** 规范小写 UUID 的精确形态。 */
   private static final Pattern CANONICAL_UUID =

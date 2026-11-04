@@ -98,7 +98,7 @@ class PermissionEvaluatorTest {
     // 非绝对形态不是路径坐标：相对文本、URI scheme、drive-relative 都返回 false 并拒绝描述。
     assertFalse(LexicalTargetPath.isAbsolute("src/Main.java"));
     assertFalse(LexicalTargetPath.isAbsolute("C:foo"));
-    assertFalse(LexicalTargetPath.isAbsolute("kkstudio:/resources/abc"));
+    assertFalse(LexicalTargetPath.isAbsolute("s3:/bucket/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("file:///srv/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("https://example.com/a.txt"));
     assertThrows(
@@ -198,7 +198,7 @@ class PermissionEvaluatorTest {
             .action());
     assertEquals(
         PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"kkstudio:/resources/abc\"}", settings).action());
+        evaluateRaw(WRITE, "{\"path\":\"vfs:/resources/abc\"}", settings).action());
     assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings).action());
   }
 

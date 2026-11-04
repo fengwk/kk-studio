@@ -20,13 +20,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 受管文本读取适配器的契约测试：受管文本与本地 {@code fs.read} 必须同契约，而窗口状态机由共享核心 {@link
- * fun.fengwk.kkstudio.platform.harness.read.TextReadWindow} 提供（其自身行为由 common 侧测试守护）。
+ * 受管文本格式化的契约测试：受管文本与本地 {@code fs.read} 必须同契约，窗口状态机由 {@link TextReadWindow} 提供。
  *
  * <p>本类覆盖适配器职责：严格 UTF-8 解码、首个字符 BOM 剥离、参数校验、扫描超时/中断与 IO 失败的映射，以及受管入口的端到端窗口结果，包括空范围、 60000
  * 码点正文预算、截断元数据与“续读位置可无损重构全部源内容”。
  */
-class ReadTextWindowTest {
+class TextReadWindowFormatTest {
 
   private static final byte[] UTF8_BOM = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
 
@@ -42,7 +41,7 @@ class ReadTextWindowTest {
 
   private static String format(
       String content, Integer offset, Integer limit, Integer columnOffset) {
-    return ReadTextWindow.format(
+    return TextReadWindow.format(
         content.getBytes(StandardCharsets.UTF_8),
         offset,
         limit,
@@ -56,7 +55,7 @@ class ReadTextWindowTest {
   void emptyInputReportsEmptyRange() {
     assertEquals(
         String.join("\n", "path: test.txt", "ends_with_newline: no", "range: empty"),
-        ReadTextWindow.format(new byte[0], 1, 200, null, "test.txt", deadline()));
+        TextReadWindow.format(new byte[0], 1, 200, null, "test.txt", deadline()));
   }
 
   /** 分页窗口：offset/limit 生效，未到 EOF 时给出 line_limit 截断与下一行位置。 */
@@ -224,7 +223,7 @@ class ReadTextWindowTest {
   @Test
   void byteOrderMarkIsStrippedOnlyAtTheVeryStart() {
     assertTrue(
-        ReadTextWindow.format(
+        TextReadWindow.format(
                 withLeadingBom("bom-text\n"), 1, 200, null, "test.txt", "unsupported", deadline())
             .contains("range: 1:1-1:8"));
 
@@ -257,7 +256,7 @@ class ReadTextWindowTest {
         assertThrows(
                 PlatformReadException.class,
                 () ->
-                    ReadTextWindow.format(
+                    TextReadWindow.format(
                         new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin", deadline()))
             .getMessage()
             .contains("binary"));
@@ -265,7 +264,7 @@ class ReadTextWindowTest {
         assertThrows(
                 PlatformReadException.class,
                 () ->
-                    ReadTextWindow.format(
+                    TextReadWindow.format(
                         new byte[] {(byte) 0xC0, (byte) 0xAF},
                         1,
                         200,
@@ -289,7 +288,7 @@ class ReadTextWindowTest {
   @Test
   void lspStatusIsLastHeaderLineAndOmittedWhenUnsupported() {
     String supported =
-        ReadTextWindow.format(
+        TextReadWindow.format(
             "class App {}\n".getBytes(StandardCharsets.UTF_8),
             1,
             200,
@@ -303,7 +302,7 @@ class ReadTextWindowTest {
         supported);
 
     String unsupported =
-        ReadTextWindow.format(
+        TextReadWindow.format(
             "class App {}\n".getBytes(StandardCharsets.UTF_8),
             1,
             200,
@@ -334,7 +333,7 @@ class ReadTextWindowTest {
         assertThrows(
             PlatformReadException.class,
             () ->
-                ReadTextWindow.format(
+                TextReadWindow.format(
                     failing, 1, 200, null, "test.txt", "unsupported", deadline()));
     assertTrue(failure.getMessage().contains("cannot be read"), failure.getMessage());
   }
@@ -356,7 +355,7 @@ class ReadTextWindowTest {
           assertThrows(
               PlatformReadException.class,
               () ->
-                  ReadTextWindow.format(
+                  TextReadWindow.format(
                       interrupting, 1, 200, null, "test.txt", "unsupported", deadline()));
       assertTrue(failure.getMessage().contains("interrupted or timed out"), failure.getMessage());
     } finally {
@@ -373,7 +372,7 @@ class ReadTextWindowTest {
         assertThrows(
             PlatformReadException.class,
             () ->
-                ReadTextWindow.format(
+                TextReadWindow.format(
                     "hello\n".getBytes(StandardCharsets.UTF_8), 1, 200, null, "test.txt", expired));
     assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
   }
@@ -388,7 +387,7 @@ class ReadTextWindowTest {
     int bytes = 9 * 1024 * 1024;
 
     String head =
-        ReadTextWindow.format(
+        TextReadWindow.format(
             generatedStream(bytes), 1, 1, null, "huge.txt", "unsupported", deadline());
 
     assertTrue(head.contains("range: 1:1-1:99"), head);
@@ -399,11 +398,11 @@ class ReadTextWindowTest {
     // 读取统计出的最后一行，证明总行数来自扫描到 EOF；再越过它必须是空范围。
     long lastLine = ((long) bytes - 1) / 100 + 1;
     String tail =
-        ReadTextWindow.format(
+        TextReadWindow.format(
             generatedStream(bytes), (int) lastLine, 1, null, "huge.txt", "unsupported", deadline());
     assertTrue(tail.contains("range: " + lastLine + ":1-" + lastLine + ":84"), tail);
     String beyond =
-        ReadTextWindow.format(
+        TextReadWindow.format(
             generatedStream(bytes),
             (int) lastLine + 1,
             1,
@@ -428,7 +427,7 @@ class ReadTextWindowTest {
     int attempts = 0;
     while (true) {
       String output =
-          ReadTextWindow.format(
+          TextReadWindow.format(
               source.getBytes(StandardCharsets.UTF_8),
               offset,
               2000,
@@ -489,7 +488,7 @@ class ReadTextWindowTest {
         };
 
     assertTrue(
-        ReadTextWindow.format(stream, 1, 200, null, "test.txt", "unsupported", deadline())
+        TextReadWindow.format(stream, 1, 200, null, "test.txt", "unsupported", deadline())
             .contains("1|content"));
   }
 }
