@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi.store;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 
 import java.time.Instant;
 import java.util.Collection;

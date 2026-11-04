@@ -1,8 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.Objects;
@@ -45,16 +50,21 @@ public final class AgentSpawner {
     }
   }
 
-  /** 在调用方事务内创建（或续用）Thread、写入首批命令并登记票据。 */
-  public static AcceptedCommands spawn(HarnessStore.Transaction tx, SpawnRequest request) {
+  /** 在调用方事务内创建（或续用）Thread、写入首批命令并登记票据；{@code preflight} 只作用于本批全新命令。 */
+  public static AcceptedCommands spawn(
+      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
+    Objects.requireNonNull(preflight, "preflight");
     // 统一创建路径复用 accept 的 batch 形状规则，且在任何写入之前拒绝非法请求（含 settings-only / 多输入 / SET 乱序）。
     AcceptCommandsControl.validateBatchShape("SpawnRequest", request.commands(), true);
-    return request.continuation() == null ? spawnNew(tx, request) : spawnOnExisting(tx, request);
+    return request.continuation() == null
+        ? spawnNew(tx, request, preflight)
+        : spawnOnExisting(tx, request, preflight);
   }
 
-  private static AcceptedCommands spawnNew(HarnessStore.Transaction tx, SpawnRequest request) {
+  private static AcceptedCommands spawnNew(
+      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
     UUID parentId = request.parentThreadId();
     ThreadState parent = null;
     if (parentId != null) {
@@ -104,12 +114,12 @@ public final class AgentSpawner {
             effective,
             creationRequestHash,
             request.commands(),
-            request.preflight()),
+            preflight),
         request);
   }
 
   private static AcceptedCommands spawnOnExisting(
-      HarnessStore.Transaction tx, SpawnRequest request) {
+      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
     ThreadState thread =
         tx.threads()
             .lock(request.threadId())
@@ -128,7 +138,7 @@ public final class AgentSpawner {
             request.continuation().expectedHeadEntryId(),
             request.continuation().expectedNextCommandSequence()),
         request.commands(),
-        request.preflight(),
+        preflight,
         request);
   }
 }

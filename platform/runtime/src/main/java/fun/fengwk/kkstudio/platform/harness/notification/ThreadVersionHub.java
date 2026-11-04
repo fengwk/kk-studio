@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut;
 
 import java.util.Objects;

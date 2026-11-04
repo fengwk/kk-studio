@@ -1,9 +1,21 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 
 import java.time.Instant;
 import java.util.ArrayList;

@@ -1,7 +1,7 @@
 # Web 模块
 
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
-是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness infra、Runtime、
+是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
 Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
 
@@ -12,15 +12,18 @@ Builtin/Common 经 Platform compile 依赖传递进入发行物。
 Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
 [`PluginCatalogConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/PluginCatalogConfiguration.java)
 装配唯一的 `PluginCatalogRuntime`：它为新安装的 Plugin 写入默认配置，收集真正内置的
-Contributor / Adapter，按当前配置构建完整 `PluginCatalogSnapshot`，HarnessCatalog 与 CanvasFunctionCatalog
-来自同一快照；构建失败会释放已建插件实例。容器不暴露静态快照或目录 bean。
+Contributor / Adapter，按当前配置构建完整 `PluginCatalogSnapshot`。HarnessCatalog 由平台聚合，
+Canvas 目录则作为产品目录投影在同一次构建里冻结（[`PluginCanvasFunctionCatalog`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/PluginCanvasFunctionCatalog.java)）；
+任一目录校验失败都会释放已建插件实例并保留旧快照。容器不暴露静态快照或目录 bean。
+同一个冻结视图还注册为平台的 `PluginFunctionNamesProjection`，插件详情的 `canvasFunctionNames`
+因此与执行使用同一份目录，平台不需要 import Canvas 类型。
 `PluginCatalogRefresher` 用单线程每 5 秒回读配置，并合并本节点提交后的唤醒和共享
 `PostgresqlNotificationLoop` 的 `plugin_changed` 通知；建连/重连同样触发对账。
 通知只排队，不信任 payload，也不在 LISTEN 线程上配置插件；漏通知由周期回读追平。
 修订变化时整体重建并原子发布，旧快照直到最后一个活动租用释放才关闭。
 存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
-Canvas HTTP 目录查询在一次 `CanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一快照；
+Canvas HTTP 目录查询在一次 `PluginCanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一快照；
 Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 目录每项都携带 `version`（`definitionFingerprint` 字符串）；
 `POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run` 必带同形状 `expectedVersion`，
@@ -75,8 +78,13 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、流式追帧（`stream-catchup`）、compact、yolo、stop、tool approval |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
-| Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
+| Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
+
+Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
+内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。旧的顶层
+`model` / `variant` 不属于请求契约。Driver、模型与 Variant 的校验和引用事务见
+[Platform Catalog](platform.md#catalog)。
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档 |
@@ -128,7 +136,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 
 ### 请求诊断与预览
 
-`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`modelName` / 可空 `variant`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updateTime` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 `POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
@@ -174,10 +182,13 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
-JSON API 显式返回 [`ApiResponse`](../../web/src/main/java/fun/fengwk/kkstudio/web/api/ApiResponse.java)
+JSON API 显式返回共享的
+[`ApiResponse`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http/ApiResponse.java)
 信封，包含 `status/code/message` 与可选的 `data/errors`；`success` 由 HTTP 状态派生。
 直接返回的信封由 advice 同步 HTTP 状态；`ResponseEntity` 由控制器显式设置状态。
 下载、HTML 与字节流保留原始响应，不参与信封包装。
+信封本身属于 Platform 的共享 HTTP 模型，拥有 HTTP 边界的应用模块（例如 Canvas）与控制器的归属包无关，
+都以同一类型返回；Web 仍是唯一的组合根与 advice 归属。
 
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
@@ -191,6 +202,8 @@ required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnyS
 advice 按 Controller 范围映射 validation 400、not found 404、version/duplicate/in-use 409，
 以及设施不可用/不变量异常；Project 不变量异常为 500。
 locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
+Canvas 控制器由 `kk-studio-canvas-runtime` 的自动配置注册，仍显式列在这些 advice 的 `assignableTypes` 中，
+因此 Controller 归属模块变化不改变错误 envelope 的形状。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
@@ -204,8 +217,11 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 
 [`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
 共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
-Thread/Canvas version、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
+Thread version、Canvas revision、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
+通道与进程内 fan-out 归各自模块所有：Thread 由本模块的 `ThreadVersionHub` 承担；Canvas 的
+`CanvasVersionHub` 与其他 revision 通知语义属于 [Canvas](canvas.md#revision-通知)，Web 只把它的 channel
+登记到 LISTEN 连接并把通知与 resync 转交，再把 revision 事件转发给浏览器。
 
 Harness 的 Thread version、执行树与交互失效不在这里定义协议：组合根只取平台
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)

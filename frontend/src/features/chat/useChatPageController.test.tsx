@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
+import { chatService } from '@/features/chat/chat-service'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -15,7 +15,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listAgents: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     listChats: vi.fn(),
     createChat: vi.fn(),
@@ -61,7 +61,7 @@ describe('useChatPageController', () => {
 
   // 没有可用 Agent 时才查询 Provider / Model，用于首次使用引导。
   it('reports catalog setup progress when no usable agent exists', async () => {
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ model: null })]))
+    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ execution: null })]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([{ name: 'p' }]) as never)
     vi.mocked(agentService.listModels).mockResolvedValue(page([]) as never)
 
@@ -178,8 +178,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: {
       inheritParentEnvironment: true,
       tools: [],

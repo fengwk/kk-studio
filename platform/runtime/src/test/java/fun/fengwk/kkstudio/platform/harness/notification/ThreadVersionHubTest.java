@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges.Event;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 
 import java.util.ArrayList;
 import java.util.List;

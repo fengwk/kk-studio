@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 
 /**
  * Platform 侧运行时工具目录的租用端口：每个 {@link Lease} 固定当前插件快照与一次性读取的 MCP 工具。

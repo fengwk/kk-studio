@@ -7,10 +7,10 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsProvider;
 

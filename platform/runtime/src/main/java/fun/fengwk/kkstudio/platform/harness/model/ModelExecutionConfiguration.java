@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 

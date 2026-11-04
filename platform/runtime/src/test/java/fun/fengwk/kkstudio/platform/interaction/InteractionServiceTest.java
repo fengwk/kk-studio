@@ -17,15 +17,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
+import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
 import java.util.List;

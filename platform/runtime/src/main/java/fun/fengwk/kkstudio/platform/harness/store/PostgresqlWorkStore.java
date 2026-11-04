@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.Work;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 import fun.fengwk.kkstudio.work.DurableWork;
 import fun.fengwk.kkstudio.work.DurableWorkStore;

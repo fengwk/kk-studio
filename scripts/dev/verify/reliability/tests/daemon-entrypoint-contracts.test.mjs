@@ -10,7 +10,7 @@ import test from 'node:test'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
-const RELIABILITY_COMPOSE = path.join(REPOSITORY_ROOT, 'deploy/reliability/compose.yaml')
+const RELIABILITY_COMPOSE = path.join(REPOSITORY_ROOT, 'deploy/test/compose.yaml')
 const RELIABILITY_ENTRYPOINT = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon-entrypoint.sh')
 const RELIABILITY_DOCKERFILE = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile')
 

@@ -1,0 +1,479 @@
+package fun.fengwk.kkstudio.harness.codec;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+
+import java.time.Instant;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * history Entry payload 的包内严格 value codec：BranchSettings / ModelSelection /
+ * AssistantMessageMetadata 以及它们需要的通用 JSON 原语。仅供同包 {@link HistoryEntryPayloadJsonCodec} 组合使用，不复制
+ * AgentMessage codec。
+ */
+final class HistoryValueCodecs {
+
+  static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> BRANCH_SETTINGS_FIELDS =
+      orderedSet("agentName", "execution", "environmentName", "goal");
+  private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
+  private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
+  private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
+
+  /** 可选的 assistantMetadata 字段：缺失或 null 表示没有对应事实（含旧历史记录）。 */
+  private static final Set<String> METADATA_OPTIONAL_FIELDS =
+      orderedSet(
+          "decodeDurationMillis",
+          "model",
+          "requestedAt",
+          "responseServiceTier",
+          "requestBodyPricing");
+
+  private static final Set<String> USAGE_FIELDS =
+      orderedSet(
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens",
+          "cacheWriteByTtl",
+          "reasoningTokens",
+          "providerTotalTokens");
+
+  private HistoryValueCodecs() {}
+
+  // ---------- BranchSettings ----------
+
+  static ObjectNode encodeBranchSettings(BranchSettings settings) {
+    ObjectNode node = NODES.objectNode();
+    node.put("agentName", settings.agentName());
+    node.set("execution", ExecutionSelectionJsonCodec.encode(settings.execution()));
+    // environmentName 是完整快照的一部分：null 必须显式输出，据此表达「未选择」。
+    if (settings.environmentName() == null) {
+      node.putNull("environmentName");
+    } else {
+      node.put("environmentName", settings.environmentName());
+    }
+    // goal 是完整快照的一部分：null（用户未设置或已清除）必须显式输出。
+    if (settings.goal() == null) {
+      node.putNull("goal");
+    } else {
+      ObjectNode goal = NODES.objectNode();
+      goal.put("id", settings.goal().id().toString());
+      goal.put("text", settings.goal().text());
+      node.set("goal", goal);
+    }
+    return node;
+  }
+
+  static BranchSettings decodeBranchSettings(JsonNode value, String context) {
+    ObjectNode node = requireObject(value, context);
+    requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
+    return new BranchSettings(
+        requiredText(node, "agentName", context),
+        ExecutionSelectionJsonCodec.decode(node.get("execution"), context + ".execution"),
+        nullableEnvironmentName(node, "environmentName", context),
+        nullableGoal(node, "goal", context));
+  }
+
+  /** 解码可空 Goal 快照：null 或精确 2 字段对象；任何其它形状确定性拒绝。 */
+  static GoalSetting nullableGoal(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null) {
+      throw new IllegalArgumentException(context + " must declare " + field);
+    }
+    if (value.isNull()) {
+      return null;
+    }
+    ObjectNode goal = requireObject(value, context + "." + field);
+    requireExactFields(goal, GOAL_FIELDS, context + "." + field);
+    UUID id;
+    try {
+      id = UUID.fromString(requiredText(goal, "id", context + "." + field));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + ".id must be a UUID", error);
+    }
+    return new GoalSetting(id, requiredText(goal, "text", context + "." + field));
+  }
+
+  /** 解码可空 Environment 名：text 或 null；其他类型拒绝，非 null 文本走 canonical 校验。 */
+  static String nullableEnvironmentName(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return BranchSettings.requireCanonicalEnvironmentName(
+        value.stringValue(), context + "." + field);
+  }
+
+  // ---------- ModelSelection ----------
+
+  static ObjectNode encodeModelSelection(ModelSelection selection) {
+    ObjectNode node = NODES.objectNode();
+    node.put("modelName", selection.modelName());
+    node.put("variant", selection.variant());
+    return node;
+  }
+
+  static ModelSelection decodeModelSelection(JsonNode value, String context) {
+    ObjectNode node = requireObject(value, context);
+    requireExactFields(node, MODEL_SELECTION_FIELDS, context);
+    JsonNode variant = node.get("variant");
+    if (!variant.isNull() && !variant.isString()) {
+      throw new IllegalArgumentException(context + ".variant must be text or null");
+    }
+    return new ModelSelection(
+        requiredText(node, "modelName", context), variant.isNull() ? null : variant.stringValue());
+  }
+
+  // ---------- AssistantMessageMetadata ----------
+
+  static ObjectNode encodeAssistantMetadata(AssistantMessageMetadata metadata) {
+    ObjectNode node = NODES.objectNode();
+    node.put("stopReason", metadata.stopReason().name());
+    ModelUsage usage = metadata.usage();
+    ObjectNode usageNode = node.putObject("usage");
+    usageNode.put("inputTokens", usage.inputTokens());
+    usageNode.put("outputTokens", usage.outputTokens());
+    usageNode.put("cacheReadTokens", usage.cacheReadTokens());
+    usageNode.put("cacheWriteTokens", usage.cacheWriteTokens());
+    ObjectNode ttlNode = usageNode.putObject("cacheWriteByTtl");
+    for (var entry : usage.cacheWriteByTtl().entrySet()) {
+      ttlNode.put(entry.getKey().toString(), entry.getValue());
+    }
+    putNullableLong(usageNode, "reasoningTokens", usage.reasoningTokens());
+    putNullableLong(usageNode, "providerTotalTokens", usage.providerTotalTokens());
+    if (metadata.decodeDurationMillis() != null) {
+      node.put("decodeDurationMillis", metadata.decodeDurationMillis());
+    }
+    if (metadata.model() != null) {
+      node.set("model", encodeModelSelection(metadata.model()));
+    }
+    if (metadata.requestedAt() != null) {
+      node.put("requestedAt", metadata.requestedAt().toString());
+    }
+    if (metadata.responseServiceTier() != null) {
+      node.put("responseServiceTier", metadata.responseServiceTier());
+    }
+    if (metadata.requestBodyPricing() != null) {
+      ObjectNode pricing = node.putObject("requestBodyPricing");
+      for (Map.Entry<String, Boolean> entry : metadata.requestBodyPricing().matches().entrySet()) {
+        pricing.put(entry.getKey(), entry.getValue());
+      }
+    }
+    return node;
+  }
+
+  static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
+    ObjectNode node = requireObject(value, "assistantMetadata");
+    requireFields(node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
+    GenerationStopReason stopReason =
+        readEnum(
+            GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
+    ObjectNode usageNode = requireObject(node.get("usage"), "assistantMetadata.usage");
+    requireExactFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
+    ModelUsage usage =
+        new ModelUsage(
+            requiredNonNegativeLong(usageNode, "inputTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "outputTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "cacheReadTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "cacheWriteTokens", "assistantMetadata.usage"),
+            decodeTtlTokens(
+                requireObject(
+                    usageNode.get("cacheWriteByTtl"), "assistantMetadata.usage.cacheWriteByTtl"),
+                "assistantMetadata.usage.cacheWriteByTtl"),
+            nullableNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
+            nullableNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
+    Long decodeDurationMillis =
+        nullableNonNegativeLong(node, "decodeDurationMillis", "assistantMetadata");
+    ModelSelection model =
+        node.hasNonNull("model")
+            ? decodeModelSelection(node.get("model"), "assistantMetadata.model")
+            : null;
+    String requestedAtText = nullableText(node, "requestedAt");
+    Instant requestedAt = requestedAtText == null ? null : Instant.parse(requestedAtText);
+    String responseServiceTier = nullableText(node, "responseServiceTier");
+    RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
+    return new AssistantMessageMetadata(
+        stopReason,
+        usage,
+        decodeDurationMillis,
+        model,
+        requestedAt,
+        responseServiceTier,
+        requestBodyPricing);
+  }
+
+  private static RequestBodyPricingSnapshot decodeRequestBodyPricing(ObjectNode node) {
+    JsonNode value = node.get("requestBodyPricing");
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    ObjectNode pricing = requireObject(value, "assistantMetadata.requestBodyPricing");
+    Map<String, Boolean> matches = new LinkedHashMap<>();
+    for (String fingerprint : pricing.propertyNames()) {
+      JsonNode matched = pricing.get(fingerprint);
+      if (matched == null || !matched.isBoolean()) {
+        throw new IllegalArgumentException(
+            "assistantMetadata.requestBodyPricing values must be boolean");
+      }
+      matches.put(fingerprint, matched.booleanValue());
+    }
+    return new RequestBodyPricingSnapshot(matches);
+  }
+
+  // ---------- 通用 JSON 工具方法 ----------
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static Map<Long, Long> decodeTtlTokens(ObjectNode node, String context) {
+    Map<Long, Long> tokens = new LinkedHashMap<>();
+    for (String key : node.propertyNames()) {
+      long ttl;
+      try {
+        ttl = Long.parseLong(key);
+      } catch (NumberFormatException error) {
+        throw new IllegalArgumentException(context + " keys must be positive integer seconds");
+      }
+      if (ttl <= 0) {
+        throw new IllegalArgumentException(context + " keys must be positive integer seconds");
+      }
+      JsonNode value = node.get(key);
+      if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+        throw new IllegalArgumentException(context + "." + key + " must be a non-negative integer");
+      }
+      tokens.put(ttl, value.longValue());
+    }
+    return Map.copyOf(tokens);
+  }
+
+  static ObjectNode requireObject(JsonNode value, String context) {
+    if (!(value instanceof ObjectNode object)) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return object;
+  }
+
+  static ArrayNode requireArray(JsonNode value, String context) {
+    if (!(value instanceof ArrayNode array)) {
+      throw new IllegalArgumentException(context + " must be a JSON array");
+    }
+    return array;
+  }
+
+  static String text(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  static String requiredText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    return requiredText(value, field, context);
+  }
+
+  static String requiredText(JsonNode value, String field, String context) {
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.stringValue();
+    if (text.isBlank()) {
+      throw new IllegalArgumentException(context + "." + field + " must not be blank");
+    }
+    return text;
+  }
+
+  static boolean requiredBoolean(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(context + "." + field + " must be boolean");
+    }
+    return value.booleanValue();
+  }
+
+  static long requiredNonNegativeLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.longValue();
+  }
+
+  /** 可空非负整数：缺失或 null 归一化为 null；其他类型或负值一律拒绝。 */
+  static Long nullableNonNegativeLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a non-negative integer or null");
+    }
+    return value.longValue();
+  }
+
+  static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
+  static int requiredPositiveInt(ObjectNode node, String field, String context) {
+    int value = requiredNonNegativeInt(node, field, context);
+    if (value <= 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be positive");
+    }
+    return value;
+  }
+
+  static Integer nullablePositiveInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() <= 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive integer or null");
+    }
+    return value.intValue();
+  }
+
+  static Long nullablePositiveLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0L) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive integer or null");
+    }
+    return value.longValue();
+  }
+
+  static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
+    try {
+      return Enum.valueOf(kind, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context
+              + " must be one of "
+              + kind.getEnumConstants().length
+              + " "
+              + kind.getSimpleName()
+              + " values: "
+              + name,
+          error);
+    }
+  }
+
+  static <E extends Enum<E>> E nullableEnum(
+      Class<E> kind, ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    return readEnum(kind, text(node, field), context);
+  }
+
+  static String nullableText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    return value == null || value.isNull() ? null : text(node, field);
+  }
+
+  static UUID requiredPositiveId(ObjectNode node, String field, String context) {
+    String text = requiredText(node, field, context);
+    try {
+      return UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID string", error);
+    }
+  }
+
+  static UUID nullablePositiveId(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    try {
+      return UUID.fromString(value.stringValue());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID string", error);
+    }
+  }
+
+  static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    Iterator<String> names = node.propertyNames().iterator();
+    while (names.hasNext()) {
+      actual.add(names.next());
+    }
+    if (!actual.equals(expected)) {
+      throw new IllegalArgumentException(
+          context + " unexpected fields: " + actual + " (expected " + expected + ")");
+    }
+  }
+
+  /**
+   * 严格字段集合校验：{@code required} 必须全部存在，且实际字段不得超出 {@code required} 与 {@code optional}
+   * 的并集；未知字段、缺失必填字段一律拒绝。
+   */
+  static void requireFields(
+      ObjectNode node, Set<String> required, Set<String> optional, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    node.propertyNames().forEach(actual::add);
+    Set<String> allowed = new LinkedHashSet<>(required);
+    allowed.addAll(optional);
+    if (!actual.containsAll(required) || !allowed.containsAll(actual)) {
+      throw new IllegalArgumentException(
+          context
+              + " unexpected fields: "
+              + actual
+              + " (expected "
+              + required
+              + ", optional "
+              + optional
+              + ")");
+    }
+  }
+
+  static Set<String> orderedSet(String... values) {
+    Set<String> set = new LinkedHashSet<>();
+    for (String value : values) {
+      set.add(value);
+    }
+    return Set.copyOf(set);
+  }
+}

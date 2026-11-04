@@ -1,0 +1,510 @@
+package fun.fengwk.kkstudio.harness.codec;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * 共享的 {@link AgentMessage} 与 6 类 durable {@link AgentMessageContent} 严格、确定性 JSON codec。
+ *
+ * <p>字段固定且顺序确定；content 通过 {@code type} discriminator 区分。codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON
+ * null；trailing token（共享 {@link ObjectMapper} 启用 {@link
+ * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用 {@link
+ * StreamReadFeature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
+ * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
+ * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。encode 端同样严格校验 raw JSON 字段。
+ *
+ * <p>durable 内容类型恰为 6 类：text / thinking / json / tool_call / tool_result / resource（resource 是唯一
+ * durable 媒体引用：blobId/name/totalBytes/totalLines/preview）。瞬时 Provider 投影类型 Image / Audio / Video（携带
+ * attempt-only source）在 encode 与 decode 两端都确定性拒绝，绝不进入持久化 JSON。
+ *
+ * <p>String API 与 node API 都用于组合 codec（如 Entry payload / Thread command payload codec）。
+ */
+public final class AgentMessageJsonCodec {
+
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
+  private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
+  private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
+  private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
+  private static final Set<String> TOOL_CALL_FIELDS =
+      orderedSet(
+          "type",
+          "toolCallId",
+          "toolName",
+          "rendererKey",
+          "argumentsJson",
+          "historyAction",
+          "environmentName");
+  private static final Set<String> TOOL_RESULT_FIELDS =
+      orderedSet(
+          "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
+  private static final Set<String> RESOURCE_FIELDS =
+      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
+
+  public AgentMessageJsonCodec() {}
+
+  /** 把 {@link AgentMessage} 编码为 canonical JSON 文本。 */
+  public String encode(AgentMessage message) {
+    Objects.requireNonNull(message, "message");
+    return write(encodeNode(message));
+  }
+
+  /** 把 {@link AgentMessage} 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
+  public ObjectNode encodeNode(AgentMessage message) {
+    Objects.requireNonNull(message, "message");
+    ObjectNode node = NODES.objectNode();
+    node.put("role", message.role().name());
+    ArrayNode contents = node.putArray("contents");
+    for (AgentMessageContent content : message.contents()) {
+      contents.add(encodeContent(content));
+    }
+    return node;
+  }
+
+  /**
+   * 把 {@link AgentMessage} 编码为 client command 请求的 canonical {@link ObjectNode}：与 {@link
+   * #encodeNode} 相同，但允许瞬时 {@link AttachmentMessageContent}（编码为 {@code
+   * {"type":"attachment","uploadId":...,"imageTier":...}}）。 请求 hash 只基于该形态计算，绝不进入 durable payload。
+   */
+  public ObjectNode encodeRequestNode(AgentMessage message) {
+    Objects.requireNonNull(message, "message");
+    ObjectNode node = NODES.objectNode();
+    node.put("role", message.role().name());
+    ArrayNode contents = node.putArray("contents");
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof AttachmentMessageContent attachment) {
+        ObjectNode item = contents.addObject();
+        item.put("type", "attachment");
+        item.put("uploadId", attachment.uploadId().toString());
+        putNullableText(item, "imageTier", wireName(attachment.imageTier()));
+        continue;
+      }
+      contents.add(encodeContent(content));
+    }
+    return node;
+  }
+
+  /** 把 canonical JSON 文本解码为 {@link AgentMessage}；任何非法结构抛 {@link IllegalArgumentException}。 */
+  public AgentMessage decode(String json) {
+    Objects.requireNonNull(json, "json");
+    JsonNode root;
+    try {
+      root = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("malformed agent message JSON", error);
+    }
+    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
+    if (root == null || root.isMissingNode()) {
+      throw new IllegalArgumentException("malformed agent message JSON");
+    }
+    return decodeNode(root);
+  }
+
+  /** 从任意 {@link JsonNode} 解码 {@link AgentMessage}。 */
+  public AgentMessage decodeNode(JsonNode value) {
+    Objects.requireNonNull(value, "value");
+    ObjectNode node = requireObject(value, "message");
+    requireExactFields(node, MESSAGE_FIELDS, "message");
+    AgentMessageRole role = readEnum(AgentMessageRole.class, text(node, "role"), "message.role");
+    ArrayNode contentsNode = requireArray(node.get("contents"), "message.contents");
+    List<AgentMessageContent> contents = new ArrayList<>(contentsNode.size());
+    for (JsonNode element : contentsNode) {
+      contents.add(decodeContent(element));
+    }
+    return new AgentMessage(role, contents);
+  }
+
+  // ---------- 内容编码器与解码器 ----------
+
+  private static ObjectNode encodeContent(AgentMessageContent content) {
+    ObjectNode node = NODES.objectNode();
+    switch (content) {
+      case TextMessageContent value -> {
+        node.put("type", "text");
+        node.put("text", value.text());
+      }
+      case ImageMessageContent value -> throw new IllegalArgumentException(
+          "image content is transient (provider projection only) and must never be persisted");
+      case AudioMessageContent value -> throw new IllegalArgumentException(
+          "audio content is transient (provider projection only) and must never be persisted");
+      case VideoMessageContent value -> throw new IllegalArgumentException(
+          "video content is transient (provider projection only) and must never be persisted");
+      case ThinkingMessageContent value -> {
+        node.put("type", "thinking");
+        node.put("text", value.text());
+      }
+      case JsonMessageContent value -> {
+        // Encode 端也必须严格校验 raw JSON value。
+        validateStrictJsonValue(value.json(), "content.json");
+        node.put("type", "json");
+        node.put("json", value.json());
+      }
+      case ToolCallMessageContent value -> {
+        validateStrictJsonObject(value.argumentsJson(), "content.argumentsJson");
+        node.put("type", "tool_call");
+        node.put("toolCallId", value.toolCallId());
+        node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
+        node.put("argumentsJson", value.argumentsJson());
+        putNullableText(node, "historyAction", value.historyAction());
+        putNullableText(node, "environmentName", value.environmentName());
+      }
+      case ToolResultMessageContent value -> {
+        validateStrictJsonObject(value.detailsJson(), "content.detailsJson");
+        node.put("type", "tool_result");
+        node.put("toolCallId", value.toolCallId());
+        node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
+        ArrayNode nested = node.putArray("contents");
+        for (AgentMessageContent child : value.contents()) {
+          if (child instanceof ToolCallMessageContent
+              || child instanceof ToolResultMessageContent) {
+            throw new IllegalArgumentException(
+                "tool result contents cannot nest tool call or tool result");
+          }
+          nested.add(encodeContent(child));
+        }
+        node.put("error", value.error());
+        node.put("detailsJson", value.detailsJson());
+      }
+      case ResourceMessageContent value -> {
+        node.put("type", "resource");
+        node.put("blobId", value.blobId().toString());
+        putNullableText(node, "name", value.name());
+        putNullableLong(node, "totalBytes", value.totalBytes());
+        putNullableLong(node, "totalLines", value.totalLines());
+        putNullableText(node, "preview", value.preview());
+        putNullableText(node, "imageTier", wireName(value.imageTier()));
+      }
+      case AttachmentMessageContent value -> throw new IllegalArgumentException(
+          "attachment content is transient and must never be persisted");
+    }
+    return node;
+  }
+
+  private static AgentMessageContent decodeContent(JsonNode value) {
+    ObjectNode node = requireObject(value, "content");
+    JsonNode typeNode = node.get("type");
+    if (typeNode == null || !typeNode.isString()) {
+      throw new IllegalArgumentException("content.type must be text");
+    }
+    String type = typeNode.stringValue();
+    return switch (type) {
+      case "text" -> {
+        requireExactFields(node, TEXT_FIELDS, "content");
+        // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
+        yield new TextMessageContent(requiredTextAllowEmpty(node, "text", "content"));
+      }
+      case "thinking" -> {
+        requireExactFields(node, THINKING_FIELDS, "content");
+        yield new ThinkingMessageContent(requiredTextAllowEmpty(node, "text", "content"));
+      }
+      case "json" -> {
+        requireExactFields(node, JSON_FIELDS, "content");
+        String rawJson = requiredStrictJsonValueString(node, "json", "content");
+        yield new JsonMessageContent(rawJson);
+      }
+      case "tool_call" -> {
+        requireExactFields(node, TOOL_CALL_FIELDS, "content");
+        yield new ToolCallMessageContent(
+            requiredText(node, "toolCallId", "content"),
+            requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
+            requiredStrictJsonObjectString(node, "argumentsJson", "content"),
+            nullableText(node, "historyAction", "content"),
+            nullableText(node, "environmentName", "content"));
+      }
+      case "tool_result" -> {
+        requireExactFields(node, TOOL_RESULT_FIELDS, "content");
+        ArrayNode contentsArray = requireArray(node.get("contents"), "content.contents");
+        List<AgentMessageContent> nestedContents = new ArrayList<>(contentsArray.size());
+        for (JsonNode element : contentsArray) {
+          AgentMessageContent nested = decodeContent(element);
+          if (nested instanceof ToolCallMessageContent
+              || nested instanceof ToolResultMessageContent) {
+            throw new IllegalArgumentException(
+                "tool result contents cannot nest tool call or tool result");
+          }
+          nestedContents.add(nested);
+        }
+        yield new ToolResultMessageContent(
+            requiredText(node, "toolCallId", "content"),
+            requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
+            nestedContents,
+            requiredBoolean(node, "error", "content"),
+            requiredStrictJsonObjectString(node, "detailsJson", "content"));
+      }
+      case "resource" -> {
+        requireExactFields(node, RESOURCE_FIELDS, "content");
+        yield new ResourceMessageContent(
+            canonicalUuid(node, "blobId", "content"),
+            nullableText(node, "name", "content"),
+            nullableLong(node, "totalBytes", "content"),
+            nullableLong(node, "totalLines", "content"),
+            nullableText(node, "preview", "content"),
+            nullableImageTier(node, "imageTier", "content"));
+      }
+      default -> throw new IllegalArgumentException(
+          "unknown agent message content type: "
+              + type
+              + " (attachment and media content are transient and cannot be persisted)");
+    };
+  }
+
+  // ---------- 原始 JSON 严格校验（编码与解码共享） ----------
+
+  private static void validateStrictJsonObject(String raw, String name) {
+    JsonNode parsed = parseStrict(raw, name);
+    if (!parsed.isObject()) {
+      throw new IllegalArgumentException(name + " must be a JSON object");
+    }
+  }
+
+  private static void validateStrictJsonValue(String raw, String name) {
+    parseStrict(raw, name);
+  }
+
+  private static String requiredStrictJsonObjectString(
+      ObjectNode node, String field, String context) {
+    String raw = requiredText(node, field, context);
+    validateStrictJsonObject(raw, context + "." + field);
+    return raw;
+  }
+
+  private static String requiredStrictJsonValueString(
+      ObjectNode node, String field, String context) {
+    String raw = requiredText(node, field, context);
+    validateStrictJsonValue(raw, context + "." + field);
+    return raw;
+  }
+
+  private static JsonNode parseStrict(String raw, String name) {
+    JsonNode parsed;
+    try {
+      parsed = MAPPER.readTree(raw);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException(name + " must contain JSON", error);
+    }
+    // Jackson 3 对空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺失文档。
+    if (parsed == null || parsed.isMissingNode()) {
+      throw new IllegalArgumentException(name + " must contain JSON");
+    }
+    return parsed;
+  }
+
+  // ---------- 通用工具方法 ----------
+
+  private static String write(ObjectNode node) {
+    try {
+      return MAPPER.writeValueAsString(node);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode agent message JSON", error);
+    }
+  }
+
+  private static ObjectNode requireObject(JsonNode value, String context) {
+    if (!(value instanceof ObjectNode object)) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return object;
+  }
+
+  private static ArrayNode requireArray(JsonNode value, String context) {
+    if (!(value instanceof ArrayNode array)) {
+      throw new IllegalArgumentException(context + " must be a JSON array");
+    }
+    return array;
+  }
+
+  private static String text(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  private static String requiredText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    return requiredText(value, field, context);
+  }
+
+  private static String requiredText(JsonNode value, String field, String context) {
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.stringValue();
+    if (text.isBlank()) {
+      throw new IllegalArgumentException(context + "." + field + " must not be blank");
+    }
+    return text;
+  }
+
+  private static boolean requiredBoolean(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(context + "." + field + " must be boolean");
+    }
+    return value.booleanValue();
+  }
+
+  /** 与 {@link #requiredText} 类似，但允许空字符串（仅 non-null 约束，如 {@link TextMessageContent#text}）。 */
+  private static String requiredTextAllowEmpty(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  /** 可空文本字段：JSON null 或 text。 */
+  private static String nullableText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return value.stringValue();
+  }
+
+  /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
+  private static UUID canonicalUuid(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.stringValue();
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID: " + text, error);
+    }
+    if (!parsed.toString().equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID: " + text);
+    }
+    return parsed;
+  }
+
+  private static void putNullableText(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static Long nullableLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber()) {
+      throw new IllegalArgumentException(context + "." + field + " must be integer or null");
+    }
+    return value.longValue();
+  }
+
+  /** 可空图片输入档位字段：JSON null 或档位 wire 名称；未知名称显式失败。 */
+  private static ImageInputTier nullableImageTier(ObjectNode node, String field, String context) {
+    String wireName = nullableText(node, field, context);
+    if (wireName == null) {
+      return null;
+    }
+    try {
+      return ImageInputTier.fromWireName(wireName);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + " " + error.getMessage(), error);
+    }
+  }
+
+  private static String wireName(ImageInputTier tier) {
+    return tier == null ? null : tier.wireName();
+  }
+
+  private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
+    try {
+      return Enum.valueOf(kind, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context
+              + " must be one of "
+              + kind.getEnumConstants().length
+              + " "
+              + kind.getSimpleName()
+              + " values: "
+              + name,
+          error);
+    }
+  }
+
+  private static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    Iterator<String> names = node.propertyNames().iterator();
+    while (names.hasNext()) {
+      actual.add(names.next());
+    }
+    if (!actual.equals(expected)) {
+      throw new IllegalArgumentException(
+          context + " unexpected fields: " + actual + " (expected " + expected + ")");
+    }
+  }
+
+  private static Set<String> orderedSet(String... values) {
+    Set<String> set = new LinkedHashSet<>();
+    for (String value : values) {
+      set.add(value);
+    }
+    return Set.copyOf(set);
+  }
+}

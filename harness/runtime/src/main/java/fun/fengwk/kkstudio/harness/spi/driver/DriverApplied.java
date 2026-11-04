@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.spi.driver;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 
 import java.util.List;
 import java.util.Objects;

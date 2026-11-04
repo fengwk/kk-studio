@@ -1,28 +1,10 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-
-/** 仓库根解析：`KK_STUDIO_REPO_ROOT` 优先，否则从本文件位置向上寻找 worktree 根（`.git` 文件或目录）。 */
-function repositoryRoot() {
-    if (process.env.KK_STUDIO_REPO_ROOT) {
-        return path.resolve(process.env.KK_STUDIO_REPO_ROOT)
-    }
-    let directory = path.dirname(fileURLToPath(import.meta.url))
-    for (;;) {
-        if (existsSync(path.join(directory, '.git'))) {
-            return directory
-        }
-        const parent = path.dirname(directory)
-        if (parent === directory) {
-            throw new Error('cannot locate the kk-studio worktree root; set KK_STUDIO_REPO_ROOT')
-        }
-        directory = parent
-    }
-}
+import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const ROOT = repositoryRoot()
 const CI = readFileSync(path.join(ROOT, '.github/workflows/daemon-ci.yml'), 'utf8')

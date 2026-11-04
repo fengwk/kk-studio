@@ -179,8 +179,7 @@ create table agent_definition (
     type            varchar(16)   not null default 'USER',
     description     text,
     system_prompt   text,
-    model_name      varchar(128),
-    variant         varchar(64),
+    execution       jsonb,
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
@@ -191,20 +190,24 @@ create table agent_definition (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint fk_agent_definition_model foreign key (model_name)
-        references agent_model (name) on update cascade,
     constraint ck_agent_definition_type check (type in ('USER', 'BUILTIN')),
-    constraint ck_agent_definition_variant_requires_model check (
-        variant is null or model_name is not null
+    constraint ck_agent_definition_execution_shape check (
+        execution is null or case when jsonb_typeof(execution) = 'object' then coalesce(
+            execution ? 'driver' and execution ? 'settings'
+            and execution - 'driver' - 'settings' = '{}'::jsonb
+            and jsonb_typeof(execution -> 'driver') = 'string'
+            and length(btrim(execution ->> 'driver')) > 0
+            and jsonb_typeof(execution -> 'settings') = 'object', false) else false end
     ),
-    constraint ck_agent_definition_user_requires_model check (
-        type = 'BUILTIN' or model_name is not null
+    constraint ck_agent_definition_user_requires_execution check (
+        type = 'BUILTIN' or execution is not null
     ),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
 create index idx_agent_definition_model
-    on agent_definition (model_name);
+    on agent_definition ((execution -> 'settings' ->> 'modelName'))
+    where execution ->> 'driver' = 'builtin';
 
 -- 组内成员冷却：只按 (组, 成员引用) 隔离；group_version 使旧配置的冷却与旧在途 callback 失效。
 create table agent_model_group_cooldown (

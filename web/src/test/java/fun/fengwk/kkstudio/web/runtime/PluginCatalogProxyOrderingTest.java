@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
@@ -140,7 +139,7 @@ class PluginCatalogProxyOrderingTest {
         }
 
         @Override
-        public List<CanvasFunctionAdapter> canvasAdapters() {
+        public <T> List<T> contributions(Class<T> type) {
           return List.of();
         }
 

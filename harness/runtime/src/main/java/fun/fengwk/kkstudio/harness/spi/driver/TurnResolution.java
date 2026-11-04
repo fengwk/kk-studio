@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.spi.driver;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.Objects;

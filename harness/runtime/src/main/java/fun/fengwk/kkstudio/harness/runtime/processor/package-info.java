@@ -1,6 +1,6 @@
 /**
  * Target 级 execution processors：消费 dispatcher 已 claim 的 {@link
- * fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork}，实施所有权围栏并驱动单次 target execution 的持久化生命周期。
+ * fun.fengwk.kkstudio.harness.spi.work.ClaimedWork}，实施所有权围栏并驱动单次 target execution 的持久化生命周期。
  *
  * <p><b>Driver SPI：</b>本包同时向 Kernel 之外的 Driver 暴露最小的已认领执行骨架 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ClaimedExecutionSupport}：Work-only 所有权校验、按
