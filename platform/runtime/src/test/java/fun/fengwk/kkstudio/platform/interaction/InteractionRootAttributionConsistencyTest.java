@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
@@ -48,6 +49,7 @@ class InteractionRootAttributionConsistencyTest {
 
   private ChatSessionRepository chatSessionRepository;
   private IssueAgentOwnership issueAgentOwnership;
+  private SessionOwnership sessionOwnership;
   private EnvironmentRepository environmentRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -59,6 +61,7 @@ class InteractionRootAttributionConsistencyTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     issueAgentOwnership = mock(IssueAgentOwnership.class);
+    sessionOwnership = mock(SessionOwnership.class);
     ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
     when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
     environmentRepository = mock(EnvironmentRepository.class);
@@ -75,7 +78,7 @@ class InteractionRootAttributionConsistencyTest {
             issueAgentOwnerships,
             environmentRepository,
             runtimes);
-    interactionService = new InteractionService(issueAgentOwnerships, runtimes);
+    interactionService = new InteractionService(List.of(sessionOwnership), runtimes);
   }
 
   /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 Issue 绑定投影 owner，提交按同一根的绑定加产品锁，两个入口对同一后代各调用一次同源根解析。 */
@@ -134,6 +137,6 @@ class InteractionRootAttributionConsistencyTest {
     // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
     verify(runtime, times(2)).findRootThreadId(childThreadId);
     verify(issueAgentOwnership).findBoundRoot(rootThreadId);
-    verify(issueAgentOwnership).lockRootForInteraction(rootThreadId);
+    verify(sessionOwnership).lockForInteraction(rootThreadId, rootSessionId);
   }
 }

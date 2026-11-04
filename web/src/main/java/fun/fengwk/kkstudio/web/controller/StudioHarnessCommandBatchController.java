@@ -12,8 +12,9 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
@@ -32,10 +33,6 @@ import java.util.Objects;
 @RequestMapping("/api/command-batches")
 public class StudioHarnessCommandBatchController {
 
-  /** Issue+Agent 的命令由 Issue 工作流拥有，公共 batch 端点不提供该入口。 */
-  private static final String ISSUE_AGENT_COMMANDS_OWNED_BY_ISSUE_WORKFLOW =
-      "Issue agent commands must use the Issue business workflow";
-
   private final HarnessCommandAcceptanceOrchestrator acceptanceService;
   private final HarnessRuntime runtime;
 
@@ -52,11 +49,7 @@ public class StudioHarnessCommandBatchController {
     return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
-              OwnerRef owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
-              if (owner instanceof OwnerRef.IssueAgent) {
-                throw new ResponseStatusException(
-                    HttpStatus.CONFLICT, ISSUE_AGENT_COMMANDS_OWNED_BY_ISSUE_WORKFLOW);
-              }
+              SessionOwner owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               if (command.target() instanceof AcceptCommandsTarget.NewThread fork) {
@@ -66,7 +59,12 @@ public class StudioHarnessCommandBatchController {
                 ManualThreadControlGuard.requireForkRootSourceThread(
                     runtime, forkedSession.sourceThreadId());
               }
-              AcceptedCommands accepted = acceptanceService.accept(owner, command);
+              AcceptedCommands accepted;
+              try {
+                accepted = acceptanceService.accept(owner, command);
+              } catch (DirectCommandsNotAllowedException error) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, error.getMessage(), error);
+              }
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
               return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
             }));

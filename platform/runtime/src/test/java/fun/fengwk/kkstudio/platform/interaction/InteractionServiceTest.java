@@ -19,12 +19,14 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
 import java.util.List;
 import java.util.Optional;
@@ -37,8 +39,8 @@ class InteractionServiceTest {
     return new UUID(0L, value);
   }
 
-  private IssueAgentOwnership issueAgentOwnership;
-  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
+  private SessionOwnership ownership;
+  private SessionOwnership otherOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionService service;
@@ -46,17 +48,21 @@ class InteractionServiceTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    issueAgentOwnerships = mock(ObjectProvider.class);
+    ownership = mock(SessionOwnership.class);
+    otherOwnership = mock(SessionOwnership.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     // 默认：任意存在的 Thread 自身即执行根；后代/不存在场景在具体测试中覆盖该 stub。
     when(runtime.findRootThreadId(any()))
         .thenAnswer(invocation -> Optional.of(invocation.<UUID>getArgument(0)));
-    service = new InteractionService(issueAgentOwnerships, runtimes);
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    ThreadState root = mock(ThreadState.class);
+    when(snapshot.thread()).thenReturn(root);
+    when(root.sessionId()).thenReturn(id(400));
+    when(runtime.getThreadSnapshot(any())).thenReturn(snapshot);
+    service = new InteractionService(List.of(ownership, otherOwnership), runtimes);
   }
 
   /** 测试意图：人工回答先锁定执行根的产品层级，再进入 Runtime。 */
@@ -71,9 +77,11 @@ class InteractionServiceTest {
 
     assertSame(expected, service.submitInput(command));
 
-    InOrder order = inOrder(runtime, issueAgentOwnership);
+    InOrder order = inOrder(runtime, ownership, otherOwnership);
     order.verify(runtime).findRootThreadId(threadId);
-    order.verify(issueAgentOwnership).lockRootForInteraction(threadId);
+    order.verify(runtime).getThreadSnapshot(threadId);
+    order.verify(ownership).lockForInteraction(threadId, id(400));
+    order.verify(otherOwnership).lockForInteraction(threadId, id(400));
     order.verify(runtime).submitToolInput(command);
   }
 
@@ -89,8 +97,9 @@ class InteractionServiceTest {
 
     assertSame(expected, service.decideApproval(command));
 
-    InOrder order = inOrder(runtime, issueAgentOwnership);
-    order.verify(issueAgentOwnership).lockRootForInteraction(threadId);
+    InOrder order = inOrder(runtime, ownership, otherOwnership);
+    order.verify(ownership).lockForInteraction(threadId, id(400));
+    order.verify(otherOwnership).lockForInteraction(threadId, id(400));
     order.verify(runtime).decideToolApproval(command);
   }
 
@@ -106,8 +115,9 @@ class InteractionServiceTest {
 
     service.submitInput(command);
 
-    InOrder order = inOrder(issueAgentOwnership, runtime);
-    order.verify(issueAgentOwnership).lockRootForInteraction(rootThreadId);
+    InOrder order = inOrder(ownership, runtime);
+    order.verify(runtime).getThreadSnapshot(rootThreadId);
+    order.verify(ownership).lockForInteraction(rootThreadId, id(400));
     order.verify(runtime).submitToolInput(command);
   }
 
@@ -116,8 +126,8 @@ class InteractionServiceTest {
   void productScopeFailureNeverReachesRuntime() {
     UUID threadId = id(100);
     doThrow(new IllegalStateException("Issue owner does not exist"))
-        .when(issueAgentOwnership)
-        .lockRootForInteraction(threadId);
+        .when(ownership)
+        .lockForInteraction(threadId, id(400));
 
     IllegalStateException submitFailure =
         assertThrows(
@@ -141,14 +151,14 @@ class InteractionServiceTest {
   /** 测试意图：没有 Project 应用时不存在 Issue+Agent 执行根，写入直接进入 Runtime。 */
   @Test
   void withoutProjectApplicationWritesGoStraightToRuntime() {
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(null);
+    service = new InteractionService(List.of(), runtimes);
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(id(100), id(101), id(102), "alice", true, List.of());
 
     service.submitInput(command);
 
     verify(runtime).submitToolInput(command);
-    verifyNoInteractions(issueAgentOwnership);
+    verifyNoInteractions(ownership, otherOwnership);
   }
 
   /** 测试意图：来源 Thread 不存在（祖先链为空）时共用根解析显式抛 not-found，绝不静默回退为自身，也不进入产品锁与 Runtime。 */
@@ -166,7 +176,7 @@ class InteractionServiceTest {
             threadId, id(101), ToolApprovalDecision.ALLOWED, id(102), "alice", "ok");
     assertThrows(HarnessRuntimeNotFoundException.class, () -> service.decideApproval(approval));
 
-    verifyNoInteractions(issueAgentOwnership);
+    verifyNoInteractions(ownership, otherOwnership);
     verify(runtime, never()).submitToolInput(any());
     verify(runtime, never()).decideToolApproval(any());
   }
@@ -192,6 +202,6 @@ class InteractionServiceTest {
   void constructorRejectsNullDependencies() {
     assertThrows(NullPointerException.class, () -> new InteractionService(null, runtimes));
     assertThrows(
-        NullPointerException.class, () -> new InteractionService(issueAgentOwnerships, null));
+        NullPointerException.class, () -> new InteractionService(List.of(ownership), null));
   }
 }

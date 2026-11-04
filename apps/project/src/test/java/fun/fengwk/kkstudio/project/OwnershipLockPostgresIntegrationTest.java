@@ -11,9 +11,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.service.ProjectIssueAgentOwnership;
+import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
 
 import javax.sql.DataSource;
 
@@ -36,7 +36,7 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
-  @Autowired private ProjectIssueAgentOwnership ownership;
+  @Autowired private ProjectSessionOwnership ownership;
   @Autowired private ChatRepository chats;
 
   /** KEY SHARE 允许非键更新，但删除锁必须等待接受事务结束。 */
@@ -78,7 +78,7 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
   void projectSharePrecedesIssueUpdateAndExcludesDeletion() throws Exception {
     UUID projectId = createProject();
     Issue issue = createIssue(projectId);
-    OwnerRef.IssueAgent owner = new OwnerRef.IssueAgent(issue.getId(), "agent");
+    SessionOwner owner = ProjectSessionOwnership.owner(issue.getId(), "agent");
     AtomicInteger backend = new AtomicInteger();
     CountDownLatch started = new CountDownLatch(1);
     CountDownLatch locked = new CountDownLatch(1);
@@ -96,7 +96,7 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
                             backend.set(
                                 jdbc.queryForObject("select pg_backend_pid()", Integer.class));
                             started.countDown();
-                            ownership.lockForAcceptance(owner);
+                            ownership.lockForAcceptance(owner, null);
                             locked.countDown();
                             await(release);
                           }));

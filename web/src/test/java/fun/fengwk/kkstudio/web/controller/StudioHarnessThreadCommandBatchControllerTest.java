@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -128,7 +128,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
 
     // 既有 Thread 的继续写入只走 acceptOnThread，不借 owner-aware 创建入口，也不回读 snapshot 之外的状态。
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
     verify(runtime).getThreadSnapshot(UUID.fromString(AUTHORITATIVE_THREAD_ID));
   }
 

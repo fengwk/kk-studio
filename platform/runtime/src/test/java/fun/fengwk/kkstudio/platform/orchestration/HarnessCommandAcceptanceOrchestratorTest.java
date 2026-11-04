@@ -53,7 +53,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
+import fun.fengwk.kkstudio.platform.chat.ChatSessionOwnership;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -70,11 +72,8 @@ import java.util.UUID;
 /**
  * 产品命令接受编排的单元契约。
  *
- * <p>覆盖三类边界：owner 授权（Chat 由 {@code chat_session} 持有；Issue+Agent 只认 {@code (issueId, agentName) ->
- * threadId} 稳定绑定与由该 Thread 解析出的 Session）、NEW_SESSION 的归属建立（Chat 由 preflight 写 chat_session；
- * Issue+Agent 绑定由调用方在 Harness 接受之后于同一事务内写入，设计 §7.1），以及 USER_MESSAGE 附件物化。owner-aware 入口只服务创建；既有
- * Thread 走 owner-free 的 {@code acceptOnThread}，附件物化照常但不再附加产品 owner 门禁。任何授权失败或形状错误都必须在 Runtime
- * 之前确定性拒绝且不产生副作用。
+ * <p>覆盖 Chat 的归属授权和 preflight、禁止直接命令的产品 owner、fork 与附件物化。既有 Thread 走 owner-free 的 {@code
+ * acceptOnThread}；授权或形状错误均不得进入 Runtime 接受写入。
  */
 class HarnessCommandAcceptanceOrchestratorTest {
 
@@ -96,18 +95,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID NESTED_BLOB_ID = id(44);
   private static final UUID FOREIGN_BLOB_ID = id(45);
   private static final String AGENT_NAME = "executor";
-  private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
-  private static final OwnerRef.IssueAgent ISSUE_AGENT =
-      new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
-  private static final OwnerRef ISSUE_AGENT_OWNER = ISSUE_AGENT;
+  private static final SessionOwner CHAT_OWNER = new SessionOwner("CHAT", CHAT_ID.toString());
+  private static final SessionOwner ISSUE_AGENT_OWNER =
+      new SessionOwner("ISSUE_AGENT", ISSUE_ID + ":" + AGENT_NAME);
   private static final BranchSettings SETTINGS =
       new BranchSettings(
           "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), null);
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
-  private IssueAgentOwnership issueAgentOwnership;
-  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
+  private SessionOwnership issueAgentOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private StorageUploadService uploadService;
@@ -121,8 +118,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    issueAgentOwnerships = mock(ObjectProvider.class);
+    issueAgentOwnership = mock(SessionOwnership.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     uploadService = mock(StorageUploadService.class);
@@ -133,27 +129,23 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
 
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
-    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_ID));
-    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_ID));
+    when(issueAgentOwnership.kind()).thenReturn("ISSUE_AGENT");
+    when(issueAgentOwnership.allowsDirectCommands()).thenReturn(false);
 
     when(runtime.acceptCommands(any(), any())).thenReturn(accepted);
 
     service =
         new HarnessCommandAcceptanceOrchestrator(
-            chatSessionRepository,
-            chatRepository,
-            issueAgentOwnerships,
+            List.of(
+                new ChatSessionOwnership(chatRepository, chatSessionRepository),
+                issueAgentOwnership),
             runtimes,
             uploadService,
             refManager,
             blobManager);
   }
 
-  /**
-   * NEW_SESSION preflight 只为 Chat 建立归属边 {@code chat_session}，并保留非 USER 命令；Issue+Agent 首次接受时本服务不写稳定
-   * Thread 绑定（由调用方在接受后于同一物理事务内写入，设计 §7.1），但仍物化 USER_MESSAGE 内容。
-   */
+  /** Chat NEW_SESSION preflight 建立归属边并保留命令；Issue+Agent 直接命令被拒绝。 */
   @Test
   void newSessionCreatesChatOwnershipAndPreservesNonUserCommands() {
     NewThreadCommand setAgent =
@@ -175,16 +167,12 @@ class HarnessCommandAcceptanceOrchestratorTest {
     assertEquals("hello", ((TextMessageContent) mapped.message().contents().getFirst()).text());
     verify(chatSessionRepository).insert(SESSION_ID, CHAT_ID);
 
-    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
-    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
     AcceptCommandsCommand agentCommand = newSession(OTHER_THREAD_ID, user);
-    AcceptancePreflight agentPreflight = acceptAndCapturePreflight(ISSUE_AGENT_OWNER, agentCommand);
-    List<NewThreadCommand> agentPrepared =
-        agentPreflight.prepare(
-            new Session(SESSION_ID, "agent session", NOW), agentCommand.commands(), List.of());
-
-    assertEquals(1, agentPrepared.size());
-    assertEquals(user.idempotencyKey(), agentPrepared.getFirst().idempotencyKey());
+    assertThrows(
+        DirectCommandsNotAllowedException.class,
+        () -> service.accept(ISSUE_AGENT_OWNER, agentCommand));
+    verify(runtime, never()).acceptCommands(eq(agentCommand), any());
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
     verify(chatSessionRepository, times(1)).insert(any(), any());
   }
 
@@ -205,14 +193,17 @@ class HarnessCommandAcceptanceOrchestratorTest {
             List.of(user(new TextMessageContent("entry"))));
     assertSame(accepted, service.accept(CHAT_OWNER, entry));
 
-    // Issue+Agent：绑定 Thread 解析出的 Session 必须与目标 Session 一致；同 Session 内另开 Thread 也允许。
-    when(runtime.findThreadSessionId(THREAD_ID)).thenReturn(Optional.of(SESSION_ID));
+    // Issue+Agent 的直接命令必须由产品工作流处理。
     AcceptCommandsCommand siblingThread =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewThread(
                 SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
             List.of(user(new TextMessageContent("sibling"))));
-    assertSame(accepted, service.accept(ISSUE_AGENT_OWNER, siblingThread));
+    assertThrows(
+        DirectCommandsNotAllowedException.class,
+        () -> service.accept(ISSUE_AGENT_OWNER, siblingThread));
+    verify(runtime, never()).acceptCommands(eq(siblingThread), any());
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
 
     verify(chatRepository, times(2)).lockForKeyShare(CHAT_ID);
     verify(chatSessionRepository, times(2)).findBySessionId(SESSION_ID);
@@ -276,44 +267,43 @@ class HarnessCommandAcceptanceOrchestratorTest {
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
-  /** Issue+Agent 授权先锁定产品层级并读取稳定绑定，再进入 Runtime 接受。 */
+  /** Issue+Agent 不能通过公共入口写入，拒绝发生在产品锁和 Runtime 之前。 */
   @Test
-  void issueAgentAcceptanceLocksOwnerHierarchyBeforeRuntime() {
-    service.accept(ISSUE_AGENT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("work"))));
-
-    InOrder order = inOrder(issueAgentOwnership, runtime);
-    order.verify(issueAgentOwnership).lockForAcceptance(ISSUE_AGENT);
-    order.verify(runtime).acceptCommands(any(), any());
+  void issueAgentDirectAcceptanceIsRejectedBeforeLockAndRuntime() {
+    assertThrows(
+        DirectCommandsNotAllowedException.class,
+        () ->
+            service.accept(
+                ISSUE_AGENT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("work")))));
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
+    verifyNoInteractions(runtime);
   }
 
-  /** owner 行缺失、层级不一致或已归档（由 owner 锁定拒绝）时必须在 Runtime 接受之前确定性拒绝。 */
+  /** 缺失 Chat 和禁止直接写入的 Issue 均在 Runtime 接受之前拒绝。 */
   @Test
-  void rejectsMissingOrArchivedOwnerHierarchyBeforeRuntimeAcceptance() {
+  void rejectsMissingChatAndDirectIssueCommandsBeforeRuntimeAcceptance() {
     AcceptCommandsCommand command = newSession(THREAD_ID, user(new TextMessageContent("denied")));
 
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(null);
-    assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, command));
-
-    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT))
-        .thenThrow(new IllegalArgumentException("Cannot accept commands for archived issue"));
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
+    assertThrows(AiResourceNotFoundException.class, () -> service.accept(CHAT_OWNER, command));
+    assertThrows(
+        DirectCommandsNotAllowedException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
 
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
-  /** 同一 Session 只属于其稳定绑定的 Issue+Agent：未绑定身份不能借 NEW_THREAD 接管该 Session。 */
+  /** Issue+Agent 不能用 NEW_THREAD 绕过其产品工作流。 */
   @Test
   void rejectsIssueAgentNewThreadOnUnownedSession() {
-    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
-    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
-
     AcceptCommandsCommand onSession =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewThread(
                 SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
             List.of(user(new TextMessageContent("steal session"))));
     assertThrows(
-        IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, onSession));
+        DirectCommandsNotAllowedException.class,
+        () -> service.accept(ISSUE_AGENT_OWNER, onSession));
 
     verify(runtime, never()).acceptCommands(any(), any());
   }
@@ -329,11 +319,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalArgumentException.class,
         () -> service.accept(CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("x")))));
 
-    // Issue+Agent 不能接管 Chat 已持有的 Session（本身份尚未绑定）。
-    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
-    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
+    // Issue+Agent 公共命令无论绑定状态如何均被拒绝。
     assertThrows(
-        IllegalArgumentException.class,
+        DirectCommandsNotAllowedException.class,
         () ->
             service.accept(
                 ISSUE_AGENT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("x")))));
@@ -341,11 +329,11 @@ class HarnessCommandAcceptanceOrchestratorTest {
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
-  /** 绑定一旦存在就不可重绑：同一 Agent 不能用 NEW_SESSION 指向另一个 Thread。 */
+  /** Issue+Agent 不能借 NEW_SESSION 直接写入；绑定校验由产品 SPI 测试覆盖。 */
   @Test
-  void rejectsRebindingIssueAgentToAnotherThread() {
+  void rejectsIssueAgentNewRootForAnotherThread() {
     assertThrows(
-        IllegalArgumentException.class,
+        DirectCommandsNotAllowedException.class,
         () ->
             service.accept(
                 ISSUE_AGENT_OWNER,
@@ -377,23 +365,23 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 new Session(SESSION_ID, "session", NOW), chatCommand.commands(), List.of()));
   }
 
-  /** Issue+Agent Thread 的 Goal 不再由产品入口拒绝：绑定 Session 内允许设置或清除 Branch Goal。 */
+  /** Issue+Agent 的 Goal 也不能绕过产品工作流直接接受。 */
   @Test
-  void acceptsGoalCommandsForIssueAgentThreads() {
+  void rejectsGoalCommandsForIssueAgentThreads() {
     NewThreadCommand goal =
         new NewThreadCommand(new GoalCommandPayload("ship the release"), id(21));
-    when(runtime.findThreadSessionId(THREAD_ID)).thenReturn(Optional.of(SESSION_ID));
+    assertThrows(
+        DirectCommandsNotAllowedException.class,
+        () ->
+            service.accept(
+                ISSUE_AGENT_OWNER,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewThread(
+                        SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
+                    List.of(goal))));
 
-    assertSame(
-        accepted,
-        service.accept(
-            ISSUE_AGENT_OWNER,
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
-                List.of(goal))));
-
-    verify(runtime).acceptCommands(any(), any());
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
   }
 
   /** Chat 普通 Branch 的 Goal 是产品能力：同一 GOAL 命令在 CHAT owner 下必须继续被接受。 */
@@ -561,42 +549,46 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
+  void rejectsUnknownOrAmbiguousOwnerKindsBeforeLocking() {
+    // 未知或重复 kind 必须在产品锁和 runtime 写之前拒绝。
+    AcceptCommandsCommand command = newSession(THREAD_ID, user(new TextMessageContent("x")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.accept(new SessionOwner("UNKNOWN", "id"), command));
+    SessionOwnership duplicate = mock(SessionOwnership.class);
+    when(duplicate.kind()).thenReturn("ISSUE_AGENT");
+    HarnessCommandAcceptanceOrchestrator ambiguous =
+        new HarnessCommandAcceptanceOrchestrator(
+            List.of(issueAgentOwnership, duplicate),
+            runtimes,
+            uploadService,
+            refManager,
+            blobManager);
+    assertThrows(
+        IllegalArgumentException.class, () -> ambiguous.accept(ISSUE_AGENT_OWNER, command));
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
+    verify(duplicate, never()).lockForAcceptance(any(), any());
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
   void rejectsNullDependenciesAndNullOwner() {
-    // 强依赖验证：各 Repository、owner provider、Runtime、Upload service、Session ref manager 与 Blob
-    // manager 必须非空注入。
+    // 强依赖与 owner 均不得为空。
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                null,
-                chatRepository,
-                issueAgentOwnerships,
-                runtimes,
-                uploadService,
-                refManager,
-                blobManager));
+                null, runtimes, uploadService, refManager, blobManager));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentOwnerships,
-                runtimes,
-                null,
-                refManager,
-                blobManager));
+                List.of(issueAgentOwnership), runtimes, null, refManager, blobManager));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentOwnerships,
-                runtimes,
-                uploadService,
-                refManager,
-                null));
+                List.of(issueAgentOwnership), runtimes, uploadService, refManager, null));
     assertThrows(
         NullPointerException.class,
         () -> service.accept(null, newSession(THREAD_ID, user(new TextMessageContent("null")))));
@@ -662,7 +654,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void rejectsIssueAgentSessionForkBeforeAnySideEffect() {
     AcceptCommandsCommand command = sessionFork(user(new TextMessageContent("fork")));
 
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
+    assertThrows(
+        DirectCommandsNotAllowedException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
+    verify(issueAgentOwnership, never()).lockForAcceptance(any(), any());
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatSessionRepository, never()).insert(any(), any());
@@ -785,7 +779,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   private AcceptancePreflight acceptAndCapturePreflight(
-      OwnerRef owner, AcceptCommandsCommand command) {
+      SessionOwner owner, AcceptCommandsCommand command) {
     assertSame(accepted, service.accept(owner, command));
     ArgumentCaptor<AcceptancePreflight> captor = ArgumentCaptor.forClass(AcceptancePreflight.class);
     verify(runtime).acceptCommands(eq(command), captor.capture());

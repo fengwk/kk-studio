@@ -31,6 +31,8 @@ import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
+import fun.fengwk.kkstudio.platform.chat.ChatSession;
+import fun.fengwk.kkstudio.platform.chat.ChatSessionOwnership;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
@@ -40,7 +42,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -69,15 +70,13 @@ class SessionDeletionOrchestratorTest {
   private static final UUID BLOB_2 = id(60);
   private static final UUID ISSUE_ID = id(90);
   private static final String AGENT_NAME = "executor";
-  private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
-  private static final OwnerRef.IssueAgent ISSUE_AGENT =
-      new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
-  private static final OwnerRef ISSUE_AGENT_OWNER = ISSUE_AGENT;
+  private static final SessionOwner CHAT_OWNER = new SessionOwner("CHAT", CHAT_ID.toString());
+  private static final SessionOwner ISSUE_AGENT_OWNER =
+      new SessionOwner("ISSUE_AGENT", ISSUE_ID + ":" + AGENT_NAME);
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
-  private IssueAgentOwnership issueAgentOwnership;
-  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
+  private SessionOwnership issueAgentOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
@@ -100,8 +99,7 @@ class SessionDeletionOrchestratorTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    issueAgentOwnerships = mock(ObjectProvider.class);
+    issueAgentOwnership = mock(SessionOwnership.class);
     runtimes = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
@@ -145,12 +143,19 @@ class SessionDeletionOrchestratorTest {
 
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
 
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
-    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_1));
+    when(chatSessionRepository.findBySessionId(any()))
+        .thenAnswer(inv -> new ChatSession(inv.getArgument(0), CHAT_ID));
+    when(chatSessionRepository.deleteBySessionId(any())).thenReturn(1);
+    when(issueAgentOwnership.kind()).thenReturn("ISSUE_AGENT");
+    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT_OWNER)).thenReturn(List.of(SESSION_1));
 
     service =
         new SessionDeletionOrchestrator(
-            chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, refManager);
+            List.of(
+                new ChatSessionOwnership(chatRepository, chatSessionRepository),
+                issueAgentOwnership),
+            runtimes,
+            refManager);
   }
 
   @Test
@@ -183,7 +188,7 @@ class SessionDeletionOrchestratorTest {
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_2);
-    verifyNoInteractions(issueAgentOwnership);
+    verify(issueAgentOwnership, never()).lockForDeletion(any());
   }
 
   @Test
@@ -203,8 +208,8 @@ class SessionDeletionOrchestratorTest {
             entryStore,
             refManager,
             chatSessionRepository);
-    deleteOrder.verify(issueAgentOwnership).lockForDeletion(ISSUE_AGENT);
-    deleteOrder.verify(issueAgentOwnership).deleteBinding(ISSUE_AGENT);
+    deleteOrder.verify(issueAgentOwnership).lockForDeletion(ISSUE_AGENT_OWNER);
+    deleteOrder.verify(issueAgentOwnership).beforeSessionDeletion(ISSUE_AGENT_OWNER, SESSION_1);
     deleteOrder.verify(threadStore).lock(THREAD_1);
     deleteOrder.verify(joinStore).deleteForThreads(List.of(THREAD_1));
     deleteOrder.verify(threadStore).delete(List.of(THREAD_1));
@@ -227,7 +232,7 @@ class SessionDeletionOrchestratorTest {
     verify(entryStore, never()).delete(SESSION_1);
     verify(entryStore).delete(SESSION_2);
     verify(sessionStore).delete(SESSION_2);
-    verifyNoInteractions(issueAgentOwnership);
+    verify(issueAgentOwnership, never()).lockForDeletion(any());
   }
 
   @Test
@@ -297,7 +302,7 @@ class SessionDeletionOrchestratorTest {
     service.deleteSessionsByOwner(CHAT_OWNER);
 
     // Issue+Agent owner 不存在或尚未绑定时 lockForDeletion 为空。
-    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT)).thenReturn(Optional.empty());
+    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT_OWNER)).thenReturn(List.of());
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
 
     verifyNoInteractions(chatSessionRepository, store, refManager);
@@ -325,12 +330,14 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
-  void missingBoundThreadFailsBeforeDeletion() {
-    // 稳定绑定指向缺失 Thread 是不变量破坏，不能静默当作空会话。
+  void ownershipLockFailureFailsBeforeDeletion() {
+    // 产品归属锁或枚举失败时不能进入 runtime 删除。
+    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT_OWNER))
+        .thenThrow(new IllegalStateException("inconsistent binding"));
     assertThrows(
-        NoSuchElementException.class, () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
+        IllegalStateException.class, () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
 
-    verify(issueAgentOwnership, never()).deleteBinding(any());
+    verify(issueAgentOwnership, never()).beforeSessionDeletion(any(), any());
     verify(sessionStore, never()).delete(any());
     verifyNoInteractions(refManager);
   }
@@ -341,7 +348,7 @@ class SessionDeletionOrchestratorTest {
     putSession(SESSION_1, thread(THREAD_1, SESSION_1));
     doThrow(new DataIntegrityViolationException("referenced by project_issue_run"))
         .when(issueAgentOwnership)
-        .deleteBinding(ISSUE_AGENT);
+        .beforeSessionDeletion(ISSUE_AGENT_OWNER, SESSION_1);
 
     assertThrows(
         DataIntegrityViolationException.class,
@@ -360,15 +367,29 @@ class SessionDeletionOrchestratorTest {
     // 验证 SessionBlobRefManager 等强依赖与 owner 均不可为 null。
     assertThrows(
         NullPointerException.class,
-        () ->
-            new SessionDeletionOrchestrator(
-                null, chatRepository, issueAgentOwnerships, runtimes, refManager));
+        () -> new SessionDeletionOrchestrator(null, runtimes, refManager));
     assertThrows(
         NullPointerException.class,
-        () ->
-            new SessionDeletionOrchestrator(
-                chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, null));
+        () -> new SessionDeletionOrchestrator(List.of(issueAgentOwnership), runtimes, null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
+  }
+
+  @Test
+  void rejectsUnknownAndAmbiguousKindsBeforeLocking() {
+    // 未知或重复 kind 不能触发任何产品删除钩子或 runtime 写入。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.deleteSessionsByOwner(new SessionOwner("UNKNOWN", "id")));
+    SessionOwnership duplicate = mock(SessionOwnership.class);
+    when(duplicate.kind()).thenReturn("ISSUE_AGENT");
+    SessionDeletionOrchestrator ambiguous =
+        new SessionDeletionOrchestrator(
+            List.of(issueAgentOwnership, duplicate), runtimes, refManager);
+    assertThrows(
+        IllegalArgumentException.class, () -> ambiguous.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
+    verify(issueAgentOwnership, never()).lockForDeletion(any());
+    verify(duplicate, never()).lockForDeletion(any());
+    verifyNoInteractions(store, refManager);
   }
 
   private void putSession(UUID sessionId, ThreadState... sessionThreads) {

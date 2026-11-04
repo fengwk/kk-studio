@@ -24,8 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
@@ -86,8 +86,10 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID thread1 = UUID.randomUUID();
     UUID thread2 = UUID.randomUUID();
 
-    acceptAttachment(new OwnerRef.Chat(chat1Id), session1, thread1, UUID.fromString(upload1));
-    acceptAttachment(new OwnerRef.Chat(chat2Id), session2, thread2, UUID.fromString(upload2));
+    acceptAttachment(
+        new SessionOwner("CHAT", chat1Id.toString()), session1, thread1, UUID.fromString(upload1));
+    acceptAttachment(
+        new SessionOwner("CHAT", chat2Id.toString()), session2, thread2, UUID.fromString(upload2));
 
     UUID blobId =
         jdbc.queryForObject(
@@ -96,7 +98,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
         2L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
 
-    deletionService.deleteSessionsByOwner(new OwnerRef.Chat(chat1Id));
+    deletionService.deleteSessionsByOwner(new SessionOwner("CHAT", chat1Id.toString()));
 
     assertEquals(0, count("chat_session", "session_id", session1));
     assertEquals(0, count("harness_session", "id", session1));
@@ -121,8 +123,8 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID secondSession = new UUID(0L, 1L);
     UUID firstThread = new UUID(0L, 3L);
     UUID secondThread = new UUID(0L, 4L);
-    acceptText(new OwnerRef.Chat(chatId), firstSession, firstThread, "first");
-    acceptText(new OwnerRef.Chat(chatId), secondSession, secondThread, "second");
+    acceptText(new SessionOwner("CHAT", chatId.toString()), firstSession, firstThread, "first");
+    acceptText(new SessionOwner("CHAT", chatId.toString()), secondSession, secondThread, "second");
 
     // 归属枚举顺序刻意与 UUID 锁顺序相反；删除服务必须先收集并锁完 Session，再进入 Thread 阶段。
     jdbc.update(
@@ -137,7 +139,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     // 归属枚举与 Session UUID 顺序相反，按 Session 分组后的 Thread 又是 4 -> 3；实现必须分别全局排序两个 rank。
     assertEquals(
         List.of(firstSession, secondSession), chatSessionRepository.listSessionIds(chatId));
-    deletionService.deleteSessionsByOwner(new OwnerRef.Chat(chatId));
+    deletionService.deleteSessionsByOwner(new SessionOwner("CHAT", chatId.toString()));
 
     assertEquals(0, count("chat_session", "chat_id", chatId));
     assertEquals(0, count("harness_session", "id", firstSession));
@@ -146,7 +148,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     assertEquals(0, count("harness_thread", "id", secondThread));
   }
 
-  private void acceptText(OwnerRef owner, UUID sessionId, UUID threadId, String text) {
+  private void acceptText(SessionOwner owner, UUID sessionId, UUID threadId, String text) {
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
@@ -159,7 +161,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
                     UUID.randomUUID()))));
   }
 
-  private void acceptAttachment(OwnerRef owner, UUID sessionId, UUID threadId, UUID uploadId) {
+  private void acceptAttachment(SessionOwner owner, UUID sessionId, UUID threadId, UUID uploadId) {
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
