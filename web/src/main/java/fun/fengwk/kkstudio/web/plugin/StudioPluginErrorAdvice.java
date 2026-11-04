@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

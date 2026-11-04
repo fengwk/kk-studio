@@ -50,7 +50,8 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 | [events](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/events) | 各模块共享的进程内订阅原语：`SubscriptionFanOut` 的 UUID 定点/全局注册、幂等注销与消费者隔离投递，`SourceSubscribed` 的 ack 游标与释放句柄；不含领域事件语义、持久化或 LISTEN |
-| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse`；只依赖 spring-web 的状态类型，不含 advice、MVC 装配或容器 |
+| [http](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/http) | 各模块共享的 HTTP 响应信封 `ApiResponse` 与请求参数适配 `RequestParameters`；只依赖 spring-web，不含 advice、MVC 装配或容器 |
+| [i18n](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/i18n) | 请求 locale 的用户可见消息解析 `StudioMessageService`；资源包随本模块发布，中英文缺键回退固定 |
 
 ## Harness 持久化与调度
 

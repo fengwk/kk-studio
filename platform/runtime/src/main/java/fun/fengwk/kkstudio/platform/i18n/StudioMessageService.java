@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.i18n;
+package fun.fengwk.kkstudio.platform.i18n;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.HttpStatus;

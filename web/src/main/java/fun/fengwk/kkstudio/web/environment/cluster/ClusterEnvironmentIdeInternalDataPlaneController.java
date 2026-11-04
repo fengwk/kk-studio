@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 
 import java.io.IOException;
 import java.util.Objects;

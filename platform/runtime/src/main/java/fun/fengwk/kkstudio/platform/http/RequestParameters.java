@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.api;
+package fun.fengwk.kkstudio.platform.http;
 
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;

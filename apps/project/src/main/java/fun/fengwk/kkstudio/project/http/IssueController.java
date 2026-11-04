@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.project.dto.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ArchiveIssueRequestDTO;
@@ -46,7 +47,6 @@ import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 import java.util.List;
 import java.util.Locale;
@@ -60,7 +60,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping
-public class StudioIssueController {
+public class IssueController {
 
   private static final int DEFAULT_ACTIVITY_LIMIT = 50;
   private static final int MAX_ACTIVITY_LIMIT = 200;
@@ -73,7 +73,7 @@ public class StudioIssueController {
   private final IssueDetailAssembler issueDetailAssembler;
 
   @Autowired
-  public StudioIssueController(
+  public IssueController(
       IssueEditingService issueEditingService,
       IssueLifecycleService issueLifecycleService,
       IssueStageBudgetService issueStageBudgetService,

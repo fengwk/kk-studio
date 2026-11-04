@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.AddIssueEvidenceRequestDTO;
@@ -56,15 +57,13 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
-import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 StudioIssueController 的全部 15 个 REST 接口端点与 CAS 409 处理。 */
-class StudioIssueControllerTest {
+/** 验证 IssueController 的全部 15 个 REST 接口端点与 CAS 409 处理。 */
+class IssueControllerTest {
 
   private IssueEditingService issueEditingService;
   private IssueLifecycleService issueLifecycleService;
@@ -74,7 +73,7 @@ class StudioIssueControllerTest {
   private ProjectService projectService;
 
   private MockMvc mockMvc;
-  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
+  private final JsonMapper objectMapper = ProjectHttpJsonTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final UUID issueId = UUID.randomUUID();
   private final Instant now = Instant.now();
@@ -96,20 +95,20 @@ class StudioIssueControllerTest {
             issueStageBudgetService,
             issueRunService,
             projectService,
-            new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
+            new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get()),
             codec);
-    StudioIssueController controller =
-        new StudioIssueController(
+    IssueController controller =
+        new IssueController(
             issueEditingService,
             issueLifecycleService,
             issueStageBudgetService,
             issueEvidenceService,
-            new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get()),
+            new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get()),
             issueDetailAssembler);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProjectErrorAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

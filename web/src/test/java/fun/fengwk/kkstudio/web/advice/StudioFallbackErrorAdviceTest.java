@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
 import java.util.Locale;
 

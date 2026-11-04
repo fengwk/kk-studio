@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -36,39 +37,37 @@ import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.service.ProjectSnapshotAssembler;
-import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 StudioProjectController 的全部 REST 接口端点与 CAS 409 处理。 */
-class StudioProjectControllerTest {
+/** 验证 ProjectController 的全部 REST 接口端点与 CAS 409 处理。 */
+class ProjectControllerTest {
 
   private ProjectService projectService;
   private ProjectSnapshotAssembler snapshotAssembler;
   private MockMvc mockMvc;
 
-  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
+  private final JsonMapper objectMapper = ProjectHttpJsonTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final Instant now = Instant.now();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
   // 依赖显式提供：生产 HTTP Jackson 3 mapper，与容器注入的是同一实例。
   private final ProjectDtoMapper mapper =
-      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
+      new ProjectDtoMapper(codec, ProjectHttpJsonTestSupport.get());
 
   @BeforeEach
   void setUp() {
     projectService = mock(ProjectService.class);
     snapshotAssembler = mock(ProjectSnapshotAssembler.class);
 
-    StudioProjectController controller =
-        new StudioProjectController(projectService, snapshotAssembler, mapper, codec);
+    ProjectController controller =
+        new ProjectController(projectService, snapshotAssembler, mapper, codec);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
+            .setControllerAdvice(new ProjectErrorAdvice(new StudioMessageService()))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

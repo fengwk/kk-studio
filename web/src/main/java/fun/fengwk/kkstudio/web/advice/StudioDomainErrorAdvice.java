@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

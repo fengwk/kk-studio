@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.i18n;
+package fun.fengwk.kkstudio.platform.i18n;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

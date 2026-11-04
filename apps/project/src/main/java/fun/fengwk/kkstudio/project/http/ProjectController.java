@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -42,7 +42,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/api/projects")
-public class StudioProjectController {
+public class ProjectController {
 
   /** 未显式指定时，新项目默认开启 YOLO。 */
   private static final boolean DEFAULT_YOLO_ENABLED = true;
@@ -53,7 +53,7 @@ public class StudioProjectController {
   private final ProjectWorkflowJsonCodec workflowCodec;
 
   @Autowired
-  public StudioProjectController(
+  public ProjectController(
       ProjectService projectService,
       ProjectSnapshotAssembler projectSnapshotAssembler,
       ProjectDtoMapper mapper,

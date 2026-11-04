@@ -23,9 +23,9 @@ import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
-import fun.fengwk.kkstudio.web.api.RequestParameters;
 
 import java.util.Map;
 

@@ -7,7 +7,7 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 跨域数据约束与 ER 关系见 [Schema](schema.md)。
 
 [`apps/project`](../../apps/project/pom.xml) 是建立在平台之上的应用，集中提供领域规则、Issue 用例、
-PostgreSQL 持久化、Issue 调度与 Agent 业务工具，经
+PostgreSQL 持久化、Issue 调度、Agent 业务工具与 Project/Issue HTTP 边界，经
 [`ProjectAutoConfiguration`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。它直接使用 [Platform](platform.md) 的公开服务（运行时、Agent 任务、全局 Blob、Agent 目录与
 Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。Project 的 HTTP DTO 与领域映射由本模块持有，映射在
@@ -27,7 +27,8 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具与 Thread 归属解析 |
 | [dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto) | Project/Issue wire DTO 与领域模型双向映射 |
-| [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Web 映射 |
+| [http](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http) | Project/Issue REST 控制器与统一错误映射；只做 HTTP 适配，领域行为在 `service` |
+| [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Project 错误映射 |
 
 ## 平台能力与 owner 归属
 
@@ -275,8 +276,9 @@ Harness 的调度时间域见 [Platform](platform.md#work-的-claim--lease--wake
 ## 错误映射
 
 模块内的 `ProjectValidationException`、`ProjectNotFoundException`、
-`ProjectVersionConflictException`、`ProjectDuplicateException` 在 Web 边界由
-`StudioProjectErrorAdvice` 统一映射：validation 400、not found 404、version/duplicate/runtime conflict 409、
+`ProjectVersionConflictException`、`ProjectDuplicateException` 在本模块的 HTTP 边界由
+[`ProjectErrorAdvice`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/http/ProjectErrorAdvice.java)
+统一映射：validation 400、not found 404、version/duplicate/runtime conflict 409、
 `IllegalStateException` 500，并输出稳定的 `PROJECT_*` 错误码。在 Agent 工具边界由
 [`tool`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) 包译成 `AiValidationException` / `AiVersionConflictException` 等平台错误类型。
 

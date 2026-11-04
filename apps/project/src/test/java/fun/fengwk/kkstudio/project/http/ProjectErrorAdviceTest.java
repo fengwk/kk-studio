@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,19 +15,18 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
 import java.util.Map;
 
-class StudioProjectErrorAdviceTest {
+class ProjectErrorAdviceTest {
 
-  private final StudioProjectErrorAdvice advice =
-      new StudioProjectErrorAdvice(new StudioMessageService());
+  private final ProjectErrorAdvice advice = new ProjectErrorAdvice(new StudioMessageService());
 
   @BeforeEach
   void pinEnglishLocale() {
@@ -41,11 +40,9 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void scopesAdviceToSupportedControllers() {
-    RestControllerAdvice ann =
-        StudioProjectErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
+    RestControllerAdvice ann = ProjectErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
     assertArrayEquals(
-        new Class<?>[] {StudioProjectController.class, StudioIssueController.class},
-        ann.assignableTypes());
+        new Class<?>[] {ProjectController.class, IssueController.class}, ann.assignableTypes());
   }
 
   @Test

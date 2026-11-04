@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.http;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -12,11 +12,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,13 +27,12 @@ import java.util.Map;
  * <p>安全契约：严禁在响应或日志中回显 Issue Activity 正文、幂等键、认证凭证或非预期的敏感属性。409 冲突响应仅透出资源类型以及期望与实际版本对比，协助前端判断 CAS 重试。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(
-    assignableTypes = {StudioProjectController.class, StudioIssueController.class})
-public class StudioProjectErrorAdvice {
+@RestControllerAdvice(assignableTypes = {ProjectController.class, IssueController.class})
+public class ProjectErrorAdvice {
 
   private final StudioMessageService messageService;
 
-  public StudioProjectErrorAdvice(StudioMessageService messageService) {
+  public ProjectErrorAdvice(StudioMessageService messageService) {
     this.messageService = messageService;
   }
 
