@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -75,5 +76,15 @@ public class PlatformHarnessTestConfiguration {
   @ConditionalOnMissingBean(HarnessStore.class)
   public HarnessStore platformHarnessStore() {
     return mock(HarnessStore.class);
+  }
+
+  /**
+   * 等待环境线程投影读取 Harness Work 事实；生产 Runtime 由 web 组合根提供，platform 测试上下文给出占位 bean 仅为满足装配 （platform
+   * 测试不执行等待环境投影，真实投影由 web 的 PostgreSQL 集成测试覆盖）。
+   */
+  @Bean
+  @ConditionalOnMissingBean(HarnessRuntime.class)
+  public HarnessRuntime platformHarnessRuntime() {
+    return mock(HarnessRuntime.class);
   }
 }
