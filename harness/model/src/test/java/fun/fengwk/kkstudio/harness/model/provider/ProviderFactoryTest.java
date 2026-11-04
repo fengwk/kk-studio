@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,23 +8,11 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-class ProviderFactoriesTest {
-
-  @Test
-  void rejectsDuplicateProviderType() {
-    ProviderFactory openai =
-        ProviderFactory.of(ProviderType.OPENAI, PromptCacheRetention.NONE, (c, j) -> null);
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class, () -> new ProviderFactories(List.of(openai, openai)));
-    assertTrue(error.getMessage().contains("duplicate ProviderFactory"));
-    assertTrue(error.getMessage().contains("OPENAI"));
-  }
+class ProviderFactoryTest {
 
   @Test
   void rejectsNullAdapterConstructor() {
@@ -45,18 +32,6 @@ class ProviderFactoriesTest {
         assertThrows(IllegalArgumentException.class, () -> factory.create("", ""));
     assertTrue(error.getMessage().contains("ANTHROPIC"));
     assertTrue(error.getMessage().contains("OPENAI"));
-  }
-
-  @Test
-  void lookupIsEmptyForUnknownTypeAndPresentForKnownType() {
-    ProviderFactory openai =
-        ProviderFactory.of(
-            ProviderType.OPENAI,
-            PromptCacheRetention.SHORT,
-            (c, j) -> new AdapterStub(ProviderType.OPENAI));
-    ProviderFactories factories = new ProviderFactories(List.of(openai));
-    assertSame(openai, factories.lookup(ProviderType.OPENAI).orElseThrow());
-    assertTrue(factories.lookup(ProviderType.GOOGLE).isEmpty());
   }
 
   @Test

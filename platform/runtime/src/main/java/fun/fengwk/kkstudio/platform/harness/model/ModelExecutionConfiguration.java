@@ -9,7 +9,6 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
@@ -26,6 +25,9 @@ import java.net.ProxySelector;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -165,7 +167,20 @@ public class ModelExecutionConfiguration {
   }
 
   @Bean
-  public ProviderFactories providerFactories(ObjectProvider<ProviderFactory> providerFactoryBeans) {
-    return new ProviderFactories(providerFactoryBeans.orderedStream().toList());
+  public Map<ProviderType, ProviderFactory> providerFactories(
+      ObjectProvider<ProviderFactory> providerFactoryBeans) {
+    Objects.requireNonNull(providerFactoryBeans, "factories");
+    Map<ProviderType, ProviderFactory> index = new LinkedHashMap<>();
+    providerFactoryBeans
+        .orderedStream()
+        .forEach(
+            factory -> {
+              Objects.requireNonNull(factory, "factory");
+              ProviderType type = Objects.requireNonNull(factory.providerType(), "providerType");
+              if (index.putIfAbsent(type, factory) != null) {
+                throw new IllegalArgumentException("duplicate ProviderFactory for " + type);
+              }
+            });
+    return Map.copyOf(index);
   }
 }

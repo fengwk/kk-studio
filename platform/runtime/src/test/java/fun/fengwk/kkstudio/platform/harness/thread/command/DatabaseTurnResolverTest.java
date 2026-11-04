@@ -85,7 +85,6 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
@@ -158,6 +157,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、唯一的 registry
@@ -1691,7 +1692,7 @@ class DatabaseTurnResolverTest {
         new DatabaseProviderResolutionService(
             fixture.providers,
             new AgentProviderConfigurationCodec(JsonMapper.builder().build()),
-            new ProviderFactories(List.of(factory)),
+            Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content));
     ResolvedExecution execution =
         resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
@@ -3410,7 +3411,10 @@ class DatabaseTurnResolverTest {
               providers,
               modelConfigParser,
               groupConfigCodec,
-              new ProviderFactories(factories),
+              factories.stream()
+                  .collect(
+                      Collectors.toUnmodifiableMap(
+                          ProviderFactory::providerType, Function.identity())),
               () -> new CompactionConfig(20_000),
               contextResolver,
               TokenEstimator::estimateRequestTokens,
