@@ -3830,7 +3830,7 @@ class ModelProcessorTest {
     fixture.gateway.queue(
         new ModelGateway.Rejected(
             new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model rejected")));
-    RecordingLockStore recording = new RecordingLockStore(fixture.store);
+    RecordingStore recording = new RecordingStore(fixture.store);
     ModelProcessor processor =
         new ModelProcessor(
             recording,
@@ -3884,75 +3884,6 @@ class ModelProcessorTest {
   // ---------------------------------------------------------------------------------------------
   // fixture / 辅助方法
   // ---------------------------------------------------------------------------------------------
-
-  /** 记录模型事务锁序，同时保留同一事务上的 Builtin 操作拦截。 */
-  private static final class RecordingLockStore implements HarnessStore, BuiltinStore {
-    private final InMemoryBuiltinHarnessStore delegate;
-    private final List<List<String>> transactions = new CopyOnWriteArrayList<>();
-
-    private RecordingLockStore(InMemoryBuiltinHarnessStore delegate) {
-      this.delegate = delegate;
-    }
-
-    private List<List<String>> threadLockTransactions() {
-      return transactions.stream()
-          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("threads.lock:")))
-          .toList();
-    }
-
-    @Override
-    public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
-      return delegate.in(tx);
-    }
-
-    @Override
-    public void afterCommit(Runnable action) {
-      delegate.afterCommit(action);
-    }
-
-    @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
-    @Override
-    public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
-      return delegate.transaction(
-          tx -> {
-            List<String> ops = new CopyOnWriteArrayList<>();
-            transactions.add(ops);
-            HarnessStore.Transaction recording =
-                wrap(
-                    tx,
-                    (call, next) -> {
-                      String name = call.operation();
-                      if (name.equals("threads.lock")
-                          || name.equals("threads.lockTree")
-                          || name.equals("threads.findAncestorChain")
-                          || name.equals("sessions.lockForKeyShare")
-                          || name.equals("sessions.lockForUpdate")
-                          || name.equals("tools.lock")
-                          || name.equals("tools.lockByAssistantEntry")
-                          || name.equals("work.lock")
-                          || name.equals("work.lockClaimed")
-                          || name.equals("work.request")
-                          || name.equals("work.complete")
-                          || name.equals("work.reschedule")
-                          || name.equals("threads.update")
-                          || name.equals("tools.update")
-                          || name.equals("lockModelInvocation")
-                          || name.startsWith("update")) {
-                        ops.add(
-                            call.arguments() == null || call.arguments().length == 0
-                                ? name
-                                : name + ":" + call.argument(0));
-                      }
-                      return next.invoke();
-                    });
-            return callback.apply(recording);
-          });
-    }
-  }
 
   /** 在一次 transaction 加载完不可变 EntryPath 并提交后执行 {@code afterLoad}，用于证明 materialize 之后的 start fence。 */
   private static HarnessStore afterEntryPathLoad(HarnessStore delegate, Runnable afterLoad) {

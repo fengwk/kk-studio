@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -32,7 +31,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -80,7 +78,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -97,7 +94,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 /** PR 1 Java 运行时聚合状态机自动化测试： 验证有界批次、单 drain owner 严格保序、定时器、终态合并单次 UPDATE 与各类异常收敛边界。 */
 class ModelExecutionStreamFlushTest {
@@ -485,7 +481,7 @@ class ModelExecutionStreamFlushTest {
     assertEquals(0, fixture.store.transactionCount(), "buffered delta must not touch the store");
 
     fixture.execution.abandon();
-    fixture.store.resetUpdateCount();
+    fixture.store.resetCounters();
 
     // 取消后到达的容量边界与后续 delta 都必须 no-op
     fixture.listener().onEvent(delta("second"));
@@ -578,7 +574,7 @@ class ModelExecutionStreamFlushTest {
               tx.work().delete(new WorkTarget(BuiltinWorkType.MODEL, fixture.invocationId));
               return null;
             });
-    fixture.store.resetUpdateCount();
+    fixture.store.resetCounters();
 
     trigger.accept(fixture);
 
@@ -589,7 +585,7 @@ class ModelExecutionStreamFlushTest {
   private void assertAttemptChangeBoundary(String boundary, Consumer<Fixture> trigger) {
     Fixture fixture = boundaryFixture();
     advanceToSecondAttempt(fixture);
-    fixture.store.resetUpdateCount();
+    fixture.store.resetCounters();
 
     trigger.accept(fixture);
 
@@ -920,7 +916,7 @@ class ModelExecutionStreamFlushTest {
   void committedPartialWithFilteredResponseClearsCheckpointAndDoesNotPublishRegression() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
+    RecordingStore store = new RecordingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -964,7 +960,7 @@ class ModelExecutionStreamFlushTest {
     assertEquals("sensitive content", committedModel.streamCheckpoint().text());
     assertEquals(1, sink.deltas().size());
 
-    int updatesBefore = store.modelInvocationUpdateCount.get();
+    int updatesBefore = store.modelInvocationUpdateCount();
 
     // 投递合法 FILTERED 响应（内容被过滤为空，不作为前缀）
     execution.finish(
@@ -974,7 +970,7 @@ class ModelExecutionStreamFlushTest {
     // 校验：恰好单次 UPDATE 为 SUCCEEDED，checkpoint 撤回为 null
     assertEquals(
         updatesBefore + 1,
-        store.modelInvocationUpdateCount.get(),
+        store.modelInvocationUpdateCount(),
         "must update exactly once to terminal");
     ModelInvocation finalModel =
         store
@@ -992,7 +988,7 @@ class ModelExecutionStreamFlushTest {
   void unflushedPartialWithFilteredResponseClearsCheckpointAndDiscardsBatch() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
+    RecordingStore store = new RecordingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -1026,7 +1022,7 @@ class ModelExecutionStreamFlushTest {
 
     // 投递 delta，未达到 maxEvents=10，停留在 batchItems 中未刷盘
     execution.onEvent(new ProviderStreamEvent.TextDelta("unflushed sensitive"));
-    int updatesBefore = store.modelInvocationUpdateCount.get();
+    int updatesBefore = store.modelInvocationUpdateCount();
 
     // 投递合法 FILTERED 响应
     execution.finish(
@@ -1036,7 +1032,7 @@ class ModelExecutionStreamFlushTest {
     // 校验：单次 UPDATE 为 SUCCEEDED，checkpoint 保持 null，未刷批次被丢弃未发布
     assertEquals(
         updatesBefore + 1,
-        store.modelInvocationUpdateCount.get(),
+        store.modelInvocationUpdateCount(),
         "must update exactly once to terminal");
     ModelInvocation finalModel =
         store
@@ -1053,7 +1049,7 @@ class ModelExecutionStreamFlushTest {
   void illegalFilteredResponseWithToolCallsConvergesToInvalidResponseFailure() {
     ModelStreamConfig flushConfig =
         new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore());
+    RecordingStore store = new RecordingStore(new InMemoryBuiltinHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -1268,7 +1264,7 @@ class ModelExecutionStreamFlushTest {
       ModelRequestSpec requestSpec,
       AtomicReference<String> dbThreadRecord,
       AtomicReference<String> publishThreadRecord) {
-    CountingStore store = new CountingStore(new InMemoryBuiltinHarnessStore(), dbThreadRecord);
+    RecordingStore store = new RecordingStore(new InMemoryBuiltinHarnessStore(), dbThreadRecord);
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec, NOW);
     RecordingSink sink = new RecordingSink(publishThreadRecord);
@@ -1298,7 +1294,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static final class Fixture {
-    final CountingStore store;
+    final RecordingStore store;
     final Baseline baseline;
     final UUID invocationId;
     final RecordingSink sink;
@@ -1307,7 +1303,7 @@ class ModelExecutionStreamFlushTest {
     final Driver driver;
 
     Fixture(
-        CountingStore store,
+        RecordingStore store,
         Baseline baseline,
         UUID invocationId,
         RecordingSink sink,
@@ -1325,7 +1321,7 @@ class ModelExecutionStreamFlushTest {
     /** READY -> RUNNING 持久化；随后重置计数器，只统计流式阶段的事务与更新。 */
     void start() {
       assertTrue(execution.markRunning());
-      store.resetUpdateCount();
+      store.resetCounters();
     }
 
     Driver listener() {
@@ -1700,106 +1696,6 @@ class ModelExecutionStreamFlushTest {
 
     List<Integer> batchSizes() {
       return List.copyOf(batchSizes);
-    }
-  }
-
-  /**
-   * 测试专用 Store 代理：精确计数事务、行锁查询（{@code lockModelInvocation} / {@code lockClaimedWork}）与 {@code
-   * updateModelInvocation}（对应真实实现中的 UPDATE / SELECT ... FOR UPDATE SQL 次数），并支持失败注入，同时解包异常保证
-   * delegate 原样抛出。
-   *
-   * <p>只统计 UPDATE 次数不足以证明「每个 buffered delta 零数据库开销」：必须同时证明零事务、零行锁查询、零 SQL 执行。
-   */
-  static final class CountingStore implements HarnessStore, BuiltinStore {
-    private final InMemoryBuiltinHarnessStore delegate;
-    private final AtomicInteger modelInvocationUpdateCount = new AtomicInteger();
-    private final AtomicInteger transactionCount = new AtomicInteger();
-    private final AtomicInteger modelInvocationLockCount = new AtomicInteger();
-    private final AtomicInteger claimedWorkLockCount = new AtomicInteger();
-    private final AtomicReference<String> threadRecord;
-    volatile RuntimeException updateInvocationFailure;
-    volatile RuntimeException transactionFailure;
-
-    CountingStore(InMemoryBuiltinHarnessStore delegate) {
-      this(delegate, null);
-    }
-
-    CountingStore(InMemoryBuiltinHarnessStore delegate, AtomicReference<String> threadRecord) {
-      this.delegate = Objects.requireNonNull(delegate);
-      this.threadRecord = threadRecord;
-    }
-
-    InMemoryBuiltinHarnessStore delegate() {
-      return delegate;
-    }
-
-    @Override
-    public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
-      return delegate.in(tx);
-    }
-
-    int modelInvocationUpdateCount() {
-      return modelInvocationUpdateCount.get();
-    }
-
-    int transactionCount() {
-      return transactionCount.get();
-    }
-
-    int modelInvocationLockCount() {
-      return modelInvocationLockCount.get();
-    }
-
-    int claimedWorkLockCount() {
-      return claimedWorkLockCount.get();
-    }
-
-    void resetUpdateCount() {
-      modelInvocationUpdateCount.set(0);
-      transactionCount.set(0);
-      modelInvocationLockCount.set(0);
-      claimedWorkLockCount.set(0);
-    }
-
-    @Override
-    public void afterCommit(Runnable action) {
-      delegate.afterCommit(action);
-    }
-
-    @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
-    @Override
-    public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
-      if (transactionFailure != null) {
-        throw transactionFailure;
-      }
-      transactionCount.incrementAndGet();
-      return delegate.transaction(
-          tx -> {
-            HarnessStore.Transaction proxyTx =
-                wrap(
-                    tx,
-                    (call, next) -> {
-                      if ("updateModelInvocation".equals(call.operation())) {
-                        if (threadRecord != null) {
-                          threadRecord.set(Thread.currentThread().getName());
-                        }
-                        modelInvocationUpdateCount.incrementAndGet();
-                        if (updateInvocationFailure != null) {
-                          throw updateInvocationFailure;
-                        }
-                      } else if ("lockModelInvocation".equals(call.operation())) {
-                        modelInvocationLockCount.incrementAndGet();
-                      } else if ("work.lockClaimed".equals(call.operation())) {
-                        claimedWorkLockCount.incrementAndGet();
-                      }
-                      return next.invoke();
-                    });
-            return callback.apply(proxyTx);
-          });
     }
   }
 }
