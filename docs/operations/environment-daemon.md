@@ -312,20 +312,20 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
 服务器；初始化失败不重试，进程范围与清理行为见[内置工具与异步委派](../modules/builtin-tools.md#lsp-生命周期)。
 
-## 本机代理
+## 网络代理
 
-Daemon 不接收 Backend 的代理设置。启动时分别读取 `http_proxy`、`https_proxy`，
-兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托操作系统底层代理（Linux、macOS SystemConfiguration、Windows WinINet）。
-`no_proxy`/`NO_PROXY` 的逗号分隔绕过规则同样作用于操作系统回退结果，支持主机、域名后缀、
-IPv4/IPv6 字面量、`*` 与 IPv4/IPv6 CIDR（如 `192.168.0.0/16`、`::1/128`）；CIDR 只按目标 URL
-中的数值 IP 逐位匹配，不会为目标域名解析 DNS，因此按域名访问的内网服务仍应写域名规则。
-环境代理地址只接受无认证的 `http://host:port`；HTTPS/WSS 通过 CONNECT，
-不支持 SOCKS、代理认证或 TLS 到代理，非法配置在启动时拒绝。
+在 Studio **系统设置 → 网络** 配置 Backend 与所有在线 Daemon 共用的代理。地址仅接受
+无认证的 `http://host:port`，留空表示直连；不支持 SOCKS、代理认证或 TLS 到代理。
+绕过列表支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（如
+`192.168.0.0/16`、`::1/128`）。CIDR 仅匹配目标 URL 中的数值 IP，不解析域名。
 
-环境变量必须进入 Daemon 进程：终端 `export` 不会改变已经运行的服务。安装器不保存
-代理配置文件；Linux systemd user service、macOS LaunchAgent 或 Windows 计划任务
-需要由对应的用户环境/服务管理器提供变量，修改后重新启动 Daemon。将 studio 和
-对象存储的内网地址加入绕过规则，避免控制连接与预签名上传误走外部代理。
+Daemon 就绪时及设置变化后接收当前设置，不读取宿主环境变量或操作系统代理。
+预签名 S3 上传与技能下载的新请求使用当前设置；命令、LSP 和 code-server 在启动时
+通过 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 获取设置，变更不影响已启动的进程。
+Studio 生成的安装和卸载脚本以及在线更新安装器作业也携带当前代理设置；
+未配置代理时显式直连，不继承目标主机的代理设置。
+控制连接始终直连 Studio，因此即使代理不可用仍可接收修正；宿主必须能够直连 Studio。
+确保代理地址从每个 Daemon 主机可达，并将需要直连的对象存储地址加入绕过列表。
 
 ## 验证与 READY
 
@@ -387,16 +387,17 @@ HOME 也不是默认工作目录。
 
 更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
 必须是非草稿、tag 匹配、五件套资产齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、
-`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到命令后再次校验 URL 形状、
-SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` 预检，任何一步失败都不改动旧二进制。
+`THIRD_PARTY_NOTICES`）的完整发布，且制品地址就是官方地址。Daemon 收到目标版本后下载该版本的官方安装脚本，
+由安装脚本校验官方归档及校验文件，并使用现有配置和令牌执行安装。
 
 - 一个 Environment 同一时刻至多一次更新：内存准入与持久 operation 行双重保证；更新期间普通
   capability 调用在起点被 busy 拒绝，连接仍保持认证。
-- 只有受管安装（存在 `lib/main.js` 与同目录 `daemon.json`）接受更新；更新只替换
-  `lib` 下的程序发行目录，`daemon.json`、`daemon.token`、技能与数据都不改动，也不隐式重跑已保存的安装配置。
-- 下载/预检/备份后，Daemon 把制品交给一个 **OS 级独立、短生命周期的更新器**（Linux `systemd-run`
-  瞬时单元、macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务）完成替换与重启。
-  更新器不常驻、不提权、不自动回滚；受管服务定义缺失或归属标记不匹配时 fail closed，不改动二进制。
+- 只有官方受管安装接受更新。安装器以当前 `daemon.json` 和 `daemon.token` 为输入进行预检和快照发布；
+  配置与令牌内容、技能和数据会保留，程序与服务定义由安装器更新。
+- Daemon 启动 **OS 级独立、短生命周期的任务**（Linux `systemd-run` 瞬时单元、
+  macOS `launchctl submit` 瞬时 job、Windows 一次性计划任务），由其调用官方安装脚本完成替换与重启。
+  安装器日志保存在 `~/.kk-studio/updates/<operationId>-*/install.log`；服务仍在运行时安装失败会发送安全的失败回执，
+  服务停止后可通过该日志及安装器报告的备份路径排查，不自动重试。
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。

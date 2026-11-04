@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
+import fun.fengwk.kkstudio.platform.daemon.protocol.IdeDirectoryListing;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
@@ -42,6 +43,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -55,6 +57,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -158,6 +161,20 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertTrue(localTransportA.commands.isEmpty());
   }
 
+  /** 编码查询参与签名，远端按解码后的原始路径发送命令。 */
+  @Test
+  void directoryQueryAndMobileCommandReachRemoteOwner() {
+    assertEquals("/", nodeAService.listDirectories(ENV, "/a b+中").getPath());
+    assertEquals("/a b+中", transportB.commands.getLast().getDirectory());
+    nodeAService.openView(ENV, openViewRequest(null));
+    nodeAService.collapseMobile(ENV, VIEW, binding("7"));
+    assertEquals(IdeAction.COLLAPSE_MOBILE, transportB.commands.getLast().getAction());
+    assertEquals(3, received.get());
+    assertThrows(
+        AiValidationException.class, () -> nodeAService.listDirectories(ENV, "x".repeat(4097)));
+    assertEquals(3, received.get());
+  }
+
   @Test
   void unavailableRouteFailsClosedWithoutContactingTheRemoteOwner() {
     registryA.current = Optional.empty();
@@ -220,6 +237,129 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
           () -> service.openView(ENV, openViewRequest(null)));
     } finally {
       oversizeServer.stop(0);
+    }
+  }
+
+  /** 普通关闭的响应头和响应体都可等待确认。 */
+  @Test
+  void normalRemoteCloseWaitsForHeadersAndBody() throws Exception {
+    CountDownLatch receivedRequest = new CountDownLatch(1);
+    CountDownLatch sendHeaders = new CountDownLatch(1);
+    CountDownLatch headersSent = new CountDownLatch(1);
+    CountDownLatch finishBody = new CountDownLatch(1);
+    HttpServer delayed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    delayed.createContext(
+        "/internal/environment-ide/",
+        exchange -> {
+          receivedRequest.countDown();
+          try {
+            sendHeaders.await(5, TimeUnit.SECONDS);
+            exchange.sendResponseHeaders(200, 0);
+            headersSent.countDown();
+            finishBody.await(5, TimeUnit.SECONDS);
+            exchange.close();
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            exchange.close();
+          }
+        });
+    delayed.start();
+    try {
+      IdeClusterClient client =
+          new IdeClusterClient(
+              HttpClient.newHttpClient(),
+              objectMapper,
+              new HmacClusterInternalAuthentication(
+                  SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024),
+              Duration.ofMillis(200),
+              1024);
+      ClusterOwnerRoute owner =
+          ClusterOwnerRoute.remote(
+              NODE_B, URI.create("http://127.0.0.1:" + delayed.getAddress().getPort()));
+      EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+      close.setDiscard(false);
+      CompletableFuture<Void> waiting =
+          CompletableFuture.runAsync(() -> client.closeView(ENV, owner, VIEW, close));
+      assertTrue(receivedRequest.await(2, TimeUnit.SECONDS));
+      assertThrows(TimeoutException.class, () -> waiting.get(450, TimeUnit.MILLISECONDS));
+      sendHeaders.countDown();
+      assertTrue(headersSent.await(2, TimeUnit.SECONDS));
+      assertThrows(TimeoutException.class, () -> waiting.get(450, TimeUnit.MILLISECONDS));
+      finishBody.countDown();
+      waiting.get(2, TimeUnit.SECONDS);
+    } finally {
+      sendHeaders.countDown();
+      finishBody.countDown();
+      delayed.stop(0);
+    }
+  }
+
+  /** 等待时间无限不意味着响应体大小无限。 */
+  @Test
+  void normalRemoteCloseStillRejectsOversizedBody() throws Exception {
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/internal/environment-ide/", exchange -> respond(exchange, 200, "x".repeat(2048)));
+    server.start();
+    try {
+      IdeClusterClient client =
+          new IdeClusterClient(
+              HttpClient.newHttpClient(),
+              objectMapper,
+              new HmacClusterInternalAuthentication(
+                  SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024),
+              Duration.ofMillis(200),
+              1024);
+      ClusterOwnerRoute owner =
+          ClusterOwnerRoute.remote(
+              NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+      EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+      close.setDiscard(false);
+      assertThrows(
+          AiEnvironmentIdeUnavailableException.class,
+          () -> client.closeView(ENV, owner, VIEW, close));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  /** discard 关闭仍有超时，不能随普通关闭一同变成无限等待。 */
+  @Test
+  void remoteDiscardCloseStillTimesOut() throws Exception {
+    CountDownLatch release = new CountDownLatch(1);
+    HttpServer delayed = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    delayed.createContext(
+        "/internal/environment-ide/",
+        exchange -> {
+          try {
+            release.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          } finally {
+            exchange.close();
+          }
+        });
+    delayed.start();
+    try {
+      IdeClusterClient client =
+          new IdeClusterClient(
+              HttpClient.newHttpClient(),
+              objectMapper,
+              new HmacClusterInternalAuthentication(
+                  SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024),
+              Duration.ofMillis(200),
+              1024);
+      ClusterOwnerRoute owner =
+          ClusterOwnerRoute.remote(
+              NODE_B, URI.create("http://127.0.0.1:" + delayed.getAddress().getPort()));
+      EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+      close.setDiscard(true);
+      assertThrows(
+          AiEnvironmentIdeUnavailableException.class,
+          () -> client.closeView(ENV, owner, VIEW, close));
+    } finally {
+      release.countDown();
+      delayed.stop(0);
     }
   }
 
@@ -312,7 +452,8 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       }
     }
     try {
-      nodeBAuthentication.verify(exchange.getRequestMethod(), path, headers);
+      nodeBAuthentication.verify(
+          exchange.getRequestMethod(), exchange.getRequestURI().toString(), headers);
     } catch (ClusterInternalAuthenticationException error) {
       respond(exchange, 401, "{\"message\":\"internal authentication failed\"}");
       return;
@@ -321,6 +462,16 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     String method = exchange.getRequestMethod();
     String[] segments = path.split("/");
     try {
+      if ("GET".equals(method) && path.endsWith("/directories")) {
+        String query = exchange.getRequestURI().getRawQuery();
+        String directory =
+            query == null ? null : URLDecoder.decode(query.substring(5), StandardCharsets.UTF_8);
+        respond(
+            exchange,
+            200,
+            objectMapper.writeValueAsString(nodeBLocal.listDirectories(environmentId, directory)));
+        return;
+      }
       if ("POST".equals(method) && path.endsWith("/views")) {
         EnvironmentIdeOpenViewDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeOpenViewDTO.class);
@@ -350,6 +501,13 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         EnvironmentIdeViewBindingDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
         nodeBLocal.focusTerminal(environmentId, segments[5], request);
+        respond(exchange, 204, "");
+        return;
+      }
+      if ("POST".equals(method) && segments.length == 7 && "mobile-layout".equals(segments[6])) {
+        EnvironmentIdeViewBindingDTO request =
+            objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
+        nodeBLocal.collapseMobile(environmentId, segments[5], request);
         respond(exchange, 204, "");
         return;
       }
@@ -437,6 +595,12 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     }
 
     private static IdeResult replyFor(IdeCommand command) {
+      if (command.getAction() == IdeAction.LIST_DIRECTORIES) {
+        return IdeResult.newBuilder()
+            .setOk(true)
+            .setDirectoryListing(IdeDirectoryListing.newBuilder().setPath("/").setTruncated(false))
+            .build();
+      }
       if (command.getAction() == IdeAction.LIST_VIEWS) {
         return IdeResult.newBuilder().setOk(true).build();
       }

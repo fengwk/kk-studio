@@ -49,11 +49,13 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -198,6 +200,51 @@ class PluginManagementServiceTest {
     assertEquals("2", dto.getAppliedRevision());
     assertEquals(
         "configuration is saved but this node has not applied it yet", dto.getApplicationError());
+  }
+
+  /** 仅有效补丁传给配置服务，非法字段与值均被拒绝且错误不泄露秘密。 */
+  @Test
+  void validatesAndMapsSecretPatchesBeforeSaving() {
+    String secret = "sensitive-patch-marker";
+    PluginSecretPatchDTO set = patch("SET", secret);
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", set));
+    verify(configurationService)
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.set(secret)));
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("KEEP", null)));
+    verify(configurationService)
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.keep()));
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", patch("CLEAR", null)));
+    verify(configurationService)
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", PluginSecretPatch.clear()));
+
+    Map<String, PluginSecretPatchDTO> nullEntry = new HashMap<>();
+    nullEntry.put("apiKey", null);
+    Map<String, PluginSecretPatchDTO> nullField = new HashMap<>();
+    nullField.put(null, set);
+    for (Map<String, PluginSecretPatchDTO> invalid :
+        List.of(
+            nullEntry,
+            nullField,
+            Map.of(" apiKey", set),
+            Map.of("apiKey", patch(null, null)),
+            Map.of("apiKey", patch("UNKNOWN", secret)),
+            Map.of("apiKey", patch("KEEP", secret)),
+            Map.of("apiKey", patch("CLEAR", secret)),
+            Map.of("apiKey", patch("SET", " *** ")))) {
+      AiValidationException error =
+          assertThrows(
+              AiValidationException.class,
+              () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid));
+      assertFalse(error.toString().contains(secret));
+      assertFalse(error.toString().contains("***"));
+    }
+  }
+
+  private static PluginSecretPatchDTO patch(String operation, String value) {
+    PluginSecretPatchDTO dto = new PluginSecretPatchDTO();
+    dto.setOperation(operation);
+    dto.setValue(value);
+    return dto;
   }
 
   /** prepare 只保存 attempt 摘要与当时的配置修订，返回一次性句柄与登录地址。 */

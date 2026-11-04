@@ -78,7 +78,6 @@
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpRequest</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpResponse</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisJwt</include>
-                                        <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisRedaction</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisRenewalRequest</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MavisStatus</include>
                                         <include>fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisInstance</include>

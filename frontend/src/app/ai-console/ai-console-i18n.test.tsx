@@ -33,7 +33,6 @@ const agent: AgentDefinitionDTO = {
   type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'm1', variant: 'default' } },
   config: {
-    inheritParentEnvironment: true,
     tools: [],
     skills: [],
     subagents: [],

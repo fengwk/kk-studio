@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -43,7 +44,7 @@ import java.util.concurrent.TimeoutException;
  */
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
-  /** 单条 IDE 命令的默认等待上限；超时后放弃在途登记（迟到回执被安静忽略）。 */
+  /** 除普通关闭外，单条 IDE 命令的默认等待上限。 */
   public static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(30);
 
   public static final String IDE_ROUTE_PREFIX = "/environment-ide/";
@@ -260,6 +261,20 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   @Override
   public void focusTerminal(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    boundAction(environmentId, viewId, request, IdeAction.FOCUS_TERMINAL);
+  }
+
+  @Override
+  public void collapseMobile(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    boundAction(environmentId, viewId, request, IdeAction.COLLAPSE_MOBILE);
+  }
+
+  private void boundAction(
+      EnvironmentId environmentId,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request,
+      IdeAction action) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     UUID parsedViewId = parseViewId(viewId);
@@ -268,7 +283,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
     IdeCommand command =
         IdeCommand.newBuilder()
-            .setAction(IdeAction.FOCUS_TERMINAL)
+            .setAction(action)
             .setViewId(parsedViewId.toString())
             .setDocumentId(documentId.toString())
             .setBindingEpoch(bindingEpoch)
@@ -337,6 +352,41 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     requireReplyView(result.reply(), parsedViewId);
     // detach 冻结该 epoch 的使用证明：本地不得再允许旧 cookie/旧请求进入；视图资源在 Daemon 恢复窗口内保留。
     revokeLocal(binding);
+  }
+
+  @Override
+  public EnvironmentIdeDirectoryListingDTO listDirectories(
+      EnvironmentId environmentId, String path) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    String directory = parseDirectory(path);
+    IdeCommand.Builder command = IdeCommand.newBuilder().setAction(IdeAction.LIST_DIRECTORIES);
+    if (directory != null) {
+      command.setDirectory(directory);
+    }
+    IdeResult reply = call(environmentId, command.build()).reply();
+    if (!reply.getOk()) {
+      throw rejection(reply);
+    }
+    if (!reply.hasDirectoryListing()) {
+      throw protocolFailure("daemon did not return a directory listing");
+    }
+    var listing = reply.getDirectoryListing();
+    EnvironmentIdeDirectoryListingDTO dto = new EnvironmentIdeDirectoryListingDTO();
+    dto.setPath(listing.getPath());
+    dto.setParentPath(listing.hasParentPath() ? listing.getParentPath() : null);
+    dto.setTruncated(listing.getTruncated());
+    dto.setChildren(
+        listing.getChildrenList().stream()
+            .map(
+                child -> {
+                  EnvironmentIdeDirectoryListingDTO.Entry entry =
+                      new EnvironmentIdeDirectoryListingDTO.Entry();
+                  entry.setName(child.getName());
+                  entry.setPath(child.getPath());
+                  return entry;
+                })
+            .toList());
+    return dto;
   }
 
   @Override
@@ -507,7 +557,12 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     IdeResult reply;
     try {
-      reply = request.reply().get(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
+      reply =
+          command.getAction() == IdeAction.CLOSE_VIEW
+                  && command.hasDiscard()
+                  && !command.getDiscard()
+              ? request.reply().get()
+              : request.reply().get(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException error) {
       transport.abandonIde(request.invocationId());
       throw new IdeOutcomeUnknownException("environment IDE command timed out", error);
@@ -569,6 +624,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       return viewGone();
     }
     String code = reply.hasCode() ? reply.getCode() : "";
+    if ("CANCELLED".equals(code)) {
+      return new AiValidationException("ide_close_cancelled", message);
+    }
     if ("VIEW_IN_USE".equals(code)
         || "BUSY".equals(code)
         || "CLAIM_CONFLICT".equals(code)
@@ -637,7 +695,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     throw new AiValidationException("environment", "mode must be create or resume");
   }
 
-  private static String parseDirectory(String value) {
+  public static String parseDirectory(String value) {
     if (value == null) {
       return null;
     }

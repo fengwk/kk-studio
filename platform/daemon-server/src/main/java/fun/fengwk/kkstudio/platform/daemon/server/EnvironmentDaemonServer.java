@@ -216,16 +216,7 @@ public final class EnvironmentDaemonServer
     session.initializeSettings(currentSettings);
 
     Settings settingsMessage =
-        Settings.newBuilder()
-            .setDisplayName(pending.displayName)
-            .setResourceBudgets(
-                ResourceBudgets.newBuilder()
-                    .setMaxResourceBytes(currentSettings.maxResourceBytes())
-                    .setTemporaryResourceTtlSeconds(currentSettings.temporaryResourceTtlSeconds())
-                    .setTemporaryResourceCleanupIntervalSeconds(
-                        currentSettings.temporaryResourceCleanupIntervalSeconds())
-                    .build())
-            .build();
+        settingsMessage(currentSettings).setDisplayName(pending.displayName).build();
     Envelope settingsEnvelope =
         Envelope.newBuilder()
             .setMessageType(MessageType.SETTINGS)
@@ -240,6 +231,37 @@ public final class EnvironmentDaemonServer
       session.close();
     }
     return session;
+  }
+
+  static Settings.Builder settingsMessage(EnvironmentServerSettings settings) {
+    Settings.Builder result =
+        Settings.newBuilder()
+            .setResourceBudgets(
+                ResourceBudgets.newBuilder()
+                    .setMaxResourceBytes(settings.maxResourceBytes())
+                    .setTemporaryResourceTtlSeconds(settings.temporaryResourceTtlSeconds())
+                    .setTemporaryResourceCleanupIntervalSeconds(
+                        settings.temporaryResourceCleanupIntervalSeconds()))
+            .setNoProxyHosts(settings.noProxyHosts());
+    if (settings.proxyUrl() != null) {
+      result.setProxyUrl(settings.proxyUrl());
+    }
+    return result;
+  }
+
+  /** 设置变更或通知重连时对本节点所有连接重新读取并下发网络设置。 */
+  public void reconcileNetworkSettings() {
+    List<DaemonConnectionSession> current;
+    synchronized (inventory) {
+      current = List.copyOf(sessions.values());
+    }
+    for (DaemonConnectionSession session : current) {
+      try {
+        session.reconcileNetworkSettings();
+      } catch (RuntimeException error) {
+        logFailure("network settings notification", error);
+      }
+    }
   }
 
   @Override

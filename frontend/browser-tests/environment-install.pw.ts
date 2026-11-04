@@ -167,7 +167,7 @@ for (const width of [1280, 390, 320]) {
     await editor.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`lsp-placeholder-${width}.png`), animations: 'disabled' })
     if (width === 1280) {
-      await modal.locator('.confirm-modal-description').scrollIntoViewIfNeeded()
+      await modal.locator('.modal-body-text').scrollIntoViewIfNeeded()
       await page.screenshot({ path: testInfo.outputPath('install-copy-1280.png'), animations: 'disabled' })
     }
     const os = modal.getByRole('button', { name: '操作系统' })

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 /**
  * deep-link 回调解析的边界与去敏。
  *
@@ -138,7 +140,7 @@ class MavisCallbackTest {
     MavisCallback callback = MavisCallback.parse("minimax-cn://auth-callback?accessToken=" + TOKEN);
 
     assertFalse(callback.toString().contains(TOKEN));
-    assertTrue(callback.toString().contains(MavisRedaction.REDACTED));
+    assertTrue(callback.toString().contains(PluginRedaction.REDACTED));
 
     MavisException error =
         assertThrows(

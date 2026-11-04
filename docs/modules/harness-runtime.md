@@ -58,7 +58,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 | `SETTINGS` | 回合间安全边界上的 settings 应用快照，不调度模型 |
 | `FORK` | 分支事实节点 `{mode, sourceEntryId, sourceThreadId}`，模型可见文本是固定英文通知 |
 
-执行父子关系不进历史，而是 Thread 行上不可变的 `parentThreadId`，因此 Entry Tree 始终是对话历史而不是运行树。Environment 以全局唯一、不可变的 name 进入 settings，每回合再解析为内部路由身份；目录只出现在每次工具调用自己的 arguments 里，历史中没有目录状态。
+执行父子关系不进历史，而是 Thread 行上不可变的 `parentThreadId`，因此 Entry Tree 始终是对话历史而不是运行树。Environment 是执行根的设置；子 Agent 的初始 settings 不带环境，也不能接受 `SET_ENVIRONMENT`。每次子回合规划在执行树事务内读取执行根已生效的当前环境，并将当时的 name 冻结在回合快照中，再解析为内部路由身份。环境切换在根的安全边界生效后，后续子回合使用新环境；已冻结的模型请求与工具调用继续使用原环境。目录只出现在每次工具调用自己的 arguments 里，历史中没有目录状态。
 
 [`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntryPath.java) 是从 `ROOT` 到 head 的不可变连续路径（同 Session、父链相接、ID 不重复、首节点是唯一的 `ROOT`）。[`EntrySlice`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntrySlice.java) 是同一条链的读取视图：`baseEntryId` 为空时就是这条完整路径；非空时只含该祖先之后、不含游标本身的连续子链，空列表表示游标就是 head。增量不满足 `EntryPath` 的 ROOT 约束，不能当作完整路径使用。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/TurnPathValidator.java) 在其上校验回合文法：
 
@@ -89,10 +89,10 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `NEW_FORKED_SESSION`：把执行根在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从切点处的生效快照推导，不复制 Join、命令或调用。
 - `THREAD`：续写既有 Thread。精确的有序重放先于一切游标与 preflight 准入；单条纯 `USER_MESSAGE` 不带游标、按锁内邮箱尾部入队，其它批次必须携带 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 并精确匹配（不匹配为 `STALE_COMMAND_CURSOR`）。
 
-命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
+命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
 
 - 创建型 target 与统一 `spawn` 批次必须以恰好一条 user-like 任务输入结尾。
-- 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。`SET_CONTRIBUTOR_STATE` 是分支配置，只随普通输入回合生效。
+- 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。
 - typed `GOAL` 每次由运行时分配新的 `id` 并追加一条冻结的 USER 消息，旧 `id` 上的进度声明因此不会命中新目标；`text` 为 null 表示显式清除。
 - 产品 HTTP 面只接受 `USER_MESSAGE`、`GOAL` 与三个 `SET_*` 前缀，`GOAL` 不能与普通消息同批；`SystemReminder` 必须有完整的开闭定界符，普通消息伪造前缀不会被当作 steering。YOLO 不走邮箱。
 
@@ -343,9 +343,9 @@ Tool 的身份、定义、调用与结果是模型、配置、权限、目录与
 
 ## Contributor 与目录
 
-Contributor 是受信 Java 扩展的接入契约（[`contributor.api`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/) 包）：它声明工具、分支自定义状态与上下文投影，内置工具与插件走同一条装配路径。
+Contributor 是受信 Java 扩展的接入契约（[`contributor.api`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/) 包）：它声明工具与分支自定义状态，内置工具与插件走同一条装配路径。当前自定义状态仅用于内置 Goal 进度。
 
-[`HarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java) 只有 `descriptor()` 与 `contribute(registrar)`。[`ContributorDescriptor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorDescriptor.java) 给出 canonical id、展示名、版本与 `requires`；[`HarnessRegistrar`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 提供 `registerTool`、`registerCustomEntryType` 与 `registerContextProjector`，在 `contribute` 之外调用立即失败。
+[`HarnessContributor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java) 只有 `descriptor()` 与 `contribute(registrar)`。[`ContributorDescriptor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorDescriptor.java) 给出 canonical id、展示名、版本与 `requires`；[`HarnessRegistrar`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 提供 `registerTool` 与 `registerCustomEntryType`，在 `contribute` 之外调用立即失败。
 
 [`HarnessCatalog.from`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java) 是唯一的冻结入口：先拒绝重复 id、缺失或成环的 `requires`，再按依赖拓扑与 id 字典序调用 `contribute`；注册时强制模型可见工具名全局唯一、自定义类型按 `(contributorId, customType)` 归属，冻结时要求每个工具声明的状态访问都命中本 Contributor 注册过的类型。平台在构建每个插件快照时冻结一次目录（见 [Platform](platform.md#构建期-plugin)）。
 
@@ -372,7 +372,7 @@ stateAccesses[]          访问的分支自定义状态及 READ / WRITE 意图
 
 `REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。分支状态只经声明修改：[`BranchView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 只读当前 Contributor 在当前分支上的自定义状态与用户 Goal；[`ToolOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带结果与有序的 [`AppendCustomEntry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)（错误结果不得携带），与 Tool 结果在同一事务追加。同一 Assistant 的工具共享冻结快照，因此某状态已被先前 sibling 声明 WRITE 时，后续访问在派发前被确定性拒绝。[`ContextProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数地投影为片段，平台按目录顺序把它们拼进本次请求唯一的系统指令。
 
-新增 Contributor：实现 `HarnessContributor`（常用 `HarnessContributor.of`），按实际执行面声明环境支持级别；维护分支状态时先注册自定义条目类型再声明访问；内置实现注册为 Spring bean，插件实现从配置实例返回（见 [Platform Plugin API](platform-plugin-api.md)）。
+新增 Contributor：实现 `HarnessContributor`（常用 `HarnessContributor.of`），按实际执行面声明环境支持级别；内置实现注册为 Spring bean，插件实现从配置实例返回（见 [Platform Plugin API](platform-plugin-api.md)）。
 
 ## 内置工具
 
@@ -412,7 +412,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |
 | `api.history` | Entry Tree 的公开值类型：`Entry`、sealed payload 家族、`EntryPath` / `EntrySlice` 路径视图、`ScopedBranchView` Contributor 限域视图、`SubagentBinding`、`EntryType` 与 `TurnPathValidator` 回合文法校验；payload 编解码与 payload mapper 在 `codec`，历史归一化与最终回答判定在 `runtime.history` |
-| `api.interaction` | 等待输入/审批的只读投影与 `(createdAt, id)` 稳定分页（`PendingInteraction`、`PendingEnvironmentWait` 及分页），不持有产品归属 |
+| `api.interaction` | 等待输入/审批的只读投影与冻结环境的待领取 Work 候选；先按执行根和环境聚合再按代表键分页，也可按调用读取 Work 可领取性与时间边界。环境在线状态、名称及产品归属由平台判断 |
 | `api.join` | Join 票据与交付凭据：`ThreadJoin`、`JoinDelivery`、`ThreadJoinOutcome`、`ThreadJoinReceipt` 与完成通知渲染 `ThreadJoinCompletionRenderer`；持久化推进与交付在 `runtime.join` |
 | `api.realtime` | 有损实时投影的公开契约：sealed `RealtimeEvent`（Model delta / Model checkpoint / Tool partial）及其 wire 种类 `RealtimeEventType`、oversize payload 的跨节点上限 `RealtimePayloadLimits` 与不可用错误 `RealtimePayloadUnavailableException`；wire 编解码在 `codec`，通知信封、缓冲与恢复在平台实现，本包不持有 durable state |
 | `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现与端口分别在 `runtime.retry`、`spi.retry` |

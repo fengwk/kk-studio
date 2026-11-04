@@ -379,10 +379,7 @@ describe('resource transfer resilience branches', () => {
 describe('presigned PUT http client', () => {
   let network: InstalledOutboundNetwork
   beforeEach(async () => {
-    network = await installOutboundNetwork({}, {
-      resolve: async () => null,
-      close: async () => {},
-    })
+    network = await installOutboundNetwork()
   })
   afterEach(async () => {
     await network.close()

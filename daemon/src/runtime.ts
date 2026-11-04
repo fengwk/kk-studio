@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { create } from '@bufbuild/protobuf'
 
+import { parseReleaseArtifactUrl } from './release.js'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -14,6 +15,7 @@ import type {
   ResultContent,
 } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
+import { applyNetworkSettings } from './network.js'
 import {
   CancelSchema,
   CancelledSchema,
@@ -147,6 +149,10 @@ function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
       return 'DETACH_VIEW'
     case ProtoIdeAction.LIST_VIEWS:
       return 'LIST_VIEWS'
+    case ProtoIdeAction.LIST_DIRECTORIES:
+      return 'LIST_DIRECTORIES'
+    case ProtoIdeAction.COLLAPSE_MOBILE:
+      return 'COLLAPSE_MOBILE'
     default:
       throw new Error(`unsupported IDE action: ${action}`)
   }
@@ -426,7 +432,10 @@ export class Runtime {
       return
     }
     if (statusCode === 426) {
-      if (upgradeRequired?.artifactUrl && upgradeRequired?.artifactSha256 && this.update !== null) {
+      const target = upgradeRequired?.artifactUrl ? parseReleaseArtifactUrl(upgradeRequired.artifactUrl) : null
+      if (target !== null && upgradeRequired?.artifactSha256 && this.update !== null) {
+        const operationId = randomUUID()
+        const commandKey = JSON.stringify([target.targetVersion])
         const updateCommand = create(EnvelopeSchema, {
           messageType: MessageType.UPDATE,
           environmentId: this.boundEnvironmentId ?? undefined,
@@ -434,29 +443,27 @@ export class Runtime {
             case: 'update',
             value: {
               $typeName: 'kkstudio.environment.control.Update',
-              operationId: randomUUID(),
-              targetVersion: String(upgradeRequired.targetProtocolVersion),
-              artifactUrl: upgradeRequired.artifactUrl,
-              artifactSha256: upgradeRequired.artifactSha256,
+              operationId,
+              targetVersion: target.targetVersion,
             },
           },
         })
         const active: ActiveUpdate = {
-          operationId: randomUUID(),
-          commandKey: JSON.stringify([String(upgradeRequired.targetProtocolVersion), upgradeRequired.artifactUrl, upgradeRequired.artifactSha256]),
-          targetVersion: String(upgradeRequired.targetProtocolVersion),
+          operationId,
+          commandKey,
+          targetVersion: target.targetVersion,
           controller: new AbortController(),
           receipt: {
-            commandKey: '',
+            commandKey,
             result: create(UpdateResultSchema, {
-              operationId: randomUUID(),
+              operationId,
               phase: 1, // UPDATE_ACCEPTED
             }),
           },
           prepared: false,
         }
         this.activeUpdate = active
-        this.runtimeStatus.beginUpdate(String(upgradeRequired.targetProtocolVersion))
+        this.runtimeStatus.beginUpdate(target.targetVersion)
         void this.track(
           (async () => {
             await this.executeUpdate(active, updateCommand.payload.value as Update)
@@ -604,6 +611,11 @@ export class Runtime {
           }),
         )
       }
+      // 初始 SETTINGS 失败时服务端尚未将会话标为 READY，不能依赖在线变更通知修复。
+      // 关闭握手并重连，下一次从平台重新读取设置；已 READY 的连接仍可接收后续修正。
+      if (envelope.messageType === MessageType.SETTINGS && !connection.ready && this.activeConnection === connection) {
+        this.closeFailedHandshake(connection)
+      }
     }
   }
 
@@ -611,6 +623,9 @@ export class Runtime {
     if (envelope.messageType === MessageType.SETTINGS) {
       if (!envelope.environmentId) {
         throw new Error('SETTINGS must declare non-null environmentId')
+      }
+      if (this.boundEnvironmentId !== null && this.boundEnvironmentId !== envelope.environmentId) {
+        throw new Error('SETTINGS environmentId does not match daemon')
       }
       return
     }
@@ -621,14 +636,21 @@ export class Runtime {
   }
 
   private handleSettings(connection: ActiveConnection, envelope: Envelope): void {
-    if (!connection.markSettingsReceived()) {
-      throw new Error('SETTINGS may only be received once per connection')
-    }
     if (!envelope.environmentId) {
       throw new Error('SETTINGS must declare non-null environmentId')
     }
-    this.boundEnvironmentId = envelope.environmentId
     const settings = envelope.payload.value as Settings
+    if (settings.noProxyHosts === undefined) {
+      throw new Error('settings.noProxyHosts is required')
+    }
+    applyNetworkSettings(settings.proxyUrl ?? null, settings.noProxyHosts)
+    if (connection.ready) {
+      return
+    }
+    if (!connection.markSettingsReceived()) {
+      throw new Error('SETTINGS handshake already started')
+    }
+    this.boundEnvironmentId = envelope.environmentId
     const budgets = settings.resourceBudgets!
     this.maxResourceBytes = Number(budgets.maxResourceBytes)
     const ttl = Number(budgets.temporaryResourceTtlSeconds)
@@ -1177,6 +1199,25 @@ export class Runtime {
     this.runtimeStatus.beginUpdate(command.targetVersion ?? '')
     this.publishRuntimeStatus()
     this.rememberUpdateResult(command.operationId ?? '', receipt)
+    const stopWatching = attempt.prepared.watchFailure?.((message) => {
+      if (this.activeUpdate !== active) {
+        return
+      }
+      active.stopWatching?.()
+      this.activeUpdate = null
+      this.runtimeStatus.clearUpdate()
+      this.publishRuntimeStatus()
+      const failed = executionFailureReceipt(active, command, new Error(message))
+      this.rememberUpdateResult(command.operationId ?? '', failed)
+      this.deliverUpdateResult(failed)
+    })
+    if (stopWatching !== undefined) {
+      active.stopWatching = stopWatching
+    }
+    if (this.activeUpdate !== active) {
+      stopWatching?.()
+      return
+    }
     this.deliverUpdateResult(receipt)
   }
 
@@ -1377,7 +1418,10 @@ export class Runtime {
     }
     const controller = admission.controller
     this.ideInFlight.set(invocationId, controller)
-    const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
+    // Native close waits for a person; disconnect and shutdown still abort the command.
+    const timer = command.action === 'CLOSE_VIEW' && command.discard === false
+      ? null
+      : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
     void this.track(this.runIdeCommand(invocationId, command, controller, timer))
   }
 
@@ -1389,14 +1433,20 @@ export class Runtime {
   ): Promise<void> {
     try {
       const reply = await (this.ide as IdeService).handle(command, controller.signal)
-      this.sendIdeResult(invocationId, toProtoIdeResult(reply))
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.sendIdeResult(invocationId, toProtoIdeResult(reply))
+      }
     } catch (error) {
-      this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
+      }
     } finally {
       if (timer !== null) {
         clearTimeout(timer)
       }
-      this.ideInFlight.delete(invocationId)
+      if (this.ideInFlight.get(invocationId) === controller) {
+        this.ideInFlight.delete(invocationId)
+      }
     }
   }
 
@@ -1471,6 +1521,7 @@ export class Runtime {
     this.ideInFlight.clear()
     this.activeUpdate?.controller?.abort('SHUTDOWN')
     if (this.activeUpdate !== null) {
+      this.activeUpdate.stopWatching?.()
       this.activeUpdate.controller = null
     }
     void this.finalize(terminalState)

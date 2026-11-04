@@ -76,7 +76,6 @@ function normalizeSkills(items: SkillRefDTO[] | null | undefined): SkillRefDTO[]
 
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
-    inheritParentEnvironment: draft.inheritParentEnvironment,
     tools: normalizeCapabilityValues(draft.tools, 'tools'),
     skills: normalizeSkills(draft.skills),
     subagents: normalizeCapabilityValues(draft.subagents, 'subagents'),
@@ -91,7 +90,6 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     model: model?.name ?? '',
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
-    inheritParentEnvironment: true,
     tools: [],
     skills: [],
     subagents: [],
@@ -108,7 +106,6 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     execution: agent.execution,
     model: selection?.modelName ?? '',
     variant: selection?.variant?.trim() || '',
-    inheritParentEnvironment: config.inheritParentEnvironment,
     tools: normalizeNames(config.tools),
     skills: (config.skills || []).map((s) => ({
       packageName: s.packageName.trim(),

@@ -391,7 +391,7 @@ export function PluginConfigModal({
 
   return (
     <Dialog
-      className="resource-modal-card plugin-config-modal"
+      className="resource-modal-card plugin-config-modal modal-touch-target"
       title={t('plugins.configDialog.title', { name: plugin.name })}
       onClose={handleClose}
       pending={pending}

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
@@ -123,13 +124,15 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueEditingService.getIssue(archived.getId());
     IssueRun archivedRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
     UUID archivedEnd = appendHistoryEntry(archivedRun.getThreadId());
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         archivedRun.getId(),
         archivedRun.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         archivedEnd,
         null,
-        "REVIEW");
+        "REVIEW",
+        null);
     Issue inReview = issueEditingService.getIssue(archived.getId());
     issueLifecycleService.archiveIssue(inReview.getId(), inReview.getVersion());
     Project current = projectService.getProject(project.getId());

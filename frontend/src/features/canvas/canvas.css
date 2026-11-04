@@ -1121,26 +1121,6 @@
   color: var(--fg);
 }
 
-.canvas-feature .generation-discard-confirm {
-  margin-top: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--border-hover);
-  border-radius: 4px;
-  background: var(--surface);
-}
-
-.canvas-feature .generation-discard-confirm p {
-  margin: 0 0 6px 0;
-  color: var(--warning);
-  font-size: var(--font-size-xs);
-}
-
-.canvas-feature .generation-discard-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 /* 未定义类与内联样式的替代：JSON 编辑区与 UNKNOWN 核查区使用已定义的作用域布局。 */
 .canvas-feature .generation-raw-editor {
   display: grid;
@@ -1337,8 +1317,7 @@
   white-space: nowrap;
 }
 
-.canvas-feature .context-menu-rename,
-.canvas-feature .context-menu-confirm {
+.canvas-feature .context-menu-rename {
   display: grid;
   gap: 8px;
   padding: 4px;
@@ -1351,25 +1330,10 @@
   font-size: var(--font-size-xs);
 }
 
-.canvas-feature .context-menu-rename > div,
-.canvas-feature .context-menu-confirm > div {
+.canvas-feature .context-menu-rename > div {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-}
-
-.canvas-feature .context-menu-confirm > strong {
-  overflow: hidden;
-  font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-feature .context-menu-confirm > p {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.45;
 }
 
 .canvas-feature .context-menu-error {

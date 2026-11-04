@@ -135,7 +135,7 @@ registerCase({
             description: 'd',
             systemPrompt: 's',
             execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
-            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+            config: { tools: [], skills: [], subagents: [] },
           }),
         { status: 400, messageIncludes },
       )
@@ -157,7 +157,7 @@ registerCase({
           description: 'd',
           systemPrompt: 's',
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: '__missing_variant__' } },
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          config: { tools: [], skills: [], subagents: [] },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -469,7 +469,7 @@ registerCase({
           description: 'create',
           systemPrompt: 'you are e2e',
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -480,7 +480,7 @@ registerCase({
           description: 'updated',
           systemPrompt: 'updated prompt',
           execution: { driver: 'builtin', settings: { modelName: modelRef(updatedModel), variant: updatedModel.config.defaultVariant } },
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: false },
+          config: { tools: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
       ).json,
@@ -490,7 +490,7 @@ registerCase({
       JSON.stringify(updated),
     )
     assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
-    assert(updated.config?.inheritParentEnvironment === false, JSON.stringify(updated))
+    assert(Object.keys(updated.config ?? {}).sort().join(',') === 'skills,subagents,tools', JSON.stringify(updated))
     await ctx.call(
       'DELETE',
       `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
@@ -508,7 +508,7 @@ registerCase({
           description: 'recreated',
           systemPrompt: 'recreated prompt',
           execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
-          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -530,7 +530,7 @@ registerCase({
   id: 'crud.agent.subagent_reference_lifecycle',
   level: 'L1',
   title: 'Agent subagents 名称引用与删除保护',
-  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents/inheritParentEnvironment',
+  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents',
   async run(ctx) {
     const model = await firstModel(ctx)
     const suffix = cid().slice(0, 8)
@@ -544,7 +544,7 @@ registerCase({
             description: 'subagent child',
             systemPrompt: 'return a concise report',
             execution: { driver: 'builtin', settings: { modelName: modelRef(model), variant: model.config.defaultVariant } },
-            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+            config: { tools: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -559,7 +559,6 @@ registerCase({
               tools: [],
               skills: [],
               subagents: [child.name],
-              inheritParentEnvironment: false,
             },
           })
         ).json,
@@ -570,7 +569,7 @@ registerCase({
           && Array.isArray(parent.config?.skills)
           && parent.config.skills.length === 0
           && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name])
-          && parent.config?.inheritParentEnvironment === false,
+          && Object.keys(parent.config).sort().join(',') === 'skills,subagents,tools',
         JSON.stringify(parent),
       )
       await expectHttpError(
@@ -594,7 +593,6 @@ registerCase({
                 tools: [],
                 skills: [],
                 subagents: [],
-                inheritParentEnvironment: true,
               },
               expectedVersion: parent.version,
             },

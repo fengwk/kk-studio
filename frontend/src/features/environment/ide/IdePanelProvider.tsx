@@ -20,6 +20,8 @@ import {
 } from '@/features/environment/ide/ide-panel-context'
 import {
   initializeIdeTabState,
+  readRecentDirectories,
+  recordRecentDirectory,
   saveIdePresentation,
   type IdePresentation,
   type IdeTabStorage,
@@ -312,6 +314,9 @@ export function IdePanelProvider({
         onReloadEnvironments={() => {
           void environmentsQuery.refetch()
         }}
+        readRecentDirectories={(environmentId) => readRecentDirectories(environmentId, storage)}
+        recordRecentDirectory={(environmentId, directory) =>
+          recordRecentDirectory(environmentId, directory, storage)}
       />}>
         {children}
       </IdeSplitShell>

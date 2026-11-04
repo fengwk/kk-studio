@@ -74,6 +74,27 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
+  void ownerAcceptsNullableDisplayButRejectsUnknownAndNonStringFields() throws Exception {
+    // 宽松 mapper 下仍拒绝额外字段和类型强制转换，展示字段可显式为 null。
+    HarnessCommandOwnerDTO owner =
+        LENIENT_MAPPER.readValue(
+            "{\"kind\":\"OTHER\",\"id\":\"opaque\",\"title\":null,\"link\":null}",
+            HarnessCommandOwnerDTO.class);
+    assertEquals("OTHER", owner.getKind());
+    assertEquals("opaque", owner.getId());
+    assertNull(owner.getTitle());
+    assertNull(owner.getLink());
+    for (String field : List.of("kind", "id", "title", "link")) {
+      assertThrows(
+          Exception.class,
+          () -> LENIENT_MAPPER.readValue("{\"" + field + "\":42}", HarnessCommandOwnerDTO.class));
+    }
+    assertThrows(
+        Exception.class,
+        () -> LENIENT_MAPPER.readValue("{\"chatId\":\"x\"}", HarnessCommandOwnerDTO.class));
+  }
+
+  @Test
   void creationTargetDtoTracksFieldPresenceSoExplicitNullCannotBypassForbiddenChecks() {
     HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
     target.setType("NEW_THREAD");

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -39,13 +40,14 @@ import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.service.ProjectSessionOwnership;
 
 import javax.sql.DataSource;
 
@@ -87,7 +89,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   @Autowired private ChatSessionRepository chatSessionRepository;
   @Autowired private ChatRepository chatRepository;
   @Autowired private IssueAgentThreadRepository issueAgentThreadRepository;
-  @Autowired private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
+  @Autowired private List<SessionOwnership> ownerships;
   @Autowired private SessionBlobRefManager refManager;
   @Autowired private SessionFileRepository sessionFileRepository;
 
@@ -104,13 +106,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
         .thenReturn(
             new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT));
     orchestrator =
-        new SessionDeletionOrchestrator(
-            chatSessionRepository,
-            chatRepository,
-            issueAgentOwnerships,
-            runtimes,
-            refManager,
-            sessionFileRepository);
+        new SessionDeletionOrchestrator(ownerships, runtimes, refManager, sessionFileRepository);
     transactions = new TransactionTemplate(transactionManager);
   }
 
@@ -145,7 +141,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
         seedChildThread(survivorSession, survivorRoot, ThreadExecutionControl.RUNNABLE);
     UUID survivorJoin = seedJoin(survivorChild, survivorRoot, 1L, null, null);
 
-    deleteSessions(new OwnerRef.Chat(owner));
+    deleteSessions(new SessionOwner("CHAT", owner.toString()));
 
     assertEquals(0L, sessionRows(ownedSession));
     assertEquals(0L, sessionRows(childSession));
@@ -187,7 +183,9 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
             ThreadExecutionControl.RUNNABLE);
     UUID strandedJoin = seedJoin(strandedChild, survivorRoot, 1L, null, null);
 
-    assertThrows(IllegalStateException.class, () -> deleteSessions(new OwnerRef.Chat(owner)));
+    assertThrows(
+        IllegalStateException.class,
+        () -> deleteSessions(new SessionOwner("CHAT", owner.toString())));
 
     // 全部回滚：归属行、Session、Thread、Join 都与删除前一致。
     assertEquals(1L, sessionRows(ownedSession));
@@ -203,7 +201,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     UUID owner = chatOwner();
     UUID emptySession = ownedSession("owned-empty", owner);
 
-    deleteSessions(new OwnerRef.Chat(owner));
+    deleteSessions(new SessionOwner("CHAT", owner.toString()));
 
     assertEquals(0L, sessionRows(emptySession));
     assertEquals(0L, entryRows(emptySession));
@@ -222,7 +220,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     bindIssueAgentThread(issueId, agentName, child);
     UUID join = seedJoin(child, root, 1L, null, null);
 
-    deleteSessions(new OwnerRef.IssueAgent(issueId, agentName));
+    deleteSessions(ProjectSessionOwnership.owner(issueId, agentName));
 
     assertEquals(0L, sessionRows(sessionId));
     assertEquals(0L, entryRows(sessionId));
@@ -235,8 +233,43 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     assertEquals(1L, count("select count(*) from project where id = ?", projectId));
   }
 
+  @Test
+  void runReferenceRollsBackProjectOwnershipDeletion() {
+    // 真实 FK 阻止绑定删除时，产品归属和 runtime 事实必须在同一事务中保留。
+    String agentName = agentDefinition();
+    UUID projectId = projectRow();
+    UUID issueId = issueRow(projectId);
+    UUID sessionId = seedSession("run-bound");
+    UUID threadId = seedRootThread(sessionId, ThreadExecutionControl.RUNNABLE);
+    UUID rootEntryId = headEntryOf(sessionId);
+    bindIssueAgentThread(issueId, agentName, threadId);
+    jdbc.update(
+        "insert into project_issue_stage_budget (issue_id, state, max_runs, budget_after_ordinal)"
+            + " values (?, 'DESIGN', 3, 0)",
+        issueId);
+    jdbc.update(
+        "insert into project_issue_run (id, issue_id, ordinal, state, session_id, thread_id,"
+            + " status, start_entry_id, remaining_execution_ms, active_since)"
+            + " values (?, ?, 1, 'DESIGN', ?, ?, 'RUNNING', ?, 60000, current_timestamp)",
+        UUID.randomUUID(),
+        issueId,
+        sessionId,
+        threadId,
+        rootEntryId);
+
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () -> deleteSessions(ProjectSessionOwnership.owner(issueId, agentName)));
+    assertEquals(1L, sessionRows(sessionId));
+    assertEquals(1L, entryRows(sessionId));
+    assertEquals(1L, threadRows(threadId));
+    assertEquals(
+        1L, count("select count(*) from project_issue_agent_thread where issue_id = ?", issueId));
+    assertEquals(1L, count("select count(*) from project_issue_run where issue_id = ?", issueId));
+  }
+
   /** 与生产调用方一致：深删除在调用方的事务内执行，失败整体回滚。 */
-  private void deleteSessions(OwnerRef owner) {
+  private void deleteSessions(SessionOwner owner) {
     transactions.executeWithoutResult(status -> orchestrator.deleteSessionsByOwner(owner));
   }
 

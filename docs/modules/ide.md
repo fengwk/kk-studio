@@ -11,7 +11,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 使用证明：  Server -> IDE_LEASE（随心跳轮次批量下发的浏览器持有列表）
 ```
 
-元数据命令打开、切换目录、聚焦终端、分离或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节不经过控制命令（stream 1），而是在同一物理连接的独立 HTTP/2 流上多路复用。
+元数据命令打开、切换目录、聚焦终端、列举目录、调整移动布局、分离或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节不经过控制命令（stream 1），而是在同一物理连接的独立 HTTP/2 流上多路复用。
 
 ## 命令通道
 
@@ -26,11 +26,13 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `OPEN_VIEW` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、可选 `directory` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath` |
 | `CHANGE_DIRECTORY` | `viewId`、`documentId`、`bindingEpoch`、`directory` | `viewId`、Daemon 确认的规范 `directory` |
 | `FOCUS_TERMINAL` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
+| `COLLAPSE_MOBILE` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `CLOSE_VIEW` | `viewId`、`documentId`、`bindingEpoch`、`discard` | `viewId` |
 | `DETACH_VIEW` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `LIST_VIEWS` | 无 | `views[]`：`viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`state(OPEN/CLOSING)` |
+| `LIST_DIRECTORIES` | 可选 `directory`，省略时为宿主主目录 | `directoryListing`：规范 `path`、可选 `parentPath`、`children[]`、`truncated` |
 
-失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，`bindingEpoch` 是规范正十进制字符串且不超过 Java long 上限；`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
+失败回执固定为 `{ok:false, code, message}`：`code` 是安全大写 token（常用 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CANCELLED`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`），`message` 去敏且不超过 500 字符。UUID 一律规范小写，`bindingEpoch` 是规范正十进制字符串且不超过 Java long 上限；`directory` 与 `workspacePath` 只接受 Daemon 确认的值，客户端输入永不进入摘要。视图的 `directory` 与 `workspacePath` 由 Daemon 判定，Server 不伪造。
 
 Server 只用 `CHANGE_DIRECTORY` 的确认回执更新缓存和 DTO；缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。
 
@@ -47,9 +49,15 @@ Server 只用 `CHANGE_DIRECTORY` 的确认回执更新缓存和 DTO；缺失或�
 | POST `/api/environments/{id}/ide/views` | `viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、可选 `directory`；成功返回绑定身份、目录、workspacePath 与短期 entryUrl |
 | PUT `/api/environments/{id}/ide/views/{viewId}/directory` | 当前 `documentId`、`bindingEpoch`、目标目录；检查 dirty，成功才写工作区 |
 | POST `/api/environments/{id}/ide/views/{viewId}/terminal` | 当前 `documentId`、`bindingEpoch`；聚焦/创建该视图终端 |
-| DELETE `/api/environments/{id}/ide/views/{viewId}` | 当前 `documentId`、`bindingEpoch` 与显式 `discard`；正常 dirty 拒绝，放弃必须由确认操作产生 |
+| POST `/api/environments/{id}/ide/views/{viewId}/mobile-layout` | 当前 `documentId`、`bindingEpoch`；收起工作台原生侧栏和面板，不更改用户设置 |
+| GET `/api/environments/{id}/ide/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
+| DELETE `/api/environments/{id}/ide/views/{viewId}` | 当前 `documentId`、`bindingEpoch` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
 | 应用事件 WS `ide-use` | `documentId`、`revision`、`views[]`；空列表分离全部，不表示确认销毁 |
 | GET `/api/environments/{id}/runtime` | owner 返回当前 `{revision, status}`；无本代 READY 快照时返回 unavailable |
+
+目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。
+
+正常关闭等待 IDE 原生对话框，不设命令超时；取消以 `ide_close_cancelled` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
 
 ### 浏览器同源入口
 

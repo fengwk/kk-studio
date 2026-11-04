@@ -3,6 +3,8 @@ import { create } from '@bufbuild/protobuf'
 import type { IdeCommand, IdeService } from './contracts.js'
 import {
   IdeResultSchema,
+  IdeDirectoryListingSchema,
+  IdeDirectoryEntrySchema,
   IdeViewState,
   IdeViewSummarySchema,
   type IdeResult,
@@ -115,6 +117,12 @@ export function toProtoIdeResult(reply: IdeReply): IdeResult {
     directory: reply.directory,
     workspacePath: reply.workspacePath,
     views: views ?? [],
+    directoryListing: reply.directoryListing === undefined ? undefined : create(IdeDirectoryListingSchema, {
+      path: reply.directoryListing.path,
+      parentPath: reply.directoryListing.parentPath,
+      truncated: reply.directoryListing.truncated,
+      children: reply.directoryListing.children.map((child) => create(IdeDirectoryEntrySchema, child)),
+    }),
     code: reply.code,
     message: reply.message,
   })

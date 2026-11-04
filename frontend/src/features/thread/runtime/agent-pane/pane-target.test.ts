@@ -162,7 +162,7 @@ describe('PaneTarget durable-local FSM', () => {
 
   it('persists an exact pending request independently from the presentation target', () => {
     const storage = memoryStorage()
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
+    const owner = { kind: 'CHAT', id: 'chat-1' }
     const pending: PendingAcceptance = {
       owner,
       target: { kind: 'NEW_SESSION_DRAFT' },
@@ -262,7 +262,7 @@ describe('PaneTarget durable-local FSM', () => {
   it('matches pending recovery by its original target, not by pane id alone', () => {
     // paneId 只定位槽位：同一 pane 已切到别的展示目标时，旧记录不得套用到新目标，
     // 也不得被删除或改写，必须留给原操作对账。
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
+    const owner = { kind: 'CHAT', id: 'chat-1' }
     const storage = memoryStorage()
     const pending: PendingAcceptance = {
       owner,
@@ -308,11 +308,11 @@ describe('PaneTarget durable-local FSM', () => {
     expect(storage.getItem(recordKey)).toBe(before)
     expect(loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'NEW_SESSION_DRAFT' }))
       .toEqual(pending)
-    expect(loadPendingAcceptance({ ...owner, chatId: 'chat-2' }, 'pane-1', storage)).toBeNull()
+    expect(loadPendingAcceptance({ ...owner, id: 'chat-2' }, 'pane-1', storage)).toBeNull()
   })
 
   it('fails closed when browser storage is unavailable or contains malformed pending data', () => {
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
+    const owner = { kind: 'CHAT', id: 'chat-1' }
     const malformedStorage = memoryStorage()
     malformedStorage.setItem(
       'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1',
@@ -379,7 +379,7 @@ describe('PaneTarget durable-local FSM', () => {
   })
 
   it('rejects pending storage unless owner, commands, generation, and outcome are valid', () => {
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
+    const owner = { kind: 'CHAT', id: 'chat-1' }
     const storage = memoryStorage()
     const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
     const valid = {
@@ -620,7 +620,7 @@ describe('PaneTarget durable-local FSM', () => {
       composerParts: [{ partId: 'p1', type: 'attachment', uploadId: '', filename: 'file.txt' }],
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-    setPending({ owner: { type: 'OTHER', id: 'chat-1' } })
+    setPending({ owner: { kind: 'OTHER', id: 'chat-1' } })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
 
     // 外层匹配、内层请求指向其他 owner 时仍拒绝恢复。
@@ -628,7 +628,7 @@ describe('PaneTarget durable-local FSM', () => {
       owner,
       request: {
         ...validRequest,
-        owner: { type: 'CHAT', chatId: 'chat-other' },
+        owner: { kind: 'CHAT', id: 'chat-other' },
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -637,7 +637,7 @@ describe('PaneTarget durable-local FSM', () => {
       owner,
       request: {
         ...validRequest,
-        owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
+        owner: { kind: 'ISSUE_AGENT', id: 'issue-1:coder' },
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -707,7 +707,7 @@ describe('PaneTarget durable-local FSM', () => {
     setPending({ composerParts: [{}] })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({
-      owner: { type: 'CHAT', chatId: 'different-owner' },
+      owner: { kind: 'CHAT', id: 'different-owner' },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
   })
@@ -719,7 +719,7 @@ describe('PaneTarget durable-local FSM', () => {
    * - SET_ENVIRONMENT 命令必须显式包含 environmentName（可为 null 或非空白字符串），缺少该属性或空白/非字符串必须被拒绝。
    */
   it('enforces exact-shape persistence for environmentName on branchDraft, rootSettings, and SET_ENVIRONMENT', () => {
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
+    const owner = { kind: 'CHAT', id: 'chat-1' }
     const storage = memoryStorage()
     const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
     const baseValid = {

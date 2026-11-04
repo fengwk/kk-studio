@@ -220,9 +220,6 @@ class BuiltinHarnessContributorTest {
             .id()
             .localName());
 
-    // 没有任何 Goal context projector：Goal 绝不提升为 systemInstruction。
-    assertTrue(catalog.contextProjectors().isEmpty());
-
     // Ensure all model-visible tool names and ContributionIds are unique
     Set<String> names = new HashSet<>();
     Set<ContributionId> contributionIds = new HashSet<>();

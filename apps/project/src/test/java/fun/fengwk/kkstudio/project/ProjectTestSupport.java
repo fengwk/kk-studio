@@ -508,7 +508,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       return store;
     }
 
+    /** 项目测试使用受控 Runtime；平台测试基座另有占位 Runtime，本 bean 作为唯一注入候选。 */
     @Bean
+    @Primary
     public HarnessRuntime harnessRuntime(JdbcTemplate jdbc, HarnessStore store) {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
       HarnessRuntime deletionRuntime =

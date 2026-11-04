@@ -252,6 +252,8 @@ const ACTION_ENUM_MAP: Record<string, ProtoIdeAction> = {
   CLOSE_VIEW: ProtoIdeAction.CLOSE_VIEW,
   DETACH_VIEW: ProtoIdeAction.DETACH_VIEW,
   LIST_VIEWS: ProtoIdeAction.LIST_VIEWS,
+  LIST_DIRECTORIES: ProtoIdeAction.LIST_DIRECTORIES,
+  COLLAPSE_MOBILE: ProtoIdeAction.COLLAPSE_MOBILE,
 }
 
 function serverMessage(type: string, options: { environmentId?: string; invocationId?: string; payload?: any } = {}): Envelope {
@@ -298,6 +300,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
+          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
             temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),
@@ -316,8 +319,6 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         value: create(UpdateSchema, {
           operationId: rawPayload.operationId ?? '',
           targetVersion: rawPayload.targetVersion ?? '',
-          artifactUrl: rawPayload.artifactUrl ?? '',
-          artifactSha256: rawPayload.artifactSha256 ?? '',
         }),
       },
     })
@@ -1359,8 +1360,6 @@ describe('runtime update handling', () => {
   const command = {
     operationId,
     targetVersion: artifactFixture.targetVersion,
-    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
-    artifactSha256: artifactFixture.artifactSha256,
   }
 
   it('acknowledges ACCEPTED then reports PREPARED and dedups by operationId', async () => {
@@ -1428,6 +1427,34 @@ describe('runtime update handling', () => {
       'daemon update permit release failed: Error',
     )
     stderr.mockRestore()
+    setup.runtime.close()
+  })
+
+  it('reports a post-handoff installer failure and releases update admission', async () => {
+    // A failed download before service stop must not leave the daemon permanently busy.
+    let reportFailure: ((message: string) => void) | undefined
+    let stopped = false
+    const update: UpdatePort = {
+      async handleUpdate() {
+        return {
+          phase: 'PREPARED',
+          watchFailure(report) {
+            reportFailure = report
+            return () => { stopped = true }
+          },
+        }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(() => reportFailure !== undefined)
+    reportFailure!('official installer failed; check local install.log')
+    await waitFor(() => sent(setup.transport).some(envelope =>
+      envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'FAILED'))
+    expect(stopped).toBe(true)
+    expect(sent(setup.transport).filter(envelope => envelope.messageType === 'RUNTIME_STATUS').at(-1)?.payload)
+      .toMatchObject({ status: { update: null } })
     setup.runtime.close()
   })
 
@@ -1541,7 +1568,6 @@ describe('runtime update handling', () => {
           ...command,
           operationId: '44444444-4444-4555-8666-777777777777',
           targetVersion: '9.9.10',
-          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, '9.9.10'),
         },
       }),
     )
@@ -1591,7 +1617,7 @@ describe('runtime update handling', () => {
     })
 
     setup.transport.receive(
-      serverMessage('UPDATE', { environmentId: ENV, payload: { ...command, artifactSha256: 'b'.repeat(64) } }),
+      serverMessage('UPDATE', { environmentId: ENV, payload: { ...command, targetVersion: '9.9.10' } }),
     )
     await tick()
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(true)
@@ -1615,7 +1641,6 @@ describe('runtime update handling', () => {
         payload: {
           ...command,
           targetVersion: DAEMON_VERSION,
-          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, DAEMON_VERSION),
         },
       }),
     )
@@ -2116,8 +2141,6 @@ describe('runtime extension handlers', () => {
   const command = {
     operationId,
     targetVersion: artifactFixture.targetVersion,
-    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
-    artifactSha256: artifactFixture.artifactSha256,
   }
   const binding = {
     generation: '1',
@@ -2216,6 +2239,127 @@ describe('runtime extension handlers', () => {
 })
 
 describe('runtime IDE commands', () => {
+  it('maps directory listing and mobile collapse commands and returns the listing proto', async () => {
+    const commands: Array<Parameters<IdeService['handle']>[0]> = []
+    const listing = {
+      path: '/workspace', parentPath: '/', truncated: true,
+      children: [{ name: 'project', path: '/workspace/project' }],
+    }
+    const setup = buildRuntime({
+      ide: ideService({
+        async handle(command) {
+          commands.push(command)
+          return command.action === 'LIST_DIRECTORIES' ? { ok: true, directoryListing: listing } : { ok: true }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-directories', payload: { action: 'LIST_DIRECTORIES', directory: '/workspace' },
+      }))
+      await waitFor(() => setup.transport.sent.some((env) => env.invocationId === 'ide-directories'))
+      const result = setup.transport.sent.find((env) => env.invocationId === 'ide-directories')
+      expect(result?.payload.case).toBe('ideResult')
+      if (result?.payload.case !== 'ideResult') throw new Error('missing IDE result')
+      expect(result.payload.value.ok).toBe(true)
+      expect(result.payload.value.directoryListing).toMatchObject(listing)
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-collapse', payload: { action: 'COLLAPSE_MOBILE', viewId: ENV },
+      }))
+      await waitFor(() => setup.transport.sent.some((env) => env.invocationId === 'ide-collapse'))
+      expect(commands).toHaveLength(2)
+      expect(commands[0]).toMatchObject({ action: 'LIST_DIRECTORIES', directory: '/workspace' })
+      expect(commands[1]).toMatchObject({ action: 'COLLAPSE_MOBILE', viewId: ENV })
+      expect(sent(setup.transport).find((env) => env.invocationId === 'ide-collapse')?.payload.ok).toBe(true)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
+  // 人工确认的普通关闭不受短默认超时限制；释放后仍需在原连接交付结果。
+  it('keeps normal close pending past the default timeout and sends its eventual result', async () => {
+    const gate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<AbortSignal>()
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 20,
+      ide: ideService({
+        async handle(command, signal) {
+          expect(command).toMatchObject({ action: 'CLOSE_VIEW', discard: false })
+          started.resolve(signal)
+          await gate.promise
+          return { ok: true, viewId: ENV }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-close-pending', payload: { action: 'CLOSE_VIEW', viewId: ENV, discard: false },
+      }))
+      const signal = await started.promise
+      await vi.advanceTimersByTimeAsync(100)
+      expect(signal.aborted).toBe(false)
+      expect(setup.transport.sent.some((env) => env.invocationId === 'ide-close-pending')).toBe(false)
+      gate.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      const result = setup.transport.sent.filter((env) => env.invocationId === 'ide-close-pending')
+      expect(result).toHaveLength(1)
+      expect(result[0]?.payload.case).toBe('ideResult')
+      if (result[0]?.payload.case !== 'ideResult') throw new Error('missing IDE result')
+      expect(result[0].payload.value).toMatchObject({ ok: true, viewId: ENV })
+    } finally {
+      gate.resolve()
+      vi.useRealTimers()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
+  // 即使 IDE 延迟返回成功，断线中止后的旧请求也不能向新连接发送结果。
+  it('aborts a pending normal close on disconnect and never sends its stale success', async () => {
+    const gate = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<AbortSignal>()
+    const setup = buildRuntime({
+      ideCommandTimeoutMillis: 20,
+      ide: ideService({
+        async handle(_command, signal) {
+          started.resolve(signal)
+          await gate.promise
+          return { ok: true }
+        },
+      }),
+    })
+    try {
+      await handshake(setup)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      setup.transport.receive(serverMessage('IDE_COMMAND', {
+        invocationId: 'ide-close-disconnect', payload: { action: 'CLOSE_VIEW', viewId: ENV, discard: false },
+      }))
+      const signal = await started.promise
+      await vi.advanceTimersByTimeAsync(100)
+      expect(signal.aborted).toBe(false)
+      const oldConnection = setup.transport.connection!
+      setup.transport.disconnect()
+      expect(signal.aborted).toBe(true)
+      expect(signal.reason).toBe('CONTROL_DISCONNECTED')
+      await vi.advanceTimersByTimeAsync(5)
+      setup.transport.receive(serverMessage('SETTINGS', { environmentId: ENV }))
+      expect(setup.runtime.getState()).toBe('READY')
+      gate.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(oldConnection.sent.some((env) => env.invocationId === 'ide-close-disconnect')).toBe(false)
+      expect(setup.transport.sent.some((env) => env.invocationId === 'ide-close-disconnect')).toBe(false)
+    } finally {
+      gate.resolve()
+      vi.useRealTimers()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
+
   it('dispatches IDE_COMMAND and replies with IDE_RESULT', async () => {
     let handled = 0
     const setup = buildRuntime({
@@ -2423,7 +2567,8 @@ describe('runtime connection management', () => {
     const updateGate = Promise.withResolvers<void>()
     let observedSignal: AbortSignal | null = null
     const update: UpdatePort = {
-      async handleUpdate(_cmd, _cfg, signal) {
+      async handleUpdate(cmd, _cfg, signal) {
+        expect(cmd).toMatchObject({ targetVersion: '1.0.0' })
         observedSignal = signal
         expect(signal.aborted).toBe(false)
         await updateGate.promise
@@ -2435,7 +2580,7 @@ describe('runtime connection management', () => {
     await waitFor(() => setup.transport.connection !== null)
     setup.transport.listener?.onUpgradeFailed(426, {
       targetProtocolVersion: 1,
-      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-linux-x64-v1.0.0.tar.gz',
+      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-v1.0.0-linux-amd64.tar.gz',
       artifactSha256: 'a'.repeat(64),
     })
     await waitFor(() => setup.runtime.getRuntimeStatus().status.update !== null)
@@ -2444,7 +2589,7 @@ describe('runtime connection management', () => {
     expect(setup.runtime.getState()).not.toBe('FAILED')
 
     updateGate.resolve()
-    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1')
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1.0.0')
     expect(setup.runtime.getState()).not.toBe('FAILED')
     expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
 
@@ -2649,8 +2794,6 @@ describe('runtime IDE command lifetime and shutdown convergence', () => {
         payload: {
           operationId: '55555555-4444-4555-8666-777777777777',
           targetVersion: artifactFixture.targetVersion,
-          artifactUrl: artifactFixture.accepted[1]!.artifactUrl,
-          artifactSha256: artifactFixture.artifactSha256,
         },
       }),
     )

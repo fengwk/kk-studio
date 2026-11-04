@@ -1395,7 +1395,7 @@ async function createHoldingQueueFixture(
         description: 'Local hold agent for free UI queue tests.',
         systemPrompt: 'Wait for the local E2E stream.',
         execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       },
     )
     assert(

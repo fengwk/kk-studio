@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -223,7 +222,7 @@ public class ProjectService {
       List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issue.getId());
       for (IssueAgentThread binding : bindings) {
         sessionDeletion.deleteSessionsByOwner(
-            new OwnerRef.IssueAgent(issue.getId(), binding.agentName()));
+            ProjectSessionOwnership.owner(issue.getId(), binding.agentName()));
       }
       if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
         throw new ProjectVersionConflictException(

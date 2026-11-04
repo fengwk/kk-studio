@@ -116,11 +116,7 @@ class EnvironmentUpdateServiceTest {
     order.verify(server).sendUpdate(eq(ENV), command.capture());
     order.verify(server).endUpdate(eq(ENV), any());
     assertEquals(TARGET, command.getValue().targetVersion());
-    assertEquals(
-        DaemonUpdateArtifact.artifactUrl(
-            TARGET, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64),
-        command.getValue().artifactUrl());
-    assertEquals(SHA256, command.getValue().artifactSha256());
+    UUID.fromString(command.getValue().operationId());
   }
 
   @Test

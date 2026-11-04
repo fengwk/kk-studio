@@ -31,13 +31,9 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.chat.Chat;
-import fun.fengwk.kkstudio.platform.chat.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.ChatSession;
-import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.environment.Environment;
-import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnerDisplay;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -56,11 +52,8 @@ class InteractionQueryServiceTest {
     return new UUID(0L, value);
   }
 
-  private ChatSessionRepository chatSessionRepository;
-  private ChatRepository chatRepository;
-  private IssueAgentOwnership issueAgentOwnership;
-  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
-  private EnvironmentRepository environmentRepository;
+  private SessionOwnership ownership;
+  private EnvironmentService environmentService;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService service;
@@ -68,26 +61,51 @@ class InteractionQueryServiceTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    chatSessionRepository = mock(ChatSessionRepository.class);
-    chatRepository = mock(ChatRepository.class);
-    issueAgentOwnership = mock(IssueAgentOwnership.class);
-    issueAgentOwnerships = mock(ObjectProvider.class);
-    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
-    environmentRepository = mock(EnvironmentRepository.class);
+    ownership = mock(SessionOwnership.class);
+    environmentService = mock(EnvironmentService.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     // 默认没有环境等待分组；需要环境等待的用例再显式覆盖本 stub。
-    when(runtime.listPendingEnvironmentWaits(any(), any(), anyInt()))
+    when(runtime.listEnvironmentWaitCandidates(any(), any(), anyInt()))
         .thenReturn(new PendingEnvironmentWaitPage(List.of(), false));
-    service =
-        new InteractionQueryService(
-            chatSessionRepository,
-            chatRepository,
-            issueAgentOwnerships,
-            environmentRepository,
-            runtimes);
+    service = new InteractionQueryService(List.of(ownership), environmentService, runtimes);
+  }
+
+  private void stubOwner(UUID root, UUID session, String kind, UUID ownerId, String title) {
+    when(ownership.findOwner(root, session))
+        .thenReturn(Optional.of(new SessionOwnerDisplay(kind, ownerId.toString(), title, null)));
+  }
+
+  /** 两个产品分别命中不同的根时都应可见，不能误判为冲突。 */
+  @Test
+  void differentProductsOnDifferentRootsAreVisible() {
+    SessionOwnership other = mock(SessionOwnership.class);
+    service = new InteractionQueryService(List.of(ownership, other), environmentService, runtimes);
+    UUID root1 = id(101);
+    UUID session1 = id(102);
+    UUID root2 = id(201);
+    UUID session2 = id(202);
+    stubRoot(root1);
+    stubRoot(root2);
+    stubOwner(root1, session1, "CHAT", id(103), "chat");
+    when(other.findOwner(root2, session2))
+        .thenReturn(
+            Optional.of(new SessionOwnerDisplay("ISSUE_AGENT", "issue:agent", "issue", null)));
+    Instant time = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction first = waitingInput(id(104), root1, session1, time);
+    PendingInteraction second = waitingInput(id(204), root2, session2, time.plusSeconds(1));
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(first, second), false));
+    stubCountPage(List.of(first, second), false);
+
+    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    assertEquals(2, page.getTotal());
+    assertEquals("CHAT", page.getItems().get(0).getOwner().getKind());
+    assertEquals("issue:agent", page.getItems().get(1).getOwner().getId());
+    verify(other).findOwner(root1, session1);
+    verify(ownership).findOwner(root2, session2);
   }
 
   /** 显式过滤根/直接来源根必须解析为执行根；同时提供该根的快照（展示名）。后代来源会用 {@link #stubRootSession} 覆盖同一根的快照。 */
@@ -182,18 +200,12 @@ class InteractionQueryServiceTest {
     PendingInteraction row3 = waitingInput(invocationId3, threadId3, sessionId3, t3);
     stubRoot(threadId3);
 
-    when(chatSessionRepository.findBySessionId(sessionId1))
-        .thenReturn(new ChatSession(sessionId1, id(1001)));
-    Chat chat = mock(Chat.class);
-    when(chat.getTitle()).thenReturn("deploy chat");
-    when(chatRepository.getById(id(1001))).thenReturn(chat);
-    when(chatSessionRepository.findBySessionId(sessionId2)).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(threadId2))
+    when(ownership.findOwner(threadId1, sessionId1))
         .thenReturn(
             Optional.of(
-                new IssueAgentOwnership.BoundRoot(id(2001), "planner", "fix the pipeline")));
-    when(chatSessionRepository.findBySessionId(sessionId3)).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(threadId3)).thenReturn(Optional.empty());
+                new SessionOwnerDisplay(
+                    "CHAT", id(1001).toString(), "deploy chat", "/chats/1001")));
+    stubOwner(threadId2, sessionId2, "ISSUE_AGENT", id(2001), "fix the pipeline");
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row1, row2, row3), false));
@@ -216,13 +228,10 @@ class InteractionQueryServiceTest {
     assertEquals("{}", dto1.getArgumentsJson());
     assertNull(dto1.getApprovalJson());
     assertEquals(t1, dto1.getCreateTime());
-    assertEquals("CHAT", dto1.getOwner().getType());
-    assertEquals(id(1001).toString(), dto1.getOwner().getChatId());
-    assertEquals("deploy chat", dto1.getOwner().getChatTitle());
-    assertEquals("thread-" + threadId1, dto1.getOwner().getRootThreadName());
-    assertNull(dto1.getOwner().getIssueId());
-    assertNull(dto1.getOwner().getIssueTitle());
-    assertNull(dto1.getOwner().getAgentName());
+    assertEquals("CHAT", dto1.getOwner().getKind());
+    assertEquals(id(1001).toString(), dto1.getOwner().getId());
+    assertEquals("deploy chat", dto1.getOwner().getTitle());
+    assertEquals("/chats/1001", dto1.getOwner().getLink());
 
     InteractionDTO dto2 = page.getItems().get(1);
     assertEquals(invocationId2.toString(), dto2.getInteractionId());
@@ -233,17 +242,14 @@ class InteractionQueryServiceTest {
     assertEquals("{\"env\":\"prod\"}", dto2.getArgumentsJson());
     assertEquals("{\"allowed\":false}", dto2.getApprovalJson());
     assertEquals(t2, dto2.getCreateTime());
-    assertEquals("ISSUE_AGENT", dto2.getOwner().getType());
-    assertEquals(id(2001).toString(), dto2.getOwner().getIssueId());
-    assertEquals("fix the pipeline", dto2.getOwner().getIssueTitle());
-    assertEquals("planner", dto2.getOwner().getAgentName());
-    assertEquals("thread-" + threadId2, dto2.getOwner().getRootThreadName());
-    assertNull(dto2.getOwner().getChatId());
-    assertNull(dto2.getOwner().getChatTitle());
+    assertEquals("ISSUE_AGENT", dto2.getOwner().getKind());
+    assertEquals(id(2001).toString(), dto2.getOwner().getId());
+    assertEquals("fix the pipeline", dto2.getOwner().getTitle());
+    assertNull(dto2.getOwner().getLink());
 
-    // 展示名按请求缓存：同一根的 Chat 标题与 Issue 归属只解析一次，不逐卡回读。
-    verify(chatRepository, times(1)).getById(id(1001));
-    verify(issueAgentOwnership, times(1)).findBoundRoot(threadId2);
+    // 列表和计数共用请求级缓存。
+    verify(ownership, times(1)).findOwner(threadId1, sessionId1);
+    verify(ownership, times(1)).findOwner(threadId2, sessionId2);
   }
 
   /**
@@ -260,8 +266,7 @@ class InteractionQueryServiceTest {
     PendingInteraction childRow = waitingInput(id(900), childThreadId, childSessionId, t1);
     stubDescendant(childThreadId, rootThreadId);
     stubRootSession(rootThreadId, rootSessionId);
-    when(chatSessionRepository.findBySessionId(rootSessionId))
-        .thenReturn(new ChatSession(rootSessionId, id(700)));
+    stubOwner(rootThreadId, rootSessionId, "CHAT", id(700), null);
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(childRow), false));
     stubCountPage(List.of(childRow), false);
@@ -274,8 +279,8 @@ class InteractionQueryServiceTest {
     assertEquals(childThreadId.toString(), dto.getThreadId());
     assertEquals(childSessionId.toString(), dto.getSessionId());
     assertEquals(rootThreadId.toString(), dto.getRootThreadId());
-    assertEquals("CHAT", dto.getOwner().getType());
-    assertEquals(id(700).toString(), dto.getOwner().getChatId());
+    assertEquals("CHAT", dto.getOwner().getKind());
+    assertEquals(id(700).toString(), dto.getOwner().getId());
   }
 
   /**
@@ -304,10 +309,8 @@ class InteractionQueryServiceTest {
     stubRoot(otherRootThreadId);
     stubDescendant(childThreadId, rootThreadId);
     stubRootSession(rootThreadId, rootSessionId);
-    when(chatSessionRepository.findBySessionId(rootSessionId))
-        .thenReturn(new ChatSession(rootSessionId, id(700)));
-    when(chatSessionRepository.findBySessionId(otherRootSessionId))
-        .thenReturn(new ChatSession(otherRootSessionId, id(710)));
+    stubOwner(rootThreadId, rootSessionId, "CHAT", id(700), null);
+    stubOwner(otherRootThreadId, otherRootSessionId, "CHAT", id(710), null);
 
     // 第 1 页：根自身 + 其他根（被过滤），hasMore=true；第 2 页：后代来源（可见）。
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 2))
@@ -370,24 +373,18 @@ class InteractionQueryServiceTest {
     // row1, row2 不可见
     stubRoot(id(2));
     stubRoot(id(4));
-    when(chatSessionRepository.findBySessionId(id(1))).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(id(2))).thenReturn(Optional.empty());
-    when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
 
     // row3 可见 (Chat)
     stubRoot(id(6));
-    when(chatSessionRepository.findBySessionId(id(5))).thenReturn(new ChatSession(id(5), id(500)));
+    stubOwner(id(6), id(5), "CHAT", id(500), null);
 
     // row4 可见 (IssueAgent)
     stubRoot(id(8));
-    when(chatSessionRepository.findBySessionId(id(7))).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(id(8)))
-        .thenReturn(Optional.of(new IssueAgentOwnership.BoundRoot(id(800), "coder", null)));
+    stubOwner(id(8), id(7), "ISSUE_AGENT", id(800), null);
 
     // row5 可见 (Chat)
     stubRoot(id(10));
-    when(chatSessionRepository.findBySessionId(id(9))).thenReturn(new ChatSession(id(9), id(900)));
+    stubOwner(id(10), id(9), "CHAT", id(900), null);
 
     // 第 1 页返回 3 条（2 条不可见 + 1 条可见），hasMore 为 true
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 3))
@@ -429,16 +426,14 @@ class InteractionQueryServiceTest {
 
     // row1 可见 (Chat)
     stubRoot(id(2));
-    when(chatSessionRepository.findBySessionId(id(1))).thenReturn(new ChatSession(id(1), id(100)));
+    stubOwner(id(2), id(1), "CHAT", id(100), null);
 
     // row2 不可见
     stubRoot(id(4));
-    when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
 
     // row3 可见 (Chat)
     stubRoot(id(6));
-    when(chatSessionRepository.findBySessionId(id(5))).thenReturn(new ChatSession(id(5), id(300)));
+    stubOwner(id(6), id(5), "CHAT", id(300), null);
 
     // 第一次调用：limit=1，返回 row1 且 hasMore=true
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
@@ -490,8 +485,7 @@ class InteractionQueryServiceTest {
     PendingInteraction row =
         waitingInput(id(101), threadId, sessionId, Instant.parse("2026-03-01T10:00:00Z"));
     stubRoot(threadId);
-    when(chatSessionRepository.findBySessionId(sessionId))
-        .thenReturn(new ChatSession(sessionId, id(1001)));
+    stubOwner(threadId, sessionId, "CHAT", id(1001), null);
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 5))
         .thenReturn(new PendingInteractionPage(List.of(row), false));
     stubCountPage(List.of(row), false);
@@ -517,14 +511,12 @@ class InteractionQueryServiceTest {
 
     // row1/row3/row4 可见；row2 无产品归属（内部委派）必须被统计排除。
     stubRoot(id(2));
-    when(chatSessionRepository.findBySessionId(id(1))).thenReturn(new ChatSession(id(1), id(100)));
+    stubOwner(id(2), id(1), "CHAT", id(100), null);
     stubRoot(id(4));
-    when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
     stubRoot(id(6));
-    when(chatSessionRepository.findBySessionId(id(5))).thenReturn(new ChatSession(id(5), id(300)));
+    stubOwner(id(6), id(5), "CHAT", id(300), null);
     stubRoot(id(8));
-    when(chatSessionRepository.findBySessionId(id(7))).thenReturn(new ChatSession(id(7), id(400)));
+    stubOwner(id(8), id(7), "CHAT", id(400), null);
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
         .thenReturn(new PendingInteractionPage(List.of(row1), true));
@@ -600,7 +592,7 @@ class InteractionQueryServiceTest {
       int size,
       List<PendingEnvironmentWait> rows,
       boolean hasMore) {
-    when(runtime.listPendingEnvironmentWaits(afterCreatedAt, afterId, size))
+    when(runtime.listEnvironmentWaitCandidates(afterCreatedAt, afterId, size))
         .thenReturn(new PendingEnvironmentWaitPage(rows, hasMore));
   }
 
@@ -611,9 +603,37 @@ class InteractionQueryServiceTest {
   }
 
   private void stubEnvironmentName(String environmentId, String name) {
-    Environment environment = mock(Environment.class);
-    when(environment.getName()).thenReturn(name);
-    when(environmentRepository.getById(UUID.fromString(environmentId))).thenReturn(environment);
+    when(environmentService.requireName(EnvironmentId.parse(environmentId))).thenReturn(name);
+  }
+
+  /** 人工后代与环境等待共享根及根 Session，并在列表和计数中只解析一次归属。 */
+  @Test
+  void manualDescendantAndEnvironmentShareRootOwnership() {
+    UUID root = id(80);
+    UUID rootSession = id(81);
+    UUID child = id(82);
+    UUID childSession = id(83);
+    Instant time = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction manual = waitingInput(id(84), child, childSession, time);
+    PendingEnvironmentWait environment =
+        environmentWait(root, WAITING_ENVIRONMENT_ID, time.plusSeconds(1), id(85), 1);
+    stubDescendant(child, root);
+    stubRootSession(root, rootSession);
+    stubOwner(root, rootSession, "CHAT", id(86), "root owner");
+    stubEnvironmentName(WAITING_ENVIRONMENT_ID, "dev");
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
+        .thenReturn(new PendingInteractionPage(List.of(manual), false));
+    stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 10, List.of(environment), false);
+    stubCountPage(List.of(manual), false);
+    stubEnvironmentCountPage(List.of(environment));
+
+    InteractionPageDTO page = service.listInteractions(null, null, 10);
+    assertEquals(2, page.getTotal());
+    assertEquals(childSession.toString(), page.getItems().get(0).getSessionId());
+    assertEquals(root.toString(), page.getItems().get(0).getRootThreadId());
+    assertEquals(id(86).toString(), page.getItems().get(0).getOwner().getId());
+    assertEquals(page.getItems().get(0).getOwner(), page.getItems().get(1).getOwner());
+    verify(ownership).findOwner(root, rootSession);
   }
 
   /**
@@ -629,8 +649,7 @@ class InteractionQueryServiceTest {
     PendingInteraction manual =
         waitingInput(id(101), manualRootThreadId, manualSessionId, manualCreatedAt);
     stubRoot(manualRootThreadId);
-    when(chatSessionRepository.findBySessionId(manualSessionId))
-        .thenReturn(new ChatSession(manualSessionId, id(13)));
+    stubOwner(manualRootThreadId, manualSessionId, "CHAT", id(13), null);
 
     UUID environmentRootThreadId = id(21);
     UUID environmentSessionId = id(22);
@@ -642,8 +661,7 @@ class InteractionQueryServiceTest {
     PendingEnvironmentWait later =
         environmentWait(environmentRootThreadId, SECOND_ENVIRONMENT_ID, laterCreatedAt, id(902), 1);
     stubRootSession(environmentRootThreadId, environmentSessionId);
-    when(chatSessionRepository.findBySessionId(environmentSessionId))
-        .thenReturn(new ChatSession(environmentSessionId, id(23)));
+    stubOwner(environmentRootThreadId, environmentSessionId, "CHAT", id(23), null);
     stubEnvironmentName(WAITING_ENVIRONMENT_ID, "dev-env");
     stubEnvironmentName(SECOND_ENVIRONMENT_ID, "prod-env");
 
@@ -665,8 +683,8 @@ class InteractionQueryServiceTest {
     assertEquals("dev-env", environmentItem.getEnvironmentName());
     assertEquals(3, environmentItem.getWaitingCount().intValue());
     assertEquals(environmentRootThreadId.toString(), environmentItem.getRootThreadId());
-    assertEquals("CHAT", environmentItem.getOwner().getType());
-    assertEquals(id(23).toString(), environmentItem.getOwner().getChatId());
+    assertEquals("CHAT", environmentItem.getOwner().getKind());
+    assertEquals(id(23).toString(), environmentItem.getOwner().getId());
     assertEquals(earlierCreatedAt, environmentItem.getCreateTime());
     assertNull(environmentItem.getInteractionId());
     assertNull(environmentItem.getStatus());
@@ -682,6 +700,32 @@ class InteractionQueryServiceTest {
     assertEquals(1, secondEnvironmentItem.getWaitingCount().intValue());
   }
 
+  /** 在线候选不能让人工等待末页出现多余的空游标页，total 同样不计在线环境。 */
+  @Test
+  void onlineCandidatesDoNotCreateAnEmptyCursorPage() {
+    UUID root = id(11);
+    UUID session = id(12);
+    Instant manualTime = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction manual = waitingInput(id(101), root, session, manualTime);
+    PendingEnvironmentWait online =
+        environmentWait(root, WAITING_ENVIRONMENT_ID, manualTime.plusSeconds(1), id(102), 1);
+    stubRoot(root);
+    stubOwner(root, session, "CHAT", id(13), "chat");
+    when(environmentService.findReadyLeaseUntil(EnvironmentId.parse(WAITING_ENVIRONMENT_ID)))
+        .thenReturn(Optional.of(manualTime.plusSeconds(100)));
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
+        .thenReturn(new PendingInteractionPage(List.of(manual), false));
+    stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 1, List.of(online), false);
+    stubCountPage(List.of(manual), false);
+    stubEnvironmentCountPage(List.of(online));
+
+    InteractionPageDTO page = service.listInteractions(null, null, 1);
+
+    assertEquals(1, page.getTotal());
+    assertEquals(id(101).toString(), page.getItems().getFirst().getInteractionId());
+    assertNull(page.getNextCursor());
+  }
+
   /** 测试意图：环境等待条目的游标是组内最早调用的 {@code (createdAt, id)}；按该游标翻页只跳过已消费分组，不漏项、不重复。 */
   @Test
   void environmentWaitKeepsStableCursorAcrossPages() {
@@ -694,8 +738,7 @@ class InteractionQueryServiceTest {
     PendingEnvironmentWait second =
         environmentWait(rootThreadId, WAITING_ENVIRONMENT_ID, secondCreatedAt, id(902), 2);
     stubRootSession(rootThreadId, sessionId);
-    when(chatSessionRepository.findBySessionId(sessionId))
-        .thenReturn(new ChatSession(sessionId, id(33)));
+    stubOwner(rootThreadId, sessionId, "CHAT", id(33), null);
     stubEnvironmentName(WAITING_ENVIRONMENT_ID, "dev-env");
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
@@ -704,6 +747,8 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(firstCreatedAt, id(901), 1))
         .thenReturn(new PendingInteractionPage(List.of(), false));
     stubEnvironmentPage(firstCreatedAt, id(901), 1, List.of(second), false);
+    stubEnvironmentPage(
+        firstCreatedAt, id(901), InteractionQueryService.COUNT_PAGE_SIZE, List.of(second), false);
     stubCountPage(List.of(), false);
     stubEnvironmentCountPage(List.of(first, second));
 
@@ -733,8 +778,7 @@ class InteractionQueryServiceTest {
             environmentRootThreadId, WAITING_ENVIRONMENT_ID, environmentCreatedAt, id(901), 2);
     stubRoot(environmentRootThreadId);
     stubRootSession(environmentRootThreadId, environmentSessionId);
-    when(chatSessionRepository.findBySessionId(environmentSessionId))
-        .thenReturn(new ChatSession(environmentSessionId, id(43)));
+    stubOwner(environmentRootThreadId, environmentSessionId, "CHAT", id(43), null);
     stubEnvironmentName(WAITING_ENVIRONMENT_ID, "dev-env");
 
     UUID otherRootThreadId = id(51);
@@ -743,8 +787,7 @@ class InteractionQueryServiceTest {
         waitingInput(
             id(102), otherRootThreadId, otherSessionId, Instant.parse("2026-03-01T10:01:00Z"));
     stubRoot(otherRootThreadId);
-    when(chatSessionRepository.findBySessionId(otherSessionId))
-        .thenReturn(new ChatSession(otherSessionId, id(53)));
+    stubOwner(otherRootThreadId, otherSessionId, "CHAT", id(53), null);
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(otherManual), false));
@@ -772,8 +815,6 @@ class InteractionQueryServiceTest {
             id(901),
             1);
     stubRootSession(rootThreadId, sessionId);
-    when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(rootThreadId)).thenReturn(Optional.empty());
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
         .thenReturn(new PendingInteractionPage(List.of(), false));
@@ -786,7 +827,7 @@ class InteractionQueryServiceTest {
     assertEquals(0, page.getItems().size());
     assertEquals(0, page.getTotal());
     assertNull(page.getNextCursor());
-    verifyNoInteractions(environmentRepository);
+    verifyNoInteractions(environmentService);
   }
 
   /** 测试意图：控制器/插件发起、没有 Chat 或 Issue 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
@@ -810,8 +851,6 @@ class InteractionQueryServiceTest {
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.entryState()).thenReturn(entryState);
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
-    when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
-    when(issueAgentOwnership.findBoundRoot(rootThreadId)).thenReturn(Optional.empty());
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 5))
         .thenReturn(new PendingInteractionPage(List.of(approval), false));
     stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 5, List.of(), false);
@@ -822,11 +861,10 @@ class InteractionQueryServiceTest {
 
     assertEquals(1, page.getItems().size());
     InteractionOwnerDTO owner = page.getItems().get(0).getOwner();
-    assertEquals("AGENT_TASK", owner.getType());
-    assertEquals("worker", owner.getAgentName());
-    assertEquals("nightly report", owner.getRootThreadName());
-    assertNull(owner.getChatId());
-    assertNull(owner.getIssueId());
+    assertEquals("AGENT_TASK", owner.getKind());
+    assertEquals(rootThreadId.toString(), owner.getId());
+    assertEquals("worker", owner.getTitle());
+    assertNull(owner.getLink());
     assertEquals(1, page.getTotal());
   }
 
@@ -835,36 +873,12 @@ class InteractionQueryServiceTest {
   void constructorRejectsNullDependencies() {
     assertThrows(
         NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                null, chatRepository, issueAgentOwnerships, environmentRepository, runtimes));
+        () -> new InteractionQueryService(null, environmentService, runtimes));
     assertThrows(
         NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository,
-                null,
-                issueAgentOwnerships,
-                environmentRepository,
-                runtimes));
+        () -> new InteractionQueryService(List.of(ownership), null, runtimes));
     assertThrows(
         NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository, chatRepository, null, environmentRepository, runtimes));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository, chatRepository, issueAgentOwnerships, null, runtimes));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentOwnerships,
-                environmentRepository,
-                null));
+        () -> new InteractionQueryService(List.of(ownership), environmentService, null));
   }
 }

@@ -3,13 +3,10 @@ import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
 
 const owner = {
-  type: 'CHAT' as const,
-  chatId: 'chat-1',
-  chatTitle: null,
-  issueId: null,
-  issueTitle: null,
-  agentName: null,
-  rootThreadName: null,
+  kind: 'CHAT',
+  id: 'chat-1',
+  title: null,
+  link: '/chats/chat-1',
 }
 
 const input: InteractionDTO = {

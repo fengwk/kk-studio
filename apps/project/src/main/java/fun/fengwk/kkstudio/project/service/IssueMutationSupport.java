@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Duration;
@@ -45,27 +46,15 @@ final class IssueMutationSupport {
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
 
-  /**
-   * 锁前快速路径：命中同键同指纹时跳过加锁与业务校验。
-   *
-   * <p>未命中不能作为最终结论；调用方必须在 {@link #lockOwner(UUID)} 之后再次判定。
-   */
-  boolean replayed(UUID issueId, Identity identity) {
-    return replayedActivity(issueId, identity) != null;
-  }
-
-  IssueActivity replayedActivity(UUID issueId, Identity identity) {
+  /** 先检查 receipt，未命中时取得 owner 锁并再次检查。调用方在自己的事务中使用。 */
+  ReceiptLock<Locked> lockUnlessReplayed(UUID issueId, Identity identity) {
     currentIssue(issueId);
-    return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
-  }
-
-  /** owner 锁内的精确重试判定。 */
-  boolean replayedUnderLock(Issue issue, Identity identity) {
-    return replayedActivityUnderLock(issue, identity) != null;
-  }
-
-  IssueActivity replayedActivityUnderLock(Issue issue, Identity identity) {
-    return IssueActivityIdempotency.findApplied(issueActivityRepository, issue.getId(), identity);
+    return IssueActivityIdempotency.lockUnlessReplayed(
+        issueActivityRepository,
+        issueId,
+        identity,
+        () -> lockOwner(issueId),
+        l -> l.issue().getId());
   }
 
   /** 锁前重放返回的权威当前事实：重新读取已提交的行，不复用一级缓存快照。 */

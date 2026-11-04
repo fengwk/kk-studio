@@ -115,8 +115,8 @@ function interactionItems() {
         rootThreadId: ROOT_ID,
         sessionId: 'b1000000-0000-4000-8000-0000000000b1',
         owner: {
-          type: 'CHAT', chatId: 'chat-pane-harness', chatTitle: 'Pane harness',
-          issueId: null, issueTitle: null, agentName: null, rootThreadName: '根 Thread',
+          kind: 'CHAT', id: 'chat-pane-harness', title: 'Pane harness',
+          link: '/chats/chat-pane-harness',
         },
         toolCallId: 'call-pane-1',
         type: 'APPROVAL',

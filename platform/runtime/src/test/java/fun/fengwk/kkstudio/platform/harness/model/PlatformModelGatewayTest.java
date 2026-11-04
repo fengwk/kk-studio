@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -321,10 +324,11 @@ class PlatformModelGatewayTest {
                     })),
             () -> BUSY_DELAY,
             new ConcurrencyAdmission(2),
-            modelName ->
-                attempts.getAndIncrement() == 0
-                    ? plan
-                    : ModelRequestBodyPricing.plan(ModelPricing.ZERO));
+            pricingSource(
+                modelName ->
+                    attempts.getAndIncrement() == 0
+                        ? plan
+                        : ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
 
     ModelGateway.Succeeded first = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertEquals(
@@ -349,18 +353,19 @@ class PlatformModelGatewayTest {
                 scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
             () -> BUSY_DELAY,
             new ConcurrencyAdmission(1),
-            modelName ->
-                ModelRequestBodyPricing.plan(
-                    new ModelPricing(
-                        ModelPricing.RateSet.ZERO,
-                        List.of(
-                            new ModelPricing.Override(
-                                "fast",
-                                new ModelPricingCondition(
-                                    null, null, null, null, condition, null, null, null),
-                                new ModelPricing.RatePatch(
-                                    BigDecimal.ONE, null, null, null, null, null, false))),
-                        List.of())));
+            pricingSource(
+                modelName ->
+                    ModelRequestBodyPricing.plan(
+                        new ModelPricing(
+                            ModelPricing.RateSet.ZERO,
+                            List.of(
+                                new ModelPricing.Override(
+                                    "fast",
+                                    new ModelPricingCondition(
+                                        null, null, null, null, condition, null, null, null),
+                                    new ModelPricing.RatePatch(
+                                        BigDecimal.ONE, null, null, null, null, null, false))),
+                            List.of()))));
     ModelGateway.Succeeded succeeded = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(succeeded.completion().response().requestBodyPricing());
   }
@@ -377,7 +382,14 @@ class PlatformModelGatewayTest {
         resolution,
         () -> BUSY_DELAY,
         admission,
-        modelName -> ModelRequestBodyPricing.plan(ModelPricing.ZERO));
+        pricingSource(modelName -> ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
+  }
+
+  private static ModelPricingPlanSource pricingSource(
+      Function<String, ModelRequestBodyPricing.Plan> plans) {
+    ModelPricingPlanSource source = mock(ModelPricingPlanSource.class);
+    when(source.plan(anyString())).thenAnswer(invocation -> plans.apply(invocation.getArgument(0)));
+    return source;
   }
 
   private static Function<ModelCallTimeoutPolicy, ModelProvider> scripted(

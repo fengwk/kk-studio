@@ -54,9 +54,8 @@ class ToolCatalogDtoContractTest {
         SkillRefDTO.class,
         ((ParameterizedType) skills.getGenericType()).getActualTypeArguments()[0]);
 
-    String configTemplate =
-        """
-        {"tools":[],"skills":%s,"subagents":[],"inheritParentEnvironment":true}
+    String configTemplate = """
+        {"tools":[],"skills":%s,"subagents":[]}
         """;
     AgentDefinitionConfigDTO dto =
         MAPPER.readValue(

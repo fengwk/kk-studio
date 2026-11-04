@@ -77,12 +77,23 @@ class MavisStatusTest {
     assertTrue(business.getMessage().contains("Do not retry until credits are available."));
   }
 
-  /** 非标量状态码退化为固定文本，避免把未知服务端结构带进错误消息。 */
+  /** 状态码只回显短数值；任意远端文本与结构退化为固定文本，避免把凭据带入错误消息。 */
   @Test
-  void rendersNonScalarCodesSafely() {
+  void rendersOnlyBoundedNumericCodes() {
     JsonNode container = json("{\"nested\":true}");
     assertFalse(MavisStatus.isAuthCode(container));
     assertEquals("unexpected-status", MavisStatus.render(container));
     assertEquals("", MavisStatus.render(json("null")));
+    assertEquals("402", MavisStatus.render(json("402")));
+    assertEquals("1004", MavisStatus.render(json("\"1004\"")));
+
+    String secret = "header.payload.signature";
+    JsonNode echoed = json("\"" + secret + "\"");
+    assertEquals("unexpected-status", MavisStatus.render(echoed));
+    assertFalse(MavisStatus.isAuthCode(echoed));
+    MavisBusinessException error =
+        assertInstanceOf(MavisBusinessException.class, MavisStatus.raise(echoed, "ctx", "detail"));
+    assertEquals("unexpected-status", error.code());
+    assertFalse(error.getMessage().contains(secret));
   }
 }

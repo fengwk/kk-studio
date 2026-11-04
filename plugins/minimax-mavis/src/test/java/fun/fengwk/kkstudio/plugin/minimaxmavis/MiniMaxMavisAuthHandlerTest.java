@@ -135,7 +135,7 @@ class MiniMaxMavisAuthHandlerTest {
   }
 
   /** 模拟 catalog 响应成功的假传输。 */
-  private static final class FakeCatalogTransport implements MavisHttpTransport {
+  private static final class FakeCatalogTransport extends MavisHttpTransport {
     private final List<MavisHttpRequest> requests = new ArrayList<>();
 
     @Override

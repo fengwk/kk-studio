@@ -5,6 +5,7 @@ import type {
   EnvironmentEventDTO,
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
+  EnvironmentIdeDirectoryListingDTO,
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
@@ -84,6 +85,20 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
         data,
       ),
 
+    /**
+     * 目录选择器只列直接子目录；path 省略时服务端返回宿主主目录。
+     * 结果中的 path 是服务端规范化后的目录，调用方用它确认切换目标。
+     */
+    listIdeDirectories: (
+      environmentId: string,
+      path?: string | null,
+      signal?: AbortSignal,
+    ): Promise<EnvironmentIdeDirectoryListingDTO> =>
+      client.get(
+        `/environments/${encodeURIComponent(environmentId)}/ide/directories`,
+        path == null ? { signal } : { params: { path }, signal },
+      ),
+
     openIdeViewTerminal: (
       environmentId: string,
       viewId: string,
@@ -94,13 +109,20 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
         data,
       ),
 
-    /** 普通关闭传 discard=false；只有用户明确放弃未保存内容才传 true。 */
+    setIdeViewMobileLayout: (
+      environmentId: string,
+      viewId: string,
+      data: EnvironmentIdeViewBindingDTO,
+    ): Promise<void> =>
+      client.post(`${ideViewPath(environmentId, viewId)}/mobile-layout`, data),
+
+    /** 普通关闭等待 IDE 内用户操作；仅在状态未知并经用户确认时强制关闭。 */
     closeIdeView: (
       environmentId: string,
       viewId: string,
       data: EnvironmentIdeCloseViewDTO,
     ): Promise<void> =>
-      client.delete(ideViewPath(environmentId, viewId), { data }),
+      client.delete(ideViewPath(environmentId, viewId), data.discard ? { data } : { data, timeout: 0 }),
   }
 }
 

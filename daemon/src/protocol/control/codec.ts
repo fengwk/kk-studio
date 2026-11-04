@@ -323,6 +323,10 @@ function validateSettings(settings: Settings): void {
     settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds,
     'settings.resourceBudgets.temporaryResourceCleanupIntervalSeconds',
   )
+  requireText(settings.noProxyHosts, 'settings.noProxyHosts', { maxChars: 4096 })
+  if (settings.proxyUrl !== undefined) {
+    requireText(settings.proxyUrl, 'settings.proxyUrl', { nonBlank: true, maxChars: 2048 })
+  }
   if (settings.displayName !== undefined) {
     requireText(settings.displayName, 'settings.displayName', { nonBlank: true, maxChars: MAX_DISPLAY_NAME_CHARS })
   }
@@ -566,16 +570,7 @@ function validatePolicy(policy: TemporaryResourcePolicy): void {
 function validateUpdate(update: Update): void {
   assertNoUnknown(update, 'update')
   requireUuid(update.operationId, 'update.operationId')
-  const targetVersion = requireDaemonVersion(update.targetVersion, 'update.targetVersion')
-  const url = requireText(update.artifactUrl, 'update.artifactUrl', { nonBlank: true })
-  const match = ARTIFACT_URL_PATTERN.exec(url)
-  if (match === null || match[1] !== targetVersion) {
-    throw new Error('update.artifactUrl must be the official archive for targetVersion')
-  }
-  const sha = requireText(update.artifactSha256, 'update.artifactSha256', { nonBlank: true })
-  if (!SHA256_ANY_PATTERN.test(sha)) {
-    throw new Error('update.artifactSha256 has invalid syntax')
-  }
+  requireDaemonVersion(update.targetVersion, 'update.targetVersion')
 }
 
 function validateUpdateResult(result: UpdateResult): void {
@@ -624,6 +619,7 @@ function validateIdeCommand(command: IdeCommand): void {
       return
     case IdeAction.FOCUS_TERMINAL:
     case IdeAction.DETACH_VIEW:
+    case IdeAction.COLLAPSE_MOBILE:
       requireBoundView(command, false)
       if (command.directory !== undefined) {
         throw new Error('ideCommand.directory is not valid for this action')
@@ -638,6 +634,7 @@ function validateIdeCommand(command: IdeCommand): void {
       rejectOpenFields(command)
       return
     case IdeAction.LIST_VIEWS:
+    case IdeAction.LIST_DIRECTORIES:
       if (
         command.viewId !== undefined ||
         command.documentId !== undefined ||
@@ -646,10 +643,13 @@ function validateIdeCommand(command: IdeCommand): void {
         command.claimId !== undefined ||
         command.bindingEpoch !== undefined ||
         command.mode !== IdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED ||
-        command.directory !== undefined ||
+        (command.action === IdeAction.LIST_VIEWS && command.directory !== undefined) ||
         command.discard !== undefined
       ) {
-        throw new Error('LIST_VIEWS must only declare action')
+        throw new Error('IDE list command has invalid fields')
+      }
+      if (command.directory !== undefined) {
+        requireIdePath(command.directory, 'ideCommand.directory')
       }
       return
     default:
@@ -703,7 +703,8 @@ function validateIdeResult(result: IdeResult): void {
       result.bindingEpoch !== undefined ||
       result.directory !== undefined ||
       result.workspacePath !== undefined ||
-      result.views.length > 0
+      result.views.length > 0 ||
+      result.directoryListing !== undefined
     ) {
       throw new Error('failed IDE result must only declare code and message')
     }
@@ -713,6 +714,30 @@ function validateIdeResult(result: IdeResult): void {
   }
   if (result.code !== undefined || result.message !== undefined) {
     throw new Error('successful IDE result must not declare code or message')
+  }
+  if (result.directoryListing !== undefined) {
+    if (
+      result.viewId !== undefined || result.documentId !== undefined || result.eventNodeId !== undefined ||
+      result.connectionId !== undefined || result.claimId !== undefined || result.bindingEpoch !== undefined ||
+      result.directory !== undefined || result.workspacePath !== undefined || result.views.length > 0
+    ) {
+      throw new Error('directory listing result must not contain view fields')
+    }
+    const listing = result.directoryListing
+    assertNoUnknown(listing, 'directoryListing')
+    requireIdePath(listing.path, 'directoryListing.path')
+    if (listing.parentPath !== undefined) {
+      requireIdePath(listing.parentPath, 'directoryListing.parentPath')
+    }
+    if (listing.truncated === undefined || listing.children.length > 1000) {
+      throw new Error('directory listing requires truncated and at most 1000 children')
+    }
+    for (const child of listing.children) {
+      assertNoUnknown(child, 'directoryEntry')
+      requireIdePath(child.name, 'directoryEntry.name')
+      requireIdePath(child.path, 'directoryEntry.path')
+    }
+    return
   }
   if (result.views.length > 0) {
     if (

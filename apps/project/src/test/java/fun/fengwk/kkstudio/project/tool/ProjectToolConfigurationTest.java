@@ -46,7 +46,7 @@ class ProjectToolConfigurationTest {
 
   /**
    * 测试意图：Contributor 只冻结唯一的 {@code issue_transition}（SELECTABLE，由 Agent 配置显式选择）；Issue 的运行上下文由
-   * Markdown 任务消息承载，因此不再注册任何 custom entry type 或上下文 projector。
+   * Markdown 任务消息承载，因此不注册 custom entry type。
    */
   @Test
   void freezesOnlyTheSelectableTransitionTool() {
@@ -63,7 +63,6 @@ class ProjectToolConfigurationTest {
           assertEquals(List.of(tool), catalog.selectableTools());
 
           assertTrue(catalog.customEntryTypes().isEmpty());
-          assertTrue(catalog.contextProjectors().isEmpty());
         });
   }
 }

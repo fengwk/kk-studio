@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -68,7 +70,11 @@ public record MavisCallback(String accessToken, MavisRegion region) {
 
   @Override
   public String toString() {
-    return "MavisCallback[region=" + region.id() + ", accessToken=" + MavisRedaction.REDACTED + "]";
+    return "MavisCallback[region="
+        + region.id()
+        + ", accessToken="
+        + PluginRedaction.REDACTED
+        + "]";
   }
 
   private static String normalize(String callbackUrl) {
