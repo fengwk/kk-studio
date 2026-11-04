@@ -8,7 +8,7 @@ public enum SpawnTrigger {
   MODEL_TOOL,
   /** 运行时自身发起的内部执行，如压缩。 */
   RUNTIME,
-  /** 控制器（如 Issue 编排）发起的任务。 */
+  /** 上层控制器编排发起的任务。 */
   CONTROLLER,
   /** 插件发起的一次性 Prompt 任务。 */
   PLUGIN

@@ -56,7 +56,6 @@ public final class CommandHarvestReducer {
         case UserMessageCommandPayload ignored -> {}
         case CustomMessageCommandPayload ignored -> {}
         case NotificationCommandPayload ignored -> {}
-        case SetContributorStateCommandPayload ignored -> {}
         case GoalCommandPayload value -> {
           // 每次设置都是新目标（即使文本相同），清除则回到无 Goal。
           GoalSetting goal =

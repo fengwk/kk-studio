@@ -432,8 +432,6 @@ public final class HarnessRuntimeRequestMapper {
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
       case "NOTIFICATION" -> throw new IllegalArgumentException(
           "NOTIFICATION is internal-only and not allowed on the product HTTP surface");
-      case "SET_CONTRIBUTOR_STATE" -> throw new IllegalArgumentException(
-          "SET_CONTRIBUTOR_STATE is internal-only and not allowed on the product HTTP surface");
       default -> throw new IllegalArgumentException("unknown command type: " + type);
     };
   }

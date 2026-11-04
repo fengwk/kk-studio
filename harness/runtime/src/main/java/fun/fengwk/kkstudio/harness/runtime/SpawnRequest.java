@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * {@link AgentSpawner} 的统一请求：一次「创建（或续用）Agent Thread + 首批输入 + 票据」的全部事实。
  *
  * <p>身份由调用方预分配以保证幂等：新建 Thread 需要 {@code sessionId} 与 {@code threadId}；续用既有 Thread（task 的 {@code
- * thread_id} 续接、Issue 的稳定 Thread）时 {@code sessionId} 为 null，{@code threadId} 指向既有 Thread 并由 {@code
+ * thread_id} 续接、控制器绑定的稳定 Thread）时 {@code sessionId} 为 null，{@code threadId} 指向既有 Thread 并由 {@code
  * continuation} 给出精确 cursor，其创建来源与约束沿用创建时的冻结事实。{@code ticketId} 是票据（Join）的 invocation id，{@code
  * requestHash} 是票据的请求指纹。
  *

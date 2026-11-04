@@ -23,7 +23,7 @@ public record WorkClaim(
     leaseUntil = Objects.requireNonNull(leaseUntil, "leaseUntil");
   }
 
-  /** 无环境亲和性的 claim（ISSUE / CANVAS_RUN / Harness THREAD、MODEL 与 server-side TOOL）。 */
+  /** 无环境亲和性的 claim。 */
   public WorkClaim(UUID targetId, long claimedWakeVersion, String leaseToken, Instant leaseUntil) {
     this(targetId, claimedWakeVersion, leaseToken, leaseUntil, null);
   }

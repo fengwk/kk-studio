@@ -51,16 +51,12 @@ import java.util.UUID;
  */
 final class AcceptCommandsControl {
 
-  /**
-   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT -&gt;
-   * SET_CONTRIBUTOR_STATE，每类至多一次、全部在消息之前。
-   */
+  /** SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT，每类至多一次、全部在消息之前。 */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
           ThreadCommandType.SET_AGENT,
           ThreadCommandType.SET_EXECUTION,
-          ThreadCommandType.SET_ENVIRONMENT,
-          ThreadCommandType.SET_CONTRIBUTOR_STATE);
+          ThreadCommandType.SET_ENVIRONMENT);
 
   private final HarnessStore store;
   private final DriverRegistry driverRegistry;
@@ -893,8 +889,8 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt;
-   * SET_CONTRIBUTOR_STATE）、至多一次且全部出现在消息之前。
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_EXECUTION -&gt; SET_ENVIRONMENT）、
+   * 至多一次且全部出现在消息之前。
    *
    * <p>创建类 target（NEW_SESSION / NEW_THREAD）要求<b>恰有一条</b>末尾 user-like 输入；THREAD target 允许
    * settings-only batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch 是请求校验错误，抛 {@link

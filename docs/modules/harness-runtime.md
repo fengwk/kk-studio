@@ -87,10 +87,10 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `NEW_FORKED_SESSION`：把执行根在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从切点处的生效快照推导，不复制 Join、命令或调用。
 - `THREAD`：续写既有 Thread。精确的有序重放先于一切游标与 preflight 准入；单条纯 `USER_MESSAGE` 不带游标、按锁内邮箱尾部入队，其它批次必须携带 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 并精确匹配（不匹配为 `STALE_COMMAND_CURSOR`）。
 
-命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
+命令类型分三类：人工输入 `USER_MESSAGE` 与 `GOAL`，可信调用方输入 `CUSTOM_MESSAGE`（task、自动业务、运行时注入的 `SystemReminder`），系统通知 `NOTIFICATION`。配置命令 `SET_AGENT -> SET_EXECUTION -> SET_ENVIRONMENT` 按此顺序位于消息之前，每种至多一次；`TurnPlanBuilder` 只把生效配置冻结进 `TURN_START.settings`，不向模型注入配置提醒。约束如下：
 
 - 创建型 target 与统一 `spawn` 批次必须以恰好一条 user-like 任务输入结尾。
-- 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。`SET_CONTRIBUTOR_STATE` 是分支配置，只随普通输入回合生效。
+- 既有 Thread 接受纯设置批次：在回合间的安全边界上立即归约为一条 `SETTINGS` Entry，不打开回合、不调度模型、不恢复 `STOPPED`。
 - typed `GOAL` 每次由运行时分配新的 `id` 并追加一条冻结的 USER 消息，旧 `id` 上的进度声明因此不会命中新目标；`text` 为 null 表示显式清除。
 - 产品 HTTP 面只接受 `USER_MESSAGE`、`GOAL` 与三个 `SET_*` 前缀，`GOAL` 不能与普通消息同批；`SystemReminder` 必须有完整的开闭定界符，普通消息伪造前缀不会被当作 steering。YOLO 不走邮箱。
 

@@ -248,9 +248,10 @@ class StudioHarnessThreadCommandBatchControllerTest {
     verifyNoInteractions(acceptanceService, runtime);
   }
 
-  /** CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE 是内部 steering，产品 HTTP surface 一律 400。 */
+  /** 内部命令与已删除的命令在产品 HTTP surface 均返回 400。 */
   @Test
-  void rejectsInternalOnlyCommandTypesBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
+  void rejectsInternalAndRemovedCommandTypesBeforeTouchingAcceptanceServiceOrRuntime()
+      throws Exception {
     for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
       String commands =
           """

@@ -959,7 +959,7 @@ create table harness_thread (
         references harness_thread (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
-    -- 同 Session 复合引用目标：产品表（如 Issue Run）用 (session_id, id) 把
+    -- 同 Session 复合引用目标：上层表用 (session_id, id) 把
     -- Thread 与 Session 一起冻结，无法配错 Session。
     constraint uk_harness_thread_session unique (session_id, id),
     constraint ck_harness_thread_parent_not_self check (
@@ -1080,8 +1080,7 @@ create table harness_thread_command (
             'SET_AGENT',
             'SET_EXECUTION',
             'SET_ENVIRONMENT',
-            'NOTIFICATION',
-            'SET_CONTRIBUTOR_STATE'
+            'NOTIFICATION'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (
@@ -1303,8 +1302,8 @@ create index idx_harness_tool_invocation_pending
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
--- Durable Work：全部后台调度共用的唯一 mailbox 表。Harness 的 THREAD/MODEL/AGENT/TOOL、Project 的 ISSUE 与
--- Canvas 的 CANVAS_RUN 都是一种 target_type；due、租约与 wake 围栏一律以数据库时钟判定。
+-- Durable Work：全部后台调度共用的唯一 mailbox 表，各调度目标按 target_type 区分；
+-- due、租约与 wake 围栏一律以数据库时钟判定。
 create table durable_work (
     target_type varchar(16) not null,
     target_id uuid not null,
@@ -1871,7 +1870,7 @@ create index idx_chat_session_chat on chat_session (chat_id, created_at, session
 -- storage foundation. sha256+size_bytes uniquely identify one content in the
 -- ACTIVE state (partial unique index); width/height/duration_ms are immutable
 -- media facts written once at complete time (nullable until probed). ref_count
--- counts live owner references (a READY upload plus later Canvas/Harness
+-- counts live owner references (a READY upload plus later application and Harness
 -- consumers): ACTIVE rows always hold ref_count > 0, DELETING is terminal with
 -- ref_count = 0 and keeps the row as cleanup evidence until its S3 objects are
 -- removed and the row is conditionally deleted.
@@ -1975,7 +1974,7 @@ comment on column storage_blob.height is
 comment on column storage_blob.duration_ms is
     'Immutable media duration in milliseconds probed at complete time; null for still media.';
 comment on column storage_blob.ref_count is
-    'Live owner reference count: READY uploads and later Canvas/Harness consumers.';
+    'Live owner reference count: READY uploads and later application and Harness consumers.';
 comment on column storage_blob.state is
     'Lifecycle state: ACTIVE (ref_count > 0) or DELETING (terminal, ref_count = 0).';
 comment on column storage_blob.created_at is 'Row creation time (timestamptz, millisecond precision).';

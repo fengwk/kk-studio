@@ -11,7 +11,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ExecutionSelectionJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
@@ -24,12 +23,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 5 类 typed Thread command payload 的严格、确定性 JSON codec。
+ * Typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；GOAL 携带 nullable 目标正文（null 表示清除
- * Goal）；SET_MODEL 携带完整 {@link ModelSelection}；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除
- * 环境选择）。
+ * Goal）；SET_EXECUTION 携带 Driver 与设置；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除 环境选择）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -41,7 +39,7 @@ public final class ThreadCommandPayloadJsonCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          // SET_CONTRIBUTOR_STATE 的 state.data 是自由 JSON 树，encode/decode 都必须按 BigDecimal 搬运以保精度。
+          // execution.settings 是自由 JSON 树，必须按 BigDecimal 搬运以保精度。
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
 
@@ -55,9 +53,6 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
-  private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
-  private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
-      orderedSet("contributorId", "customType", "data");
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -130,7 +125,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case SET_EXECUTION -> decodeSetExecution(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
       case NOTIFICATION -> decodeNotification(root);
-      case SET_CONTRIBUTOR_STATE -> decodeSetContributorState(root);
     };
   }
 
@@ -191,20 +185,7 @@ public final class ThreadCommandPayloadJsonCodec {
         node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
         yield node;
       }
-      case SetContributorStateCommandPayload value -> {
-        ObjectNode node = NODES.objectNode();
-        node.set("state", encodeContributorState(value.state()));
-        yield node;
-      }
     };
-  }
-
-  private static ObjectNode encodeContributorState(CustomEntryPayload state) {
-    ObjectNode node = NODES.objectNode();
-    node.put("contributorId", state.contributorId());
-    node.put("customType", state.customType());
-    node.set("data", parseCanonicalObject(state.dataJson(), "state.data"));
-    return node;
   }
 
   // ---------- 解码器 ----------
@@ -283,18 +264,6 @@ public final class ThreadCommandPayloadJsonCodec {
         MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
-  private static SetContributorStateCommandPayload decodeSetContributorState(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_CONTRIBUTOR_STATE");
-    requireExactFields(node, SET_CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE");
-    ObjectNode state = requireObject(node.get("state"), "SET_CONTRIBUTOR_STATE.state");
-    requireExactFields(state, CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE.state");
-    return new SetContributorStateCommandPayload(
-        new CustomEntryPayload(
-            canonicalText(state, "contributorId", "SET_CONTRIBUTOR_STATE.state"),
-            canonicalText(state, "customType", "SET_CONTRIBUTOR_STATE.state"),
-            write(requireObject(state.get("data"), "SET_CONTRIBUTOR_STATE.state.data"))));
-  }
-
   private static UUID requiredUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isString()) {
@@ -340,20 +309,6 @@ public final class ThreadCommandPayloadJsonCodec {
     } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode thread command payload JSON", error);
     }
-  }
-
-  /** 解析已经是 canonical 形态的 dataJson 为 object 节点；{@link CustomEntryPayload} 保证其合法性。 */
-  private static JsonNode parseCanonicalObject(String json, String context) {
-    JsonNode node;
-    try {
-      node = MAPPER.readTree(json);
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException(context + " must contain JSON", error);
-    }
-    if (node == null || !node.isObject()) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return node;
   }
 
   private static ObjectNode requireObject(JsonNode value, String context) {

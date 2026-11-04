@@ -31,7 +31,7 @@ import {
  *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
  * commands 必须是固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT 前缀 +
- * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION、SET_CONTRIBUTOR_STATE 在产品 HTTP 面被拒绝。
+ * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {

@@ -217,7 +217,7 @@ public final class ThreadProcessor {
         return;
       }
     }
-    // 安全边界先应用全部 standalone 分支设置并追加 SETTINGS 快照；CONTRIBUTOR_STATE 留给普通输入 turn。
+    // 安全边界先应用全部分支设置并追加 SETTINGS 快照。
     // STOPPED 线程只结算设置，不恢复执行；存在 open turn 时保留冻结请求。
     if (path.openTurnStart().isEmpty() && applyPendingSettings(tx, claim, thread, path, now)) {
       return;
@@ -332,9 +332,6 @@ public final class ThreadProcessor {
    * <p>从整段 snapshot 提取而非前导前缀：{@code [USER, SET_MODEL]} 这类交错必须让设置先于任何 input / 压缩生效，同时保留设置内部
    * 相对顺序；其它输入仍 queued 且输入水位不前进，随后的 INPUT / CONTINUATION 按原序消费，绝不跳过尚未处理的输入。
    *
-   * <p>SET_CONTRIBUTOR_STATE 不是 standalone 设置：它只在本 Thread 的普通 turn 内作为有序 CUSTOM state Entry 物化，因此留给
-   * 后续 turn，绝不在回合之间越界追加。
-   *
    * <p>返回 false 表示没有可应用的设置，调用方继续正常分类。
    */
   private boolean applyPendingSettings(
@@ -385,12 +382,9 @@ public final class ThreadProcessor {
     return true;
   }
 
-  /**
-   * standalone 设置 = branch settings（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）；SET_CONTRIBUTOR_STATE
-   * 不属于此列。
-   */
+  /** standalone 设置即 branch settings。 */
   private static boolean isStandaloneSetting(ThreadCommandType type) {
-    return type.isSetting() && type != ThreadCommandType.SET_CONTRIBUTOR_STATE;
+    return type.isSetting();
   }
 
   /**

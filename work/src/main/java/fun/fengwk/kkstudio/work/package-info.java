@@ -7,7 +7,7 @@
  *
  * <p><b>事务边界：</b>生产构造绑定 Spring JDBC，{@link fun.fengwk.kkstudio.work.DurableWorkJdbc#inTransaction}
  * 加入调用方已有事务， 没有外层事务时才开启短事务，绝不使用 {@code REQUIRES_NEW}。Harness 通过自己的事务核心实现该钩子，使 SQL 与业务事实共享同一物理连接并保留
- * JDBC 首错 poisoning；Canvas / Project 的业务写入与 mailbox 变更由各自事务边界保证原子性。{@link
+ * JDBC 首错 poisoning；上层业务写入与 mailbox 变更由各自事务边界保证原子性。{@link
  * fun.fengwk.kkstudio.work.DurableWorkStore#lock} 与 {@link
  * fun.fengwk.kkstudio.work.DurableWorkStore#lockClaimed} 要求调用方已有活动事务。
  *

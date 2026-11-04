@@ -12,8 +12,7 @@ public sealed interface ThreadCommandPayload
         SetAgentCommandPayload,
         SetExecutionCommandPayload,
         SetEnvironmentCommandPayload,
-        NotificationCommandPayload,
-        SetContributorStateCommandPayload {
+        NotificationCommandPayload {
 
   /** 返回该 payload 所代表的 command type。 */
   ThreadCommandType type();
