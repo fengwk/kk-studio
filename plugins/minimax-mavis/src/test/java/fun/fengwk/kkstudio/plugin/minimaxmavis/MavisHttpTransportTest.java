@@ -36,7 +36,7 @@ import java.util.Map;
  * 不会被自动跟随、传输失败一律映射为不含凭据的 {@link MavisTransportException}。
  */
 @ResourceLock("jvm-proxy-selector")
-class JdkMavisHttpTransportTest {
+class MavisHttpTransportTest {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
@@ -58,7 +58,7 @@ class JdkMavisHttpTransportTest {
     try {
       ProxySelector.setDefault(selector);
       MavisHttpResponse response =
-          new JdkMavisHttpTransport()
+          new MavisHttpTransport()
               .send(
                   new MavisHttpRequest(
                       "GET", "http://unresolvable.invalid/echo", Map.of(), null, TIMEOUT));
@@ -103,7 +103,7 @@ class JdkMavisHttpTransportTest {
     headers.put("Authorization", "Bearer token-value");
     headers.put("Content-Type", "application/json");
     MavisHttpResponse response =
-        new JdkMavisHttpTransport()
+        new MavisHttpTransport()
             .send(
                 new MavisHttpRequest(
                     "POST", origin + "/echo", headers, "{\"query\":\"mavis\"}", TIMEOUT));
@@ -121,7 +121,7 @@ class JdkMavisHttpTransportTest {
   @Test
   void doesNotFollowRedirects() {
     MavisHttpResponse response =
-        new JdkMavisHttpTransport()
+        new MavisHttpTransport()
             .send(new MavisHttpRequest("GET", origin + "/redirect", Map.of(), null, TIMEOUT));
 
     assertEquals(302, response.statusCode());
@@ -136,7 +136,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET", origin + "/slow", Map.of(), null, Duration.ofMillis(200))));
@@ -156,7 +156,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET",
@@ -175,7 +175,7 @@ class JdkMavisHttpTransportTest {
         assertThrows(
             MavisTransportException.class,
             () ->
-                new JdkMavisHttpTransport()
+                new MavisHttpTransport()
                     .send(
                         new MavisHttpRequest(
                             "GET", "http://127.0.0.1/bad path", Map.of(), null, TIMEOUT)));

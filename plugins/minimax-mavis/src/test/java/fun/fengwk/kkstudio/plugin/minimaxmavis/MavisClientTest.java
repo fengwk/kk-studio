@@ -52,7 +52,7 @@ class MavisClientTest {
   }
 
   /** 记录请求并返回预设响应的假传输；行为上等价于「一次 send 只发一个请求」。 */
-  private static final class RecordingTransport implements MavisHttpTransport {
+  private static final class RecordingTransport extends MavisHttpTransport {
 
     private final List<MavisHttpRequest> requests = new ArrayList<>();
     private final List<MavisHttpResponse> responses = new ArrayList<>();

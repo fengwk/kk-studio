@@ -1,16 +1,72 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-/**
- * 窄 HTTP 传输 seam。
- *
- * <p>协议客户端只依赖本接口，因此全部协议与安全边界都可以用假传输驱动，无需访问真实网络。生产实现见 {@link JdkMavisHttpTransport}：它固定
- * HTTP/1.1、禁止自动 redirect，并且不做任何重试。
- *
- * <p>实现必须在传输失败时抛出 {@link MavisTransportException}，其消息只允许包含异常类型名等无凭据信息；调用方会再对这些 消息做去敏并补上请求上下文。
- */
-@FunctionalInterface
-public interface MavisHttpTransport {
+import java.io.IOException;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
-  /** 发送一次请求，且只发送一次。 */
-  MavisHttpResponse send(MavisHttpRequest request);
+/**
+ * 基于 JDK {@link HttpClient} 的生产传输实现。
+ *
+ * <p>固定 HTTP/1.1、禁止自动 redirect、显式 connect timeout，并且每次 {@link #send(MavisHttpRequest)} 只发送一个请求：不做
+ * 自动重试，因为生成类调用是非幂等的，断连后的结果是不确定的。
+ */
+public class MavisHttpTransport {
+
+  private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+  private final HttpClient client;
+
+  public MavisHttpTransport() {
+    this(
+        HttpClient.newBuilder()
+            .proxy(ProxySelector.getDefault())
+            .version(HttpClient.Version.HTTP_1_1)
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .connectTimeout(CONNECT_TIMEOUT)
+            .build());
+  }
+
+  MavisHttpTransport(HttpClient client) {
+    this.client = client;
+  }
+
+  public MavisHttpResponse send(MavisHttpRequest request) {
+    HttpRequest httpRequest;
+    try {
+      httpRequest = build(request);
+    } catch (IllegalArgumentException error) {
+      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+    }
+    try {
+      HttpResponse<String> response =
+          client.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      return new MavisHttpResponse(response.statusCode(), response.body());
+    } catch (IOException error) {
+      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new MavisTransportException(error.getClass().getSimpleName(), error);
+    }
+  }
+
+  private static HttpRequest build(MavisHttpRequest request) {
+    HttpRequest.Builder builder =
+        HttpRequest.newBuilder(URI.create(request.url())).timeout(request.timeout());
+    request.headers().forEach(builder::header);
+    if ("GET".equals(request.method())) {
+      builder.GET();
+    } else {
+      builder.method(
+          request.method(),
+          request.body() == null
+              ? HttpRequest.BodyPublishers.noBody()
+              : HttpRequest.BodyPublishers.ofString(request.body(), StandardCharsets.UTF_8));
+    }
+    return builder.build();
+  }
 }

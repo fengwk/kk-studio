@@ -1263,7 +1263,7 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /** 支持预设 catalog 响应和注入调用异常的假传输。 */
-  static final class FakeTransport implements MavisHttpTransport {
+  static final class FakeTransport extends MavisHttpTransport {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
     private String catalogResponse = CATALOG_RESPONSE;
     private int catalogStatus = 200;
