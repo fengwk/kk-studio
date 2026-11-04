@@ -19,13 +19,13 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.http.CanvasController;
 import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
 import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
+import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
-import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
@@ -73,7 +73,7 @@ class StudioResponseStatusErrorAdviceTest {
           CanvasController.class,
           CanvasFunctionController.class,
           CanvasResourceController.class,
-          StudioChatController.class,
+          ChatController.class,
           StudioHarnessCommandBatchController.class,
           StudioHarnessProviderRequestPreviewController.class,
           StudioHarnessSessionController.class,

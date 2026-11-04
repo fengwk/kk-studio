@@ -59,6 +59,12 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-chat</artifactId>
+            <version>${kk-studio.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-runtime</artifactId>
             <version>${kk-studio.version}</version>
             <type>test-jar</type>

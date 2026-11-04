@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import fun.fengwk.kkstudio.chat.http.ChatController;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
-import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
@@ -58,7 +58,7 @@ import java.util.Map;
       StudioAgentProviderController.class,
       StudioAgentModelController.class,
       StudioAgentDefinitionController.class,
-      StudioChatController.class,
+      ChatController.class,
       StudioMcpServerController.class,
       StudioEnvironmentController.class,
       StudioSkillCatalogController.class,

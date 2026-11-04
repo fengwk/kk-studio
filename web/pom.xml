@@ -58,6 +58,10 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-chat</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-ide</artifactId>
         </dependency>
         <dependency>
