@@ -94,6 +94,22 @@ describe('useAiConsoleResourceController', () => {
     })
   })
 
+  it('keeps Model and Model Group drafts independent while switching create tabs', async () => {
+    const user = userEvent.setup()
+    renderHarness()
+    await ready()
+
+    await user.click(screen.getByRole('button', { name: 'create-model' }))
+    await user.type(screen.getByTestId('model-name'), 'model-a')
+    await user.click(screen.getByRole('button', { name: 'switch-model-group' }))
+    await user.type(screen.getByTestId('model-group-name'), 'group-a')
+    await user.click(screen.getByRole('button', { name: 'switch-model' }))
+    expect(screen.getByTestId('model-name')).toHaveValue('model-a')
+
+    await user.click(screen.getByRole('button', { name: 'switch-model-group' }))
+    expect(screen.getByTestId('model-group-name')).toHaveValue('group-a')
+  })
+
   it('opens catalog resources by immutable names', async () => {
     const user = userEvent.setup()
     renderHarness()
@@ -371,7 +387,7 @@ function ResourceControllerHarness() {
     environments: true,
   })
   const modal = controller.resourceEditorModal.modal
-  const ready = !controller.providersQuery.isLoading && !controller.modelsQuery.isLoading && !controller.agentsQuery.isLoading
+  const ready = !controller.queries.providers.isLoading && !controller.queries.models.isLoading && !controller.queries.agents.isLoading
   const editor = controller.resourceEditorModal
   const errorField = Object.entries(editor.fieldErrors)[0]?.[1] ?? ''
   const formError = editor.formError
@@ -393,22 +409,22 @@ function ResourceControllerHarness() {
       <button type="button" onClick={() => editor.onClose()}>
         close-resource
       </button>
-      <button type="button" onClick={() => controller.openCreateProvider()}>
+      <button type="button" onClick={() => controller.editorActions.createProvider()}>
         create-provider
       </button>
-      <button type="button" onClick={() => controller.openEditProvider('stub')}>
+      <button type="button" onClick={() => controller.editorActions.editProvider('stub')}>
         open-provider
       </button>
-      <button type="button" onClick={() => controller.openCreateModel()}>
+      <button type="button" onClick={() => controller.editorActions.createModel()}>
         create-model
       </button>
-      <button type="button" onClick={() => controller.openEditModel('acceptance-stub')}>
+      <button type="button" onClick={() => controller.editorActions.editModel('acceptance-stub')}>
         open-model
       </button>
-      <button type="button" onClick={() => controller.openCreateAgent()}>
+      <button type="button" onClick={() => controller.editorActions.createAgent()}>
         create-agent
       </button>
-      <button type="button" onClick={() => controller.openEditAgent('default-assistant')}>
+      <button type="button" onClick={() => controller.editorActions.editAgent('default-assistant')}>
         open-agent
       </button>
       <form onSubmit={editor.onSubmit}>
@@ -430,27 +446,52 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'model' && (
         <>
-          <input data-testid="model-provider" value={editor.modelDraft.providerName} readOnly />
-          <input
-            data-testid="model-name"
-            value={editor.modelDraft.name}
-            onChange={(event) =>
-              editor.onModelDraftChange({
-                ...editor.modelDraft,
-                name: event.target.value,
-              })
-            }
-          />
-          <input
-            data-testid="model-id"
-            value={editor.modelDraft.modelId}
-            onChange={(event) =>
-              editor.onModelDraftChange({
-                ...editor.modelDraft,
-                modelId: event.target.value,
-              })
-            }
-          />
+          {modal.mode === 'create' ? (
+            <>
+              <button type="button" onClick={() => editor.onModelCreateKindChange('GROUP')}>
+                switch-model-group
+              </button>
+              <button type="button" onClick={() => editor.onModelCreateKindChange('MODEL')}>
+                switch-model
+              </button>
+            </>
+          ) : null}
+          {modal.resourceKind === 'MODEL' ? (
+            <>
+              <input data-testid="model-provider" value={editor.modelDraft.providerName} readOnly />
+              <input
+                data-testid="model-name"
+                value={editor.modelDraft.name}
+                onChange={(event) =>
+                  editor.onModelDraftChange({
+                    ...editor.modelDraft,
+                    name: event.target.value,
+                  })
+                }
+              />
+              <input
+                data-testid="model-id"
+                value={editor.modelDraft.modelId}
+                onChange={(event) =>
+                  editor.onModelDraftChange({
+                    ...editor.modelDraft,
+                    modelId: event.target.value,
+                  })
+                }
+              />
+            </>
+          ) : (
+            <input
+              data-testid="model-group-name"
+              value={editor.modelGroupDraft.name}
+              onChange={(event) =>
+                editor.onModelGroupDraftChange({
+                  ...editor.modelGroupDraft,
+                  name: event.target.value,
+                })
+              }
+            />
+          )}
         </>
       )}
 
@@ -483,13 +524,13 @@ function ResourceControllerHarness() {
       {controller.deleteConfirmModal.modal && (
         <div data-testid="delete-confirm-open">open</div>
       )}
-      <button type="button" onClick={() => controller.deleteProvider('stub', '0')}>
+      <button type="button" onClick={() => controller.deleteResource.provider('stub', '0')}>
         delete-provider
       </button>
-      <button type="button" onClick={() => controller.deleteModel('acceptance-stub', '0')}>
+      <button type="button" onClick={() => controller.deleteResource.model('acceptance-stub', '0')}>
         delete-model
       </button>
-      <button type="button" onClick={() => controller.deleteAgent('default-assistant', '0')}>
+      <button type="button" onClick={() => controller.deleteResource.agent('default-assistant', '0')}>
         delete-agent
       </button>
       <button type="button" onClick={() => controller.deleteConfirmModal.modal?.onConfirm()}>
