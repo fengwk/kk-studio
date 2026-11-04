@@ -11,85 +11,30 @@ export type IssueActionKind =
   | 'RESET_BUDGET'
   | 'ACTIVITY'
 
-// 1. 严格 discriminated union 定义 7 种操作的精确 payload 与结构
-export interface TransitionPendingAction {
+/** 每种写操作的精确 payload；键与 {@link IssueActionKind} 一一对应。 */
+export interface IssueActionPayloads {
+  TRANSITION: { toState: string }
+  RECOVER: Record<string, never>
+  REOPEN: Record<string, never>
+  BLOCK: { reason: string }
+  STOP: { detail: string | null }
+  RESET_BUDGET: { state: string; maxRuns: number }
+  ACTIVITY: { kind: 'COMMENT' | 'INSTRUCTION'; body: string }
+}
+
+/** 单条侧车记录：kind 决定 payload 的精确形状。 */
+export interface PendingIssueActionOf<K extends IssueActionKind = IssueActionKind> {
   issueId: string
-  kind: 'TRANSITION'
+  kind: K
   requestKey: string
   expectedVersion: string
-  payload: { toState: string }
+  payload: IssueActionPayloads[K]
   createdAt: string
   isUnknown: boolean
 }
 
-export interface RecoverPendingAction {
-  issueId: string
-  kind: 'RECOVER'
-  requestKey: string
-  expectedVersion: string
-  payload: Record<string, never>
-  createdAt: string
-  isUnknown: boolean
-}
-
-export interface ReopenPendingAction {
-  issueId: string
-  kind: 'REOPEN'
-  requestKey: string
-  expectedVersion: string
-  payload: Record<string, never>
-  createdAt: string
-  isUnknown: boolean
-}
-
-export interface BlockPendingAction {
-  issueId: string
-  kind: 'BLOCK'
-  requestKey: string
-  expectedVersion: string
-  payload: { reason: string }
-  createdAt: string
-  isUnknown: boolean
-}
-
-export interface StopPendingAction {
-  issueId: string
-  kind: 'STOP'
-  requestKey: string
-  expectedVersion: string
-  payload: { detail: string | null }
-  createdAt: string
-  isUnknown: boolean
-}
-
-export interface ResetBudgetPendingAction {
-  issueId: string
-  kind: 'RESET_BUDGET'
-  requestKey: string
-  expectedVersion: string
-  payload: { state: string; maxRuns: number }
-  createdAt: string
-  isUnknown: boolean
-}
-
-export interface ActivityPendingAction {
-  issueId: string
-  kind: 'ACTIVITY'
-  requestKey: string
-  expectedVersion: string
-  payload: { kind: 'COMMENT' | 'INSTRUCTION'; body: string }
-  createdAt: string
-  isUnknown: boolean
-}
-
-export type PendingIssueAction =
-  | TransitionPendingAction
-  | RecoverPendingAction
-  | ReopenPendingAction
-  | BlockPendingAction
-  | StopPendingAction
-  | ResetBudgetPendingAction
-  | ActivityPendingAction
+/** 全部写操作的判别联合；侧车写入、恢复与精确重试共用同一形状。 */
+export type PendingIssueAction = { [K in IssueActionKind]: PendingIssueActionOf<K> }[IssueActionKind]
 
 export type LoadPendingActionResult =
   | { type: 'NONE' }
@@ -403,7 +348,7 @@ export function isPayloadEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
- * 严格校验 PendingAction 是否为合法的 8 类动作之一，且核对 action.issueId === expectedIssueId
+ * 严格校验 PendingAction 是否为合法的动作之一，且核对 action.issueId === expectedIssueId
  */
 export function validAction(value: unknown, expectedIssueId?: string): value is PendingIssueAction {
   if (!isRecord(value)) {

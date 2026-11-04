@@ -107,7 +107,7 @@ describe('pending-action-sidecar', () => {
     expect(() => storePendingAction(issueId, mockAction)).not.toThrow()
   })
 
-  it('validates schema strictly across all 8 kinds and rejects invalid kind or foreign issue', () => {
+  it('validates schema strictly across all kinds and rejects invalid kind or foreign issue', () => {
     // 测试意图：验证 discriminated union 校验，拒绝垃圾 kind、payload 不匹配或外来 issue 写入
     expect(validAction(mockAction, issueId)).toBe(true)
 
