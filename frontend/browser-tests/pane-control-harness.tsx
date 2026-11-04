@@ -20,7 +20,7 @@ const HARNESS_AGENT: AgentDefinitionDTO = {
   systemPrompt: null,
   type: 'BUILTIN',
   execution: { driver: 'builtin', settings: { modelName: 'minimax/VeryLongModelName', variant: 'default' } },
-  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+  config: { tools: [], skills: [], subagents: [] },
   version: '1',
   createTime: 1790812800,
   updateTime: 1790812800,
@@ -68,7 +68,7 @@ function PaneControlRoutes() {
           element={(
             <div className="pane-harness-frame" data-testid="pane-harness-frame">
               <AgentPane
-                owner={{ type: 'CHAT', chatId: 'chat-pane-harness' }}
+                owner={{ kind: 'CHAT', id: 'chat-pane-harness' }}
                 paneId="pane-harness"
                 focused
                 agents={[HARNESS_AGENT]}

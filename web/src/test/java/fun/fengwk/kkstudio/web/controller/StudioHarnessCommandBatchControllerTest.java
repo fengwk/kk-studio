@@ -2,13 +2,11 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -39,9 +37,9 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.orchestration.DirectCommandsNotAllowedException;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -77,7 +75,7 @@ class StudioHarnessCommandBatchControllerTest {
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ApiResponseStatusAdvice())
             .build();
-    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenReturn(
             new AcceptedCommands(
                 HarnessRuntimeTestFixtures.session(),
@@ -91,7 +89,7 @@ class StudioHarnessCommandBatchControllerTest {
 
   @Test
   void nameConflictFromCreationIsHttp409WithTypedReason() throws Exception {
-    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, "name already used"));
@@ -107,7 +105,7 @@ class StudioHarnessCommandBatchControllerTest {
   /** Runtime 的精确重放结果仍按 202 返回，而不是把已有名称的身份误译为冲突。 */
   @Test
   void exactCreationReplayRemainsAcceptedAtHttpBoundary() throws Exception {
-    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenReturn(
             new AcceptedCommands(
                 HarnessRuntimeTestFixtures.session(),
@@ -150,7 +148,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService, times(2)).accept(any(OwnerRef.class), commandCaptor.capture());
+    verify(acceptanceService, times(2)).accept(any(SessionOwner.class), commandCaptor.capture());
     assertEquals(2, commandCaptor.getAllValues().size());
     assertEquals(
         AcceptCommandsTarget.NewRootSession.class,
@@ -159,13 +157,10 @@ class StudioHarnessCommandBatchControllerTest {
         AcceptCommandsTarget.NewThread.class,
         commandCaptor.getAllValues().get(1).target().getClass());
 
-    ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
+    ArgumentCaptor<SessionOwner> ownerCaptor = ArgumentCaptor.forClass(SessionOwner.class);
     verify(acceptanceService, times(2))
         .accept(ownerCaptor.capture(), any(AcceptCommandsCommand.class));
-    assertEquals(OwnerType.CHAT, ownerCaptor.getAllValues().get(0).type());
-    assertInstanceOf(OwnerRef.Chat.class, ownerCaptor.getAllValues().get(0));
-    assertEquals(
-        UUID.fromString(OWNER_ID), ((OwnerRef.Chat) ownerCaptor.getAllValues().get(0)).chatId());
+    assertEquals(new SessionOwner("CHAT", OWNER_ID), ownerCaptor.getAllValues().get(0));
   }
 
   /** 测试意图：未知 target 类型在入口 400，且不触达 service 与 runtime。 */
@@ -222,7 +217,7 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.detail").value("unknown command target field: unknown"));
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   /** 意图：NEW_THREAD（wire 新 target）必须拒绝携带 NEW_SESSION 专属的 rootSettings，且 400 detail 不回显字段值。 */
@@ -261,12 +256,12 @@ class StudioHarnessCommandBatchControllerTest {
                                 "\"yoloEnabled\":false,\"sessionName\":\"x\""))))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
-  void rejectsInternalOnlyCommandTypesFromProductHttpSurface() throws Exception {
-    // CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE 都是内部 steering：产品 HTTP 请求体携带即 400。
+  void rejectsInternalAndRemovedCommandTypesFromProductHttpSurface() throws Exception {
+    // 内部命令与已删除的命令在产品 HTTP 请求中均返回 400。
     for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
       String internalOnly =
           batchWithCommands(
@@ -287,7 +282,7 @@ class StudioHarnessCommandBatchControllerTest {
     }
 
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   /**
@@ -318,7 +313,7 @@ class StudioHarnessCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService).accept(any(OwnerRef.class), commandCaptor.capture());
+    verify(acceptanceService).accept(any(SessionOwner.class), commandCaptor.capture());
     List<ThreadCommandPayload> payloads =
         commandCaptor.getValue().commands().stream().map(command -> command.payload()).toList();
     assertEquals(
@@ -429,12 +424,12 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(wrongOrder))
         .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
   void preservesCommandReplayConflictReasonInUnifiedErrorEnvelope() throws Exception {
-    when(acceptanceService.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))
+    when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
@@ -476,7 +471,7 @@ class StudioHarnessCommandBatchControllerTest {
             jsonPath("$.errors.detail").value("unknown HTTP command field: unexpectedField"));
 
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -494,12 +489,14 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("Failed to read request"));
 
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
   void rejectsIssueAgentCommandsAtPublicHttpBoundary() throws Exception {
     // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 owner 伪造公共命令批，返回 409 Conflict。
+    when(acceptanceService.accept(any(SessionOwner.class), any(AcceptCommandsCommand.class)))
+        .thenThrow(new DirectCommandsNotAllowedException());
     for (String target : List.of(newSessionTarget(), newThreadTarget())) {
       String request =
           batchWithCommands(
@@ -513,16 +510,17 @@ class StudioHarnessCommandBatchControllerTest {
                   """
                       .formatted(IDEMPOTENCY_KEY))
               .replace(
-                  "\"owner\":{\"type\":\"CHAT\",\"chatId\":\"" + OWNER_ID + "\"}",
-                  "\"owner\":{\"type\":\"ISSUE_AGENT\",\"issueId\":\""
+                  "\"owner\":{\"kind\":\"CHAT\",\"id\":\"" + OWNER_ID + "\"}",
+                  "\"owner\":{\"kind\":\"ISSUE_AGENT\",\"id\":\""
                       + OWNER_ID
-                      + "\",\"agentName\":\"default-assistant\"}");
+                      + ":default-assistant\"}");
       mockMvc
           .perform(
               post("/api/command-batches").contentType(MediaType.APPLICATION_JSON).content(request))
           .andExpect(status().isConflict());
     }
-    verifyNoInteractions(acceptanceService, runtime);
+    verify(acceptanceService, times(2))
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -547,7 +545,7 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(status().isConflict());
 
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -570,7 +568,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(batch(newThreadTarget())))
         .andExpect(status().isAccepted());
 
-    verify(acceptanceService).accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+    verify(acceptanceService).accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -596,7 +594,7 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(status().isConflict());
 
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   @Test
@@ -620,7 +618,7 @@ class StudioHarnessCommandBatchControllerTest {
                 .content(batch(newForkedSessionTarget())))
         .andExpect(status().isAccepted());
 
-    verify(acceptanceService).accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+    verify(acceptanceService).accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
   }
 
   /** 来源 Thread 快照：sessionId 固定为 {@link #SESSION_ID}，只用于 guard 解析来源会话。 */
@@ -676,7 +674,7 @@ class StudioHarnessCommandBatchControllerTest {
   private static String batchWithCommands(String target, String commands) {
     return """
         {
-          "owner":{"type":"CHAT","chatId":"%s"},
+          "owner":{"kind":"CHAT","id":"%s"},
           "target":%s,
           "commands":%s
         }

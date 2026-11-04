@@ -56,7 +56,7 @@ const thread: HarnessThreadDTO = {
 describe('AgentPane acceptance pipeline', () => {
   it('builds one NEW_SESSION request with root settings and only USER_MESSAGE', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -64,7 +64,7 @@ describe('AgentPane acceptance pipeline', () => {
       createId: () => 'command-1',
     })
 
-    expect(plan.request.owner).toEqual({ type: 'CHAT', chatId: 'chat-1' })
+    expect(plan.request.owner).toEqual({ kind: 'CHAT', id: 'chat-1' })
     expect(plan.request.commands).toHaveLength(1)
     expect(plan.request.commands[0]).toMatchObject({
       type: 'USER_MESSAGE',
@@ -110,7 +110,7 @@ describe('AgentPane acceptance pipeline', () => {
   it('routes NEW_THREAD creation through settings diff and existing threads through the owner-free batch contract', () => {
     const draft = { ...baseDraft, agentName: 'coder', yoloEnabled: true }
     const entry = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: {
         kind: 'NEW_THREAD_DRAFT',
         sessionId: 's1',
@@ -142,7 +142,7 @@ describe('AgentPane acceptance pipeline', () => {
     // 预分配客户端新 sessionId/threadId 以支撑未知结果重试幂等，且不携带 rootSettings / threadName。
     let forkIdIndex = 0
     const forked = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: {
         kind: 'FORK_SESSION_DRAFT',
         sessionId: 'source-session',
@@ -154,7 +154,7 @@ describe('AgentPane acceptance pipeline', () => {
       parts: [createTextPart('fork into new session')],
       createId: () => `fork-id-${forkIdIndex++}`,
     })
-    expect(forked.request.owner).toEqual({ type: 'CHAT', chatId: 'chat-1' })
+    expect(forked.request.owner).toEqual({ kind: 'CHAT', id: 'chat-1' })
     expect(forked.request.target).toMatchObject({
       type: 'NEW_FORKED_SESSION',
       sourceThreadId: 'source-thread-1',
@@ -178,7 +178,7 @@ describe('AgentPane acceptance pipeline', () => {
 
     // 既有 Thread 不再伪造创建批次，必须走无 owner/target 的 thread command batch 契约。
     expect(() => buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'BOUND_THREAD', threadId: thread.threadId },
       draft,
       base: baseDraft,
@@ -200,7 +200,7 @@ describe('AgentPane acceptance pipeline', () => {
 
   it('keeps exact unknown retries and fences late success after a target switch', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -246,7 +246,7 @@ describe('AgentPane acceptance pipeline', () => {
     const resolved = { ...local, uploadId: 'server-upload-id' }
 
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -266,7 +266,7 @@ describe('AgentPane acceptance pipeline', () => {
     const resource = createResourcePart('blob-1', 'report.txt', 'preview')
 
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -288,7 +288,7 @@ describe('AgentPane acceptance pipeline', () => {
 
   it('keeps frozen request identity and handles definite conflict branches explicitly', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
+      owner: { kind: 'CHAT', id: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,

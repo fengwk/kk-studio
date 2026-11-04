@@ -28,7 +28,7 @@ function ChatsFrame({ children }: ExtensionComponentProps) {
       >
         {children}
       </AiConsoleFrame>
-      <ConfirmActionModal {...controller.deleteConfirmModal} />
+      <ConfirmActionModal {...controller.deleteConfirmModal} className="modal-touch-target" />
     </>
   )
 }

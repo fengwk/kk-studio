@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.http.RequestParameters;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -98,7 +99,22 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.listViews(environment);
   }
 
-  @PutMapping("/{viewId:" + VIEW_ID + "}/directory")
+  @GetMapping("/directories")
+  public EnvironmentIdeDirectoryListingDTO listDirectories(
+      @PathVariable String environmentId, HttpServletRequest request) {
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    return localEnvironmentIdeService.listDirectories(environment, request.getParameter("path"));
+  }
+
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/mobile-layout")
+  public void collapseMobile(
+      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
+    localEnvironmentIdeService.collapseMobile(environment, viewId, body);
+  }
+
+  @PutMapping("/views/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -107,7 +123,7 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
   }
 
-  @PostMapping("/{viewId:" + VIEW_ID + "}/terminal")
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/terminal")
   public void focusTerminal(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -115,7 +131,7 @@ public class ClusterEnvironmentIdeInternalController {
     localEnvironmentIdeService.focusTerminal(environment, viewId, body);
   }
 
-  @PostMapping("/{viewId:" + VIEW_ID + "}/detach")
+  @PostMapping("/views/{viewId:" + VIEW_ID + "}/detach")
   public void detachView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -123,7 +139,7 @@ public class ClusterEnvironmentIdeInternalController {
     localEnvironmentIdeService.detachView(environment, viewId, body);
   }
 
-  @DeleteMapping("/{viewId:" + VIEW_ID + "}")
+  @DeleteMapping("/views/{viewId:" + VIEW_ID + "}")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
@@ -196,7 +212,8 @@ public class ClusterEnvironmentIdeInternalController {
             : error instanceof AiEnvironmentIdeUnavailableException
                 ? HttpStatus.CONFLICT
                 : HttpStatus.INTERNAL_SERVER_ERROR;
-    return ResponseEntity.status(status).body(Map.of("message", message(error)));
+    return ResponseEntity.status(status)
+        .body(Map.of("message", message(error), "resource", error.resource()));
   }
 
   private static String message(AiDomainException error) {

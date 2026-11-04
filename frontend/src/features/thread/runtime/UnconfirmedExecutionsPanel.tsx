@@ -156,6 +156,7 @@ export function UnconfirmedExecutionsPanel({
         ))}
       </ul>
       <ConfirmActionModal
+        className="modal-touch-target"
         modal={target == null
           ? null
           : {

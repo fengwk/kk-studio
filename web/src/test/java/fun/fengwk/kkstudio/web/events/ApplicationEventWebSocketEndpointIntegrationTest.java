@@ -230,7 +230,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     String createBody =
         """
         {
-          "owner":{"type":"CHAT","chatId":"%s"},
+          "owner":{"kind":"CHAT","id":"%s"},
           "target":{
             "type":"NEW_SESSION",
             "sessionId":"%s",

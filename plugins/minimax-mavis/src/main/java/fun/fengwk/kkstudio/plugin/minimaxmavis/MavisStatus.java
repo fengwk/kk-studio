@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Mavis 响应的业务状态分层校验。
@@ -15,6 +16,8 @@ import java.util.Set;
 public final class MavisStatus {
 
   private static final Set<String> AUTH_CODES = Set.of("401", "1004");
+  private static final Pattern NUMERIC_CODE = Pattern.compile("-?[0-9]{1,9}");
+  private static final String UNEXPECTED_STATUS = "unexpected-status";
 
   private MavisStatus() {}
 
@@ -55,15 +58,22 @@ public final class MavisStatus {
     return new MavisBusinessException(context, render(code), serverMessage);
   }
 
-  /** 状态码的稳定文本形式；非标量取值退化为固定文本，避免回显未知服务端结构。 */
+  /**
+   * 状态码的稳定文本形式。
+   *
+   * <p>远端只能影响一个短数值：文本必须是规范十进制整数，数值也受长度约束。其他取值退化为固定文本，避免把服务端原文（可能含凭据）带进错误消息。
+   */
   public static String render(JsonNode code) {
     if (code == null || code.isNull()) {
       return "";
     }
-    if (code.isContainer()) {
-      return "unexpected-status";
+    if (code.isNumber() || code.isTextual()) {
+      String text = code.asText();
+      if (NUMERIC_CODE.matcher(text).matches()) {
+        return text;
+      }
     }
-    return code.asText();
+    return UNEXPECTED_STATUS;
   }
 
   private static Optional<JsonNode> unsuccessful(JsonNode code) {

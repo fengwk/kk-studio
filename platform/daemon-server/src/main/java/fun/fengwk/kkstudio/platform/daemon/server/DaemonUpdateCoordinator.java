@@ -89,8 +89,6 @@ final class DaemonUpdateCoordinator {
         Update.newBuilder()
             .setOperationId(command.operationId())
             .setTargetVersion(command.targetVersion())
-            .setArtifactUrl(command.artifactUrl())
-            .setArtifactSha256(command.artifactSha256())
             .build();
     Envelope envelope =
         Envelope.newBuilder()

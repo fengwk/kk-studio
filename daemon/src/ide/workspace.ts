@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { readdir, readFile, stat, realpath } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
-import type { DaemonConfig } from '../contracts.js'
+import { opendir, readdir, readFile, stat, realpath } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
+import type { DaemonConfig, IdeReply } from '../contracts.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { IdeError } from './errors.js'
 
@@ -60,14 +60,73 @@ export async function canonicalDirectory(input: string): Promise<string> {
   let resolved: string
   try {
     resolved = await realpath(input)
-  } catch {
-    throw new IdeError('directory does not exist')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    throw new IdeError(code === 'ENOENT' || code === 'ENOTDIR' ? 'directory does not exist' : 'directory is not accessible')
   }
   const info = await stat(resolved)
   if (!info.isDirectory()) {
     throw new IdeError('directory is not a directory')
   }
   return resolved
+}
+
+/** Lists only direct real directories; input symlinks resolve, child symlinks are not traversed. */
+export async function listDirectories(input: string): Promise<NonNullable<IdeReply['directoryListing']>> {
+  const path = await canonicalDirectory(input)
+  if (path.length > 4096 || /[\u0000-\u001f\u007f]/.test(path)) {
+    throw new IdeError('directory path is invalid')
+  }
+  const parent = dirname(path)
+  const listing: NonNullable<IdeReply['directoryListing']> = {
+    path,
+    parentPath: parent === path ? undefined : parent,
+    children: [],
+    truncated: false,
+  }
+  const names: string[] = []
+  try {
+    const directory = await opendir(path)
+    for await (const entry of directory) {
+      if (!entry.isDirectory()) {
+        continue
+      }
+      const name = entry.name
+      if (name.trim() === '' || /[\u0000-\u001f\u007f]/.test(name) || join(path, name).length > 4096) {
+        listing.truncated = true
+        continue
+      }
+      // Keep only the smallest 1000 names while scanning, independent of directory size.
+      let low = 0
+      let high = names.length
+      while (low < high) {
+        const mid = (low + high) >>> 1
+        if (names[mid]! < name) low = mid + 1
+        else high = mid
+      }
+      if (low < 1000) names.splice(low, 0, name)
+      if (names.length > 1000) {
+        names.pop()
+        listing.truncated = true
+      } else if (low >= 1000) {
+        listing.truncated = true
+      }
+    }
+  } catch {
+    throw new IdeError('directory cannot be listed')
+  }
+  // Keep the cross-node JSON response well within its 64 KiB bound, including escaping.
+  let bytes = Buffer.byteLength(JSON.stringify({ ...listing, parentPath: listing.parentPath ?? null }))
+  for (const name of names) {
+    const entry = { name, path: join(path, name) }
+    bytes += Buffer.byteLength(JSON.stringify(entry)) + 1
+    if (bytes > 48 * 1024) {
+      listing.truncated = true
+      break
+    }
+    listing.children.push(entry)
+  }
+  return listing
 }
 
 /** Serialises the managed single-folder workspace file for a view. */

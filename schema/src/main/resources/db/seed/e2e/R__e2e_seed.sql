@@ -136,7 +136,7 @@ insert into agent_definition (
     'default-assistant', 'Default e2e assistant.',
     '你是 kk-studio 的本地开发助手。',
     '{"driver":"builtin","settings":{"modelName":"MiniMax-M2.7","variant":"high"}}',
-    '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 );
 

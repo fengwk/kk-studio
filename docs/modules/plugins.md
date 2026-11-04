@@ -98,7 +98,7 @@
 - **类与包**：[`fun.fengwk.kkstudio.plugin.opencli`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/)，安装定义为 [`OpenCliPlugin`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliPlugin.java)，自动配置为 [`OpenCliAutoConfiguration`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliAutoConfiguration.java)。
 - **认证契约**：静态密钥认证（`apiKey`，上下文字段为 `baseUrl`），同时支持可选的受保护私有身份 `instanceId`。两者均保存在 secrets 中，绝不回读明文。
 - **配置项**：
-  - 核心连接与流控制：`enabled`（默认 `false`）、`baseUrl`、`connectTimeoutMillis`、`requestTimeoutMillis`、`longPollTimeoutMillis`、`streamBufferBytes`、`maxJsonResponseBytes`、`maxOutputChars`；
+  - 核心连接与超时：`enabled`（默认 `false`）、`baseUrl`、`connectTimeoutMillis`、`requestTimeoutMillis`、`longPollTimeoutMillis`；响应及输出大小限制由客户端固定控制；
   - `gptImage2` 子配置：`paidEnabled`、`askTimeoutSeconds`、`hubExecutionTimeoutMillis`、`maxWaitMillis`；
   - `seedance` 子配置：`enabled`、`retry`、`hubExecutionTimeoutMillis`、`statusPollIntervalMillis`、`maxWaitMillis`。
 - **Canvas 适配器**：

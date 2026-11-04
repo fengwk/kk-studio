@@ -31,7 +31,7 @@ import {
  *   （ROOT 或已闭合 TURN_END）下开新 Thread；threadName 是必填的分支显示名，创建前按 Names 规则规范化并进入创建请求身份
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
  * commands 必须是固定顺序 SET_AGENT,SET_EXECUTION,SET_ENVIRONMENT 前缀 +
- * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION、SET_CONTRIBUTOR_STATE 在产品 HTTP 面被拒绝。
+ * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {
@@ -240,7 +240,7 @@ export function branchSettingsOf(agent, executionOrModel, environmentName = null
 
 /** Chat owner 引用（canonical chatId）。 */
 export function chatOwner(chatId) {
-  return { type: 'CHAT', chatId: canonicalUuid(chatId, 'chatId') }
+  return { kind: 'CHAT', id: canonicalUuid(chatId, 'chatId') }
 }
 
 /** NEW_SESSION target：预分配 sessionId/threadId，携带 root settings 与 initial yolo。 */
@@ -365,13 +365,13 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   }
 
   assert(
-    owner?.type === 'CHAT',
-    `owner.type must be CHAT: ${JSON.stringify(owner)}`,
+    owner?.kind === 'CHAT',
+    `owner.kind must be CHAT: ${JSON.stringify(owner)}`,
   )
-  canonicalUuid(owner.chatId, 'owner.chatId')
+  canonicalUuid(owner.id, 'owner.id')
   assert(
-    Object.keys(owner).sort().join(',') === 'chatId,type',
-    `owner must contain only type and chatId: ${JSON.stringify(owner)}`,
+    Object.keys(owner).sort().join(',') === 'id,kind',
+    `owner must contain only kind and id: ${JSON.stringify(owner)}`,
   )
   const { status, json } = await ctx.call('POST', '/api/command-batches', {
     owner,

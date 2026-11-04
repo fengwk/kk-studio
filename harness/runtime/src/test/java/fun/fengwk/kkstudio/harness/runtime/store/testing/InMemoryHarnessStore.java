@@ -10,8 +10,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
@@ -19,7 +17,7 @@ import java.util.function.Function;
 /**
  * Test-only in-memory reference implementation of {@link HarnessStore}，供 Processor / 契约测试复用。
  *
- * <p>本类只是事务核心的宿主：持有唯一已提交 {@link InMemoryState}、全局 monitor、测试时钟、环境目录与事务生命周期。事务实现从 {@link
+ * <p>本类只是事务核心的宿主：持有唯一已提交 {@link InMemoryState}、全局 monitor、测试时钟与事务生命周期。事务实现从 {@link
  * InMemoryHarnessTransaction} 开始，九个聚合原语分别在 {@link InMemorySessionStore}、{@link InMemoryEntryStore}、
  * {@link InMemoryThreadStore}、{@link InMemoryCommandStore}、{@link InMemoryToolStore}、{@link
  * InMemoryWorkStore}、 {@link InMemoryJoinStore}、{@link InMemoryStopReceiptStore} 与 {@link
@@ -49,25 +47,12 @@ public class InMemoryHarnessStore implements HarnessStore {
   private InMemoryState committed;
   private boolean inTransaction;
   private volatile RouteReadyPredicate routeReadyPredicate;
-  private volatile EnvironmentReadyLeasePredicate environmentReadyLeasePredicate;
-  private final Map<EnvironmentId, String> environmentNames = new HashMap<>();
   private volatile Clock clock = HarnessStoreTime.millisecondClock(Clock.systemUTC());
 
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
   public interface RouteReadyPredicate {
     boolean isRouteReady(UUID nodeInstanceId, EnvironmentId environmentId, Instant now);
-  }
-
-  /**
-   * 环境 READY 租约判定谓词：任意节点是否持有该环境的有效 READY 连接租约（权威时间域为 {@code now}）。
-   *
-   * <p>与 {@link RouteReadyPredicate} 分层：后者判定「本节点 + 本 leaseToken」能否承接路由，本谓词判定环境在读取投影中是否已上线（无有效 READY
-   * 租约即为等待环境）。未注入时视为环境没有有效 READY 租约。
-   */
-  @FunctionalInterface
-  public interface EnvironmentReadyLeasePredicate {
-    boolean hasReadyLease(EnvironmentId environmentId, Instant now);
   }
 
   public InMemoryHarnessStore() {
@@ -104,18 +89,6 @@ public class InMemoryHarnessStore implements HarnessStore {
 
   public void setRouteReadyPredicate(RouteReadyPredicate routeReadyPredicate) {
     this.routeReadyPredicate = routeReadyPredicate;
-  }
-
-  public void setEnvironmentReadyLeasePredicate(
-      EnvironmentReadyLeasePredicate environmentReadyLeasePredicate) {
-    this.environmentReadyLeasePredicate = environmentReadyLeasePredicate;
-  }
-
-  /** 测试环境目录：名称沿 Work 冻结身份查询，不依赖 Thread 设置。 */
-  public void setEnvironmentName(EnvironmentId environmentId, String name) {
-    synchronized (monitor) {
-      environmentNames.put(environmentId, name);
-    }
   }
 
   private int transactionCount;
@@ -246,14 +219,5 @@ public class InMemoryHarnessStore implements HarnessStore {
       return true;
     }
     return nodeInstanceId != null && predicate.isRouteReady(nodeInstanceId, environmentId, now);
-  }
-
-  boolean hasReadyEnvironmentLease(EnvironmentId environmentId, Instant now) {
-    EnvironmentReadyLeasePredicate predicate = environmentReadyLeasePredicate;
-    return predicate != null && predicate.hasReadyLease(environmentId, now);
-  }
-
-  String environmentName(EnvironmentId environmentId) {
-    return environmentNames.get(environmentId);
   }
 }

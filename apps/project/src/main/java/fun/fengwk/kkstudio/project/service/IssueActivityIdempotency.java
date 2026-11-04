@@ -8,6 +8,8 @@ import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Issue 业务活动的请求键与规范化请求指纹（设计 §4.6）：一个动作一条活动，活动身份为 {@code kind:requestKey}，指纹由动作与规范化请求字段决定。
@@ -58,6 +60,24 @@ final class IssueActivityIdempotency {
       IssueActivityRepository repository, UUID issueId, Identity identity) {
     return match(repository.findByIdempotencyKey(issueId, identity.key()), identity);
   }
+
+  /** 先查 receipt，再加锁并重查；锁前命中时 lock 为空，锁内命中时返回所持锁。 */
+  static <T> ReceiptLock<T> lockUnlessReplayed(
+      IssueActivityRepository repository,
+      UUID issueId,
+      Identity identity,
+      Supplier<T> lock,
+      Function<T, UUID> lockedIssueId) {
+    IssueActivity activity = findApplied(repository, issueId, identity);
+    if (activity != null) {
+      return new ReceiptLock<>(null, activity);
+    }
+    T locked = lock.get();
+    return new ReceiptLock<>(
+        locked, findApplied(repository, lockedIssueId.apply(locked), identity));
+  }
+
+  record ReceiptLock<T>(T locked, IssueActivity activity) {}
 
   private static IssueActivity match(IssueActivity existing, Identity identity) {
     if (existing == null) {

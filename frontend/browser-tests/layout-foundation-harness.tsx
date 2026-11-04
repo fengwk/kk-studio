@@ -4,6 +4,7 @@ import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 
 setLocale('zh-CN')
 
@@ -12,6 +13,7 @@ setLocale('zh-CN')
  */
 export function LayoutFoundationHarnessApp() {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [model, setModel] = useState('alpha')
 
   return (
@@ -20,8 +22,11 @@ export function LayoutFoundationHarnessApp() {
       <button type="button" id="open-foundation-dialog" className="btn-primary" onClick={() => setDialogOpen(true)}>
         打开基础弹窗
       </button>
+      <button type="button" className="btn-primary" onClick={() => setConfirmOpen(true)}>
+        打开确认弹窗
+      </button>
       {dialogOpen ? (
-        <Dialog title="基础交互弹窗" onClose={() => setDialogOpen(false)}>
+        <Dialog className="modal-touch-target" title="基础交互弹窗" onClose={() => setDialogOpen(false)}>
           <div className="modal-body">
             <div className="form-group">
               <span>模型</span>
@@ -43,6 +48,18 @@ export function LayoutFoundationHarnessApp() {
           </div>
         </Dialog>
       ) : null}
+      <ConfirmActionModal
+        className="modal-touch-target"
+        modal={confirmOpen ? {
+          title: '删除记录？',
+          description: '此操作会删除记录。',
+          confirmLabel: '删除',
+          tone: 'danger',
+          onConfirm: () => setConfirmOpen(false),
+        } : null}
+        pending={false}
+        onClose={() => setConfirmOpen(false)}
+      />
     </div>
   )
 }

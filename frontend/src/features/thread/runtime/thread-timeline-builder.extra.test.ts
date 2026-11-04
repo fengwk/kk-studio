@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
 import {
   buildThreadTimeline,
   parseApproval,
 } from '@/features/thread/runtime/thread-timeline-builder'
+import { aggregateEntryUsage } from '@/features/thread/runtime/thread-timeline/turn-usage'
 import type {
   RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
@@ -930,3 +932,462 @@ function messagePayload(role: string, contents: Array<Record<string, unknown>>) 
 function customMessagePayload(role: 'USER', text: string) {
   return { message: { role, contents: [{ type: 'text', text }] } }
 }
+
+/**
+ * Turn usage 矩阵：usage 绝不紧跟 Assistant，必须在相应 TURN_END 之后投影为
+ * TurnSummary；compaction / aborted / error / 未关闭 turn 不产生对话残留 summary。
+ * TURN_END 本身不投影消息，因此「仅在 turn 关闭后出现且位于该 turn 全部消息之后」
+ * 就是 TURN_END 后投影的可观察语义。
+ *
+ * 费用是读取投影：费用由服务端定价并只来自 Entry.usageCost 读取投影。
+ * Entry.usageCost -> assistantMetadata 的接线由 branch owner 在 entry-projection 完成。
+ */
+describe('Turn usage after TURN_END', () => {
+  function entry(
+    entryId: string,
+    entryType: EntryType,
+    payload: Record<string, unknown>,
+    createTime = 1785232800,
+  ): HarnessSessionEntryDTO {
+    return {
+      entryId,
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType,
+      payloadJson: JSON.stringify(payload),
+      createTime,
+      usageCost: null,
+    }
+  }
+
+  function assistant(
+    id: string,
+    text: string,
+    metadata?: unknown,
+  ): HarnessSessionEntryDTO {
+    const payload: Record<string, unknown> = {
+      message: { role: 'ASSISTANT', contents: [{ type: 'text', text }] },
+    }
+    if (metadata !== undefined) {
+      payload.assistantMetadata = metadata
+    }
+    return entry(id, 'MESSAGE', payload)
+  }
+
+  function turnStart(id = 'turn-1', reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
+    return entry(id, 'TURN_START', { reason, settings: {
+      agentName: 'coding',
+      execution: createBuiltinExecution('m', 'default'),
+      environmentName: null,
+    } })
+  }
+
+  function turnEnd(id = 'end-1', outcome = 'COMPLETED'): HarnessSessionEntryDTO {
+    return entry(id, 'TURN_END', { outcome, continueModel: false })
+  }
+
+  function userMessage(text: string): HarnessSessionEntryDTO {
+    return entry(
+      `user-${text}`,
+      'MESSAGE',
+      { message: { role: 'USER', contents: [{ type: 'text', text }] } },
+    )
+  }
+
+  function usageMetadata(
+    input: number,
+    output: number,
+    extras: Record<string, unknown> = {},
+  ) {
+    return {
+      usage: {
+        inputTokens: input,
+        outputTokens: output,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        ...extras,
+      },
+    }
+  }
+
+  it('projects the TurnSummary only after the turn is closed, as the turn last message', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('问题'),
+        assistant('assistant-1', '回答', usageMetadata(10, 20, {
+          reasoningTokens: 3,
+          providerTotalTokens: 33,
+        })),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+
+    const ids = timeline.messages.map((message) => message.id)
+    const usageIndex = ids.indexOf('meta-usage-entry-assistant-1')
+    expect(usageIndex).toBeGreaterThan(0)
+    // TURN_END 是控制边界（不投影消息）：summary 位于整个已关闭 turn 的最后。
+    expect(usageIndex).toBe(ids.length - 1)
+    const usage = timeline.messages[usageIndex]
+    expect(usage).toMatchObject({
+      role: 'meta',
+      kind: 'turn_usage',
+      subjectEntryId: 'assistant-1',
+      status: 'done',
+    })
+    if (!usage || usage.role !== 'meta') {
+      throw new Error('Expected turn usage meta message')
+    }
+    expect(usage.text).toContain('↑10')
+    expect(usage.text).toContain('↓20')
+    expect(usage).toMatchObject({
+      turnUsage: {
+        input: 10,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 3,
+        providerTotal: 33,
+        // 费用只来自 Entry.usageCost 读取投影
+        cost: null,
+      },
+      details: {
+        reasoning: 3,
+        providerTotal: 33,
+      },
+    })
+  })
+
+  it('places the summary after tool results of the same turn', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('run'),
+        entry('assistant-1', 'MESSAGE', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [
+              { type: 'text', text: '调用工具' },
+              {
+                type: 'tool_call',
+                toolCallId: 'call-1',
+                toolName: 'bash',
+                rendererKey: 'bash',
+                argumentsJson: '{"command":"ls"}',
+              },
+            ],
+          },
+          assistantMetadata: usageMetadata(10, 20),
+        }),
+        entry('tool-1', 'MESSAGE', {
+          message: {
+            role: 'TOOL',
+            contents: [
+              {
+                type: 'tool_result',
+                toolCallId: 'call-1',
+                toolName: 'bash',
+                rendererKey: 'bash',
+                contents: [{ type: 'text', text: 'ok' }],
+              },
+            ],
+          },
+        }),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+
+    const ids = timeline.messages.map((message) => message.id)
+    const usageIndex = ids.indexOf('meta-usage-entry-assistant-1')
+    expect(usageIndex).toBe(ids.length - 1)
+    expect(ids[usageIndex - 1]).toBe('tool-1:tool-result:call-1:0')
+  })
+
+  it('keeps each turn usage attached to its own TURN_END across multiple turns', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('turn-1'),
+        userMessage('a'),
+        assistant('assistant-1', 'first', usageMetadata(10, 20)),
+        turnEnd('end-1'),
+        turnStart('turn-2'),
+        userMessage('b'),
+        assistant('assistant-2', 'second', usageMetadata(30, 40)),
+        turnEnd('end-2'),
+      ],
+      [],
+      [],
+    )
+
+    const ids = timeline.messages.map((message) => message.id)
+    const firstUsage = ids.indexOf('meta-usage-entry-assistant-1')
+    const secondUsage = ids.indexOf('meta-usage-entry-assistant-2')
+    expect(firstUsage).toBeGreaterThanOrEqual(0)
+    expect(secondUsage).toBeGreaterThan(firstUsage)
+    // 第二个 summary 是整个 timeline 的最后一条消息。
+    expect(secondUsage).toBe(ids.length - 1)
+    expect(ids[firstUsage + 1]).toBe('user-b')
+  })
+
+  it('does not project usage for aborted or error turns without assistant metadata', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        entry('aborted-1', 'ASSISTANT_ABORTED', {
+          message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'partial' }] },
+        }),
+        turnEnd('end-1', 'STOPPED'),
+        entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+        userMessage('b'),
+        entry('error-1', 'ASSISTANT_ERROR', { error: { message: 'boom' } }),
+        entry('end-2', 'TURN_END', { outcome: 'FAILED' }),
+      ],
+      [],
+      [],
+    )
+
+    // 两个回合都拿不到 assistant metadata：不得投影 usage 摘要（id 前缀 meta-usage-），
+    // 但 TURN_END 页脚 meta 仍然存在并各自携带真实 TURN_END Entry id。
+    const metas = timeline.messages.filter((message) => message.role === 'meta')
+    expect(metas.map((message) => message.id)).toEqual([
+      'meta-turn-end-end-1',
+      'meta-turn-end-end-2',
+    ])
+    expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual([
+      'end-1',
+      'end-2',
+    ])
+    expect(metas.map((message) => message.text)).toEqual(['-', '-'])
+    for (const meta of metas) {
+      expect(meta).not.toHaveProperty('turnUsage')
+      expect(meta).not.toHaveProperty('details')
+    }
+    expect(timeline.messages).toContainEqual(expect.objectContaining({
+      id: 'error-1', role: 'assistant', status: 'error', text: 'boom',
+    }))
+  })
+
+  it.each(['FAILED', 'STOPPED', 'COMPLETED'])('uses a placeholder without usage for %s', (outcome) => {
+    const timeline = buildThreadTimeline([turnStart(), turnEnd('end-1', outcome)], [], [])
+    expect(timeline.messages.at(-1)).toMatchObject({
+      text: '-', endEntryId: 'end-1', kind: 'turn_usage',
+    })
+    expect(timeline.messages.at(-1)).not.toHaveProperty('turnUsage')
+  })
+
+  // 失败不抹掉本轮已经发生的真实用量，也不把真实零读数变成缺失占位。
+  it.each([[10, 20], [0, 0]])('retains actual usage for a failed turn (%i, %i)', (input, output) => {
+    const timeline = buildThreadTimeline([
+      turnStart(),
+      {
+        ...assistant('assistant-1', 'partial', usageMetadata(input, output)),
+        usageCost: { currency: 'USD', amount: '0' },
+      },
+      entry('error-1', 'ASSISTANT_ERROR', { error: { message: 'boom' } }),
+      turnEnd('failed-end', 'FAILED'),
+    ], [], [])
+    const footer = timeline.messages.at(-1)
+    expect(footer).toMatchObject({
+      endEntryId: 'failed-end',
+      turnUsage: { input, output, cost: { currency: 'USD', amount: '0' } },
+    })
+    if (!footer || footer.role !== 'meta') {
+      throw new Error('Expected turn usage meta message')
+    }
+    expect(footer.text).toContain(`↑${input}`)
+    expect(footer.text).toContain(`↓${output}`)
+    expect(footer.text).not.toContain('FAILED')
+  })
+
+  it('does not leak usage from an unclosed turn into the next TURN_END', () => {
+    // 上一 turn 的 assistant 已带 usage，但该 turn 没有 TURN_END（快照截断）：
+    // 新 TURN_START 必须丢弃残留，下一个 TURN_END 投影当前 usage。
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('turn-1'),
+        userMessage('a'),
+        assistant('assistant-1', '回答', usageMetadata(10, 20)),
+        turnStart('turn-2'),
+        userMessage('b'),
+        assistant('assistant-2', '回答 2', usageMetadata(5, 6)),
+        turnEnd('end-2'),
+      ],
+      [],
+      [],
+    )
+
+    const ids = timeline.messages.map((message) => message.id)
+    expect(ids.filter((id) => id.startsWith('meta-usage-entry-'))).toEqual([
+      'meta-usage-entry-assistant-2', // 仅第二个（已关闭）turn 的 summary
+    ])
+  })
+
+  it('does not project usage inside compaction turns', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('turn-1', 'COMPACTION'),
+        userMessage('summary'),
+        assistant('assistant-1', 'compact answer', usageMetadata(100, 50)),
+        turnEnd('end-1'),
+        turnStart('turn-2'),
+        userMessage('real'),
+        assistant('assistant-2', 'real answer', usageMetadata(1, 2)),
+        turnEnd('end-2'),
+      ],
+      [],
+      [],
+    )
+
+    const ids = timeline.messages.map((message) => message.id)
+    expect(ids.filter((id) => id.startsWith('meta-usage-entry-'))).toEqual([
+      'meta-usage-entry-assistant-2', // 仅真实 turn 的 summary
+    ])
+    // 真实 turn 的 summary 位于整个 timeline 的最后（紧随其 TURN_END）。
+    expect(ids.indexOf('meta-usage-entry-assistant-2')).toBe(ids.length - 1)
+  })
+
+  it('preserves a reported all-zero usage summary', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-1', '回答', usageMetadata(0, 0)),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    // 真实零与未报告不同；summary 仍携带真实 TURN_END 身份。
+    const metas = timeline.messages.filter((message) => message.role === 'meta')
+    expect(metas.map((message) => message.id)).toEqual(['meta-usage-entry-assistant-1'])
+    expect(metas[0]).toMatchObject({ turnUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })
+    expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
+  })
+
+  // usage 结构非法时投影 unknown turnUsage
+  it('propagates unknown when usage metadata structure is non-canonical', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-1', '回答', {
+          usage: { invalidField: 123 },
+        }),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    const metaWithUsage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.turnUsage != null,
+    )
+    expect(metaWithUsage).toBeDefined()
+    expect(metaWithUsage?.role === 'meta' ? metaWithUsage.turnUsage : undefined).toMatchObject({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cost: null,
+    })
+    expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
+      .toEqual(['meta-usage-entry-assistant-1'])
+  })
+
+  it.each([false, true])('propagates invalid model metadata through turn projection in either order (%s)', (reverse) => {
+    const known = assistant('known', 'known', usageMetadata(10, 2))
+    known.usageCost = { currency: 'USD', amount: '0.05' }
+    const unknown = assistant('unknown', 'unknown', [])
+    const outputs = reverse ? [unknown, known] : [known, unknown]
+    const timeline = buildThreadTimeline([turnStart(), ...outputs, turnEnd()], [], [])
+    const summary = timeline.messages.find((message) => message.role === 'meta' && message.turnUsage != null)
+    expect(summary?.role === 'meta' ? summary.turnUsage : undefined).toMatchObject({
+      input: null, output: null, cacheRead: null, cacheWrite: null, cost: null,
+    })
+  })
+
+  it('omits turn usage summary for manual assistant messages without assistantMetadata', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-manual', '人工回复'),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    // 无模型 metadata 的人工 ASSISTANT 不计，不投影任何 turnUsage meta message
+    expect(timeline.messages.some((message) =>
+      message.role === 'meta' && message.turnUsage != null)).toBe(false)
+    expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
+      .toEqual(['meta-turn-end-end-1'])
+  })
+
+  it('still projects a summary when only reasoning/cache are nonzero', () => {
+    // 输出全为 reasoning 的调用仍产生摘要；reasoning 是 output 子集，不重复累加。
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-1', '回答', usageMetadata(0, 2, {
+          reasoningTokens: 2,
+          cacheReadTokens: 1,
+        })),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    const usage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.kind === 'turn_usage',
+    )
+    expect(usage).toMatchObject({
+      turnUsage: { input: 0, output: 2, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: null },
+    })
+  })
+
+  it('counts facts from an unclosed turn for the footer while hiding its conversation summary', () => {
+    // 对话摘要只在 TURN_END 之后出现；而 footer 的累计用量是事实派生，不因回合未关闭而漏计。
+    const entries = [
+      turnStart('turn-1'),
+      userMessage('a'),
+      {
+        ...assistant('assistant-1', '回答', usageMetadata(10, 20)),
+        usageCost: { currency: 'USD', amount: '0.25' },
+      },
+    ]
+    const timeline = buildThreadTimeline(entries, [], [])
+    expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
+
+    const aggregated = aggregateEntryUsage(entries)
+    expect(aggregated?.input).toBe(10)
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '0.25' })
+  })
+
+  // compaction 回合里真实发生的 usage 也必须进入累计，不能因内容被隐藏而漏计
+  it('includes compaction turn facts in the footer aggregate', () => {
+    const entries = [
+      turnStart('compact', 'COMPACTION'),
+      {
+        ...assistant('assistant-compact', 'summary', usageMetadata(100, 50)),
+        usageCost: { currency: 'USD', amount: '1' },
+      },
+      turnEnd('compact-end'),
+      turnStart('turn-1'),
+      {
+        ...assistant('assistant-1', 'done', usageMetadata(10, 20)),
+        usageCost: { currency: 'USD', amount: '0.125' },
+      },
+      turnEnd('end-1'),
+    ]
+
+    const aggregated = aggregateEntryUsage(entries)
+    expect(aggregated).toMatchObject({ input: 110, output: 70 })
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '1.125' })
+  })
+})

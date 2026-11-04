@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
@@ -109,7 +110,8 @@ class StudioChatControllerTest {
     summary.setFirstMessagePreview("hello");
     summary.setThreadCount(2);
 
-    when(harnessQueryService.listChatSessions(id(7))).thenReturn(List.of(summary));
+    when(harnessQueryService.listSessions(new SessionOwner("CHAT", idText(7))))
+        .thenReturn(List.of(summary));
 
     mockMvc
         .perform(get("/api/chats/" + idText(7) + "/sessions"))
@@ -118,7 +120,7 @@ class StudioChatControllerTest {
         .andExpect(jsonPath("$.data[0].name").value("session name"))
         .andExpect(jsonPath("$.data[0].firstMessagePreview").value("hello"))
         .andExpect(jsonPath("$.data[0].threadCount").value(2));
-    verify(harnessQueryService).listChatSessions(id(7));
+    verify(harnessQueryService).listSessions(new SessionOwner("CHAT", idText(7)));
   }
 
   /** 测试意图：验证 Chat 创建只接受当前字段，响应中不存在 Workspace 状态。 */

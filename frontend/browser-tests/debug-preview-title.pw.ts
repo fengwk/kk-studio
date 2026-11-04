@@ -269,7 +269,7 @@ async function installPreviewApiMock(
           name,
           type: 'USER',
           execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'Claude' : 'missing-model', variant: 'fast' } },
-          config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [] },
           version: '1',
         })) : []
         await route.fulfill({

@@ -171,7 +171,7 @@ function RootInteractionList({
                   <GitBranch size={14} aria-hidden="true" />
                   <span className="interaction-source-name">
                     {threadId === rootThreadId
-                      ? source?.name ?? item.owner.rootThreadName ?? t('ai.interaction.viewSource')
+                      ? source?.name ?? t('ai.interaction.viewSource')
                       : t('ai.runtime.notification.entry.viewSubagentExecution', { threadId })}
                   </span>
                   {threadId !== rootThreadId && source?.name

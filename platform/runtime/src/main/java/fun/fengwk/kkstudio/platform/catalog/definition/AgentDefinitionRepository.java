@@ -125,23 +125,6 @@ public class AgentDefinitionRepository {
         .single();
   }
 
-  /** 是否有未归档 Project 的工作流阶段把该 Agent 作为执行者。 */
-  public boolean existsReferencingProjectWorkflow(String name) {
-    return jdbcClient
-        .sql(
-            """
-            select exists (
-                select 1
-                from project p, jsonb_array_elements(p.workflow -> 'states') state
-                where p.archived_at is null
-                  and state ->> 'agent' = :name
-            )
-            """)
-        .param("name", name)
-        .query(Boolean.class)
-        .single();
-  }
-
   /** 是否有任何 Agent 的 {@code config.skills} 引用该全局 Skill。 */
   public boolean existsReferencingSkill(String packageName, String skillName) {
     return jdbcClient

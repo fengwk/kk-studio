@@ -88,7 +88,7 @@ const assistantAgent: AgentDefinitionDTO = {
   systemPrompt: null,
   type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
-  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+  config: { tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: 0,
   updateTime: 0,
@@ -361,7 +361,7 @@ describe('ChatWorkspacePage', () => {
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
     expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
     const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
+    expect(request.owner).toEqual({ kind: 'CHAT', id: CHAT_ID })
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.commands).toHaveLength(1)
     expect(request.commands[0]?.type).toBe('USER_MESSAGE')

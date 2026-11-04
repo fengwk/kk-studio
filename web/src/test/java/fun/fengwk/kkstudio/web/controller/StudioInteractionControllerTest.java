@@ -80,8 +80,8 @@ class StudioInteractionControllerTest {
     item.setSessionId(idText(3));
     item.setRootThreadId(idText(5));
     InteractionOwnerDTO owner = new InteractionOwnerDTO();
-    owner.setType("CHAT");
-    owner.setChatId(idText(4));
+    owner.setKind("CHAT");
+    owner.setId(idText(4));
     item.setOwner(owner);
     item.setToolCallId("call-1");
     item.setToolName("ask_user");
@@ -99,8 +99,10 @@ class StudioInteractionControllerTest {
         .andExpect(jsonPath("$.data.items[0].threadId").value(idText(2)))
         .andExpect(jsonPath("$.data.items[0].sessionId").value(idText(3)))
         .andExpect(jsonPath("$.data.items[0].rootThreadId").value(idText(5)))
-        .andExpect(jsonPath("$.data.items[0].owner.type").value("CHAT"))
-        .andExpect(jsonPath("$.data.items[0].owner.chatId").value(idText(4)))
+        .andExpect(jsonPath("$.data.items[0].owner.kind").value("CHAT"))
+        .andExpect(jsonPath("$.data.items[0].owner.id").value(idText(4)))
+        .andExpect(jsonPath("$.data.items[0].owner.title").hasJsonPath())
+        .andExpect(jsonPath("$.data.items[0].owner.link").hasJsonPath())
         .andExpect(jsonPath("$.data.items[0].toolCallId").value("call-1"))
         .andExpect(jsonPath("$.data.items[0].toolName").value("ask_user"))
         .andExpect(jsonPath("$.data.items[0].argumentsJson").value("{\"questions\":[]}"))

@@ -120,13 +120,16 @@ class OpenCliHubClientContractTest {
     assertExecutionFailure("\"stdoutTruncated\":true,\"resources\":[]");
     assertExecutionFailure("\"stdout\":5,\"resources\":[]");
 
-    OpenCliSettings limited = hub(1024, 512 * 1024, 4096, 1024);
-    String data = executionData("\"stdout\":\"" + "x".repeat(1025) + "\",\"resources\":[]");
+    String data =
+        executionData(
+            "\"stdout\":\""
+                + "x".repeat(OpenCliHubClient.MAX_OUTPUT_CHARS + 1)
+                + "\",\"resources\":[]");
     assertThrows(
         OpenCliHubException.class,
         () ->
             new OpenCliHubClient(
-                    limited,
+                    hub(),
                     MAPPER,
                     validCredentialAccess(DEFAULT_KEY),
                     new StubHttpClient(request -> jsonResponse(200, envelope(data))))
@@ -154,10 +157,9 @@ class OpenCliHubClientContractTest {
 
   @Test
   void boundsJsonAndErrorBodiesWithoutEchoingRemoteDetail() {
-    OpenCliSettings limitedJson = hub(1024, 1024, 4096, 65_535);
     OpenCliHubClient jsonClient =
         new OpenCliHubClient(
-            limitedJson,
+            hub(),
             MAPPER,
             validCredentialAccess(DEFAULT_KEY),
             new StubHttpClient(
@@ -165,16 +167,22 @@ class OpenCliHubClientContractTest {
                     response(
                         200,
                         "application/json",
-                        "{\"status\":200,\"code\":\"OK\",\"data\":\"" + "x".repeat(1100) + "\"}")));
+                        "{\"status\":200,\"code\":\"OK\",\"data\":\""
+                            + "x".repeat(OpenCliHubClient.MAX_JSON_RESPONSE_BYTES + 1)
+                            + "\"}")));
     assertThrows(OpenCliHubException.class, () -> jsonClient.getExecution("exec-1", 0));
 
-    OpenCliSettings limitedError = hub(1024, 512 * 1024, 256, 65_535);
     OpenCliHubClient errorClient =
         new OpenCliHubClient(
-            limitedError,
+            hub(),
             MAPPER,
             validCredentialAccess(DEFAULT_KEY),
-            new StubHttpClient(request -> response(500, "text/plain", "bad\n" + "x".repeat(300))));
+            new StubHttpClient(
+                request ->
+                    response(
+                        500,
+                        "text/plain",
+                        "bad\n" + "x".repeat(OpenCliHubClient.MAX_ERROR_RESPONSE_BYTES + 1))));
     OpenCliHubException error =
         assertThrows(OpenCliHubException.class, () -> errorClient.getExecution("exec-1", 0));
     // 远端错误正文无论是否超限都不进入公开消息，只保留 HTTP 状态。
@@ -493,10 +501,6 @@ class OpenCliHubClientContractTest {
             5_000,
             120_000,
             130_000,
-            1024,
-            512 * 1024,
-            4096,
-            65_535,
             OpenCliTestSettings.defaults().gptImage2(),
             OpenCliTestSettings.defaults().seedance());
     OpenCliHubClient disabled =
@@ -1503,11 +1507,15 @@ class OpenCliHubClientContractTest {
   }
 
   private static String executionData(String fields) {
-    return """
-        {"id":"exec-1","status":"SUCCEEDED","stdout":"","stderr":"",
-         "stdoutTruncated":false,"stderrTruncated":false,%s}
-        """
-        .formatted(fields);
+    return "{"
+        + (fields.contains("\"id\":") ? "" : "\"id\":\"exec-1\",")
+        + (fields.contains("\"status\":") ? "" : "\"status\":\"SUCCEEDED\",")
+        + (fields.contains("\"stdout\":") ? "" : "\"stdout\":\"\",")
+        + (fields.contains("\"stderr\":") ? "" : "\"stderr\":\"\",")
+        + (fields.contains("\"stdoutTruncated\":") ? "" : "\"stdoutTruncated\":false,")
+        + (fields.contains("\"stderrTruncated\":") ? "" : "\"stderrTruncated\":false,")
+        + fields
+        + "}";
   }
 
   private static String envelope(String data) {
@@ -1515,24 +1523,12 @@ class OpenCliHubClientContractTest {
   }
 
   private static OpenCliSettings hub() {
-    return hub(1024, 512 * 1024, 4096, 65_535);
-  }
-
-  private static OpenCliSettings hub(
-      int streamBufferBytes,
-      int maxJsonResponseBytes,
-      int maxErrorResponseBytes,
-      int maxOutputChars) {
     return new OpenCliSettings(
         true,
         "http://hub.test:8080",
         5_000,
         120_000,
         130_000,
-        streamBufferBytes,
-        maxJsonResponseBytes,
-        maxErrorResponseBytes,
-        maxOutputChars,
         OpenCliTestSettings.defaults().gptImage2(),
         OpenCliTestSettings.defaults().seedance());
   }

@@ -27,12 +27,13 @@ import { useCanvasResourceActions } from '@/features/canvas/useCanvasResourceAct
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 
 export type { CanvasContextMenuState, ContextMenuTarget } from '@/features/canvas/canvas-stage-model'
 
 const MENU_MARGIN = 8
 
-/** CanvasStage 级右键菜单：动作直接调用 controller，销毁/改名走菜单内确认/编辑模式。 */
+/** CanvasStage 级右键菜单：改名在菜单内编辑，删除通过共享确认弹窗。 */
 export function CanvasContextMenu({
   state,
   onClose,
@@ -67,9 +68,7 @@ export function CanvasContextMenu({
   useEffect(() => {
     if (mode === 'rename') {
       menuRef.current?.querySelector<HTMLInputElement>('.context-menu-rename input')?.focus()
-    } else if (mode === 'confirm') {
-      menuRef.current?.querySelector<HTMLButtonElement>('.context-menu-confirm-cancel')?.focus()
-    } else {
+    } else if (mode === 'menu') {
       menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
     }
   }, [mode, state.target])
@@ -77,6 +76,9 @@ export function CanvasContextMenu({
   // 菜单外任意 pointerdown（含画布/视口）关闭菜单。
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
+      if (mode === 'confirm') {
+        return
+      }
       const target = event.target as Node | null
       if (target && menuRef.current?.contains(target)) {
         return
@@ -85,7 +87,7 @@ export function CanvasContextMenu({
     }
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [onClose])
+  }, [mode, onClose])
 
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (mode !== 'menu') {
@@ -156,6 +158,7 @@ export function CanvasContextMenu({
     ? t('canvas.menu.groupDeleteConfirmDescription')
     : t('canvas.node.deleteConfirmDescription')
   return (
+    <>
     <div
       ref={menuRef}
       className="canvas-context-menu"
@@ -200,24 +203,6 @@ export function CanvasContextMenu({
             </Button>
           </div>
         </div>
-      ) : mode === 'confirm' ? (
-        <div className="context-menu-confirm" role="alertdialog" aria-label={confirmTitle}>
-          <strong>{confirmTitle}</strong>
-          <p>{confirmDescription}</p>
-          <div>
-            <Button
-              className="context-menu-confirm-cancel"
-              variant="ghost"
-              size="compact"
-              onClick={() => setMode('menu')}
-            >
-              {t('canvas.node.deleteCancel')}
-            </Button>
-            <Button size="compact" danger onClick={confirmDelete}>
-              {t('canvas.node.deleteConfirm')}
-            </Button>
-          </div>
-        </div>
       ) : target.kind === 'resource' ? (
         <ResourceMenuItems target={target} onClose={onClose} onRename={() => setMode('rename')} onDelete={() => setMode('confirm')} />
       ) : target.kind === 'group' ? (
@@ -230,6 +215,20 @@ export function CanvasContextMenu({
         <MenuButton icon={<GroupIcon aria-hidden="true" />} label={t('canvas.menu.group')} onClick={() => runtime.createGroup()} onClose={onClose} />
       ) : null}
     </div>
+    <ConfirmActionModal
+      className="modal-touch-target"
+      modal={mode === 'confirm' ? {
+        title: confirmTitle,
+        description: confirmDescription,
+        confirmLabel: t('canvas.node.deleteConfirm'),
+        icon: 'delete',
+        tone: 'danger',
+        onConfirm: confirmDelete,
+      } : null}
+      pending={false}
+      onClose={() => setMode('menu')}
+    />
+    </>
   )
 }
 

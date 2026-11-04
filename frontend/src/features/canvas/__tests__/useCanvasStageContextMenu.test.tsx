@@ -271,6 +271,23 @@ describe('useCanvasStageContextMenu', () => {
     expect(result.current.contextMenu).toBeNull()
   })
 
+  it('leaves Escape to a blocking confirmation before closing the menu', () => {
+    // 菜单的 window 监听先于确认弹窗注册，必须显式让弹窗处理第一次 Escape。
+    const { result } = setupHook({})
+    act(() => result.current.openNodeContextMenu(mouseEvent(), flowNode(NODE_A)))
+    const modal = document.createElement('div')
+    modal.setAttribute('role', 'alertdialog')
+    document.body.append(modal)
+    try {
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+      expect(result.current.contextMenu).not.toBeNull()
+    } finally {
+      modal.remove()
+    }
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(result.current.contextMenu).toBeNull()
+  })
+
   it('keeps the menu open when selection changes to the same id set and closes on a different set', () => {
     const { result } = setupHook({ selectedIds: [NODE_A] })
     act(() => result.current.openNodeContextMenu(mouseEvent(), flowNode(NODE_A)))

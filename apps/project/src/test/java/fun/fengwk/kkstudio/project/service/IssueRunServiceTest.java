@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.platform.IssueRunTask;
 import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
@@ -124,19 +123,11 @@ class IssueRunServiceTest {
     AcceptedCommands accepted = mock(AcceptedCommands.class);
 
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
     when(issueRunRepository.lockActiveByIssueId(ISSUE_ID)).thenReturn(null);
     when(stageBudgetRepository.get(ISSUE_ID, "DESIGN"))
-        .thenReturn(
-            IssueStageBudgetRow.builder()
-                .issueId(ISSUE_ID)
-                .state("DESIGN")
-                .maxRuns(5)
-                .budgetAfterOrdinal(0)
-                .build());
-    when(issueRunRepository.countByIssueIdAndStateAfterOrdinal(ISSUE_ID, "DESIGN", 0))
-        .thenReturn(0L);
+        .thenReturn(new StageBudgetView("DESIGN", 5, 0, 0, 5));
     when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, "worker")).thenReturn(null);
     when(agentBranchSettings.materialize("worker")).thenReturn(settings);
     when(rootEntry.id()).thenReturn(rootEntryId);
@@ -202,7 +193,7 @@ class IssueRunServiceTest {
     Issue issue = issue();
     issue.setState("INIT");
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     ProjectValidationException error =
@@ -223,13 +214,13 @@ class IssueRunServiceTest {
             .replace("\"environment\":\"stage-env\",", "")
             .replace("\"maxRuns\":3,", ""));
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     ProjectValidationException error =
         assertThrows(ProjectValidationException.class, () -> service.acceptRun(ISSUE_ID, "start"));
     assertTrue(error.getMessage().contains("no enabled agent"));
-    verify(stageBudgetRepository, never()).insert(any());
+    verify(stageBudgetRepository, never()).insert(any(), any());
     verify(threadExecutions, never()).submitRunTask(any());
   }
 
@@ -239,7 +230,7 @@ class IssueRunServiceTest {
     Issue issue = issue();
     Project project = project();
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     project.setArchivedAt(Instant.now());
@@ -303,13 +294,89 @@ class IssueRunServiceTest {
     when(executions.getIfAvailable()).thenReturn(threadExecutions);
     when(threadExecutions.readThread(threadId)).thenReturn(view);
 
-    service.completeRun(runId, 3L, "complete-1", endEntryId, null, null);
+    service.finishRun(
+        runId, 3L, "complete-1", IssueRunStatus.COMPLETED, endEntryId, null, null, null);
 
     // 历史区间校验仍然读取权威路径，但整个收尾不产生任何 Harness 命令接受。
     verify(threadExecutions).readThread(threadId);
     verify(threadExecutions, never()).acceptCommands(any(), any());
     assertEquals(IssueRunStatus.COMPLETED, run.getStatus());
     assertEquals(endEntryId, run.getEndEntryId());
+  }
+
+  @Test
+  void rejectsInvalidTerminalArgumentsBeforeReadingRun() {
+    // 不合法状态和跨终态字段不能访问持久化或被幂等重放掩盖。
+    UUID runId = UUID.randomUUID();
+    UUID end = UUID.randomUUID();
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.RUNNING, end, null, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", null, end, null, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () ->
+            service.finishRun(runId, 0, "key", IssueRunStatus.COMPLETED, end, null, null, "error"));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.CANCELLED, end, end, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () ->
+            service.finishRun(
+                runId, 0, "key", IssueRunStatus.FAILED, end, null, "REVIEW", "error"));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.FAILED, end, null, null, null));
+    verify(issueRunRepository, never()).getById(any());
+  }
+
+  /** 缺少 Harness 运行时必须明确失败，不能伪造已接受的 Run。 */
+  @Test
+  void missingHarnessRuntimeRejectsAcceptance() {
+    Issue issue = issue();
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+    when(stageBudgetRepository.insert(any(), any())).thenReturn(true);
+    when(agentBranchSettings.materialize("worker"))
+        .thenReturn(
+            new BranchSettings(
+                "worker", BuiltinExecution.of(ModelSelection.model("model", "default")), null));
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> service.acceptRun(ISSUE_ID, "accept"));
+    assertTrue(error.getMessage().contains("harness runtime"));
+    verify(issueRunRepository, never()).insert(any());
+  }
+
+  /** 耗尽的执行额度不能通过等待或恢复绕过；终态也不能被重新激活。 */
+  @Test
+  void exhaustedAndTerminalRunsCannotWaitOrResume() {
+    UUID runId = UUID.randomUUID();
+    IssueRun run =
+        IssueRun.builder()
+            .id(runId)
+            .issueId(ISSUE_ID)
+            .status(IssueRunStatus.RUNNING)
+            .remainingExecutionMs(0)
+            .version(1)
+            .build();
+    when(issueRunRepository.getById(runId)).thenReturn(run);
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue());
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue());
+    when(issueRunRepository.lockById(runId)).thenReturn(run);
+
+    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    run.setStatus(IssueRunStatus.WAITING);
+    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
+    run.setStatus(IssueRunStatus.FAILED);
+    assertThrows(ProjectValidationException.class, () -> service.resumeRun(runId, 1));
+    assertThrows(ProjectValidationException.class, () -> service.waitRun(runId, 1));
+    verify(issueRunRepository, never()).updateById(any(), anyLong());
   }
 
   private static Issue issue() {

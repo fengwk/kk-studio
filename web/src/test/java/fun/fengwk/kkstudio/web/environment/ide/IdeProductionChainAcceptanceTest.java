@@ -3,9 +3,11 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -59,6 +61,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 生产链路验收：真实 Server ↔ 生产 Node 24 Daemon ↔ 已构建的受管 code-server。
@@ -118,6 +121,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private Path browserTempDir;
 
+  private Path testRecordsDir;
+
   @AfterEach
   void tearDown() {
     RuntimeException failure = null;
@@ -143,6 +148,12 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         daemon.close();
         daemon = null;
       }
+      if (testRecordsDir != null) {
+        deleteTree(testRecordsDir);
+        testRecordsDir = null;
+      }
+    } catch (IOException error) {
+      throw new IllegalStateException("failed to remove IDE test records", error);
     } catch (RuntimeException error) {
       if (failure == null) {
         failure = error;
@@ -450,6 +461,175 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       browserDriver.finish();
 
       closeView(environmentId, viewId, documentId, bindingEpoch);
+    }
+  }
+
+  /** 不打开视图列目录，再以真实工作台的原生对话框验证取消和正常关闭。 */
+  @Test
+  @Order(6)
+  void listsDirectoriesAndClosesDirtyViewThroughNativeDialog() throws Exception {
+    Path playwright = explicitPlaywrightModule();
+    Path node = nodeBinary();
+    browserTempDir = Files.createTempDirectory("kk-ide-br-");
+    String environmentId = startEnvironmentAndDaemon();
+    Path workspace = daemon.workspaceDirectory();
+    Files.createDirectory(workspace.resolve("z-dir"));
+    Files.createDirectory(workspace.resolve("a-dir"));
+    Files.createDirectory(workspace.resolve("a-dir").resolve("nested"));
+    Files.createSymbolicLink(workspace.resolve("link-dir"), workspace.resolve("a-dir"));
+    Files.writeString(workspace.resolve("editable.txt"), "initial text in workspace\n");
+    String listingUrl =
+        HttpUrl.get(baseUrl() + "/api/environments/" + environmentId + "/ide/directories")
+            .newBuilder()
+            .addQueryParameter("path", workspace.toString())
+            .build()
+            .toString();
+    try (Response response =
+        browser.newCall(new Request.Builder().url(listingUrl).build()).execute()) {
+      assertEquals(200, response.code());
+      JsonNode listing =
+          JsonMapper.builder().build().readTree(response.body().string()).path("data");
+      assertEquals(workspace.toRealPath().toString(), listing.path("path").asText());
+      assertEquals(
+          workspace.toRealPath().getParent().toString(), listing.path("parentPath").asText());
+      assertFalse(listing.path("truncated").asBoolean());
+      assertEquals(2, listing.path("children").size());
+      assertEquals("a-dir", listing.path("children").get(0).path("name").asText());
+      assertEquals(
+          workspace.resolve("a-dir").toString(),
+          listing.path("children").get(0).path("path").asText());
+      assertEquals("z-dir", listing.path("children").get(1).path("name").asText());
+      assertEquals(
+          workspace.resolve("z-dir").toString(),
+          listing.path("children").get(1).path("path").asText());
+    }
+    assertTrue(localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().isEmpty());
+    Files.createDirectory(workspace.resolve(".vscode"));
+    Files.writeString(workspace.resolve(".vscode/settings.json"), "{\"files.autoSave\":\"off\"}\n");
+
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, claimId);
+      long epoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      browserDriver = BrowserDriver.start(node, recordsDir());
+      browserDriver.send(
+          Map.ofEntries(
+              Map.entry("playwrightModule", playwright.toString()), Map.entry("baseUrl", baseUrl()),
+              Map.entry("environmentId", environmentId),
+                  Map.entry("documentId", documentId.toString()),
+              Map.entry("workspaceDirectory", workspace.toString()),
+                  Map.entry("browserTempDirectory", browserTempDir.toString()),
+              Map.entry("entryUrl", opened.path("entryUrl").asText()),
+                  Map.entry("viewId", viewId.toString()),
+              Map.entry("bindingEpoch", Long.toString(epoch)),
+                  Map.entry("scenario", "dirty-close")));
+      browserDriver.await("workbench-ready");
+      browserDriver.await("editor-ready");
+      String binding = "{\"documentId\":\"" + documentId + "\",\"bindingEpoch\":\"" + epoch + "\"}";
+      Request mobile =
+          new Request.Builder()
+              .url(
+                  baseUrl()
+                      + "/api/environments/"
+                      + environmentId
+                      + "/ide/views/"
+                      + viewId
+                      + "/mobile-layout")
+              .post(RequestBody.create(binding, JSON))
+              .build();
+      try (Response response =
+          browser
+              .newBuilder()
+              .readTimeout(90, TimeUnit.SECONDS)
+              .build()
+              .newCall(mobile)
+              .execute()) {
+        String text = response.body().string();
+        assertTrue(
+            response.code() == 200 || response.code() == 204,
+            "mobile layout: " + response.code() + " " + text);
+      }
+      browserDriver.proceed();
+      String cookie = browserDriver.await("dirty-ready").path("cookie").asText();
+      assertFalse(cookie.isBlank());
+      assertEquals(
+          "initial text in workspace\n", Files.readString(workspace.resolve("editable.txt")));
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      try {
+        Future<CloseResult> first =
+            executor.submit(() -> normalCloseStatus(environmentId, viewId, documentId, epoch));
+        try {
+          browserDriver.await("close-prompt");
+        } catch (AssertionError failure) {
+          if (first.isDone()) {
+            throw new AssertionError(
+                "close returned before native prompt: " + first.get(), failure);
+          }
+          throw failure;
+        }
+        // The production HTTP, control and bridge layers must all outlive the former 20/30s
+        // budgets.
+        assertThrows(TimeoutException.class, () -> first.get(32, TimeUnit.SECONDS));
+        assertTrue(fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"));
+        browserDriver.proceed();
+        browserDriver.await("dialog-answered");
+        CloseResult cancelled = first.get(90, TimeUnit.SECONDS);
+        assertEquals(400, cancelled.status(), "Cancel must reject the close");
+        assertEquals(
+            "ide_close_cancelled",
+            JsonMapper.builder()
+                .build()
+                .readTree(cancelled.body())
+                .path("errors")
+                .path("resource")
+                .asText());
+        assertTrue(fetchView(environmentId, viewId, cookie, "/").toLowerCase().contains("<html"));
+        assertTrue(
+            localIdeService.listViews(EnvironmentId.parse(environmentId)).getViews().stream()
+                .anyMatch(view -> viewId.toString().equals(view.getViewId())));
+        Future<CloseResult> second =
+            executor.submit(() -> normalCloseStatus(environmentId, viewId, documentId, epoch));
+        browserDriver.await("close-prompt");
+        browserDriver.proceed();
+        browserDriver.await("dialog-answered");
+        int status = second.get(90, TimeUnit.SECONDS).status();
+        assertTrue(status == 200 || status == 204, "normal close must succeed: " + status);
+        awaitViewReleased(environmentId, viewId);
+        assertViewRejected(environmentId, viewId, cookie, "closed view must reject its cookie");
+        assertEquals(
+            "initial text in workspace\n", Files.readString(workspace.resolve("editable.txt")));
+        browserDriver.proceed();
+        browserDriver.await("done");
+        browserDriver.finish();
+      } finally {
+        executor.shutdownNow();
+      }
+    }
+  }
+
+  private record CloseResult(int status, String body) {}
+
+  private CloseResult normalCloseStatus(
+      String environmentId, UUID viewId, UUID documentId, long epoch) throws IOException {
+    String body =
+        "{\"documentId\":\""
+            + documentId
+            + "\",\"bindingEpoch\":\""
+            + epoch
+            + "\",\"discard\":false}";
+    Request request =
+        new Request.Builder()
+            .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views/" + viewId)
+            .delete(RequestBody.create(body, JSON))
+            .build();
+    try (Response response =
+        browser.newBuilder().readTimeout(90, TimeUnit.SECONDS).build().newCall(request).execute()) {
+      return new CloseResult(response.code(), response.body().string());
     }
   }
 
@@ -849,11 +1029,12 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     throw new IllegalStateException("cannot locate the repository root from the module directory");
   }
 
-  private static Path recordsDir() throws IOException {
-    Path records = repoRoot().getParent().resolve("records");
-    Files.createDirectories(records);
-    Files.setPosixFilePermissions(records, PosixFilePermissions.fromString("rwx------"));
-    return records;
+  private Path recordsDir() throws IOException {
+    if (testRecordsDir == null) {
+      testRecordsDir = Files.createTempDirectory("kk-ide-records-");
+      Files.setPosixFilePermissions(testRecordsDir, PosixFilePermissions.fromString("rwx------"));
+    }
+    return testRecordsDir;
   }
 
   private record EventIdentity(String eventNodeId, String connectionId) {}

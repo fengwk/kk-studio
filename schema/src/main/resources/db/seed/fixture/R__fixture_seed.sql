@@ -38,7 +38,7 @@ insert into agent_definition (
     'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.',
     '{"driver":"builtin","settings":{"modelName":"acceptance-stub","variant":"default"}}',
-    '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 );
 

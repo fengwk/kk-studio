@@ -106,6 +106,33 @@ function nextCommand(stream: http.IncomingMessage): Promise<{ id: string; op: st
 }
 
 describe('loopback IDE bridge', () => {
+  it('does not time out a native close prompt after 30 seconds', async () => {
+    const instance = await bridge()
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    instance.assign(viewId, workspace, '1', '/target')
+    const stream = await openStream(instance.url, instance.secret, workspace, ['/target'])
+    const command = nextCommand(stream)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let settled = false
+      const pending = instance.request(viewId, { op: 'closeView' }, signal()).then((result) => {
+        settled = true
+        return result
+      })
+      const id = (await command).id
+      // Fake time exercises the actual bridge timer rather than waiting on a real prompt.
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(settled).toBe(false)
+      await request(`${instance.url}/bridge/result`, {
+        method: 'POST', headers: jsonAuth(instance.secret), body: JSON.stringify({ id, ok: true }),
+      })
+      expect(await pending).toMatchObject({ ok: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retains an accepted host identity even if the registration acknowledgement is lost', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'

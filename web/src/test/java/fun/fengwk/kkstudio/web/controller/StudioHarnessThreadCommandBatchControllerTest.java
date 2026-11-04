@@ -32,7 +32,7 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -128,7 +128,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
 
     // 既有 Thread 的继续写入只走 acceptOnThread，不借 owner-aware 创建入口，也不回读 snapshot 之外的状态。
     verify(acceptanceService, never())
-        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+        .accept(any(SessionOwner.class), any(AcceptCommandsCommand.class));
     verify(runtime).getThreadSnapshot(UUID.fromString(AUTHORITATIVE_THREAD_ID));
   }
 
@@ -248,9 +248,10 @@ class StudioHarnessThreadCommandBatchControllerTest {
     verifyNoInteractions(acceptanceService, runtime);
   }
 
-  /** CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE 是内部 steering，产品 HTTP surface 一律 400。 */
+  /** 内部命令与已删除的命令在产品 HTTP surface 均返回 400。 */
   @Test
-  void rejectsInternalOnlyCommandTypesBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
+  void rejectsInternalAndRemovedCommandTypesBeforeTouchingAcceptanceServiceOrRuntime()
+      throws Exception {
     for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
       String commands =
           """

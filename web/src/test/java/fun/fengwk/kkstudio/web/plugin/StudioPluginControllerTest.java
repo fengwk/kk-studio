@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /** {@link StudioPluginController} 与 {@link StudioPluginErrorAdvice} 独立 MockMvc 契约与错误翻译测试。 */
 class StudioPluginControllerTest {
@@ -282,7 +284,8 @@ class StudioPluginControllerTest {
 
     PluginDTO pending = samplePluginDTO("my-plugin");
     pending.setApplicationError("configuration is saved but this node has not applied it yet");
-    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
+    when(pluginManagementService.updateConfiguration(
+            eq("my-plugin"), eq(7L), any(), nullable(Map.class)))
         .thenReturn(pending);
 
     mockMvc
@@ -297,7 +300,8 @@ class StudioPluginControllerTest {
                 .value("configuration is saved but this node has not applied it yet"));
 
     PluginDTO applied = samplePluginDTO("my-plugin");
-    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
+    when(pluginManagementService.updateConfiguration(
+            eq("my-plugin"), eq(7L), any(), nullable(Map.class)))
         .thenReturn(applied);
 
     mockMvc
@@ -310,7 +314,7 @@ class StudioPluginControllerTest {
         .andExpect(jsonPath("$.data.applicationError").doesNotExist());
 
     verify(pluginManagementService, times(2))
-        .updateConfiguration(eq("my-plugin"), eq(7L), any(), any());
+        .updateConfiguration(eq("my-plugin"), eq(7L), any(), nullable(Map.class));
   }
 
   /** 测试意图：期望坐标与 SET 值只接受 JSON 字符串，数字/布尔不做标量强制转换；KEEP/CLEAR 的显式 null 同样被拒绝，且错误绝不回显请求 正文里的标记值。 */

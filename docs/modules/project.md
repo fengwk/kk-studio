@@ -10,7 +10,7 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 PostgreSQL 持久化、Issue 调度、Agent 业务工具与 Project/Issue HTTP 边界，经
 [`ProjectAutoConfiguration`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。它直接使用 [Platform](platform.md) 的公开服务（运行时、Agent 任务、全局 Blob、Agent 目录与
-Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。Project 的 HTTP DTO 与领域映射由本模块持有，映射在
+Session 深删除），并实现平台定义的 `SessionOwnership` 与 `AgentReferenceCheck`（含 Issue Agent 归属）；平台从不依赖 Project。Project 的 HTTP DTO 与领域映射由本模块持有，映射在
 [`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java)，由本模块扫描为唯一组件，并注入宿主的 Jackson 3 `ObjectMapper` 与唯一的 [`ProjectWorkflowJsonCodec`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)。Issue
 Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方向由仓库检查
 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
@@ -39,7 +39,8 @@ Project 只经两个窄适配接触运行时与存储，平台异常在此收敛
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
-`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project KEY SHARE -> Issue UPDATE` 锁定产品层级（Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
+`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectSessionOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSessionOwnership.java) 实现平台定义的 `SessionOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。规则是不允许分叉、不允许通用命令直写，删除 Session 前先删除绑定行；锁序由 Project 自己维护，平台编排只按固定顺序调用它。
+[`ProjectAgentReferenceCheck`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectAgentReferenceCheck.java) 实现平台的 `AgentReferenceCheck`：删除 Agent 前检查未归档项目的工作流阶段，平台不再读取 `project` 表。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
 
@@ -122,7 +123,7 @@ Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一�
 恢复已接受 Run、工具循环、协议续生成和问答等待沿用原次数。更换 Agent、返工或重开
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由明确授权或重置操作维护。
 
-[`IssueStageBudget`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStageBudget.java)
+[`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
 承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
 `nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
 Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
@@ -224,10 +225,12 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 读侧由 [`ProjectSnapshotAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSnapshotAssembler.java) 与
 [`IssueDetailAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueDetailAssembler.java)
 在模块内部完成快照用例聚合；
-`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
+`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作，最终答复证据的预校验和发布由
+`IssueReconcileEvidence` 在同一事务内负责；
 [`IssueMutationSupport`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueMutationSupport.java)
-只集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、幂等 receipt、版本/归档门禁与活动落库，
-不承载具体动作或状态/额度规则；Repository 只做单表读写与 CAS 行数判定。
+集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、版本/归档门禁与活动落库；
+`IssueActivityIdempotency` 统一锁前、锁内两次 receipt 判定；Run 的完成、取消与失败由同一事务入口收尾。
+阶段额度仓库读取额度时按 Run 历史聚合已消耗次数；其余仓库负责实体读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker

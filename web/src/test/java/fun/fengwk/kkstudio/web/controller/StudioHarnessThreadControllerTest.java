@@ -59,6 +59,8 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
@@ -97,6 +99,7 @@ class StudioHarnessThreadControllerTest {
   private ModelRequestDebugService modelRequestDebugService;
   private InteractionService interactionService;
   private UsageCostProjectionService usageCostProjectionService;
+  private EnvironmentService environmentService;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -105,11 +108,16 @@ class StudioHarnessThreadControllerTest {
     modelRequestDebugService = mock(ModelRequestDebugService.class);
     interactionService = mock(InteractionService.class);
     usageCostProjectionService = mock(UsageCostProjectionService.class);
+    environmentService = mock(EnvironmentService.class);
     // 费用是快照的读取时投影：默认没有可计价事实，单个用例再按 entry id 指定。
     when(usageCostProjectionService.project(any())).thenReturn(Map.of());
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime, modelRequestDebugService, interactionService, usageCostProjectionService);
+            runtime,
+            modelRequestDebugService,
+            interactionService,
+            usageCostProjectionService,
+            new EnvironmentWaitProjectionService(runtime, environmentService));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -208,7 +216,8 @@ class StudioHarnessThreadControllerTest {
         .thenReturn(
             List.of(
                 new EnvironmentToolWait(
-                    id(100), EnvironmentId.of(id(200)), false, "archlinux", deadline)));
+                    id(100), EnvironmentId.of(id(200)), true, false, deadline)));
+    when(environmentService.requireName(EnvironmentId.of(id(200)))).thenReturn("archlinux");
     mockMvc
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())

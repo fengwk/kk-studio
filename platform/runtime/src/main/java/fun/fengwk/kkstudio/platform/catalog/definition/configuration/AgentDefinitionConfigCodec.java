@@ -93,11 +93,6 @@ public class AgentDefinitionConfigCodec {
     validateToolNames(config.getTools());
     validateSkills(config.getSkills());
     validateNames(config.getSubagents(), "subagents");
-    if (config.getInheritParentEnvironment() == null) {
-      // 缺省是 true（DTO 字段初值）；显式 JSON null 解析后即为 null，必须 fail closed。
-      throw new IllegalArgumentException(
-          "agent definition config inheritParentEnvironment is required");
-    }
   }
 
   /** 校验选中的全局 Skill 引用列表：非空列表、非空元素、canonical 短名、保序且不重复。 */

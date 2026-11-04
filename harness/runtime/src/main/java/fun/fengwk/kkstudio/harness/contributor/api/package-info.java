@@ -8,8 +8,7 @@
  *       fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor}： 声明贡献者身份、展示元数据与 {@code
  *       requires} 依赖 DAG；
  *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar}： 类型化注册统一 {@link
- *       fun.fengwk.kkstudio.harness.contributor.api.Tool}、Custom Entry ownership 与 {@link
- *       fun.fengwk.kkstudio.harness.contributor.api.ContextProjector}；
+ *       fun.fengwk.kkstudio.harness.contributor.api.Tool} 与 Custom Entry ownership；
  *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog}： 验证 requires DAG
  *       无环无缺失，按拓扑序收集贡献，冻结为不可变目录；
  *   <li>{@link fun.fengwk.kkstudio.harness.contributor.api.BranchView}、{@link

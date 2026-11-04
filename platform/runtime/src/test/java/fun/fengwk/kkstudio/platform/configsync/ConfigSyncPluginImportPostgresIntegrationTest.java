@@ -331,8 +331,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(new ModelSelection(MODEL_NAME, null)))
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .version(0L)
             .build();
     return agent;

@@ -216,7 +216,7 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
         SystemSettings initialSettings) {
       this.snapshot = new SystemSettingsSnapshot(initialSettings);
       SystemSettingsChangeHandler changeHandler =
-          new SystemSettingsChangeHandler(repository, snapshot);
+          new SystemSettingsChangeHandler(repository, snapshot, event -> {});
       this.loop =
           new PostgresqlNotificationLoop(
               dataSource,

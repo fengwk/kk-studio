@@ -269,7 +269,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                 results: [
                   { name: 'architect', description: '系统架构师', type: 'USER',
                     execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
-                    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] }, version: '1' },
+                    config: { tools: [], skills: [], subagents: [] }, version: '1' },
                 ],
               },
             },

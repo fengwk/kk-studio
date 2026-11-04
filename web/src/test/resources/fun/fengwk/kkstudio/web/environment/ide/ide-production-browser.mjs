@@ -91,6 +91,7 @@ function parseConfig(raw) {
     entryUrl: config.entryUrl,
     viewId: config.viewId,
     bindingEpoch: String(config.bindingEpoch),
+    scenario: config.scenario,
   }
 }
 
@@ -223,6 +224,55 @@ async function run(config, lines) {
     await fileRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
 
     emit({ event: 'workbench-ready' })
+
+    if (config.scenario === 'dirty-close') {
+      stage('dirty-editor')
+      await fileRow.dblclick()
+      const editor = page.locator('.monaco-editor .view-lines').first()
+      await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+      await page.waitForFunction(
+        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('initial text in workspace'),
+        undefined,
+        { timeout: EDITOR_TIMEOUT },
+      )
+      emit({ event: 'editor-ready' })
+      const ready = await lines.next()
+      if (ready.done || JSON.parse(ready.value).continue !== true) throw namedError('ProtocolError')
+      await editor.click()
+      await page.keyboard.press('End')
+      await page.keyboard.type(' dirty acceptance')
+      await page.waitForFunction(
+        () => document.querySelector('.monaco-editor .view-lines')?.textContent?.replaceAll('\u00a0', ' ').includes('dirty acceptance'),
+        undefined,
+        { timeout: EDITOR_TIMEOUT },
+      )
+      try {
+        await page.locator('.tab.dirty').first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+      } catch (error) {
+        process.stderr.write(`tab classes: ${JSON.stringify(await page.locator('.tab').evaluateAll((tabs) => tabs.map((tab) => ({ class: tab.className, label: tab.getAttribute('aria-label') }))))}\n`)
+        throw error
+      }
+      const cookies = await context.cookies()
+      const cookie = cookies.find((item) => item.name === 'kk_ide_session')
+      if (!cookie) throw namedError('MissingSessionCookie')
+      emit({ event: 'dirty-ready', cookie: cookie.value })
+      for (const choice of ['Cancel', "Don't Save"]) {
+        stage('native-close-dialog')
+        const dialog = page.locator('.monaco-dialog-box').filter({ hasText: 'editable.txt' }).first()
+        await dialog.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+        emit({ event: 'close-prompt' })
+        const next = await lines.next()
+        if (next.done || JSON.parse(next.value).continue !== true) throw namedError('ProtocolError')
+        await dialog.getByRole('button', { name: choice, exact: true }).click()
+        emit({ event: 'dialog-answered' })
+      }
+      const next = await lines.next()
+      if (next.done || JSON.parse(next.value).continue !== true) throw namedError('ProtocolError')
+      await browser.close()
+      browser = null
+      emit({ event: 'done' })
+      return
+    }
 
     // 2. Terminal interaction: open terminal, type command, assert output & exit code
     stage('terminal-open')
