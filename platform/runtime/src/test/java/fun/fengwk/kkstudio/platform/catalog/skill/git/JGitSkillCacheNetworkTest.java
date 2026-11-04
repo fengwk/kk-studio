@@ -8,19 +8,130 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.transport.PacketLineOut;
+import org.eclipse.jgit.transport.RefAdvertiser.PacketLineOutRefAdvertiser;
+import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.transport.UploadPack;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPInputStream;
 
 @Timeout(10)
 class JGitSkillCacheNetworkTest {
+
+  /** 测试意图：允许拉取可达提交的 Smart HTTP 服务在分支前进后仍支持按旧 SHA 浅拉取，无需检出。 */
+  @Test
+  void fetchesPreviouslyObservedCommitAtDepthOneWithoutCheckout(@TempDir Path directory)
+      throws Exception {
+    Path remote = directory.resolve("remote-shallow");
+    try (Git source = Git.init().setDirectory(remote.toFile()).setInitialBranch("main").call()) {
+      Path file = remote.resolve("dev/SKILL.md");
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, "old");
+      source.add().addFilepattern(".").call();
+      RevCommit parent = source.commit().setMessage("parent").setSign(false).call();
+      Files.writeString(file, "observed");
+      source.add().addFilepattern(".").call();
+      RevCommit observed = source.commit().setMessage("observed").setSign(false).call();
+      Files.writeString(file, "new head");
+      source.add().addFilepattern(".").call();
+      RevCommit head = source.commit().setMessage("head").setSign(false).call();
+
+      HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+      server.createContext(
+          "/",
+          exchange -> {
+            try (UploadPack pack = new UploadPack(source.getRepository());
+                ByteArrayOutputStream response = new ByteArrayOutputStream()) {
+              pack.setBiDirectionalPipe(false);
+              pack.setRequestPolicy(UploadPack.RequestPolicy.REACHABLE_COMMIT);
+              String contentType;
+              if (exchange.getRequestURI().getPath().equals("/info/refs")) {
+                PacketLineOut lines = new PacketLineOut(response);
+                pack.sendAdvertisedRefs(new PacketLineOutRefAdvertiser(lines), "git-upload-pack");
+                contentType = "application/x-git-upload-pack-advertisement";
+              } else if (exchange.getRequestURI().getPath().equals("/git-upload-pack")) {
+                byte[] request = exchange.getRequestBody().readAllBytes();
+                if ("gzip".equals(exchange.getRequestHeaders().getFirst("Content-Encoding"))) {
+                  try (GZIPInputStream input =
+                      new GZIPInputStream(new ByteArrayInputStream(request))) {
+                    request = input.readAllBytes();
+                  }
+                }
+                pack.upload(new ByteArrayInputStream(request), response, null);
+                contentType = "application/x-git-upload-pack-result";
+              } else {
+                exchange.sendResponseHeaders(404, -1);
+                return;
+              }
+              byte[] body = response.toByteArray();
+              exchange.getResponseHeaders().set("Content-Type", contentType);
+              exchange.sendResponseHeaders(200, body.length);
+              exchange.getResponseBody().write(body);
+            } finally {
+              exchange.close();
+            }
+          });
+      server.start();
+      try {
+        String remoteUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+        try (GitHttpConnectionFactory network = new GitHttpConnectionFactory(1000, 1000)) {
+          assertEquals(
+              head.name(),
+              Git.lsRemoteRepository()
+                  .setRemote(remoteUrl)
+                  .setTransportConfigCallback(network.callback())
+                  .callAsMap()
+                  .get("refs/heads/main")
+                  .getObjectId()
+                  .name());
+          Path local = directory.resolve("fetch");
+          try (Git fetched = Git.init().setDirectory(local.toFile()).setBare(true).call()) {
+            fetched
+                .fetch()
+                .setRemote(remoteUrl)
+                .setTransportConfigCallback(network.callback())
+                .setRefSpecs(new RefSpec(observed.name() + ":refs/heads/observed"))
+                .setDepth(1)
+                .call();
+            assertTrue(
+                fetched.getRepository().getObjectDatabase().getShallowCommits().contains(observed));
+            assertFalse(fetched.getRepository().getObjectDatabase().has(parent));
+            assertFalse(fetched.getRepository().getObjectDatabase().has(head));
+            try (RevWalk walk = new RevWalk(fetched.getRepository());
+                TreeWalk tree =
+                    TreeWalk.forPath(
+                        fetched.getRepository(),
+                        "dev/SKILL.md",
+                        walk.parseCommit(ObjectId.fromString(observed.name())).getTree())) {
+              assertArrayEquals(
+                  "observed".getBytes(StandardCharsets.UTF_8),
+                  fetched.getRepository().open(tree.getObjectId(0), Constants.OBJ_BLOB).getBytes());
+            }
+          }
+          assertFalse(Files.exists(local.resolve("dev")));
+        }
+      } finally {
+        server.stop(0);
+      }
+    }
+  }
 
   /** 意图：所有 lsRemote 与 clone 真正经过分离的 HTTP factory，持续传输超过 read budget 不被总时限截断。 */
   @Test
