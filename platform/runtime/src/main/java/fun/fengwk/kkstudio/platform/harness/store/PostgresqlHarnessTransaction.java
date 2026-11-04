@@ -7,28 +7,29 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.CommandStore;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.StopReceiptStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
+import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
+import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
+import fun.fengwk.kkstudio.harness.spi.store.StopReceiptStore;
+import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
@@ -231,12 +232,12 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
   void notifyThreadVersion(UUID threadId, long version) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
+    notifyChannel(HarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
   }
 
   /** 执行树失效：payload 为真实执行根 id；绝不伪造根 Thread 的 version。 */
   void notifyExecutionTree(UUID rootThreadId) {
-    notifyChannel(PostgresqlHarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
+    notifyChannel(HarnessNotificationChannel.THREAD_TREE, rootThreadId.toString());
   }
 
   /**
@@ -244,7 +245,7 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
    */
   void notifyToolInteraction(UUID rootThreadId) {
     notifyChannel(
-        PostgresqlHarnessNotificationChannel.TOOL_INTERACTION,
+        HarnessNotificationChannel.TOOL_INTERACTION,
         rootThreadId == null ? "" : rootThreadId.toString());
   }
 

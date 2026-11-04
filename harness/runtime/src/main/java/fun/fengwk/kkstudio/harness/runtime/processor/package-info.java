@@ -1,6 +1,6 @@
 /**
  * Target 级 execution processors：消费 dispatcher 已 claim 的 {@link
- * fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork}，实施所有权围栏并驱动单次 target execution 的持久化生命周期。
+ * fun.fengwk.kkstudio.harness.spi.work.ClaimedWork}，实施所有权围栏并驱动单次 target execution 的持久化生命周期。
  *
  * <p><b>Driver SPI：</b>本包同时向 Kernel 之外的 Driver 暴露最小的已认领执行骨架 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ClaimedExecutionSupport}：Work-only 所有权校验、按
@@ -12,7 +12,7 @@
  * 状态；只有准入检查会开启 Work-only 短事务，其余写入使用调用方事务，不提供基类或模板方法。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor} 输入必须是 TOOL target 的
- * claim，以 {@link fun.fengwk.kkstudio.harness.runtime.port.ToolGateway} 做本地
+ * claim，以 {@link fun.fengwk.kkstudio.harness.spi.ToolGateway} 做本地
  * admission，并在独占虚拟线程上阻塞执行至终态。所有持久化状态变更都在短事务内通过 store 锁序（Thread -&gt; Driver 私有行 -&gt;
  * ToolInvocation -&gt; Work，同层 Work 按 (type, id) 升序）与 lease/token 校验完成，lost / stale 完整 no-op；Tool
  * 在副作用之前持久化 READY -&gt; RUNNING，取消即对执行线程 interrupt，资源只在终态决议与执行体返回之后释放。
@@ -33,11 +33,11 @@
  * 仍 owned 的 READY，绝不启动 Gateway，也不留下新 execution。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor} 输入必须是 THREAD target 的
- * claim，通过单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 与 {@link
- * fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver} 协作，是每个 claim 恰执行一个持久化 action 的
- * single-action reducer（Driver 结果应用 -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt;
- * input -&gt; idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动在单个 store transaction 内构造
- * candidate，由 Driver 同步解析与校验后提交，不存在事务外解析、二次 CAS 或可恢复的 TURN_START-without-Invocation 中间态。 Driver
+ * claim，通过单一 {@link fun.fengwk.kkstudio.harness.spi.store.HarnessStore} 与 {@link
+ * fun.fengwk.kkstudio.harness.spi.driver.AgentDriver} 协作，是每个 claim 恰执行一个持久化 action 的 single-action
+ * reducer（Driver 结果应用 -&gt; Tool sibling batch -&gt; blocker -&gt; continuation -&gt; input -&gt;
+ * idle），下一 action 一律由同事务 {@code requestWork} 驱动，绝不内部循环。Turn 启动在单个 store transaction 内构造 candidate，由
+ * Driver 同步解析与校验后提交，不存在事务外解析、二次 CAS 或可恢复的 TURN_START-without-Invocation 中间态。 Driver
  * 负责检查具体执行后端的请求与分支事实是否一致；契约错误转为 durable FAILED。终态应用只由 ThreadProcessor 写 Entry/head。Result / Config
  * 类型见 {@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig}。

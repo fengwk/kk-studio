@@ -22,4 +22,6 @@ LABEL org.opencontainers.image.source="https://github.com/minio/mc" \
 COPY --from=download /usr/local/bin/mc /usr/local/bin/mc
 COPY --from=download /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY LICENSE NOTICE /usr/share/licenses/minio-client/
+# One-shot bucket bootstrap shared by the Compose stacks; the default entrypoint stays mc.
+COPY init-bucket.sh /usr/local/bin/init-bucket.sh
 ENTRYPOINT ["mc"]

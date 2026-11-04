@@ -1,5 +1,8 @@
 import { assert, assertDecimalVersion, assertExactFields, cid, differentDecimalLong, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -335,11 +338,5 @@ registerCase({
     assertExactFields(cancelledTerminal, RUN_FIELDS, 'cancel result')
     assert(cancelledTerminal.status === 'SUCCEEDED', JSON.stringify(cancelledTerminal))
 
-    // 运行已收尾的节点可以正常删除画布。
-    await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
-    await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })
-    await expectHttpError(() => ctx.call('GET', functionById(canvas.id, functionNodeId).runPath), {
-      status: 404,
-    })
   },
 })

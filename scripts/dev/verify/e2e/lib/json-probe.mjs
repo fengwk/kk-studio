@@ -10,9 +10,10 @@
 
 import { readFileSync } from 'node:fs'
 
+import { render, runProbe } from '../../../lib/json-probe.mjs'
+import { PROVIDER_SPECS } from '../sync-provider-credentials.mjs'
+
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
-/** Python-style rendering of a scalar (`None`, `True`, `False`), as these helpers always printed. */
-const render = (value) => (value === null || value === undefined ? 'None' : value === true ? 'True' : value === false ? 'False' : String(value))
 
 const document = JSON.parse(readFileSync(0, 'utf8'))
 const firstModel = () => document?.data?.results?.[0] ?? null
@@ -36,19 +37,9 @@ const commands = {
   'providers-ready'() {
     const rows = document?.data?.results ?? []
     const configured = new Set(rows.filter((row) => row.configured && row.baseUrl).map((row) => row.name))
-    const missing = ['google', 'openai', 'minimax-anthropic', 'deepseek'].filter((name) => !configured.has(name)).sort()
+    const missing = PROVIDER_SPECS.map((spec) => spec.name).filter((name) => !configured.has(name)).sort()
     console.log(missing.length > 0 ? `missing:${missing.join(',')}` : 'ok')
   },
 }
 
-const [command, ...args] = process.argv.slice(2)
-if (!(command in commands)) {
-  process.stderr.write(`unknown probe: ${command}\n`)
-  process.exit(2)
-}
-try {
-  commands[command](...args)
-} catch (error) {
-  process.stderr.write(`${error.message}\n`)
-  process.exitCode = 1
-}
+runProbe(commands)

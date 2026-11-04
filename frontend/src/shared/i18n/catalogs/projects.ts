@@ -77,10 +77,6 @@ export const projectsCatalog = {
     'zh-CN': '终止运行',
     'en-US': 'Stop Execution',
   },
-  'projects.issue.resolveUnknown': {
-    'zh-CN': '人工核查并解除 UNKNOWN',
-    'en-US': 'Verify & Resolve UNKNOWN',
-  },
   'projects.issue.reopen': {
     'zh-CN': '重新打开',
     'en-US': 'Reopen',
@@ -309,10 +305,6 @@ export const projectsCatalog = {
     'zh-CN': '未说明',
     'en-US': 'unspecified',
   },
-  'projects.issue.unknownBadgeTitle': {
-    'zh-CN': '需人工核查，暂不能继续',
-    'en-US': 'Needs manual verification before continuing',
-  },
   'projects.issue.pausedBadgeTitle': {
     'zh-CN': '已人工暂停',
     'en-US': 'Paused manually',
@@ -332,14 +324,6 @@ export const projectsCatalog = {
   'projects.issue.blockReasonPrefix': {
     'zh-CN': '原因: {{reason}}',
     'en-US': 'Reason: {{reason}}',
-  },
-  'projects.issue.actionVerify': {
-    'zh-CN': '人工核查',
-    'en-US': 'Verify',
-  },
-  'projects.issue.actionVerifyTitle': {
-    'zh-CN': '核查外部副作用，解除 UNKNOWN',
-    'en-US': 'Verify external side effects and resolve UNKNOWN',
   },
   'projects.issue.actionRecover': {
     'zh-CN': '恢复',
@@ -806,10 +790,6 @@ export const projectsCatalog = {
     'zh-CN': '存在未确认结果的阻塞请求，不能直接修改输入。请先重试原操作或明确放弃。',
     'en-US': 'A pending block request exists. Retry or discard it before editing the input.',
   },
-  'projects.issue.pendingResolveUnknownModifyBlocked': {
-    'zh-CN': '存在未确认结果的人工核查请求，不能直接修改输入。请先重试原操作或明确放弃。',
-    'en-US': 'A pending verification request exists. Retry or discard it before editing the input.',
-  },
   'projects.issue.pendingStopModifyBlocked': {
     'zh-CN': '存在未确认结果的终止请求，不能直接修改输入。请先重试原操作或明确放弃。',
     'en-US': 'A pending stop request exists. Retry or discard it before editing the input.',
@@ -873,10 +853,6 @@ export const projectsCatalog = {
   'projects.issue.blockReasonRequired': {
     'zh-CN': '阻塞原因不能为空',
     'en-US': 'A blocked reason is required',
-  },
-  'projects.issue.verificationRequired': {
-    'zh-CN': '人工核查说明不能为空',
-    'en-US': 'A verification note is required',
   },
   'projects.issue.resetBudgetStateRequired': {
     'zh-CN': '请选择要重置预算的工作阶段',
@@ -1102,10 +1078,6 @@ export const projectsCatalog = {
     'zh-CN': '公开证据 ({{count}})',
     'en-US': 'Public evidence ({{count}})',
   },
-  'projects.issue.pendingVerifyExternalSideEffects': {
-    'zh-CN': '待人工核查外部副作用',
-    'en-US': 'External side effects need manual verification',
-  },
   'projects.issue.transitionStateTo': {
     'zh-CN': '流转状态至 {{state}}',
     'en-US': 'Transition to {{state}}',
@@ -1113,10 +1085,6 @@ export const projectsCatalog = {
   'projects.issue.transitionToState': {
     'zh-CN': '流转至 {{state}}',
     'en-US': 'Move to {{state}}',
-  },
-  'projects.issue.resolveUnknownActionTitle': {
-    'zh-CN': '核查外部副作用并解除 UNKNOWN',
-    'en-US': 'Verify external side effects and resolve UNKNOWN',
   },
   'projects.issue.recoverActionTitle': {
     'zh-CN': '解除阻塞并恢复至原工作阶段',
@@ -1213,30 +1181,6 @@ export const projectsCatalog = {
   'projects.issue.confirmBlock': {
     'zh-CN': '确认阻塞',
     'en-US': 'Mark as blocked',
-  },
-  'projects.issue.resolveUnknownDialogTitle': {
-    'zh-CN': '解除 UNKNOWN',
-    'en-US': 'Resolve UNKNOWN',
-  },
-  'projects.issue.resolveUnknownDesc': {
-    'zh-CN': '* 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除 UNKNOWN 暂停。',
-    'en-US': '* The run crashed or timed out, leaving its in-flight side effects unknown. Check the leftover model/tool calls and external side effects, then record your basis for resolving the UNKNOWN pause.',
-  },
-  'projects.issue.verificationFieldLabel': {
-    'zh-CN': '核查结论与说明',
-    'en-US': 'Verification result and notes',
-  },
-  'projects.issue.verificationPlaceholder': {
-    'zh-CN': '说明已核实的内容与外部状态一致性保证...',
-    'en-US': 'Describe what you verified and how you confirmed the external state is consistent…',
-  },
-  'projects.issue.resolving': {
-    'zh-CN': '解除中...',
-    'en-US': 'Resolving…',
-  },
-  'projects.issue.confirmResolveUnknown': {
-    'zh-CN': '确认解除 UNKNOWN',
-    'en-US': 'Resolve UNKNOWN',
   },
   'projects.issue.stopDialogTitle': {
     'zh-CN': '终止当前运行',

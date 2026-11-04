@@ -7,13 +7,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
@@ -41,7 +40,6 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnMissingBean(ToolGateway.class)
   public ToolExecutionGateway toolExecutionGateway(
       RuntimeToolCatalogSource runtimeToolCatalogSource,
-      ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
@@ -53,7 +51,6 @@ public class HarnessToolGatewayConfiguration {
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new ToolExecutionGateway(
         runtimeToolCatalogSource,
-        contributorBranchViewLoader,
         capabilityTransport,
         permissionEvaluator,
         toolSettingsProvider,

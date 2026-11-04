@@ -187,17 +187,15 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
     }
 
     ToolExecutionContext context = request.context();
-    if (context == null || context.threadId() == null) {
-      return ToolResult.error(
-          callId, "execution context with threadId is required to read kkstudio: resources");
+    if (context == null) {
+      return ToolResult.error(callId, "execution context is required to read kkstudio: resources");
     }
 
     try {
       ResourceRead read =
           resourceReader.readResource(
-              context.threadId(),
-              context.invocationId(),
-              callId,
+              context.sessionId(),
+              context.mediaCapabilities(),
               blobId,
               offset,
               limit,

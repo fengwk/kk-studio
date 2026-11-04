@@ -19,8 +19,7 @@ const agentWithEnv: AgentDefinitionDTO = {
   description: null,
   systemPrompt: null,
   type: 'USER',
-  model: 'minimax/MiniMax',
-  variant: 'default',
+  execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
   config: {
     inheritParentEnvironment: true,
     tools: [],

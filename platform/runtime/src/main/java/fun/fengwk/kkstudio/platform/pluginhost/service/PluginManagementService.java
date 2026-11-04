@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.pluginhost.service;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
@@ -23,6 +22,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -73,6 +73,7 @@ public final class PluginManagementService {
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
   private final PluginConfigurationService configurationService;
+  private final PluginFunctionNamesProjection functionNamesProjection;
   private final PluginAuthAttemptRepository authAttempts;
   private final Duration authAttemptTtl;
   private final Clock clock;
@@ -83,6 +84,7 @@ public final class PluginManagementService {
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
+      PluginFunctionNamesProjection functionNamesProjection,
       PluginAuthAttemptRepository authAttempts,
       Duration authAttemptTtl,
       Clock clock) {
@@ -92,6 +94,8 @@ public final class PluginManagementService {
     this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.configurationService =
         Objects.requireNonNull(configurationService, "configurationService");
+    this.functionNamesProjection =
+        Objects.requireNonNull(functionNamesProjection, "functionNamesProjection");
     this.authAttempts = Objects.requireNonNull(authAttempts, "authAttempts");
     if (authAttemptTtl.isZero() || authAttemptTtl.isNegative()) {
       throw new IllegalArgumentException("authAttemptTtl must be a positive duration");
@@ -292,7 +296,9 @@ public final class PluginManagementService {
         applied.flatMap(entry -> entry.instance().connectionCheck()).isPresent());
     dto.setHarnessToolNames(applied.map(entry -> toolNames(snapshot, entry)).orElse(List.of()));
     dto.setCanvasFunctionNames(
-        applied.map(entry -> functionNames(snapshot, entry)).orElse(List.of()));
+        applied
+            .map(entry -> functionNamesProjection.functionNames(snapshot, entry))
+            .orElse(List.of()));
     return dto;
   }
 
@@ -306,18 +312,6 @@ public final class PluginManagementService {
     for (ToolContribution tool : snapshot.harnessCatalog().tools()) {
       if (plugin.contributorIds().contains(tool.id().contributorId())) {
         names.add(tool.definition().descriptor().name());
-      }
-    }
-    return List.copyOf(names);
-  }
-
-  private static List<String> functionNames(
-      PluginCatalogSnapshot snapshot, PluginCatalogSnapshot.ConfiguredPlugin plugin) {
-    List<String> names = new ArrayList<>();
-    for (CanvasFunctionCatalog.RegisteredFunction function :
-        snapshot.canvasFunctionCatalog().list()) {
-      if (plugin.functionNames().contains(function.function().name())) {
-        names.add(function.function().name());
       }
     }
     return List.copyOf(names);

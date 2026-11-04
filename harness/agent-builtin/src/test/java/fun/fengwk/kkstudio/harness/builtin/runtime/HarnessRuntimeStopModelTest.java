@@ -21,6 +21,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
@@ -29,33 +51,17 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -269,6 +275,189 @@ class HarnessRuntimeStopModelTest {
             .transaction(
                 tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
             .isPresent());
+  }
+
+  @Test
+  void driverFailureRollsBackSettledToolChildren() {
+    // Driver 在工具收敛后失败时，不能留下部分历史或删除的子行。
+    var baseline = HarnessRuntimeTestSupport.seedToolBaseline(store, 1);
+    UUID tool = baseline.toolIds().getFirst();
+    HarnessRuntimeTestSupport.seedToolWork(store, tool);
+    AgentDriver delegate = new BuiltinAgentDriver(store, (threadId, path, preparation) -> null);
+    AgentDriver failing =
+        (AgentDriver)
+            Proxy.newProxyInstance(
+                AgentDriver.class.getClassLoader(),
+                new Class<?>[] {AgentDriver.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("stop")) {
+                    throw new IllegalStateException("driver failure");
+                  }
+                  try {
+                    return method.invoke(delegate, args);
+                  } catch (InvocationTargetException error) {
+                    throw error.getCause();
+                  }
+                });
+    HarnessRuntime failingRuntime =
+        new HarnessRuntime(
+            store, new DriverRegistry(List.of(failing)), () -> CompactionConfig.DEFAULT);
+    ThreadState before =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
+    List<Entry> beforeEntries =
+        store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId()));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            failingRuntime.stop(
+                new StopCommand(baseline.threadId(), TestIds.id(1), before.version())));
+    assertEquals(
+        before, store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()));
+    assertEquals(
+        beforeEntries, store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId())));
+    assertTrue(store.transaction(tx -> tx.tools().find(tool)).isPresent());
+    assertTrue(
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isPresent());
+    assertTrue(
+        store
+            .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, tool)))
+            .isPresent());
+  }
+
+  @Test
+  void stopSettlesActiveToolsBeforeDeletingTheirModel() {
+    // 真正附着 Model 的批次：在途副作用未知，而未执行的 sibling 被取消。
+    var baseline = HarnessRuntimeTestSupport.seedToolBaseline(store, 2);
+    UUID ready = baseline.toolIds().get(0);
+    UUID running = baseline.toolIds().get(1);
+    HarnessRuntimeTestSupport.approveTool(store, running);
+    HarnessRuntimeTestSupport.markRunningTool(store, running);
+    seedThreadWork(store, baseline.threadId());
+    seedModelWork(store, baseline.modelId());
+    HarnessRuntimeTestSupport.seedToolWork(store, ready);
+    HarnessRuntimeTestSupport.seedToolWork(store, running);
+
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
+    assertStopped(result);
+    assertEquals(0, targetReceipt(result).cancelledCommandCount());
+    List<ToolResultStatus> statuses =
+        pathOf(baseline.threadId()).entries().stream()
+            .filter(e -> e.payload() instanceof MessagePayload m && m.toolResultMetadata() != null)
+            .map(e -> ((MessagePayload) e.payload()).toolResultMetadata().status())
+            .toList();
+    assertEquals(List.of(ToolResultStatus.CANCELLED, ToolResultStatus.UNKNOWN), statuses);
+    assertTrue(store.transaction(tx -> tx.tools().find(ready)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(running)).isEmpty());
+    assertTrue(
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
+    for (WorkTarget target :
+        List.of(
+            new WorkTarget(WorkTargetType.THREAD, baseline.threadId()),
+            new WorkTarget(WorkTargetType.MODEL, baseline.modelId()),
+            new WorkTarget(WorkTargetType.TOOL, ready),
+            new WorkTarget(WorkTargetType.TOOL, running))) {
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
+    }
+  }
+
+  @Test
+  void stopMaterializesPendingToolCallWithoutDispatchingIt() {
+    // A committed response is not active work, but Stop must still settle its tool batch.
+    HarnessRuntimeTestSupport.ModelBaseline baseline =
+        store.transaction(
+            tx -> {
+              UUID sessionId = tx.nextId();
+              UUID rootId = tx.nextId();
+              UUID turnId = tx.nextId();
+              UUID threadId = tx.nextId();
+              UUID userId = tx.nextId();
+              UUID modelId = tx.nextId();
+              tx.sessions().insert(HarnessRuntimeTestSupport.session(sessionId));
+              tx.entries().insert(HarnessRuntimeTestSupport.rootEntry(rootId, sessionId));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          turnId, sessionId, rootId, T5, threadId));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.userMessageEntry(userId, sessionId, turnId, T5));
+              tx.threads().insert(HarnessRuntimeTestSupport.thread(threadId, sessionId, userId));
+              ModelInvocation model =
+                  HarnessRuntimeTestSupport.modelInvocationWithRequest(
+                      modelId,
+                      threadId,
+                      turnId,
+                      userId,
+                      HarnessRuntimeTestSupport.tooledModelRequest(List.of("bash")),
+                      T5);
+              builtin(store, tx).insertModelInvocation(model);
+              ModelInvocation running = model.markRunning(T5);
+              builtin(store, tx).updateModelInvocation(running);
+              builtin(store, tx)
+                  .updateModelInvocation(
+                      running.succeed(
+                          HarnessRuntimeTestSupport.responseWithToolCalls("call-1"), T5));
+              return new HarnessRuntimeTestSupport.ModelBaseline(
+                  sessionId, rootId, turnId, threadId, modelId);
+            });
+
+    assertEquals(
+        ThreadLiveState.DRIVER_RESPONSE_PENDING,
+        runtime.getThreadSnapshot(baseline.threadId()).liveState());
+    assertFalse(runtime.getThreadSnapshot(baseline.threadId()).executionFacts().hasWork());
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    assertStopped(result);
+    assertEquals(
+        ThreadExecutionControl.STOPPED,
+        store
+            .transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow())
+            .executionControl());
+    EntryPath path = pathOf(baseline.threadId());
+    Entry assistant =
+        path.entries().stream()
+            .filter(
+                e ->
+                    e.payload() instanceof MessagePayload message
+                        && message.message().contents().stream()
+                            .anyMatch(c -> c instanceof ToolCallMessageContent))
+            .findFirst()
+            .orElseThrow();
+    ToolCallMessageContent call =
+        (ToolCallMessageContent)
+            ((MessagePayload) assistant.payload())
+                .message().contents().stream()
+                    .filter(c -> c instanceof ToolCallMessageContent)
+                    .findFirst()
+                    .orElseThrow();
+    assertEquals("call-1", call.toolCallId());
+    assertTrue(store.transaction(tx -> tx.tools().loadByAssistantEntry(assistant.id())).isEmpty());
+    assertTrue(
+        store
+            .transaction(tx -> builtin(store, tx).findModelInvocation(baseline.modelId()))
+            .isEmpty());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+            .isEmpty());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+            .isEmpty());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.work().claimNext(WorkTargetType.TOOL, "test", Duration.ofMinutes(1)))
+            .isEmpty());
+    TurnEndPayload end = (TurnEndPayload) path.head().payload();
+    assertEquals(TurnEndOutcome.STOPPED, end.outcome());
+    assertEquals(TurnEndReason.USER_STOP, end.reason());
+    assertEquals(TestIds.id(1), end.closeRequestId());
   }
 
   @Test

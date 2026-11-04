@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshService;
@@ -88,6 +89,7 @@ public class PluginConfiguration {
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
+      ObjectProvider<PluginFunctionNamesProjection> functionNamesProjections,
       PluginAuthAttemptRepository authAttempts,
       PluginProperties properties) {
     return new PluginManagementService(
@@ -96,6 +98,7 @@ public class PluginConfiguration {
         configurations,
         credentials,
         configurationService,
+        functionNamesProjections.getIfAvailable(() -> PluginFunctionNamesProjection.NONE),
         authAttempts,
         properties.getAuthAttemptTtl(),
         Clock.systemUTC());

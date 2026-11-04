@@ -70,7 +70,7 @@ describe('useAiConsoleResourceController', () => {
         modelHttpRetryStatusCodes: data.modelHttpRetryStatusCodes !== undefined ? data.modelHttpRetryStatusCodes : currentProvider.modelHttpRetryStatusCodes,
       }
       currentModel = { ...currentModel, providerName: currentProvider.name }
-      currentAgent = { ...currentAgent, model: currentModel.name }
+      currentAgent = { ...currentAgent, execution: { driver: 'builtin', settings: { modelName: currentModel.name, variant: 'default' } } }
       return currentProvider
     })
     vi.mocked(agentService.updateModel).mockImplementation(async (_modelName, data) => {
@@ -79,7 +79,7 @@ describe('useAiConsoleResourceController', () => {
         ...data,
         description: data.description !== undefined ? data.description : currentModel.description,
       }
-      currentAgent = { ...currentAgent, model: currentModel.name }
+      currentAgent = { ...currentAgent, execution: { driver: 'builtin', settings: { modelName: currentModel.name, variant: 'default' } } }
       return currentModel
     })
     vi.mocked(agentService.updateAgent).mockImplementation(async (_name, data) => {
@@ -88,8 +88,7 @@ describe('useAiConsoleResourceController', () => {
         ...data,
         description: data.description !== undefined ? data.description : currentAgent.description,
         systemPrompt: data.systemPrompt !== undefined ? data.systemPrompt : currentAgent.systemPrompt,
-        model: data.model !== undefined ? data.model : currentAgent.model,
-        variant: data.variant !== undefined ? data.variant : currentAgent.variant,
+        execution: data.execution !== undefined ? data.execution : currentAgent.execution,
       }
       return currentAgent
     })
@@ -144,7 +143,7 @@ describe('useAiConsoleResourceController', () => {
       queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
       queryClient.setQueryData(
         queryKeys.agents.list,
-        page([{ ...currentAgent, model: 'acceptance-stub-v2' }]),
+        page([{ ...currentAgent, execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub-v2', variant: 'default' } } }]),
       )
     })
 
@@ -193,7 +192,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
       expect(agentService.createAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'new-agent', model: 'acceptance-stub' }),
+        expect.objectContaining({ name: 'new-agent', execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: null } } }),
       )
       expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
     })
@@ -582,8 +581,7 @@ function agent(): AgentDefinitionDTO {
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
     type: 'USER' as const,
-    model: 'acceptance-stub',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
     config: {
       inheritParentEnvironment: true,
       tools: [],

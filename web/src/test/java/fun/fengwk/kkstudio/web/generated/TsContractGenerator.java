@@ -53,8 +53,8 @@ import java.util.regex.Pattern;
  * 从 Web 控制器签名与生产 HTTP Jackson 3 mapper 生成全部传输契约的 TypeScript 类型。
  *
  * <p>根类型取自控制器处理方法的 {@code @RequestBody} 参数（请求方向）与返回值（响应方向），再加上嵌在错误响应上下文里的结构化载荷； 从根出发沿属性闭包收集契约包（生产为
- * {@code fun.fengwk.kkstudio.share}）下的 DTO 与枚举。属性名与顺序来自真实 mapper 的 introspection，枚举 wire 值由 mapper
- * 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
+ * {@code fun.fengwk.kkstudio.share} 与 {@code fun.fengwk.kkstudio.canvas.dto}）下的 DTO 与枚举。属性名与顺序来自真实
+ * mapper 的 introspection，枚举 wire 值由 mapper 序列化每个常量得到，标量映射在构造时用探针核验。presence 规则：
  *
  * <ul>
  *   <li>未标 {@link Nullable} 的属性必填且非空；原始类型同理。
@@ -137,7 +137,7 @@ final class TsContractGenerator {
   private static final Pattern TYPESCRIPT_IDENTIFIER = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$]*");
 
   private final JsonMapper mapper;
-  private final String contractPackage;
+  private final List<String> contractPackages;
   private final List<Class<?>> controllers;
   private final List<Class<?>> errorPayloadTypes;
   private final Map<Class<?>, Direction> directions = new HashMap<>();
@@ -145,11 +145,11 @@ final class TsContractGenerator {
 
   TsContractGenerator(
       JsonMapper mapper,
-      String contractPackage,
+      List<String> contractPackages,
       List<Class<?>> controllers,
       List<Class<?>> errorPayloadTypes) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
-    this.contractPackage = Objects.requireNonNull(contractPackage, "contractPackage") + ".";
+    this.contractPackages = contractPackages.stream().map(name -> name + ".").toList();
     this.controllers = List.copyOf(controllers);
     this.errorPayloadTypes = List.copyOf(errorPayloadTypes);
     validateWireProfile(mapper);
@@ -206,7 +206,7 @@ final class TsContractGenerator {
         visit(raw.getComponentType(), direction);
         return;
       }
-      if (raw.getName().startsWith(contractPackage)) {
+      if (isContractType(raw)) {
         register(raw, direction);
       }
       return;
@@ -220,6 +220,10 @@ final class TsContractGenerator {
     if (type instanceof GenericArrayType array) {
       visit(array.getGenericComponentType(), direction);
     }
+  }
+
+  private boolean isContractType(Class<?> type) {
+    return contractPackages.stream().anyMatch(prefix -> type.getName().startsWith(prefix));
   }
 
   private void register(Class<?> type, Direction direction) {
@@ -252,7 +256,7 @@ final class TsContractGenerator {
 
   private void visitJavaType(JavaType type, Direction direction) {
     Class<?> raw = type.getRawClass();
-    if (raw.getName().startsWith(contractPackage)) {
+    if (isContractType(raw)) {
       register(raw, direction);
     }
     for (int i = 0; i < type.containedTypeCount(); i++) {
@@ -661,7 +665,7 @@ final class TsContractGenerator {
    */
   private String tsType(JavaType type, Direction direction) {
     Class<?> raw = type.getRawClass();
-    if (raw.getName().startsWith(contractPackage)) {
+    if (isContractType(raw)) {
       return tsName(raw);
     }
     if (direction == Direction.REQUEST && (raw == Long.class || raw == long.class)) {

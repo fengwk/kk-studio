@@ -11,7 +11,7 @@ const css = readFileSync(
     process.cwd(),
     'src',
     'features',
-    'chat',
+    'thread',
     'runtime',
     'thread-panel',
     'messages',

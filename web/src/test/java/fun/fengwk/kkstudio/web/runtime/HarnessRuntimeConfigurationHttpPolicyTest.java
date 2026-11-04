@@ -10,8 +10,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;

@@ -2,8 +2,14 @@ package fun.fengwk.kkstudio.web.events;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
+import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
+import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
+import fun.fengwk.kkstudio.harness.api.HarnessInvalidationChanges;
+import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
+import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
@@ -20,8 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游：Thread 使用 version + realtime source，Canvas 使用 version
- * source，Projects、Interactions、 Environments 使用全局失效 source，Tree 使用按执行根的失效
+ * <p>每个资源只有一组共享上游：Thread 使用公开的 harness version 订阅 + realtime source，Canvas 使用 version
+ * source，Projects、Interactions、Environments 使用全局失效 source，Tree 使用按执行根的失效
  * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
  * 游标（全局提示型资源固定为 0，无持久游标的 Tree 资源同样为 0）。
  *
@@ -117,13 +123,11 @@ final class ApplicationEventHub implements AutoCloseable {
     void close();
   }
 
-  private final ThreadVersionEventSource threadVersionSource;
+  private final HarnessChangeSubscriptions harnessChanges;
   private final RealtimeEventSource realtimeSource;
   private final RealtimeSubscriptionService realtimeSubscriptions;
   private final CanvasVersionEventSource canvasVersionSource;
   private final ProjectInvalidationHub projectInvalidationHub;
-  private final InvalidationEventSource executionTreeChangeSource;
-  private final InvalidationEventSource interactionChangeSource;
   private final InvalidationEventSource environmentChangeSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
@@ -142,26 +146,20 @@ final class ApplicationEventHub implements AutoCloseable {
    * 在装配时传入）；溢出折叠为单个 {@link Signal.Resync}，保证可恢复且内存有界。
    */
   ApplicationEventHub(
-      ThreadVersionEventSource threadVersionSource,
+      HarnessChangeSubscriptions harnessChanges,
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
-      InvalidationEventSource executionTreeChangeSource,
-      InvalidationEventSource interactionChangeSource,
       InvalidationEventSource environmentChangeSource,
       int maxBufferedSignals) {
-    this.threadVersionSource = Objects.requireNonNull(threadVersionSource, "threadVersionSource");
+    this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
         Objects.requireNonNull(realtimeSubscriptions, "realtimeSubscriptions");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
     this.projectInvalidationHub =
         Objects.requireNonNull(projectInvalidationHub, "projectInvalidationHub");
-    this.executionTreeChangeSource =
-        Objects.requireNonNull(executionTreeChangeSource, "executionTreeChangeSource");
-    this.interactionChangeSource =
-        Objects.requireNonNull(interactionChangeSource, "interactionChangeSource");
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     if (maxBufferedSignals <= 0) {
@@ -256,9 +254,11 @@ final class ApplicationEventHub implements AutoCloseable {
   private void establishUpstream(ResourceState state) {
     switch (state.key.kind()) {
       case THREAD -> {
-        SourceSubscribed version =
-            threadVersionSource.subscribe(state.key.id(), event -> fanoutVersion(state, event));
-        state.threadVersionHandle = version.handle();
+        HarnessChangeSubscription version =
+            harnessChanges
+                .threadVersions()
+                .subscribe(state.key.id(), event -> fanout(state, threadVersionSignal(event)));
+        state.threadVersionHandle = version;
         state.realtimeHandle =
             realtimeSource.subscribe(
                 state.key.id(),
@@ -277,48 +277,53 @@ final class ApplicationEventHub implements AutoCloseable {
           projectInvalidationHub.subscribe(
               projectId -> fanout(state, new Signal.ProjectChanged(projectId)),
               () -> fanout(state, new Signal.Resync()));
-      case TREE -> {
-        SourceSubscribed subscribed =
-            executionTreeChangeSource.subscribe(
-                state.key.id(), event -> fanoutInvalidation(state, event));
-        state.invalidationHandle = subscribed.handle();
-        state.cursor = subscribed.cursor();
-      }
-      case INTERACTIONS -> {
-        SourceSubscribed subscribed =
-            interactionChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
-        state.invalidationHandle = subscribed.handle();
-        state.cursor = subscribed.cursor();
-      }
-      case ENVIRONMENTS -> {
-        SourceSubscribed subscribed =
-            environmentChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
-        state.invalidationHandle = subscribed.handle();
-        state.cursor = subscribed.cursor();
-      }
+      case TREE -> state.invalidationHandle =
+          harnessChanges
+              .executionTree()
+              .subscribe(state.key.id(), event -> fanout(state, executionTreeSignal(event)));
+      case INTERACTIONS -> state.invalidationHandle =
+          harnessChanges
+              .interactions()
+              .subscribe(null, event -> fanout(state, interactionSignal(event)));
+      case ENVIRONMENTS -> state.invalidationHandle =
+          environmentChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
     }
   }
 
-  /** 提示型资源的信号只做「按资源种类回读」：resync 一律整体替换，其余按资源坐标系落成最小失效信号。 */
+  /** Thread version 信号只做「前进到该 version」；resync 一律整体回读。 */
+  private static Signal threadVersionSignal(HarnessThreadVersionChanges.Event event) {
+    if (event instanceof HarnessThreadVersionChanges.Event.Version version) {
+      return new Signal.Version(Long.toString(version.version()));
+    }
+    return new Signal.Resync();
+  }
+
+  /** 执行树按资源自带根 id 定点失效，事件本身不携带额外坐标。 */
+  private static Signal executionTreeSignal(HarnessInvalidationChanges.Event event) {
+    if (event instanceof HarnessInvalidationChanges.Event.Changed) {
+      return new Signal.TreeChanged();
+    }
+    return new Signal.Resync();
+  }
+
+  /** 待处理交互是全局资源：changed 携带真实执行根，resync 要求整体回读。 */
+  private static Signal interactionSignal(HarnessInvalidationChanges.Event event) {
+    if (event instanceof HarnessInvalidationChanges.Event.Changed changed) {
+      return new Signal.InteractionsChanged(changed.key());
+    }
+    return new Signal.Resync();
+  }
+
+  /** web 自有提示型资源的信号只做「按资源种类回读」。 */
   private void fanoutInvalidation(ResourceState state, InvalidationEventSource.Event event) {
     if (event.resync()) {
       fanout(state, new Signal.Resync());
       return;
     }
-    switch (state.key.kind()) {
-      case TREE -> fanout(state, new Signal.TreeChanged());
-      case INTERACTIONS -> fanout(state, new Signal.InteractionsChanged(event.key()));
-      case ENVIRONMENTS -> fanout(state, new Signal.EnvironmentChanged());
-      default -> throw new IllegalStateException("unexpected invalidation resource: " + state.key);
+    if (state.key.kind() != ResourceKind.ENVIRONMENTS) {
+      throw new IllegalStateException("unexpected invalidation resource: " + state.key);
     }
-  }
-
-  private void fanoutVersion(ResourceState state, ThreadVersionEventSource.Event event) {
-    if (event.resync()) {
-      fanout(state, new Signal.Resync());
-    } else {
-      fanout(state, new Signal.Version(event.version()));
-    }
+    fanout(state, new Signal.EnvironmentChanged());
   }
 
   private void fanoutVersion(ResourceState state, CanvasVersionEventSource.Event event) {

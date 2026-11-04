@@ -31,8 +31,7 @@ const agent: AgentDefinitionDTO = {
   description: null,
   systemPrompt: null,
   type: 'USER',
-  model: 'm1',
-  variant: 'default',
+  execution: { driver: 'builtin', settings: { modelName: 'm1', variant: 'default' } },
   config: {
     inheritParentEnvironment: true,
     tools: [],

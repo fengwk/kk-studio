@@ -20,39 +20,39 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -151,7 +151,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 runtime,
                 command,
                 join,
-                (tx, current, commands) -> {
+                (current, commands, copiedEntries) -> {
                   throw new IllegalStateException(
                       "preflight rejected: insufficient balance or policy denial");
                 }));
@@ -340,7 +340,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       newSessionChild(
                           child1SessionId, child1ThreadId, baseline.threadId(), "task 1"),
                       joinRequest(join1Id, baseline.threadId(), baseline.rootEntryId(), 5, 5),
-                      (tx, current, commands) -> {
+                      (current, commands, copiedEntries) -> {
                         tx1HoldingLock.countDown();
                         try {
                           if (!tx1CanCommit.await(10, TimeUnit.SECONDS)) {
@@ -461,7 +461,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       request,
                       join,
-                      (tx, current, commands) -> {
+                      (current, commands, copiedEntries) -> {
                         tx1HoldingTreeLock.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;
@@ -526,7 +526,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       request,
                       ticket,
-                      (tx, current, commands) -> {
+                      (current, commands, copiedEntries) -> {
                         tx1HoldingTreeLock.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;
@@ -635,7 +635,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 runtime,
                 newSessionChild(abortedSessionId, abortedThreadId, baseline.threadId(), "garbage"),
                 joinRequest(abortedJoinId, baseline.threadId(), baseline.rootEntryId(), 5, 3),
-                (tx, current, commands) -> {
+                (current, commands, copiedEntries) -> {
                   throw new RuntimeException("abort");
                 }));
     assertEquals(
@@ -795,7 +795,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       requestA,
                       joinA,
-                      (tx, current, commands) -> {
+                      (current, commands, copiedEntries) -> {
                         tx1HoldingAdmission.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;

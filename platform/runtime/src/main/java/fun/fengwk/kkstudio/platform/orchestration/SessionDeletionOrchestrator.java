@@ -4,20 +4,13 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -35,20 +28,20 @@ public class SessionDeletionOrchestrator {
   private final ChatSessionRepository chatSessionRepository;
   private final ChatRepository chatRepository;
   private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
-  private final ObjectProvider<HarnessStore> stores;
+  private final ObjectProvider<HarnessRuntime> runtimes;
   private final SessionBlobRefManager refManager;
 
   public SessionDeletionOrchestrator(
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
       ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
-      ObjectProvider<HarnessStore> stores,
+      ObjectProvider<HarnessRuntime> runtimes,
       SessionBlobRefManager refManager) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
-    this.stores = Objects.requireNonNull(stores, "stores");
+    this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
 
@@ -59,49 +52,16 @@ public class SessionDeletionOrchestrator {
   @Transactional
   public void deleteSessionsByOwner(OwnerRef owner) {
     Objects.requireNonNull(owner, "owner");
-    List<UUID> sessionIds = new ArrayList<>(lockOwnerAndListSessionIds(owner));
-    sessionIds.sort(UuidOrder.COMPARATOR);
+    List<UUID> sessionIds = lockOwnerAndListSessionIds(owner);
     if (sessionIds.isEmpty()) {
       return;
     }
-    HarnessStore store = requireStore();
-    // store 事务（PROPAGATION_REQUIRED）加入本应用事务；blob release 经 SessionBlobRefManager（MANDATORY）。
-    store.transaction(
-        tx -> {
-          // 先算闭包后取锁：闭包以「Session 的全部 Thread」为单位向下推进，共享 Session 内别的入口建立的 root fork 同样在删除集合内。
-          DeletionScope scope = discoverScope(tx, sessionIds);
-          // 锁序与 accept 路径一致（执行树 root -> Session -> Thread）；并发加入子树由树锁排除，加锁后复核闭包只增不减。
-          for (UUID root : scope.roots()) {
-            tx.threads().lockTree(root);
-          }
-          // 多 Session 深删若逐个取 SESSION 锁，第二个 Session 开始会因曾取过 THREAD 锁而违反 SESSION -> THREAD 单调锁序。
-          List<UUID> presentSessions = new ArrayList<>(scope.sessions().size());
-          for (UUID sessionId : scope.sessions()) {
-            if (tx.sessions().lockForUpdate(sessionId).isPresent()) {
-              presentSessions.add(sessionId);
-            }
-          }
-          DeletionScope confirmed = discoverScope(tx, presentSessions);
-          if (!scope.sessions().containsAll(confirmed.sessions())
-              || !scope.roots().containsAll(confirmed.roots())) {
-            throw new IllegalStateException(
-                "harness execution tree changed while acquiring its deletion locks");
-          }
-          scope = confirmed;
-          // 产品归属行（FK RESTRICT）必须先于 harness Thread/Session 行删除：chat_session 行与
-          // project_issue_agent_thread 行分别持有指向 Session / Thread 的外键。
-          for (UUID sessionId : presentSessions) {
-            deleteRelation(owner, sessionId);
-          }
-          deleteThreadsDeep(tx, scope.threads());
-          // blob ref 释放与 Entry/Session 清理（均不取 harness 锁）。
-          for (UUID sessionId : scope.sessions()) {
-            releaseSessionBlobRefs(sessionId);
-            tx.entries().delete(sessionId);
-            tx.sessions().delete(sessionId);
-          }
-          return null;
-        });
+    // Runtime 的 store 事务加入本应用事务，blob release 要求已有事务。
+    requireRuntime()
+        .deleteSessions(
+            sessionIds,
+            ids -> ids.forEach(id -> deleteRelation(owner, id)),
+            ids -> ids.forEach(this::releaseSessionBlobRefs));
   }
 
   /** 排他锁定 owner 行并枚举其 Session；owner 不存在（或 Issue+Agent 尚未绑定）返回空列表表示删除目标不存在。 */
@@ -123,76 +83,7 @@ public class SessionDeletionOrchestrator {
 
   /** 由稳定绑定解析其 Thread 的 Session：绑定行持有指向 Thread 的外键且归属已被排他锁定，Thread 必然存在。 */
   private UUID boundThreadSessionId(UUID threadId) {
-    return requireStore()
-        .transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId))
-        .orElseThrow();
-  }
-
-  /** 删除闭包内全部 Thread：按 UUID 升序锁定，拒绝单边删除（父或子存活即闭包被截断），再批量删 join 与执行事实。 */
-  private void deleteThreadsDeep(HarnessStore.Transaction tx, Set<UUID> threadIds) {
-    List<UUID> ordered = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
-    for (UUID threadId : ordered) {
-      tx.threads().lock(threadId).orElseThrow();
-    }
-    for (UUID threadId : ordered) {
-      ThreadState thread = tx.threads().find(threadId).orElseThrow();
-      if (thread.parentThreadId() != null && !threadIds.contains(thread.parentThreadId())) {
-        throw new IllegalStateException(
-            "cannot delete a child thread while its execution parent survives");
-      }
-      if (tx.threads().listChildren(threadId).stream()
-          .anyMatch(child -> !threadIds.contains(child.id()))) {
-        throw new IllegalStateException(
-            "cannot delete a parent thread while its execution children survive");
-      }
-    }
-    if (ordered.isEmpty()) {
-      return;
-    }
-    // 两端都在删除集合内，因此未匹配/未交付的 pending join 也一并删除；join 引用源 Command 与结果 Entry，必须先于二者删除。
-    tx.joins().deleteForThreads(ordered);
-    if (tx.threads().delete(ordered) != ordered.size()) {
-      throw new IllegalStateException("not all locked threads were deleted");
-    }
-  }
-
-  /** 一次 owner 深删的闭包：目标 Session（升序）、全部待删 Thread（含无父 root fork）与其执行树 root（升序）。 */
-  private record DeletionScope(List<UUID> sessions, Set<UUID> threads, List<UUID> roots) {}
-
-  /**
-   * 计算 Session/Thread 删除闭包：从 owner 归属的 Session 出发，逐 Session 取其全部 Thread，再沿永久孩子关系把后代 Session 并入。
-   *
-   * <p>以 Session 为单位而不是以 Thread 为单位推进，是为了覆盖「task 子 Session 中另建的无父 root fork」这类没有父边可循的线程；整个闭包在
-   * 取锁前后各算一次，用于 fail-safe 复核。
-   */
-  private static DeletionScope discoverScope(
-      HarnessStore.Transaction tx, List<UUID> initialSessions) {
-    Set<UUID> sessions = new TreeSet<>(UuidOrder.COMPARATOR);
-    Set<UUID> threads = new HashSet<>();
-    List<UUID> pending = new ArrayList<>(initialSessions);
-    for (int index = 0; index < pending.size(); index++) {
-      UUID sessionId = pending.get(index);
-      if (!sessions.add(sessionId)) {
-        continue;
-      }
-      for (ThreadState thread : tx.threads().listBySession(sessionId)) {
-        threads.add(thread.id());
-        for (ThreadState child : tx.threads().listChildren(thread.id())) {
-          if (!sessions.contains(child.sessionId())) {
-            pending.add(child.sessionId());
-          }
-        }
-      }
-    }
-    List<UUID> roots =
-        threads.stream()
-            .map(id -> tx.threads().find(id))
-            .flatMap(Optional::stream)
-            .map(ThreadState::rootThreadId)
-            .distinct()
-            .sorted(UuidOrder.COMPARATOR)
-            .toList();
-    return new DeletionScope(List.copyOf(sessions), Set.copyOf(threads), roots);
+    return requireRuntime().findThreadSessionId(threadId).orElseThrow();
   }
 
   /** release Session 级 blob 引用（ref_count 对账 + 删除 session_blob_ref 行），先于 Session 删除。 */
@@ -213,13 +104,13 @@ public class SessionDeletionOrchestrator {
     }
   }
 
-  private HarnessStore requireStore() {
-    HarnessStore store = stores.getIfAvailable();
-    if (store == null) {
+  private HarnessRuntime requireRuntime() {
+    HarnessRuntime runtime = runtimes.getIfAvailable();
+    if (runtime == null) {
       throw new IllegalStateException(
-          "harness store is not available; cannot deep delete owner sessions");
+          "harness runtime is not available; cannot deep delete owner sessions");
     }
-    return store;
+    return runtime;
   }
 
   private IssueAgentOwnership requireIssueAgentOwnership() {

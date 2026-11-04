@@ -330,10 +330,6 @@ export function ProjectDetailPage({
     )
   }
 
-  const handleResolveUnknownIssue = async (issueId: string, _expectedVersion: string) => {
-    handleSelectIssue(issueId)
-  }
-
   // 项目归档 / 取消归档
   const handleProjectArchiveToggle = async () => {
     if (!snapshot) {
@@ -463,7 +459,6 @@ export function ProjectDetailPage({
           onBlockIssue={handleBlockIssue}
           onRecoverIssue={handleRecoverIssue}
           onReopenIssue={handleReopenIssue}
-          onResolveUnknownIssue={handleResolveUnknownIssue}
         />
 
         {queryThreadId && (

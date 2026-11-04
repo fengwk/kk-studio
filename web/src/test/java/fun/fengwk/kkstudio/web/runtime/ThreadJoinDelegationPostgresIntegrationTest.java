@@ -26,50 +26,50 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
@@ -356,7 +356,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
           () -> {
             start.await();
             try {
-              return runtime.spawn(request);
+              return runtime.spawn(request, AcceptancePreflight.IDENTITY);
             } catch (IllegalArgumentException rejected) {
               // 并发败者整体回滚：不允许留下半套事实。
               return null;
@@ -384,7 +384,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(1, commandsOf(parentThreadId).size());
 
     // 已提交后的顺序重放：同一请求（同一 target/命令/幂等键 + 同一 join 身份）必须精确重放，不再创建任何事实。
-    AcceptedCommands replay = runtime.spawn(request);
+    AcceptedCommands replay = runtime.spawn(request, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed(), "a committed duplicate acceptance must replay");
     assertEquals(childThreadId, replay.thread().id());
     assertEquals(1, count("harness_session", "id", childSessionId));
@@ -406,7 +406,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                         invocationId,
                         expectedParentHead,
                         "child work",
-                        MAX_DEPTH)));
+                        MAX_DEPTH),
+                    AcceptancePreflight.IDENTITY));
     assertEquals("join invocation identity reused", reused.getMessage());
   }
 
@@ -450,7 +451,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                                 invocations.get(attempt),
                                 headEntryId(parentThreadId),
                                 "child work",
-                                MAX_DEPTH));
+                                MAX_DEPTH),
+                            AcceptancePreflight.IDENTITY);
                         return true;
                       } catch (IllegalArgumentException rejected) {
                         return false;
@@ -527,7 +529,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                         grandChildInvocationId,
                         headEntryId(childThreadId),
                         "grandchild work",
-                        2)));
+                        2),
+                    AcceptancePreflight.IDENTITY));
     assertEquals("join depth quota exceeded", rejected.getMessage());
 
     // 越限者整体回滚：孙 Session/Thread/命令/join 都不存在，既有的父子事实完整保留。
@@ -679,7 +682,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                 resumeSource,
                 resumeInvocationId,
                 parentHead,
-                "more child work"));
+                "more child work"),
+            AcceptancePreflight.IDENTITY);
     assertFalse(resumed.replayed());
     assertTrue(resumed.joinReplaced(), "busy resume supersedes the previous unfinished join");
     assertEquals(2, commandsOf(childThreadId).size());
@@ -1083,7 +1087,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                 invocationId,
                 expectedParentHeadEntryId,
                 prompt,
-                maxDepth));
+                maxDepth),
+            AcceptancePreflight.IDENTITY);
     assertEquals(childThreadId, accepted.thread().id());
     assertFalse(accepted.replayed());
     return accepted;
@@ -1111,7 +1116,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         sessionId,
         SETTINGS,
         List.of(source),
-        AcceptancePreflight.IDENTITY,
         parentThreadId,
         expectedParentHeadEntryId,
         null,
@@ -1139,7 +1143,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         null,
         SETTINGS,
         List.of(source),
-        AcceptancePreflight.IDENTITY,
         parentThreadId,
         expectedParentHeadEntryId,
         continuation,

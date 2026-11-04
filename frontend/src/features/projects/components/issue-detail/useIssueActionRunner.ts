@@ -197,13 +197,6 @@ export function useIssueActionRunner({
             reason: (payload as { reason: string }).reason,
           })
           break
-        case 'RESOLVE_UNKNOWN':
-          await api.resolveUnknown(issue.id, {
-            expectedVersion,
-            requestKey,
-            verification: (payload as { verification: string }).verification,
-          })
-          break
         case 'STOP':
           await api.stopIssue(issue.id, {
             expectedVersion,

@@ -50,7 +50,7 @@
 | 文档 | 回答的问题 |
 | --- | --- |
 | [Platform](modules/platform.md) | Catalog、Plugin、Chat、Storage、Environment、MCP 与外部系统如何编排？ |
-| [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、Canvas Function SPI、凭据与资源端口契约？ |
+| [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、实例如何按类型交出产品域贡献、凭据与资源端口契约是什么？ |
 | [Plugins](modules/plugins.md) | 内置的 ComfyUI、Media、MiniMax Mavis 和 OpenCLI 插件如何配置、认证与提供能力？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
 | [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |

@@ -2,11 +2,12 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolEditReviewJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.history.JsonObjects;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
+import fun.fengwk.kkstudio.harness.codec.ToolEditReviewJsonCodec;
 
 import java.util.ArrayList;
 import java.util.List;

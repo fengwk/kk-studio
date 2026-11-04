@@ -24,7 +24,6 @@ import {
   runPhase,
   summarizeSamples,
   validateCanvasCreateResponse,
-  validateCanvasDeleteResponse,
   validateCatalogResponse,
   validateHealthResponse,
   validateReportRoot,
@@ -204,7 +203,6 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
       /revision/,
     )
   }
-  assert.doesNotThrow(() => validateCanvasDeleteResponse({ status: 204 }))
 })
 
 test('CLI rejects illegal duration, threshold overrides, unsafe roots, and symlink paths', () => {
@@ -299,7 +297,6 @@ test('report writer creates timestamped and latest summary/report files', () => 
       gate: { passed: true, failures: [] },
       status: 'pass',
     })),
-    cleanup: { attempted: 0, errors: [], remaining: [] },
     interrupted: null,
     runError: null,
   }
@@ -313,17 +310,21 @@ test('report writer creates timestamped and latest summary/report files', () => 
       readFileSync(path.join(report.runDir, 'report.md'), 'utf8'),
       /Configured \(s\).*Actual measurement \(s\)/,
     )
+    const reportText = readFileSync(path.join(report.runDir, 'report.md'), 'utf8')
+    assert.match(reportText, /persist until isolated test database\/volume cleanup/)
+    assert.match(reportText, /not comparable to the former create\+delete workload/)
   } finally {
     rmSync(reportRoot, { recursive: true, force: true })
   }
 })
 
 test(
-  'one-second local fake integration runs all fixed scenarios without Docker and cleans canvases',
+  'one-second local fake integration runs all fixed scenarios and retains created canvases',
   { timeout: 30_000 },
   async () => {
     const reportRoot = mkdtempSync(path.join(tmpdir(), 'performance-fake-report-'))
     const canvases = new Map()
+    const unexpectedRequests = []
     const server = createServer(async (request, response) => {
       const requestUrl = new URL(request.url, 'http://127.0.0.1')
       if (request.method === 'GET' && requestUrl.pathname === '/actuator/health') {
@@ -354,10 +355,6 @@ test(
         })
         return
       }
-      if (request.method === 'GET' && requestUrl.pathname === '/api/canvases') {
-        sendJson(response, 200, { code: 'success', data: [...canvases.values()] })
-        return
-      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/canvases') {
         const body = JSON.parse(await readRequestBody(request))
         const id = randomUUID()
@@ -366,12 +363,7 @@ test(
         sendJson(response, 201, { code: 'success', data: canvas })
         return
       }
-      if (request.method === 'DELETE' && requestUrl.pathname.startsWith('/api/canvases/')) {
-        canvases.delete(requestUrl.pathname.split('/').at(-1))
-        response.writeHead(204)
-        response.end()
-        return
-      }
+      unexpectedRequests.push(`${request.method} ${requestUrl.pathname}`)
       sendJson(response, 404, { code: 'not_found' })
     })
 
@@ -398,7 +390,15 @@ test(
         },
       })
       assert.equal(result.summary.status, 'pass')
-      assert.deepEqual([...canvases.values()], [])
+      // Both warmup and measurement create rows; no list or delete request is needed.
+      const canvasScenario = result.summary.scenarios.find((scenario) => scenario.id === 'canvas')
+      assert.equal(canvasScenario.name, 'Canvas create transaction')
+      assert.equal(canvasScenario.path, '/api/canvases')
+      assert.equal(canvases.size, canvasScenario.warmup.success + canvasScenario.metrics.success)
+      assert.ok(canvases.size > 0)
+      assert.ok([...canvases.values()].every((canvas) => canvas.title.startsWith('performance-')))
+      assert.deepEqual(unexpectedRequests, [])
+      assert.equal('cleanup' in result.summary, false)
       assert.equal(result.summary.scenarios.length, 3)
       for (const scenario of result.summary.scenarios) {
         assert.ok(scenario.metrics.requests >= MIN_SAMPLES, scenario.id)

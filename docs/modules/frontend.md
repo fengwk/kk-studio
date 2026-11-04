@@ -57,8 +57,9 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 （Harness 命令、上传与技能等），不再为 Interaction、Plugin 或 Project 手写运行时 decoder；
 这些 HTTP 响应直接消费生成契约，在真正使用点做 `type` / `status` 分支。
 service 按职责归属：Chat、Environment、Extensions、Catalog、Settings 的接口客户端位于各自 feature；
-`shared/api` 只保留 HTTP client、生成契约、Harness/Agent/Storage/Interaction/Studio 平台客户端。
-[Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约。
+`shared/api` 只保留 HTTP client、生成契约和 Harness/Agent/Storage/Interaction 平台客户端。
+[Projects feature](../../frontend/src/features/projects) 使用生成的 HTTP 契约；
+[Canvas 接口客户端](../../frontend/src/features/canvas/canvas-api.ts) 与 wire codec 由 Canvas feature 持有。
 HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
@@ -190,7 +191,8 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 `NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、
 `FORK_SESSION_DRAFT`（携带 `sourceThreadId`、`startEntryId`，会话 fork 为新建的 `sessionId`/`threadId`）、
 `BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
-显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
+显式选 Agent 同步其 execution 并保留环境、YOLO、输入与附件；Builtin 的模型和默认变体由目录解析，
+其他 Driver 的 settings 原样保留；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_EXECUTION → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
@@ -345,7 +347,9 @@ AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作�
 Provider → Model → Agent → Chat 的首次使用引导并链接到对应页面，已有可用 Agent 时不再查询。
 新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
 上游失败时就地展示状态与原因。
-Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护，编辑表单允许其模型留空（未配置），用户创建的 Agent 仍要求模型。
+Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护。
+表单选择 execution Driver，当前提供 Builtin 的模型与 Variant 配置；内置定义允许未配置
+execution，用户创建的 Agent 必须配置。无法编辑的其他 Driver 保留原始 settings，不静默改写。
 Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
@@ -389,7 +393,7 @@ epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
-Issue Agent Pane 复用 Harness 时间线；UNKNOWN 核查与阶段状态分别展示。
+Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
 ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
 Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload

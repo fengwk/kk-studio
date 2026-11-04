@@ -81,7 +81,6 @@ describe('ProjectsPage', () => {
     blockIssue: vi.fn(),
     recoverIssue: vi.fn(),
     reopenIssue: vi.fn(),
-    resolveUnknown: vi.fn(),
     stopIssue: vi.fn(),
     resetStageBudget: vi.fn(),
     appendIssueActivity: vi.fn(),

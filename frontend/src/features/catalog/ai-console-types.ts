@@ -5,6 +5,7 @@ import type {
   AgentModelInputModality,
   AgentModelKind,
   AgentModelPricingDTO,
+  HarnessExecutionSelectionDTO,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -80,6 +81,7 @@ export interface AgentDraft {
   name: string
   description: string
   systemPrompt: string
+  execution?: HarnessExecutionSelectionDTO | null
   /** 全局唯一逻辑模型名（单 Model 或组）。 */
   model: string
   /** 单 Model 的可选覆盖；组为空。 */
