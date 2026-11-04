@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.gateway.IdeGatewayDataPlane;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 
 import java.net.URI;

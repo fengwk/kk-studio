@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUsePaths;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 
 import java.time.Clock;
 import java.time.Duration;

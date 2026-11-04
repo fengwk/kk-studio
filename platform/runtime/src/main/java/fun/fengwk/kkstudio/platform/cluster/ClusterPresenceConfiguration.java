@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.cluster;
+package fun.fengwk.kkstudio.platform.cluster;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

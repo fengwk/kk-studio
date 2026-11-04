@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.cluster;
+package fun.fengwk.kkstudio.platform.cluster;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

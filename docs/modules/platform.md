@@ -46,6 +46,7 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
+| [cluster](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster) | 跨节点内部基础设施：`cluster_node` 注册与心跳租约、内部 HMAC 请求认证、内部端点共用的路径/请求取值/错误信封约定，以及实时订阅判定与 oversize payload 回拉 |
 | [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |

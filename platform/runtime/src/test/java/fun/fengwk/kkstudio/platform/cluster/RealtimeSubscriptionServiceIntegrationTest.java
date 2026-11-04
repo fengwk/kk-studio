@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.cluster;
+package fun.fengwk.kkstudio.platform.cluster;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

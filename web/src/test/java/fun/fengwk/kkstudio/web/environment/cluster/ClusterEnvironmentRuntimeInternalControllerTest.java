@@ -14,10 +14,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;

@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 

@@ -27,15 +27,15 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 

@@ -4,9 +4,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.BoundedBodySubscriber;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 
 import java.net.URI;

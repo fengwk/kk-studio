@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.cluster;
+package fun.fengwk.kkstudio.platform.cluster;
 
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadLimits;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadUnavailableException;

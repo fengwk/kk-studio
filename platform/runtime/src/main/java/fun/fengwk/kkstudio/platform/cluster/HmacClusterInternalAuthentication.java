@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.cluster;
+package fun.fengwk.kkstudio.platform.cluster;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;

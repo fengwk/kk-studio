@@ -23,10 +23,10 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseIntentReply;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUsePaths;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseSnapshot;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalErrors;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalRequests;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
 

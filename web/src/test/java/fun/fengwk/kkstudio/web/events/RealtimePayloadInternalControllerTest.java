@@ -13,8 +13,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimePayloadBuffer;
 
 import java.time.Clock;

@@ -83,7 +83,7 @@ HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空�
 [`ClusterEnvironmentIdeInternalDataPlaneController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/ClusterEnvironmentIdeInternalDataPlaneController.java)
 与 [`IdeBrowserUseInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/web/IdeBrowserUseInternalController.java)
 的成功响应是裸 DTO，错误响应则使用与浏览器 API 相同的 `ApiResponse` 信封和领域状态映射
-（[`ClusterInternalErrors`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/cluster/ClusterInternalErrors.java)）：
+（[`ClusterInternalErrors`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/cluster/ClusterInternalErrors.java)）：
 认证失败固定 401 且 `code` 为 `UNAUTHORIZED`，领域失败保留 `code` 与 `errors.resource`/`errors.detail`，请求体超限为 413。
 [`IdeClusterClient`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/IdeClusterClient.java) 只从该信封读取
 `message` 与 `errors.resource`，已知的 `ide_close_cancelled` 是唯一穿透到调用方的内部资源标识。

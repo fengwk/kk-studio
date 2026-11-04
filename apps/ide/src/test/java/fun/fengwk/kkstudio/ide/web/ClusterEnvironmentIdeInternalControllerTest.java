@@ -33,9 +33,9 @@ import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
+import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 

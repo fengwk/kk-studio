@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 
 import java.net.http.HttpClient;
