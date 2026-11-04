@@ -61,7 +61,7 @@ describe('useChatPageController', () => {
 
   // 没有可用 Agent 时才查询 Provider / Model，用于首次使用引导。
   it('reports catalog setup progress when no usable agent exists', async () => {
-    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ model: null })]))
+    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ execution: null })]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([{ name: 'p' }]) as never)
     vi.mocked(agentService.listModels).mockResolvedValue(page([]) as never)
 
@@ -178,8 +178,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: {
       inheritParentEnvironment: true,
       tools: [],

@@ -243,8 +243,7 @@ function agent(): AgentDefinitionDTO {
     description: null,
     systemPrompt: null,
     type: 'USER' as const,
-    model: 'model-1',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'model-1', variant: 'default' } },
     config: {
       inheritParentEnvironment: true,
       tools: [],

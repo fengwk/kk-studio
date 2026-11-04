@@ -1,6 +1,7 @@
 import type { AgentDefinitionEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
+import { createBuiltinExecution, getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { translate } from '@/shared/i18n'
 import type {
   AgentDefinitionConfigDTO,
@@ -99,13 +100,14 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
 
 export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
   const config = agent.config
+  const selection = getBuiltinModelSelection(agent.execution)
   return {
     name: agent.name,
     description: agent.description || '',
     systemPrompt: agent.systemPrompt || '',
-    // BUILTIN 的未配置模型（null）投影为空字符串，由表单显式呈现未配置状态。
-    model: agent.model ?? '',
-    variant: agent.variant?.trim() || '',
+    execution: agent.execution,
+    model: selection?.modelName ?? '',
+    variant: selection?.variant?.trim() || '',
     inheritParentEnvironment: config.inheritParentEnvironment,
     tools: normalizeNames(config.tools),
     skills: (config.skills || []).map((s) => ({
@@ -121,20 +123,27 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   if (!name) {
     throw new Error('name must not be blank')
   }
-  const model = draft.model.trim()
-  if (!model) {
-    throw new Error('model must not be blank')
-  }
-  // 允许空覆盖；后端在需要时回退到 model.defaultVariant。
-  const variant = trimToNull(draft.variant)
   return {
     name,
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    model,
-    variant,
+    execution: draftExecution(draft, false),
     config: toConfig(draft),
   }
+}
+
+function draftExecution(draft: AgentDraft, allowUnconfigured: boolean) {
+  if (draft.execution && draft.execution.driver !== 'builtin') {
+    return draft.execution
+  }
+  const model = draft.model.trim()
+  if (!model) {
+    if (allowUnconfigured) {
+      return null
+    }
+    throw new Error('model must not be blank')
+  }
+  return createBuiltinExecution(model, trimToNull(draft.variant))
 }
 
 /**
@@ -145,15 +154,10 @@ export function toEditableAgentUpdate(
   draft: AgentDraft,
   allowUnconfiguredModel = false,
 ): AgentDefinitionEditablePropertiesDTO {
-  const model = draft.model.trim()
-  if (!model && !allowUnconfiguredModel) {
-    throw new Error('model must not be blank')
-  }
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    model: model || null,
-    variant: trimToNull(draft.variant),
+    execution: draftExecution(draft, allowUnconfiguredModel),
     config: toConfig(draft),
   }
 }

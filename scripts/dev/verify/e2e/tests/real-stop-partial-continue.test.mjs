@@ -263,7 +263,10 @@ function createStopCaseContext({ exitConverges = true } = {}) {
         }
       }
       if (method === 'POST' && url === '/api/agents') {
-        return { status: 201, json: { data: { name: body.name, version: '0' } } }
+        assert.deepEqual(body.execution, {
+          driver: 'builtin', settings: { modelName: MODEL.modelName, variant: MODEL.variant },
+        })
+        return { status: 201, json: { data: { name: body.name, execution: body.execution, version: '0' } } }
       }
       if (method === 'POST' && url === '/api/chats') {
         return {

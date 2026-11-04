@@ -7,12 +7,45 @@ import { HttpError } from '../lib/http.mjs'
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 
+test('seed case reads the execution contract, including a null builtin variant', async () => {
+  // Execute the registered case against a faithful catalog response, not a source-text probe.
+  const agent = {
+    name: 'fixture-agent', type: 'USER', description: 'fixture', systemPrompt: 'prompt',
+    execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: null } },
+    config: {}, version: '0', createTime: 0, updateTime: 0,
+  }
+  const providers = Object.entries({
+    minimax: 'openai_responses', openai: 'openai_responses', xai: 'openai_responses',
+    deepseek: 'openai', google: 'google', anthropic: 'anthropic', zai: 'openai',
+    'minimax-anthropic': 'anthropic',
+  }).map(([name, providerType]) => ({
+    name, description: 'fixture', providerType, configured: false,
+    modelCallTimeoutMillis: null, modelCallIdleTimeoutMillis: null, modelHttpRetryStatusCodes: null,
+    version: '0', createTime: 0, updateTime: 0,
+  }))
+  const ctx = {
+    vars: {},
+    async call(method, path) {
+      assert.equal(method, 'GET')
+      const results = path.startsWith('/api/agents') ? [agent] : providers
+      return { json: { data: { results } } }
+    },
+  }
+  await getCase('seed.agent_and_provider').run(ctx)
+  assert.deepEqual(ctx.vars.agent.execution, agent.execution)
+  agent.model = 'fixture-model'
+  await assert.rejects(getCase('seed.agent_and_provider').run(ctx), /AgentDefinitionDTO/)
+})
+
 function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) {
   let thread
   let previews = 0
   const ctx = {
     vars: {
-      agent: { name: 'fixture-agent', model: 'fixture-model', variant: 'default' },
+      agent: {
+        name: 'fixture-agent',
+        execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: null } },
+      },
       seedModel: { config: { defaultVariant: 'default' } },
     },
     async call(method, path, body) {
@@ -130,8 +163,7 @@ function modelRequestDebugFixture() {
   const agent = {
     name: 'fixture-agent',
     type: 'USER',
-    model: 'fixture-model',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: 'default' } },
   }
   const model = {
     providerName: 'fixture-provider',

@@ -67,8 +67,7 @@ function agent(
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'model',
-    variant: null,
+    execution: createBuiltinExecution('model', null),
     config: {
       inheritParentEnvironment: true,
       tools,
@@ -82,7 +81,7 @@ function agent(
 }
 
 function agentWithoutModel(): AgentDefinitionDTO {
-  return { ...agent([], [], []), model: '' }
+  return { ...agent([], [], []), execution: null }
 }
 
 function draftWith(
@@ -115,6 +114,13 @@ function queuedSettingCommand(
 }
 
 describe('BranchDraft materialization failures', () => {
+  it('passes through an unknown execution without requiring a model catalog', () => {
+    // 非 builtin 配置属于对应 driver，不能当作模型选择重写。
+    const execution = { driver: 'future', settings: { opaque: 'value' } }
+    const result = materializeBlankBranchDraft({ ...agent([], [], []), execution }, false, [])
+    expect(result?.execution).toEqual(execution)
+  })
+
   it('returns null when the Agent is missing or has no model ref', () => {
     expect(materializeBlankBranchDraft(undefined, false, [model])).toBeNull()
     expect(materializeBlankBranchDraft(agentWithoutModel(), false, [model])).toBeNull()
@@ -132,7 +138,7 @@ describe('BranchDraft materialization failures', () => {
     expect(
       materializeBlankBranchDraft(withUnknownVariant, false, [modelWithoutDefaultVariant]),
     ).toBeNull()
-    const missingVariantAgent = { ...withUnknownVariant, variant: 'missing' }
+    const missingVariantAgent = { ...withUnknownVariant, execution: createBuiltinExecution('model', 'missing') }
     expect(materializeBlankBranchDraft(missingVariantAgent, false, [model])).toBeNull()
   })
 
@@ -149,7 +155,7 @@ describe('BranchDraft materialization failures', () => {
   it('keeps a group selection variant-free through draft, queued command and HTTP snapshot', () => {
     // 组不拥有 variant；初始化、持久命令回放和 HTTP 省略 null 时都不能继承旧模型的 variant。
     const group = { ...model, kind: 'GROUP' as const, name: 'group' }
-    const draft = materializeBlankBranchDraft({ ...agent([], [], []), model: 'group' }, false, [group])
+    const draft = materializeBlankBranchDraft({ ...agent([], [], []), execution: createBuiltinExecution('group', null) }, false, [group])
     expect(draft?.execution).toEqual(createBuiltinExecution('group', null))
     const base = draftWith()
     const projected = projectPendingTarget(base, [
@@ -266,8 +272,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       const claudeAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-agent',
-        model: 'claude',
-        variant: null,
+        execution: createBuiltinExecution('claude', null),
       }
       const existing = draftWith({
         agentName: 'assistant',
@@ -288,8 +293,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       const explicitVariantAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-v2',
-        model: 'claude',
-        variant: 'v2',
+        execution: createBuiltinExecution('claude', 'v2'),
       }
       const result = materializeAgentBranchDraft(explicitVariantAgent, [model, claudeModel], null)
       expect(result?.execution).toEqual(createBuiltinExecution('claude', 'v2'))
@@ -299,8 +303,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       const defaultVariantAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-default',
-        model: 'claude',
-        variant: null,
+        execution: createBuiltinExecution('claude', null),
       }
       const result = materializeAgentBranchDraft(defaultVariantAgent, [model, claudeModel], null)
       expect(result?.execution).toEqual(createBuiltinExecution('claude', 'v1'))
@@ -310,14 +313,12 @@ describe('BranchDraft conversion and diff semantics', () => {
       const agentV1: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'agent-v1',
-        model: 'claude',
-        variant: 'v1',
+        execution: createBuiltinExecution('claude', 'v1'),
       }
       const agentV2: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'agent-v2',
-        model: 'claude',
-        variant: 'v2',
+        execution: createBuiltinExecution('claude', 'v2'),
       }
       const initial = materializeAgentBranchDraft(agentV1, [claudeModel], null)
       expect(getBuiltinModelSelection(initial?.execution)?.variant).toBe('v1')
@@ -353,16 +354,15 @@ describe('BranchDraft conversion and diff semantics', () => {
     })
 
     it('returns null and does not produce a draft if model, ref or variant is invalid', () => {
-      const agentNoModel: AgentDefinitionDTO = { ...agent([], [], []), model: '' }
+      const agentNoModel: AgentDefinitionDTO = { ...agent([], [], []), execution: null }
       expect(materializeAgentBranchDraft(agentNoModel, [model], draftWith())).toBeNull()
 
-      const agentWithMissingModel: AgentDefinitionDTO = { ...agent([], [], []), model: 'missing/model' }
+      const agentWithMissingModel: AgentDefinitionDTO = { ...agent([], [], []), execution: createBuiltinExecution('missing/model', null) }
       expect(materializeAgentBranchDraft(agentWithMissingModel, [model], draftWith())).toBeNull()
 
       const agentWithInvalidVariant: AgentDefinitionDTO = {
         ...agent([], [], []),
-        model: 'model',
-        variant: 'non-existent-variant',
+        execution: createBuiltinExecution('model', 'non-existent-variant'),
       }
       expect(materializeAgentBranchDraft(agentWithInvalidVariant, [model], draftWith())).toBeNull()
     })

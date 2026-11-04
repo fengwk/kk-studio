@@ -1394,8 +1394,7 @@ async function createHoldingQueueFixture(
         name: `e2e-ui-hold-agent-${suffix}`,
         description: 'Local hold agent for free UI queue tests.',
         systemPrompt: 'Wait for the local E2E stream.',
-        model: state.model.name,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       },
     )
@@ -1444,10 +1443,7 @@ async function createHoldingQueueFixture(
       commands: [
         setAgentCommand(state.agent.name, cid()),
         setExecutionCommand(
-          {
-            modelName: state.model.name,
-            variant: 'default',
-          },
+          state.agent.execution.settings,
           cid(),
         ),
         userMessageCommand(historicalMessage, cid()),
@@ -1628,11 +1624,11 @@ async function resolveCatalogTarget(apiCtx) {
   const agents = agentsResponse.json?.data?.results || []
   const models = modelsResponse.json?.data?.results || []
   for (const agent of agents) {
-    const modelName = String(agent.model || '')
-    if (!modelName) continue
+    if (agent.execution?.driver !== 'builtin') continue
+    const { modelName, variant } = agent.execution.settings || {}
+    if (!modelName || (variant !== null && typeof variant !== 'string')) continue
     const model = models.find((candidate) => candidate.name === modelName)
-    const variant = agent.variant || model?.config?.defaultVariant
-    if (model && variant) {
+    if (model) {
       return {
         agent,
         model: { modelName, variant },

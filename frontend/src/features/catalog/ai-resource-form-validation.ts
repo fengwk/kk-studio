@@ -205,7 +205,7 @@ export function validateResourceDraft(
     }
     // BUILTIN 支持显式未配置模型；USER 仍要求已选择 Model。
     const builtin = modal.mode === 'edit' && modal.type === 'BUILTIN'
-    if (!builtin && !drafts.agentDraft.model.trim()) {
+    if (!builtin && (!drafts.agentDraft.execution || drafts.agentDraft.execution.driver === 'builtin') && !drafts.agentDraft.model.trim()) {
       return {
         ok: false,
         message: translate('ai.catalog.validation.agentModel'),

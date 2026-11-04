@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
@@ -86,6 +88,28 @@ class ConfigSyncExporterTest {
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> providers = (List<Map<String, Object>>) document.get("providers");
     assertFalse(providers.get(0).containsKey("modelHttpRetryStatusCodes"));
+  }
+
+  /** 导出使用嵌套 execution 并保留 variant，不产生旧的顶层模型字段。 */
+  @Test
+  void agentExportCarriesExecutionWithoutLegacyFields() {
+    var configured =
+        agent("a", "m", agentConfig(List.of(), List.of(), List.of())).toBuilder()
+            .execution(BuiltinExecution.of(new ModelSelection("m", "default")))
+            .build();
+    var snapshot =
+        snapshot(
+            List.of(), List.of(), List.of(configured), List.of(), List.of(), List.of(), List.of());
+    var document =
+        yaml.parse(
+            exporter.export(snapshot, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"))));
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> agents = (List<Map<String, Object>>) document.get("agents");
+    assertEquals(
+        Map.of("driver", "builtin", "settings", Map.of("modelName", "m", "variant", "default")),
+        agents.get(0).get("execution"));
+    assertFalse(agents.get(0).containsKey("model"));
+    assertFalse(agents.get(0).containsKey("variant"));
   }
 
   @Test

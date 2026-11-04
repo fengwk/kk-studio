@@ -275,8 +275,7 @@ registerCase({
         name: `e2e-agent-interaction-${suffix}`,
         description: 'Local pending input E2E agent.',
         systemPrompt: 'Ask the user with ask_user, then report the accepted answer.',
-        model: model.name,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         // ask_user 是内置 SELECTABLE 工具：只有显式声明的 Agent 才把问卷工具暴露给模型。
         config: { tools: ['ask_user'], skills: [], subagents: [], inheritParentEnvironment: true },
       })
@@ -301,8 +300,7 @@ registerCase({
         sessionId,
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(agent, {
-          modelName: model.name,
-          variant: 'default',
+          ...agent.execution.settings,
         }),
         yoloEnabled: false,
         commands: [userMessageCommand(marker, cid())],

@@ -280,7 +280,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (model != null) {
       return resolveLogical(model, requested.variant(), null);
     }
-    String defaultModel = agent.modelName();
+    ModelSelection defaultSelection = builtinAgentModel(agent);
+    String defaultModel = defaultSelection == null ? null : defaultSelection.modelName();
     AgentModel fallback =
         defaultModel == null || defaultModel.equals(requested.modelName())
             ? null
@@ -291,7 +292,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + requested.modelName()
               + " and the agent default model are both unavailable; bind an available model");
     }
-    return resolveLogical(fallback, requested.variant(), agent.variant());
+    return resolveLogical(fallback, requested.variant(), defaultSelection.variant());
+  }
+
+  private static ModelSelection builtinAgentModel(AgentDefinition agent) {
+    ExecutionSelection execution = agent.execution();
+    if (execution == null || !BuiltinExecution.DRIVER.equals(execution.driver())) {
+      return null;
+    }
+    try {
+      return BuiltinExecution.model(execution);
+    } catch (IllegalArgumentException error) {
+      throw rejection(
+          "invalid agent builtin execution: " + agent.name() + ": " + messageOrClass(error));
+    }
   }
 
   /**
@@ -430,13 +444,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.modelName() == null) {
+    if (agent.execution() == null) {
       throw rejection("compaction agent has no configured model");
     }
+    if (!BuiltinExecution.DRIVER.equals(agent.execution().driver())) {
+      throw rejection("compaction agent must use builtin execution");
+    }
+    ModelSelection selection = builtinAgentModel(agent);
     AgentModel model =
         require(
-            modelRepository.getByName(agent.modelName()), "model not found: " + agent.modelName());
-    ResolvedSelection resolved = resolveLogical(model, agent.variant(), null);
+            modelRepository.getByName(selection.modelName()),
+            "model not found: " + selection.modelName());
+    ResolvedSelection resolved = resolveLogical(model, selection.variant(), null);
     for (MemberRuntime member : resolved.members()) {
       requireReasoningSupport(member);
     }

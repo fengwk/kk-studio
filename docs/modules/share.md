@@ -97,9 +97,11 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 
 - 未知字段、重复 JSON 键、错误的 union `type`/`op`、非 canonical UUID 或非规范数字都在 wire 边界失败，不会进入领域服务。
 - required-nullable 字段即使为 `null` 也必须序列化，避免客户端把「未返回」当成「无值」。
-- durable 版本与序号在 wire 上永远是十进字符串；模型身份统一为全局逻辑 `modelName`，MODEL 与
-  GROUP 共用同一名称空间，名称可以包含斜杠。选择只携带 `{modelName, variant?}`；GROUP 的
-  `variant` 必须为 null，成员 Variant 写在组配置内。
+- durable 版本与序号在 wire 上永远是十进字符串。Agent 定义与 Thread 的 execution 均为
+  `{driver, settings}`；用户 Agent 必须配置，未配置的内置 Agent 显式返回 null。
+  Builtin settings 为 `{modelName, variant}`，其中 `variant` 可为 null。MODEL 与 GROUP
+  共用全局逻辑 `modelName` 名称空间，名称可以包含斜杠；GROUP 的 variant 必须为 null，
+  成员 Variant 写在组配置内。
 - 模型价格统一为 `{base, overrides, multipliers}`，金额与倍率都是十进制字符串；普通缺价按 0、
   缺倍率按 1、`reasoning: null` 继承 output。
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。

@@ -94,12 +94,11 @@ registerCase({
         name: `e2e-agent-attempt-${suffix}`,
         description: 'Local model attempt visibility E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
-        model: model.name,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentResponse.json)
-      assert(agent?.name && agent.model === model.name, JSON.stringify(agentResponse.json))
+      assert(agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name, JSON.stringify(agentResponse.json))
 
       chat = await createChat(ctx, {
         title: `e2e-attempt-visibility-${suffix}`,
@@ -116,7 +115,7 @@ registerCase({
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(
           { name: `e2e-attempt-missing-${suffix}` },
-          { modelName: model.name, variant: 'default' },
+          agent.execution.settings,
         ),
         yoloEnabled: false,
         commands: [userMessageCommand(`materialize ${suffix}`, cid())],
@@ -147,7 +146,7 @@ registerCase({
               commands: [
                 setAgentCommand(agent.name, cid()),
                 setExecutionCommand(
-                  { modelName: model.name, variant: 'default' },
+                  agent.execution.settings,
                   cid(),
                 ),
                 userMessageCommand(initialMarker, cid()),
