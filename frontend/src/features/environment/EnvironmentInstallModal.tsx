@@ -352,7 +352,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 {lspEnabled && (
                   <div className="install-field">
                     <label className="form-group">
-                      <span>LSP servers (JSON)</span>
+                      <span>LSP servers</span>
                       <TextArea
                         rows={8}
                         value={servers}

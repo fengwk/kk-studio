@@ -64,11 +64,11 @@ describe('thread status formatting', () => {
       contextWindow: 128_000,
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 61 },
     }, t).segments.find((segment) => segment.key === 'context')
-    expect(known?.title).toBe('上下文占用（最近一次模型调用估算）：约 61 / 128000 tokens')
+    expect(known?.title).toBe('上下文占用，最近一次模型调用估算：约 61 / 128000 tokens')
 
     const unknown = buildThreadStatusModel({ contextWindow: 128_000 }, t).segments
       .find((segment) => segment.key === 'context')
-    expect(unknown?.title).toBe('上下文占用：尚未测量（上限 128000 tokens）')
+    expect(unknown?.title).toBe('上下文占用：尚未测量，上限 128000 tokens')
   })
 
   // hover：完整数字 + 全称字段（含推理），无冗余的累计标题；主行保持紧凑

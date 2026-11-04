@@ -65,7 +65,7 @@ export function CreateChatModal({
       list.push({
         value: selectedEnvironmentName,
         label: environmentsQuery.isSuccess
-          ? `${selectedEnvironmentName} ${t('ai.chat.environmentUnavailable')}`
+          ? `${selectedEnvironmentName} · ${t('ai.chat.environmentUnavailable')}`
           : selectedEnvironmentName,
       })
     }

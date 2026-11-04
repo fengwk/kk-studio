@@ -354,7 +354,7 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull())
     await waitFor(() => expect(environmentService.listEnvironments).toHaveBeenCalledTimes(2))
     expect(
-      await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B（总大小未知）'),
+      await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B · 总大小未知'),
     ).toBeInTheDocument()
     expect(queryClient.getQueryData(queryKeys.environments.runtime('env-1'))).toEqual(started)
   })
@@ -413,7 +413,7 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     const progress = await screen.findByText(
-      '正在更新至 1.3.0 · 已下载 8 MB（总大小未知）',
+      '正在更新至 1.3.0 · 已下载 8 MB · 总大小未知',
     )
     expect(progress).not.toHaveTextContent('%')
   })

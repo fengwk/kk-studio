@@ -360,7 +360,7 @@ describe('IssueDetailModal', () => {
     )
 
     await screen.findByLabelText('Issue #12 详情')
-    fireEvent.click(screen.getByRole('button', { name: '终止 (Stop)' }))
+    fireEvent.click(screen.getByRole('button', { name: '终止' }))
 
     expect(screen.getByRole('heading', { name: /终止当前运行/i })).toBeInTheDocument()
     const detailInput = screen.getByPlaceholderText(/说明人工中止执行的原因/i)
@@ -407,7 +407,7 @@ describe('IssueDetailModal', () => {
     const resolveBtn = await screen.findByRole('button', { name: '人工核查' })
     fireEvent.click(resolveBtn)
 
-    expect(screen.getByRole('heading', { name: /解除 UNKNOWN（人工核查）/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /解除 UNKNOWN/i })).toBeInTheDocument()
     const verificationInput = screen.getByPlaceholderText(/说明已核实的内容与外部状态一致性保证/i)
     fireEvent.change(verificationInput, { target: { value: 'Manually verified as safe to continue.' } })
 

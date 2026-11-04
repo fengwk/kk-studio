@@ -811,7 +811,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     // 即使调用与收据的 UUID 不同，也仅能导航至收据指定的线程。
     const link = screen.getByRole('link')
-    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
+    expect(link).toHaveAccessibleName('查看 subagent 00000000-0000-0000-0000-000000000002 的执行')
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     const prompt = screen.getByText('continue working on subtask')
     expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -908,7 +908,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent (00000000-0000-0000-0000-000000000002) 执行' }))
+    expect(screen.getByRole('link', { name: '查看 subagent 00000000-0000-0000-0000-000000000002 的执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
   })
 
@@ -927,7 +927,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
     const prompt = screen.getByText('first task prompt')
     const link = screen.getByRole('link')
-    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
+    expect(link).toHaveAccessibleName('查看 subagent 00000000-0000-0000-0000-000000000002 的执行')
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)

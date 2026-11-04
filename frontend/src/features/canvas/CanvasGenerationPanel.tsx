@@ -504,7 +504,7 @@ export function CanvasGenerationPanel({
         {activeModel.outputs && activeModel.outputs.length > 0 ? (
           <div className="generation-outputs-badge-list" aria-label={t('canvas.generation.outputsAria')}>
             {activeModel.outputs.map((out, idx) => (
-              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} (${out.kind})` : out.kind}>
+              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} · ${out.kind}` : out.kind}>
                 {out.kind}{out.name ? `: ${out.name}` : ''}
               </span>
             ))}

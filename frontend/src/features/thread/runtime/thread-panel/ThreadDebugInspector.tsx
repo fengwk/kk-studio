@@ -165,7 +165,7 @@ export function ThreadDebugInspector({
                 </Badge>
                 {selection.tool.filterReason ? (
                   <span className="thread-debug-filter-reason">
-                    ({formatFilterReason(selection.tool.filterReason, t)})
+                    · {formatFilterReason(selection.tool.filterReason, t)}
                   </span>
                 ) : null}
               </KeyValueRow>

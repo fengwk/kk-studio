@@ -141,7 +141,7 @@ describe('McpServersPage', () => {
 
     const nameInput = screen.getByPlaceholderText('e.g. filesystem')
     const urlInput = screen.getByPlaceholderText('https://example.com/mcp')
-    const headersInput = screen.getByLabelText(/自定义请求头/)
+    const headersInput = screen.getByLabelText(/JSON 请求头/)
     const submitBtn = within(modal).getByRole('button', { name: '确认' })
 
     // 校验：无效 name
@@ -263,7 +263,7 @@ describe('McpServersPage', () => {
     await user.clear(urlInput)
     await user.type(urlInput, 'https://example.com/api-v2')
 
-    const headersArea = screen.getByLabelText(/自定义请求头/)
+    const headersArea = screen.getByLabelText(/JSON 请求头/)
     fireEvent.change(headersArea, {
       target: { value: '{"X-Api-Key": "key_123"}' },
     })

@@ -230,7 +230,7 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent (00000000-0000-4000-8000-000000000004) 执行' }))
+    expect(screen.getByRole('link', { name: '查看 subagent 00000000-0000-4000-8000-000000000004 的执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
     rerender(
       <MemoryRouter>
@@ -278,7 +278,7 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    const link = screen.getByRole('link', { name: '查看 subagent (00000000-0000-0000-0000-000000000202) 执行' })
+    const link = screen.getByRole('link', { name: '查看 subagent 00000000-0000-0000-0000-000000000202 的执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
     // 受理收据既不重复打印正文，也不宣称子任务完成。
     expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
@@ -296,7 +296,7 @@ describe('TaskToolRenderer result phase', () => {
         })} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: 'View subagent (00000000-0000-4000-8000-000000000004) execution' }))
+    expect(screen.getByRole('link', { name: 'View subagent 00000000-0000-4000-8000-000000000004 execution' }))
       .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
   })
 

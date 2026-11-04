@@ -165,7 +165,7 @@ describe('SyncTab', () => {
       expect(within(dialog).getByRole('checkbox', { name: label })).toBeChecked()
     }
     expect(
-      within(dialog).getByText('共 7 类 · 7 项（含依赖）'),
+      within(dialog).getByText('共 7 类 · 7 项，含依赖'),
     ).toBeInTheDocument()
   })
 
@@ -182,7 +182,7 @@ describe('SyncTab', () => {
       expect(checkbox).toBeDisabled()
     }
     expect(within(dialog).getAllByText('依赖')).toHaveLength(3)
-    expect(within(dialog).getByText('共 4 类 · 4 项（含依赖）')).toBeInTheDocument()
+    expect(within(dialog).getByText('共 4 类 · 4 项，含依赖')).toBeInTheDocument()
 
     // 移除源选择后依赖随之释放。
     await userEvent.setup().click(within(dialog).getByRole('checkbox', { name: 'Agent: reviewer' }))
@@ -198,7 +198,7 @@ describe('SyncTab', () => {
     await clearAllSelections()
     await userEvent.setup().click(within(dialog).getByRole('checkbox', { name: 'Agent: reviewer' }))
     // UI 仍展示完整闭包。
-    expect(within(dialog).getByText('共 4 类 · 4 项（含依赖）')).toBeInTheDocument()
+    expect(within(dialog).getByText('共 4 类 · 4 项，含依赖')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '导出' }))
     await waitFor(() => expect(mocks.exportConfig).toHaveBeenCalledTimes(1))
@@ -380,7 +380,7 @@ describe('SyncTab', () => {
       name: '插件配置: minimax-mavis',
     })
     expect(pluginsCheckbox).toBeChecked()
-    expect(within(dialog).getByText('共 8 类 · 8 项（含依赖）')).toBeInTheDocument()
+    expect(within(dialog).getByText('共 8 类 · 8 项，含依赖')).toBeInTheDocument()
 
     // 清空全部选择后再只勾选插件配置：它可独立选择，并自动纳入声明的 Agent 依赖。
     for (const label of [...KIND_TOGGLES, '插件配置']) {
@@ -393,7 +393,7 @@ describe('SyncTab', () => {
     expect(agentDependency).toBeChecked()
     expect(agentDependency).toBeDisabled()
     // 传递闭包：插件 → Agent → 模型/提供商/技能包。
-    expect(within(dialog).getByText('共 5 类 · 5 项（含依赖）')).toBeInTheDocument()
+    expect(within(dialog).getByText('共 5 类 · 5 项，含依赖')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: '导出' }))
 

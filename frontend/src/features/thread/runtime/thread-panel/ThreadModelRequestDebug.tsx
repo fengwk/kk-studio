@@ -96,7 +96,7 @@ export function ThreadModelRequestDebug({
     }
     const retentionText = formatCacheRetention(debug.cacheControl.retention, t)
     if (debug.cacheControl.key) {
-      return `${retentionText} (${debug.cacheControl.key})`
+      return `${retentionText} · ${debug.cacheControl.key}`
     }
     return retentionText
   }, [debug.cacheControl, t])

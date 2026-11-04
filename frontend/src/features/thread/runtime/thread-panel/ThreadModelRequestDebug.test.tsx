@@ -127,13 +127,13 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     // 工具标题与徽章
     expect(screen.getByText(/工具 1 纳入规划 · 1 已过滤/)).toBeInTheDocument()
     expect(screen.getByText('read')).toBeInTheDocument()
-    const readBadge = screen.getByTitle('可选环境 (OPTIONAL)')
+    const readBadge = screen.getByTitle('可选环境 · OPTIONAL')
     expect(readBadge).toHaveTextContent('P+E')
 
     // 过滤工具包含 ⊘ 符号与需要环境徽章
     expect(screen.getByText(/⊘/)).toBeInTheDocument()
     expect(screen.getByText('bash')).toBeInTheDocument()
-    const bashBadge = screen.getByTitle('需要环境 (REQUIRED)')
+    const bashBadge = screen.getByTitle('需要环境 · REQUIRED')
     expect(bashBadge).toHaveTextContent('E')
 
     // 技能区域
@@ -145,7 +145,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText('子代理：')).toBeInTheDocument()
     expect(screen.getByText('helper')).toBeInTheDocument()
     expect(screen.getByText('缓存：')).toBeInTheDocument()
-    expect(screen.getByText(/短期 \(SHORT\)/)).toBeInTheDocument()
+    expect(screen.getByText(/短期 · SHORT/)).toBeInTheDocument()
   })
 
   it('switches dynamically to en-US and verifies real english localization across all labels and badges', async () => {
@@ -160,13 +160,13 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText('Currently planned tool environment')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
     expect(screen.getByText(/TOOLS 1 planned · 1 filtered/)).toBeInTheDocument()
-    expect(screen.getByTitle('Optional environment (OPTIONAL)')).toBeInTheDocument()
-    expect(screen.getByTitle('Environment required (REQUIRED)')).toBeInTheDocument()
+    expect(screen.getByTitle('Optional environment · OPTIONAL')).toBeInTheDocument()
+    expect(screen.getByTitle('Environment required · REQUIRED')).toBeInTheDocument()
     expect(screen.getByText('SKILLS 1')).toBeInTheDocument()
     expect(screen.getByText('· local')).toBeInTheDocument()
     expect(screen.getByText('Subagents:')).toBeInTheDocument()
     expect(screen.getByText('Cache:')).toBeInTheDocument()
-    expect(screen.getByText(/Short \(SHORT\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Short · SHORT/)).toBeInTheDocument()
 
     // 打开 Tool 检查器，断言英文标题与行标题
     await user.click(screen.getByRole('button', { name: 'Tool read' }))
@@ -176,7 +176,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText('Name')).toBeInTheDocument()
     expect(screen.getByText('Status')).toBeInTheDocument()
     expect(screen.getByText('Environment Support')).toBeInTheDocument()
-    expect(screen.getByText('Contributor (Provenance)')).toBeInTheDocument()
+    expect(screen.getByText('Contributor')).toBeInTheDocument()
     expect(screen.getByText('Description')).toBeInTheDocument()
     expect(screen.getByText('Input Schema JSON:')).toBeInTheDocument()
 
@@ -200,8 +200,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(inspector).toHaveAttribute('aria-label', 'read')
     expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('名称')).toBeInTheDocument()
-    expect(screen.getByText('纳入当前规划 (SENT)')).toBeInTheDocument()
-    expect(screen.getByText('可选环境 (OPTIONAL)')).toBeInTheDocument()
+    expect(screen.getByText('纳入当前规划 · SENT')).toBeInTheDocument()
+    expect(screen.getByText('可选环境 · OPTIONAL')).toBeInTheDocument()
     expect(screen.getByText('builtin:read')).toHaveClass('ui-mono')
     expect(screen.getByText('builtin:read')).toBeInTheDocument()
     expect(screen.getByText('Read file')).toBeInTheDocument()
@@ -222,8 +222,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(inspector).toHaveAttribute('aria-label', 'dev')
     expect(screen.getByRole('heading', { level: 3, name: 'dev' })).toBeInTheDocument()
     expect(screen.getByText('技能名称')).toBeInTheDocument()
-    expect(screen.getByText('包名 (Package)')).toBeInTheDocument()
-    expect(screen.getByText('交付方式 (Delivery)')).toBeInTheDocument()
+    expect(screen.getByText('包名')).toBeInTheDocument()
+    expect(screen.getByText('交付方式')).toBeInTheDocument()
     expect(screen.getByText('本地')).toBeInTheDocument()
     expect(screen.getByText('dev-tools')).toBeInTheDocument()
     expect(screen.getByText('/opt/skills/dev-tools/dev/SKILL.md')).toBeInTheDocument()
@@ -239,7 +239,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       const user = userEvent.setup()
       render(<DebugViewHarness />)
 
-      const snapshotBtn = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })
+      const snapshotBtn = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文' })
       expect(snapshotBtn).toBeInTheDocument()
       expect(snapshotBtn).toHaveTextContent('冻结调用输入')
 
@@ -385,7 +385,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         />,
       )
 
-      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 \(SHORT\) \(aff-key-42\)/ })
+      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 · SHORT · aff-key-42/ })
       expect(cacheBtn).toBeInTheDocument()
 
       await user.click(cacheBtn)
@@ -586,8 +586,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       )
 
       expect(screen.getByText('UNKNOWN_SUPPORT')).toBeInTheDocument()
-      expect(screen.getByText(/长期 \(LONG\)/)).toBeInTheDocument()
-      expect(screen.getByTitle('平台独立 (NONE)')).toBeInTheDocument()
+      expect(screen.getByText(/长期 · LONG/)).toBeInTheDocument()
+      expect(screen.getByTitle('平台独立 · NONE')).toBeInTheDocument()
     })
 
     it('handles PLATFORM skill delivery, requiredEnvironmentId, and container fallback focus in inspector', () => {
@@ -708,7 +708,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       )
 
       await user.click(screen.getByRole('button', { name: '已过滤工具 filtered-tool' }))
-      expect(screen.getByText('(RATE_LIMIT_EXCEEDED)')).toBeInTheDocument()
+      expect(screen.getByText('· RATE_LIMIT_EXCEEDED')).toBeInTheDocument()
       expect(screen.getAllByText('UNKNOWN_ENV').length).toBeGreaterThanOrEqual(1)
       await user.keyboard('{Escape}')
 
@@ -814,7 +814,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onSelectInspector={onSelectInspector}
         />,
       )
-      await user.click(screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' }))
+      await user.click(screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文' }))
       expect(onSelectInspector).toHaveBeenCalledWith({ type: 'request' })
 
       rerender(
@@ -823,7 +823,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           onSelectInspector={onSelectInspector}
         />,
       )
-      expect(screen.queryByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文' })).not.toBeInTheDocument()
     })
   })
 })

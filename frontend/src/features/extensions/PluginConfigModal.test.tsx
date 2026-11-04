@@ -351,7 +351,7 @@ describe('PluginConfigModal', () => {
 
     expect(await screen.findByTestId('plugin-config-conflict-banner')).toBeInTheDocument()
     expect(
-      screen.getByText('配置已被其他操作修改（版本冲突），请刷新并查看最新改动。'),
+      screen.getByText('配置已被其他操作修改，发生版本冲突。请刷新并查看最新改动。'),
     ).toBeInTheDocument()
 
     expect(checkbox).not.toBeChecked()

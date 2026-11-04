@@ -611,7 +611,7 @@ describe('PluginsTab', () => {
     })
     expect(within(dialog).getByTestId('plugin-check-authentication')).toHaveTextContent('凭据已接受')
     expect(within(dialog).getByTestId('plugin-check-browser-session')).toHaveTextContent(
-      '未知（本检查不核验浏览器登录态）',
+      '未知；本检查不核验浏览器登录态',
     )
     expect(within(dialog).getByTestId('plugin-check-checked-at')).toHaveTextContent(
       new Date(1772366400 * 1000).toLocaleString('zh-CN'),

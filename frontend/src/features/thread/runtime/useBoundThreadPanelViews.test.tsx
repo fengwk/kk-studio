@@ -122,7 +122,7 @@ it('renders on-demand preview, inspector and history actions and clears history 
   fireEvent.click(screen.getByTestId('historical-request-preview'))
   await waitFor(() => expect(screen.getByTestId('preview-request-body')).toHaveTextContent('history'))
   expect(screen.getByText(/按当前目录、Provider 与模型定义重建/)).toBeInTheDocument()
-  expect(screen.getByText('输出记录时间（规划时刻）')).toBeInTheDocument()
+  expect(screen.getByText('规划时刻记录')).toBeInTheDocument()
   expect(screen.queryByText('生成时间')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '关闭检查器' }))
   expect(screen.queryByTestId('preview-request-body')).toBeNull()

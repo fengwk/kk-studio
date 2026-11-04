@@ -81,7 +81,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('MiniMax (quality)（模型默认）')).toBeInTheDocument()
+    expect(screen.getByText('MiniMax (quality) · 模型默认')).toBeInTheDocument()
     rerender(
       <AgentResourceCard
         agent={agent({ model: 'xai/grok-4.7', variant: 'xhigh' })}
@@ -335,7 +335,7 @@ describe('AI resource cards', () => {
     )
     expect(screen.getByText('provider description')).toBeInTheDocument()
     expect(screen.getByText('not-a-number')).toBeInTheDocument()
-    expect(screen.getByText('无 API Key（无认证请求）')).toBeInTheDocument()
+    expect(screen.getByText('无 API Key，请求不认证')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })

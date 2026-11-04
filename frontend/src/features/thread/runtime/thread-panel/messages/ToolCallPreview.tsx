@@ -29,7 +29,7 @@ export function ToolCallPreview({
         <div className="thread-tool-preview-target">
           <span className="thread-tool-preview-target-path">{preview.path}</span>
           {preview.workdir ? (
-            <span className="thread-tool-preview-target-workdir">({preview.workdir})</span>
+            <span className="thread-tool-preview-target-workdir">· {preview.workdir}</span>
           ) : null}
         </div>
         <ToolOutputViewport

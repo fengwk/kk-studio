@@ -179,9 +179,9 @@ describe('SubagentReceipt collapsed summary', () => {
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()
 
-    const link = screen.getByRole('link', { name: '查看 subagent (child-thread-1) 执行' })
+    const link = screen.getByRole('link', { name: '查看 subagent child-thread-1 的执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
-    expect(link).toHaveAttribute('title', '查看 subagent (child-thread-1) 执行')
+    expect(link).toHaveAttribute('title', '查看 subagent child-thread-1 的执行')
     expect(link.nextElementSibling).toBe(toggle)
     expect(toggle.parentElement?.lastElementChild).toBe(toggle)
   })
@@ -362,7 +362,7 @@ describe('SubagentReceipt identity and safety', () => {
         threadId: '00000000-0000-4000-8000-000000000004', state: 'completed', result: 'done',
       }), null),
     )
-    const label = '查看 subagent (00000000-0000-4000-8000-000000000004) 执行'
+    const label = '查看 subagent 00000000-0000-4000-8000-000000000004 的执行'
     const link = screen.getByRole('link', { name: label })
     expect(link).toHaveAttribute('title', label)
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')

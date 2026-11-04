@@ -61,7 +61,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
     const { container } = render(<ToolMessageBlock message={callMsg} />)
 
     expect(screen.getByText('/workspace/Sample.java')).toBeInTheDocument()
-    expect(screen.getByText('(/workspace/root)')).toBeInTheDocument()
+    expect(screen.getByText('· /workspace/root')).toBeInTheDocument()
 
     const viewport = container.querySelector('.thread-tool-preview-body.is-write')
     expect(viewport).toBeInTheDocument()
@@ -101,7 +101,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
 
     const { container } = render(<ToolMessageBlock message={callMsg} />)
     expect(screen.getAllByText('/workspace/empty.txt').length).toBeGreaterThanOrEqual(1)
-    expect(container.querySelector('.thread-tool-empty-content')).toHaveTextContent('（空文件）')
+    expect(container.querySelector('.thread-tool-empty-content')).toHaveTextContent('空文件')
   })
 
   it('edit 流式参数阶段明确标注为输入，不伪造为真实 diff', () => {

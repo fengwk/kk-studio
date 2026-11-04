@@ -226,7 +226,7 @@ describe('EditProjectModal', () => {
       await user.click(agentField)
       await user.click(screen.getByRole('option', { name: 'backend-dev' }))
       expect(agentField).not.toHaveAttribute('aria-invalid')
-      await user.type(screen.getByRole('textbox', { name: 'Run 额度（maxRuns）' }), '3')
+      await user.type(screen.getByRole('textbox', { name: 'Run 额度' }), '3')
       await user.click(screen.getByRole('button', { name: '保存工作流' }))
       await waitFor(() => expect(api.updateWorkflow).toHaveBeenCalledTimes(1))
       expect(api.updateWorkflow).toHaveBeenCalledWith(project.id, expect.objectContaining({

@@ -29,7 +29,7 @@ describe('ThreadStatusFooter', () => {
     expect(title).toHaveLength(5)
     expect(title[0]).toBe('未选择环境')
     // 分支累计输入 300000 绝不能冒充上下文占用。
-    expect(title[1]).toBe('上下文占用：尚未测量（上限 128000 tokens）')
+    expect(title[1]).toBe('上下文占用：尚未测量，上限 128000 tokens')
     expect(title[1]).not.toContain('300000')
     expect(title[2]).toContain('300000')
   })
@@ -105,8 +105,8 @@ describe('ThreadStatusFooter', () => {
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('dev（不可用）')
-    expect(lineOf(footer).getAttribute('title')).toContain('环境：dev（不可用）')
+    expect(footer).toHaveTextContent('dev · 不可用')
+    expect(lineOf(footer).getAttribute('title')).toContain('环境：dev · 不可用')
   })
 
   // 单行按 | 连接环境/上下文/用量；hover 用完整数字与全称字段，且没有冗余的累计标题。
@@ -189,12 +189,12 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'dev (unavailable) ∣ ctx —/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
+      'dev · unavailable ∣ ctx —/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
     const unavailableTitle = hoverLines(line)
     expect(unavailableTitle).toHaveLength(5)
-    expect(unavailableTitle[0]).toBe('Environment: dev (unavailable)')
-    expect(unavailableTitle[1]).toBe('Context occupancy: not yet measured (limit 128000 tokens)')
+    expect(unavailableTitle[0]).toBe('Environment: dev · unavailable')
+    expect(unavailableTitle[1]).toBe('Context occupancy: not yet measured, limit 128000 tokens')
 
     rerender(
       <ThreadStatusFooter

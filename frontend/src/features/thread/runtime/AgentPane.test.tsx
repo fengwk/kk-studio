@@ -4401,8 +4401,8 @@ describe('AgentPane root control and child observation', () => {
 
     const source = await screen.findByRole('link', { name: /worker/ })
     expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
-    expect(source).toHaveAttribute('title', `查看 subagent (${CHILD_THREAD_ID}) 执行`)
-    expect(source).toHaveTextContent(`查看 subagent (${CHILD_THREAD_ID}) 执行`)
+    expect(source).toHaveAttribute('title', `查看 subagent ${CHILD_THREAD_ID} 的执行`)
+    expect(source).toHaveTextContent(`查看 subagent ${CHILD_THREAD_ID} 的执行`)
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'root draft kept')
     const unmountsBeforeObservation = controlMounts.unmount.mock.calls.length
@@ -4999,7 +4999,7 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
-    const label = `查看 subagent (${unknownSourceId}) 执行`
+    const label = `查看 subagent ${unknownSourceId} 的执行`
     const source = await screen.findByRole('link', { name: label })
     expect(source).toHaveAttribute('title', label)
     expect(source).toHaveTextContent(label)
@@ -5090,7 +5090,7 @@ describe('AgentPane root control mounting', () => {
     await user.click(composer)
     await user.keyboard('/goal{Enter}')
 
-    const input = await screen.findByPlaceholderText('输入 thread 目标（最多 2000 字符）...')
+    const input = await screen.findByPlaceholderText('输入 thread 目标...')
     await user.type(input, '先把契约梳理清楚')
     await user.click(screen.getByRole('button', { name: '设置目标' }))
 

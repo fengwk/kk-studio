@@ -546,7 +546,7 @@ describe('ThreadEventView', () => {
       const previewTab = screen.getByRole('tab', { name: '请求预览' })
       const detailTab = screen.getByRole('tab', { name: '详情' })
       await user.click(previewTab)
-      const frozenTrigger = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest（非 HTTP 原始报文）' })
+      const frozenTrigger = screen.getByRole('button', { name: '查看当前调用冻结的规范化 ProviderRequest，而非 HTTP 原始报文' })
 
       // 点击冻结调用触发器并由上级更新 selection。
       await user.click(frozenTrigger)
@@ -637,7 +637,7 @@ describe('ThreadEventView', () => {
       await user.click(previewTab)
 
       // 点击 Cache 按钮
-      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 \(SHORT\) \(key-1\)/ })
+      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 · SHORT · key-1/ })
       await user.click(cacheBtn)
 
       expect(detailTab).toHaveAttribute('aria-selected', 'true')

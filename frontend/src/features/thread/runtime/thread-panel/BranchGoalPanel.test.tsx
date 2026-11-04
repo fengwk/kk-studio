@@ -93,7 +93,7 @@ describe('BranchGoalPanel', () => {
       />,
     )
 
-    expect(screen.getByText(/已完成（Agent 报告）/)).toBeInTheDocument()
+    expect(screen.getByText(/已完成/)).toBeInTheDocument()
     expect(screen.getByText(/由 Agent 报告，非系统验收/)).toBeInTheDocument()
     expect(screen.getByText('Successfully satisfied all acceptance criteria')).toBeInTheDocument()
   })

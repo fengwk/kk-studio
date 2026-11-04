@@ -117,12 +117,12 @@ describe('AI i18n live-switch contracts', () => {
     )
 
     expect(screen.getByRole('form', { name: 'Create Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat name (duplicates allowed)')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Chat name')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
     expect(screen.getByRole('form', { name: '新建 Chat' })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Chat 名称（可重名）')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Chat 名称')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
   })
 
