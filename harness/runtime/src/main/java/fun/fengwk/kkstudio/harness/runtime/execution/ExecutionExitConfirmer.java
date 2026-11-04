@@ -113,15 +113,15 @@ public final class ExecutionExitConfirmer {
         executionId,
         () -> {
           PendingProof current = proofs.get(executionId);
-          if (candidate.inMemory()) {
-            // 等待锁期间已由并发确认完成并删除 proof，本轮不再重放。
-            if (current == null) {
-              return null;
+          if (current != null) {
+            // 磁盘记录来临前本进程已有更权威的 proof，本轮由内存候选处理。
+            if (!candidate.inMemory()) {
+              return false;
             }
           } else {
-            // 磁盘记录只在本进程还没有同一执行的 proof 时装入。
-            if (current != null) {
-              return null;
+            // 内存 proof 在等待锁期间已完成并删除时不再重放；磁盘记录此时才装入。
+            if (candidate.inMemory()) {
+              return false;
             }
             current = new PendingProof(candidate.journalRecord());
             proofs.put(executionId, current);
@@ -129,7 +129,7 @@ public final class ExecutionExitConfirmer {
           if (shouldAttempt(executionId, now)) {
             replayOne(current.record(), now);
           }
-          return null;
+          return true;
         });
   }
 
