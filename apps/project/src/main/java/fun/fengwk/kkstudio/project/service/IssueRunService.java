@@ -123,7 +123,7 @@ public class IssueRunService {
       return replayAcceptedRun(applied);
     }
     Issue initial = issueRepository.getById(issueId);
-    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
+    Project project = projectRepository.lockForShare(initial.getProjectId());
     if (project == null) {
       throw new ProjectNotFoundException("project");
     }

@@ -124,7 +124,7 @@ class IssueRunServiceTest {
     AcceptedCommands accepted = mock(AcceptedCommands.class);
 
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
     when(issueRunRepository.lockActiveByIssueId(ISSUE_ID)).thenReturn(null);
     when(stageBudgetRepository.get(ISSUE_ID, "DESIGN"))
@@ -202,7 +202,7 @@ class IssueRunServiceTest {
     Issue issue = issue();
     issue.setState("INIT");
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     ProjectValidationException error =
@@ -223,7 +223,7 @@ class IssueRunServiceTest {
             .replace("\"environment\":\"stage-env\",", "")
             .replace("\"maxRuns\":3,", ""));
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     ProjectValidationException error =
@@ -239,7 +239,7 @@ class IssueRunServiceTest {
     Issue issue = issue();
     Project project = project();
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
 
     project.setArchivedAt(Instant.now());

@@ -38,7 +38,7 @@ Project 只经两个窄适配接触运行时与存储，平台异常在此收敛
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
-`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project KEY SHARE -> Issue UPDATE` 锁定产品层级（Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
+`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
 

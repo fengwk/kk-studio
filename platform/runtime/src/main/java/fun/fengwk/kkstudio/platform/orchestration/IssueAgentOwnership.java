@@ -7,7 +7,7 @@ import java.util.UUID;
  * Issue+Agent owner 的产品层级与稳定 Thread 绑定，由 Project 应用实现。
  *
  * <p>平台编排只经由本接口锁定 Project/Issue 并读写 {@code (issueId, agentName) -> threadId} 绑定，自身不感知 Project
- * 领域。锁序固定为先 Project 后 Issue：接受与交互路径用共享锁（{@code Project KEY SHARE -> Issue UPDATE}），不阻塞同 owner
+ * 领域。锁序固定为先 Project 后 Issue：接受与交互路径用共享锁（{@code Project SHARE -> Issue UPDATE}），不阻塞不同 Issue
  * 的并发写入；深删除路径用排他锁。所有方法都必须在调用方的事务内执行。
  */
 public interface IssueAgentOwnership {

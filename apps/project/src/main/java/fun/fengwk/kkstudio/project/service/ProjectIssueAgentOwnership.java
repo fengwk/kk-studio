@@ -31,7 +31,7 @@ public class ProjectIssueAgentOwnership implements IssueAgentOwnership {
       throw new IllegalArgumentException("Issue owner does not exist");
     }
     UUID projectId = issue.getProjectId();
-    Project project = projectRepository.lockForKeyShare(projectId);
+    Project project = projectRepository.lockForShare(projectId);
     if (project == null) {
       throw new IllegalArgumentException("Project owner does not exist");
     }
@@ -83,7 +83,7 @@ public class ProjectIssueAgentOwnership implements IssueAgentOwnership {
       throw new IllegalStateException("Issue owner does not exist");
     }
     UUID projectId = issue.getProjectId();
-    if (projectRepository.lockForKeyShare(projectId) == null) {
+    if (projectRepository.lockForShare(projectId) == null) {
       throw new IllegalStateException("Project owner does not exist");
     }
     Issue lockedIssue = issueRepository.lockById(issue.getId());

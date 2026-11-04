@@ -50,7 +50,7 @@ class ProjectIssueAgentOwnershipTest {
     ownership = new ProjectIssueAgentOwnership(projectRepository, issueRepository, bindings);
 
     Project project = Project.builder().id(PROJECT_ID).build();
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(projectRepository.lockById(PROJECT_ID)).thenReturn(project);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
@@ -60,13 +60,13 @@ class ProjectIssueAgentOwnershipTest {
         .thenReturn(new IssueAgentThread(ISSUE_ID, AGENT, PROJECT_ID, THREAD_ID));
   }
 
-  /** 接受路径严格按 Project KEY SHARE -> Issue UPDATE -> 稳定绑定读取的顺序执行，并返回绑定 Thread。 */
+  /** 接受路径严格按 Project SHARE -> Issue UPDATE -> 稳定绑定读取的顺序执行，并返回绑定 Thread。 */
   @Test
   void acceptanceLocksProjectThenIssueThenReadsBinding() {
     assertEquals(Optional.of(THREAD_ID), ownership.lockForAcceptance(OWNER));
 
     InOrder order = inOrder(projectRepository, issueRepository, bindings);
-    order.verify(projectRepository).lockForKeyShare(PROJECT_ID);
+    order.verify(projectRepository).lockForShare(PROJECT_ID);
     order.verify(issueRepository).lockById(ISSUE_ID);
     order.verify(bindings).findByIssueIdAndAgentName(ISSUE_ID, AGENT);
   }
@@ -86,14 +86,14 @@ class ProjectIssueAgentOwnershipTest {
     assertRejected("Issue owner does not exist");
 
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(null);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(null);
     assertRejected("Project owner does not exist");
 
-    when(projectRepository.lockForKeyShare(PROJECT_ID))
+    when(projectRepository.lockForShare(PROJECT_ID))
         .thenReturn(Project.builder().id(PROJECT_ID).archivedAt(ARCHIVED_AT).build());
     assertRejected("Cannot accept commands for archived project");
 
-    when(projectRepository.lockForKeyShare(PROJECT_ID))
+    when(projectRepository.lockForShare(PROJECT_ID))
         .thenReturn(Project.builder().id(PROJECT_ID).build());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue(new UUID(0L, 99), null));
     assertRejected("Issue owner hierarchy is inconsistent");
@@ -134,11 +134,11 @@ class ProjectIssueAgentOwnershipTest {
     ownership.deleteBinding(OWNER);
 
     verify(bindings).deleteByIssueIdAndAgentName(ISSUE_ID, AGENT);
-    verify(projectRepository, never()).lockForKeyShare(any());
+    verify(projectRepository, never()).lockForShare(any());
     verify(issueRepository, never()).lockById(any());
   }
 
-  /** 交互路径：根有 Issue 绑定时按 Project KEY SHARE -> Issue UPDATE 加锁；暂停或归档不阻止人工回答被记录。 */
+  /** 交互路径：根有 Issue 绑定时按 Project SHARE -> Issue UPDATE 加锁；暂停或归档不阻止人工回答被记录。 */
   @Test
   void interactionLocksBoundRootHierarchyEvenWhenArchived() {
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, ARCHIVED_AT));
@@ -147,7 +147,7 @@ class ProjectIssueAgentOwnershipTest {
 
     InOrder order = inOrder(issueRepository, projectRepository);
     order.verify(issueRepository).getById(ISSUE_ID);
-    order.verify(projectRepository).lockForKeyShare(PROJECT_ID);
+    order.verify(projectRepository).lockForShare(PROJECT_ID);
     order.verify(issueRepository).lockById(ISSUE_ID);
   }
 
@@ -168,10 +168,10 @@ class ProjectIssueAgentOwnershipTest {
     assertCorrupt("Issue owner does not exist");
 
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue(PROJECT_ID, null));
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(null);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(null);
     assertCorrupt("Project owner does not exist");
 
-    when(projectRepository.lockForKeyShare(PROJECT_ID))
+    when(projectRepository.lockForShare(PROJECT_ID))
         .thenReturn(Project.builder().id(PROJECT_ID).build());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(null);
     assertCorrupt("Issue owner hierarchy is inconsistent");
