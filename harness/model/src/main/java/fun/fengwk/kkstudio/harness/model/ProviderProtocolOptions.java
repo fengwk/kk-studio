@@ -3,9 +3,11 @@ package fun.fengwk.kkstudio.harness.model;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 单个 model variant 携带的厂商原生协议请求选项。
@@ -43,6 +45,25 @@ public record ProviderProtocolOptions(String canonicalJson) {
       return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
     } catch (JacksonException error) {
       throw new IllegalArgumentException("protocolOptions must contain JSON values only");
+    }
+  }
+
+  /** 从已解析的 JSON object 构造，避免调用方序列化后再解析一次。 */
+  public static ProviderProtocolOptions fromJsonNode(ObjectNode options) {
+    Objects.requireNonNull(options, "options");
+    try {
+      return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("protocolOptions must contain JSON values only");
+    }
+  }
+
+  /** 返回 canonical JSON 的独立可变副本；每次调用互不影响。 */
+  public ObjectNode copyOptions() {
+    try {
+      return (ObjectNode) STRICT_MAPPER.readTree(canonicalJson);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("variant protocol options are not valid JSON", error);
     }
   }
 

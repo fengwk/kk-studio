@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 
 import java.math.BigInteger;
@@ -99,7 +98,7 @@ final class OpenAiChatRequestEncoder {
     Objects.requireNonNull(config, "config");
 
     // variant 的原生协议选项是请求体的合并基座：官方顶层能力无损保留，运行时所有权字段随后覆盖并在 native 声明时冲突
-    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    ObjectNode root = request.variant().protocolOptions().copyOptions();
     rejectRuntimeOwnedNativeFields(root);
     for (String field : List.of("functions", "function_call")) {
       if (root.has(field)) {

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -14,16 +15,16 @@ import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import java.math.BigDecimal;
 
 /**
- * {@link ProviderProtocolOptionsJson} 契约：空选项返回空 object、数值按 JSON 语义还原，且每次调用都返回互不影响的独立副本。
+ * {@link ProviderProtocolOptions#copyOptions()} 契约：空选项返回空 object、数值按 JSON 语义还原，且每次调用都返回互不影响的独立副本。
  *
  * <p>协议编码器会把返回值直接合并进请求体并任意修改，因此「副本独立」与「数值原样」是后续四个协议编码器无损合并的前提。
  */
-class ProviderProtocolOptionsJsonTest {
+class ProviderProtocolOptionsCopyTest {
 
   /** 未声明选项的 variant 得到空 object，可直接作为合并基座。 */
   @Test
   void returnsEmptyObjectWhenVariantDeclaresNoOptions() {
-    ObjectNode options = ProviderProtocolOptionsJson.copyOfOptions(new ModelVariant("default"));
+    ObjectNode options = new ModelVariant("default").protocolOptions().copyOptions();
 
     assertTrue(options.isEmpty());
     assertEquals("{}", options.toString());
@@ -40,7 +41,7 @@ class ProviderProtocolOptionsJsonTest {
                 "{\"metadata\":{\"source\":\"catalog\"},\"thinking\":{\"budget_tokens\":4096},"
                     + "\"ratio\":1.10,\"revision\":1758880000000,\"flags\":[true,false]}"));
 
-    ObjectNode options = ProviderProtocolOptionsJson.copyOfOptions(variant);
+    ObjectNode options = variant.protocolOptions().copyOptions();
 
     assertEquals("catalog", options.path("metadata").path("source").asString(""));
     assertEquals(4096, options.path("thinking").path("budget_tokens").asInt(0));
@@ -65,7 +66,7 @@ class ProviderProtocolOptionsJsonTest {
                 "{\"big\":1e309,\"tiny\":1e-324,"
                     + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}"));
 
-    ObjectNode options = ProviderProtocolOptionsJson.copyOfOptions(variant);
+    ObjectNode options = variant.protocolOptions().copyOptions();
 
     assertEquals(new BigDecimal("1e309"), options.path("big").decimalValue());
     assertEquals(new BigDecimal("1e-324"), options.path("tiny").decimalValue());
@@ -84,8 +85,8 @@ class ProviderProtocolOptionsJsonTest {
             null,
             new ProviderProtocolOptions("{\"metadata\":{\"source\":\"catalog\"}}"));
 
-    ObjectNode first = ProviderProtocolOptionsJson.copyOfOptions(variant);
-    ObjectNode second = ProviderProtocolOptionsJson.copyOfOptions(variant);
+    ObjectNode first = variant.protocolOptions().copyOptions();
+    ObjectNode second = variant.protocolOptions().copyOptions();
     assertNotSame(first, second);
 
     ((ObjectNode) first.path("metadata")).put("source", "mutated");
@@ -95,15 +96,25 @@ class ProviderProtocolOptionsJsonTest {
     assertTrue(second.path("injected").isMissingNode());
     assertEquals(
         "catalog",
-        ProviderProtocolOptionsJson.copyOfOptions(variant)
-            .path("metadata")
-            .path("source")
-            .asString(""));
+        variant.protocolOptions().copyOptions().path("metadata").path("source").asString(""));
   }
 
-  /** variant 不可为 null：编码器传入错误对象时必须显式失败，而不是产出空选项。 */
+  /** fromJsonNode 直接消费已解析树，并保持同样的 canonical 语义。 */
   @Test
-  void rejectsNullVariant() {
-    assertThrows(NullPointerException.class, () -> ProviderProtocolOptionsJson.copyOfOptions(null));
+  void constructsFromParsedNodeWithoutChangingNumbers() {
+    ObjectNode parsed = JsonNodeFactory.instance.objectNode();
+    parsed.put("ratio", new BigDecimal("1.10"));
+    parsed.put("revision", 1758880000000L);
+
+    ProviderProtocolOptions options = ProviderProtocolOptions.fromJsonNode(parsed);
+
+    assertEquals("{\"ratio\":1.1,\"revision\":1758880000000}", options.canonicalJson());
+    assertEquals(new BigDecimal("1.1"), options.copyOptions().path("ratio").decimalValue());
+  }
+
+  /** 已解析节点不可为 null：调用方必须显式处理空选项，而不是静默退化为空 object。 */
+  @Test
+  void rejectsNullParsedNode() {
+    assertThrows(NullPointerException.class, () -> ProviderProtocolOptions.fromJsonNode(null));
   }
 }

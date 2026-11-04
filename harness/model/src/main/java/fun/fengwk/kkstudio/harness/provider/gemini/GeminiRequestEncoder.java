@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 
 import java.math.BigInteger;
@@ -98,7 +97,7 @@ final class GeminiRequestEncoder {
     validateCacheControl(request.cacheControl());
 
     // 1. 以 variant 原生协议选项为 root：非 runtime-owned 的官方字段无损保留
-    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    ObjectNode root = request.variant().protocolOptions().copyOptions();
     rejectRuntimeOwnedOptions(root);
 
     // 2. 请求唯一的系统指令映射为顶层 systemInstruction.parts

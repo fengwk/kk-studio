@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
@@ -293,7 +292,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals("{\"n\":1.1}", fromDto.get(0).protocolOptions().canonicalJson());
     assertEquals(
         new BigDecimal("1e-324"),
-        ProviderProtocolOptionsJson.copyOfOptions(fromDto.get(1)).path("n").decimalValue());
+        fromDto.get(1).protocolOptions().copyOptions().path("n").decimalValue());
   }
 
   /** 选项校验仍早于默认 variant 和定价校验，且不得泄露原文。 */
@@ -479,8 +478,7 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(runtime.contains("1.234567890123456789E+45"), runtime);
     // 协议编码器实际使用的树仍是 JSON 数字；写成 wire 后不能变为字符串或 JS 浮点近似值。
     var wireOptions =
-        ProviderProtocolOptionsJson.copyOfOptions(
-            conventionParser.parse(encoded).variants().get(0));
+        conventionParser.parse(encoded).variants().get(0).protocolOptions().copyOptions();
     assertEquals(new BigInteger("9007199254740993"), wireOptions.path("large").bigIntegerValue());
     assertEquals(
         new BigInteger("9223372036854775808"), wireOptions.path("beyond").bigIntegerValue());

@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -46,10 +45,9 @@ import java.util.Set;
  *
  * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Anthropic 规范的 UTF-8 请求 JSON 字节数组。
  *
- * <p>请求体以 variant 的 native {@link ProviderProtocolOptionsJson protocolOptions} 为合并起点：运行时所有权字段
- * （{@code model}/{@code max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code
- * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker
- * 与请求体大小均基于最终合并结果。
+ * <p>请求体以 variant 的 native {@code protocolOptions} 为合并起点：运行时所有权字段 （{@code model}/{@code
+ * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
+ * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
  * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前，BUDGET
  * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
@@ -108,7 +106,7 @@ public final class AnthropicRequestEncoder {
     Objects.requireNonNull(config, "config");
 
     // native protocolOptions 是合并起点：运行时所有权字段由本编码器写入，其余官方顶层字段原样保留
-    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    ObjectNode root = request.variant().protocolOptions().copyOptions();
     rejectRuntimeOwnedOptions(root);
 
     root.put("model", request.model().modelId());

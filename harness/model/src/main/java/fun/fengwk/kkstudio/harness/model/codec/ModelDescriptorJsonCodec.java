@@ -1,5 +1,14 @@
 package fun.fengwk.kkstudio.harness.model.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.sorted;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.text;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -16,9 +25,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -66,7 +73,8 @@ public final class ModelDescriptorJsonCodec {
   /** 把单个 {@link ModelDescriptor} 编码为 canonical JSON 文本。 */
   public String encodeDescriptor(ModelDescriptor descriptor) {
     Objects.requireNonNull(descriptor, "descriptor");
-    return write(encodeDescriptorNode(descriptor));
+    return JsonCodecSupport.write(
+        MAPPER, encodeDescriptorNode(descriptor), "cannot encode model JSON");
   }
 
   /** 把单个 {@link ModelDescriptor} 编码为 canonical {@link ObjectNode}。 */
@@ -94,7 +102,7 @@ public final class ModelDescriptorJsonCodec {
   /** 把单个 {@link ModelVariant} 编码为 canonical JSON 文本。 */
   public String encodeVariant(ModelVariant variant) {
     Objects.requireNonNull(variant, "variant");
-    return write(encodeVariantNode(variant));
+    return JsonCodecSupport.write(MAPPER, encodeVariantNode(variant), "cannot encode model JSON");
   }
 
   /** 把单个 {@link ModelVariant} 编码为 canonical {@link ObjectNode}。 */
@@ -201,97 +209,12 @@ public final class ModelDescriptorJsonCodec {
    * object，而不是被再次转义的字符串。
    */
   private static ObjectNode protocolOptionsNode(ProviderProtocolOptions protocolOptions) {
-    try {
-      return object(MAPPER.readTree(protocolOptions.canonicalJson()), "protocolOptions");
-    } catch (JacksonException exception) {
-      throw new IllegalStateException("cannot encode variant protocol options", exception);
-    }
+    return protocolOptions.copyOptions();
   }
 
   /** 读取必填的 protocolOptions object；缺失、null 与非 object 都拒绝。 */
   private static ProviderProtocolOptions readProtocolOptions(ObjectNode node) {
-    ObjectNode options = object(node.get("protocolOptions"), "protocolOptions");
-    try {
-      return new ProviderProtocolOptions(MAPPER.writeValueAsString(options));
-    } catch (JacksonException exception) {
-      throw new IllegalArgumentException("invalid variant protocolOptions", exception);
-    }
-  }
-
-  // ---------- 共享工具方法 ----------
-
-  /**
-   * 暴露给同模块其他 codec（如 {@code ProviderRequestJsonCodec}）的 JsonNode 字段读工具，签名严格遵守
-   * ProviderRequestJsonCodec 的现有实现，保证两处行为完全一致。
-   */
-  static ObjectNode object(JsonNode value, String name) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(name + " must be an object");
-    }
-    return object;
-  }
-
-  static ArrayNode array(JsonNode value, String name) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(name + " must be an array");
-    }
-    return array;
-  }
-
-  static String text(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isString()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    return value.stringValue();
-  }
-
-  static String decodeNullableText(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isString()) {
-      throw new IllegalArgumentException(field + " must be text or null");
-    }
-    return value.stringValue();
-  }
-
-  static boolean bool(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isBoolean()) {
-      throw new IllegalArgumentException(field + " must be boolean");
-    }
-    return value.booleanValue();
-  }
-
-  static void requireFields(ObjectNode node, Set<String> expected, String name) {
-    Set<String> actual = new HashSet<>();
-    node.propertyNames().forEach(actual::add);
-    if (!actual.equals(expected)) {
-      throw new IllegalArgumentException(
-          "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");
-    }
-  }
-
-  static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return set;
-  }
-
-  /** 按给定比较器排序的不可变列表，用于 enum Set 的 deterministic 输出。 */
-  static <T> List<T> sorted(Set<T> values, Comparator<? super T> comparator) {
-    return values.stream().sorted(comparator).toList();
-  }
-
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException exception) {
-      throw new IllegalStateException("cannot encode model JSON", exception);
-    }
+    return ProviderProtocolOptions.fromJsonNode(
+        object(node.get("protocolOptions"), "protocolOptions"));
   }
 }

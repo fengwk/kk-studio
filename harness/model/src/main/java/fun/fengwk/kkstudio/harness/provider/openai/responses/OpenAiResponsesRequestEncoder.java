@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
-import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 
 import java.net.URI;
@@ -112,7 +111,7 @@ public final class OpenAiResponsesRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
 
     // variant 的厂商原生协议选项是请求体 root：官方字段默认无损并入，runtime 所有权字段单独裁决。
-    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    ObjectNode root = request.variant().protocolOptions().copyOptions();
     validateNativeOptions(root);
     applyRuntimeFacts(root, request);
 
