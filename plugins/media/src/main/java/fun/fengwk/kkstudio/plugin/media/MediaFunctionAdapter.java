@@ -137,6 +137,7 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
     // There is no external service, remote queue, or asynchronous worker to submit to.
     // The Runtime persists the SUBMITTING -> SUBMITTED lifecycle transitions around this
     // invocation.
+    // A local, deterministic crop has no resumable external state, so it must not checkpoint.
   }
 
   @Override
@@ -146,13 +147,6 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
     preflight(run);
 
     CropRectangle rect = CropRectangle.from(run.args());
-    context.checkpoint(
-        "CROPPING",
-        Map.of(
-            "x", rect.x(),
-            "y", rect.y(),
-            "width", rect.width(),
-            "height", rect.height()));
 
     CanvasFunctionFrozenReference reference = run.manifest().get(0);
     BufferedImage sourceImage;

@@ -81,10 +81,10 @@ class FakeCanvasFunctionAdapterTest {
             "QUEUED",
             Map.of());
     adapter.submit(context, run);
-    assertEquals(List.of("FAKE_SUBMITTED"), context.stages);
+    assertTrue(context.stages.isEmpty(), "local fake fixture has no external state to checkpoint");
 
     assertEquals(List.of(IMAGE_TARGET), adapter.execute(context, run));
-    assertEquals(List.of("FAKE_SUBMITTED", "FAKE_RENDERING"), context.stages);
+    assertTrue(context.stages.isEmpty(), "execute must not checkpoint local fake work");
     assertEquals(IMAGE_TARGET, context.materializedBlobId);
 
     RecordingContext videoContext = new RecordingContext();
@@ -125,11 +125,11 @@ class FakeCanvasFunctionAdapterTest {
             "QUEUED",
             Map.of());
     adapter.submit(reportContext, reportRun);
-    assertEquals(List.of("FAKE_SUBMITTED"), reportContext.stages);
+    assertTrue(reportContext.stages.isEmpty());
 
     List<UUID> reportResult = adapter.execute(reportContext, reportRun);
     assertEquals(List.of(REPORT_TEXT, REPORT_IMAGE), reportResult);
-    assertEquals(List.of("FAKE_SUBMITTED", "FAKE_REPORTING"), reportContext.stages);
+    assertTrue(reportContext.stages.isEmpty());
     assertEquals("Fake report for output", reportContext.materializedText.get(REPORT_TEXT));
     assertEquals(REPORT_IMAGE, reportContext.materializedBlobId);
 

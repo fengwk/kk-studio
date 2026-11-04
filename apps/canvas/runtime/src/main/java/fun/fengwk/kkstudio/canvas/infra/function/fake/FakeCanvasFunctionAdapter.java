@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 只读取 main resources 极小合法媒体、仍经过真实 materializer 的无成本 fake adapter。 */
+/** 只读取 main resources 极小合法媒体、仍经过真实 materializer 的无成本 fake adapter；没有外部副作用，因此不写 checkpoint。 */
 public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private static final String IMAGE_FIXTURE =
@@ -171,13 +171,12 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
-    context.checkpoint("FAKE_SUBMITTED", Map.of());
+    // 免费、同步、可重复的本地 fixture 没有需要恢复的外部任务身份。
   }
 
   @Override
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     if (run.definition().name().equals(REPORT_FUNCTION.name())) {
-      context.checkpoint("FAKE_REPORTING", Map.of("fixture", IMAGE_FIXTURE));
       CanvasFunctionFrozenOutput textOutput = run.output(0);
       CanvasFunctionFrozenOutput imageOutput = run.output(1);
       UUID textId = context.materializeTextOutput(textOutput, "Fake report for " + run.nodeName());
@@ -190,7 +189,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
       }
     }
     String fixture = fixture(run);
-    context.checkpoint("FAKE_RENDERING", Map.of("fixture", fixture));
     ClassPathResource resource = new ClassPathResource(fixture);
     try (InputStream content = resource.getInputStream()) {
       UUID resourceId = context.materializeOutput(run.output(0), content);
