@@ -186,7 +186,7 @@ class SystemSettingsServiceTest {
     assertEquals(SystemSettings.DEFAULT, snapshot.get());
   }
 
-  /** GET 的显式 section 映射必须携带 network，不能因服务手动复制字段漏掉新契约。 */
+  /** GET 映射完整聚合及版本，network 的可选字段也必须保留。 */
   @Test
   void getIncludesPersistedNetworkSection() {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
@@ -196,7 +196,11 @@ class SystemSettingsServiceTest {
     when(repository.get())
         .thenReturn(
             new SystemSettingsRepository.SystemSettingsRecord(settings, 1, CREATED_AT, UPDATED_AT));
-    assertEquals(sections.getNetwork(), service.get().getNetwork());
+    var response = service.get();
+    assertEquals(settings, codec.fromDto(response));
+    assertEquals("1", response.getVersion());
+    assertEquals(CREATED_AT, response.getCreateTime());
+    assertEquals(UPDATED_AT, response.getUpdateTime());
   }
 
   private SystemSettingsUpdateDTO update(

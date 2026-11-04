@@ -181,8 +181,13 @@ public class SystemSettingsCodec {
 
   /** 把领域聚合六个 section 映射为 DTO 载体（GET 响应 / 测试对比）。 */
   public SystemSettingsSectionsDTO toSections(SystemSettings settings) {
+    return toSections(settings, new SystemSettingsSectionsDTO());
+  }
+
+  /** 直接填充目标 DTO，避免在响应中再次复制各 section。 */
+  public <T extends SystemSettingsSectionsDTO> T toSections(SystemSettings settings, T dto) {
     Objects.requireNonNull(settings, "settings");
-    SystemSettingsSectionsDTO dto = new SystemSettingsSectionsDTO();
+    Objects.requireNonNull(dto, "dto");
     dto.setTool(fromTool(settings.tool()));
     dto.setAiRuntime(fromAiRuntime(settings.aiRuntime()));
     dto.setEnvironment(fromEnvironment(settings.environment()));
