@@ -8,59 +8,31 @@ import type {
   CapabilityExecutor,
   CapabilityResult,
   DaemonConfig,
-  IdeCommand,
   IdeLeaseHandler,
   IdeService,
   ProcessSupervisor,
-  ResultContent,
 } from './contracts.js'
 import { DAEMON_VERSION } from './config.js'
 import { applyNetworkSettings } from './network.js'
 import {
-  CancelSchema,
   CancelledSchema,
-  CapabilityResultSchema,
-  CompletedSchema,
-  ContentSchema,
   EnvelopeSchema,
   ErrorSchema,
   ExecutionExitedSchema,
-  FailedSchema,
   HeartbeatSchema,
-  IdeResultSchema,
-  JsonContentSchema,
   MessageType,
-  ProgressSchema,
   ReadySchema,
   RecoverNotFoundSchema,
-  ResourceContentSchema,
-  RuntimeBodySchema,
-  RuntimeSnapshotSchema,
   RuntimeStatusSchema,
-  SettingsSchema,
   StartedSchema,
-  TextContentSchema,
-  UpdateProgressSchema,
-  UpdateResultSchema,
-  IdeAction as ProtoIdeAction,
-  IdeOpenMode as ProtoIdeOpenMode,
-  type Cancel,
-  type Completed,
-  type Content,
   type Envelope,
-  type Failed,
-  type Heartbeat,
   type IdeCommand as ProtoIdeCommand,
   type IdeLease as ProtoIdeLease,
   type IdeResult,
   type Invoke,
-  type Progress,
-  type Ready,
-  type Recover,
   type ResourceUploadTicket,
   type RuntimeSnapshot,
   type Settings,
-  type Started,
   type TemporaryResourcePolicy,
   type Update,
   type UpdateResult,
@@ -74,18 +46,28 @@ import {
   type TerminalMessage,
   type TerminalPayload,
 } from './journal.js'
-import { validate } from './protocol/control/codec.js'
+import {
+  ActiveConnection,
+  ConnectionLifecycle,
+  type RuntimeState,
+} from './runtime-connection.js'
 import { RuntimeStatusTracker, type RuntimeStatus, type RuntimeStatusUpdate, type UpdateByteProgress } from './runtime-status.js'
 import { detectEnvironmentInfo } from './runtime-environment.js'
 import {
-  admitIdeCommand,
-  ideFailureReply,
+  encodeCompletedProto,
+  encodeProgressProto,
+  failedPayload,
+  requireInvocationId,
+  safeMessage,
+} from './runtime-encoding.js'
+import {
+  IdeCommandRuntime,
   requireFreshIdeLease,
-  toProtoIdeResult,
+  toIdeLeaseProof,
   type ActiveIdeLeaseRound,
 } from './runtime-ide.js'
 import type { RuntimeOptions, TemporaryResourceSweeper, UpdatePort } from './runtime-ports.js'
-import { createResourceRuntime, type UploadedResource } from './runtime-resources.js'
+import { createResourceRuntime } from './runtime-resources.js'
 import { collectDiagnosticFailure, recordShutdownFailure, releaseStep } from './runtime-shutdown.js'
 import {
   acceptedReceipt,
@@ -98,7 +80,7 @@ import {
   type ActiveUpdate,
   type UpdateReceipt,
 } from './runtime-update.js'
-import type { ControlConnection, ControlTransport, ControlTransportListener } from './transport/index.js'
+import type { ControlTransport } from './transport/index.js'
 
 /**
  * Environment Daemon 的连接、协议与本地 Capability 执行基座。
@@ -113,7 +95,7 @@ import type { ControlConnection, ControlTransport, ControlTransportListener } fr
  * <p>有界性：并发 invocation 数、update 回执缓存、IDE 在途请求集合与 journal 终态条目都有明确上界；没有无界队列。
  */
 
-export type RuntimeState = 'STOPPED' | 'DISCONNECTED' | 'CONNECTING' | 'READY' | 'FAILED'
+export type { RuntimeState } from './runtime-connection.js'
 
 export type InvocationTerminationCause = 'TIMED_OUT' | 'CANCELLED' | 'SHUTDOWN'
 
@@ -128,54 +110,19 @@ export type { RuntimeStatus, UpdateByteProgress } from './runtime-status.js'
 export { detectArchitecture, detectEnvironmentInfo, defaultNote } from './runtime-environment.js'
 export type { UploadedResource } from './runtime-resources.js'
 
-const FALLBACK_FAILURE_MESSAGE = 'capability execution failed'
 const DEFAULT_HEARTBEAT_INTERVAL_MILLIS = 15_000
 const DEFAULT_INITIAL_RECONNECT_DELAY_MILLIS = 1_000
 const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 
-function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
-  switch (action) {
-    case ProtoIdeAction.OPEN_VIEW:
-      return 'OPEN_VIEW'
-    case ProtoIdeAction.CHANGE_DIRECTORY:
-      return 'CHANGE_DIRECTORY'
-    case ProtoIdeAction.FOCUS_TERMINAL:
-      return 'FOCUS_TERMINAL'
-    case ProtoIdeAction.CLOSE_VIEW:
-      return 'CLOSE_VIEW'
-    case ProtoIdeAction.LIST_VIEWS:
-      return 'LIST_VIEWS'
-    case ProtoIdeAction.LIST_DIRECTORIES:
-      return 'LIST_DIRECTORIES'
-    case ProtoIdeAction.COLLAPSE_MOBILE:
-      return 'COLLAPSE_MOBILE'
-    default:
-      throw new Error(`unsupported IDE action: ${action}`)
-  }
-}
-
-function toIdeMode(mode: ProtoIdeOpenMode | undefined): IdeCommand['mode'] | undefined {
-  if (mode === undefined || mode === ProtoIdeOpenMode.IDE_OPEN_MODE_UNSPECIFIED) {
-    return undefined
-  }
-  switch (mode) {
-    case ProtoIdeOpenMode.CREATE:
-      return 'create'
-    case ProtoIdeOpenMode.RESUME:
-      return 'resume'
-    default:
-      throw new Error(`unsupported IDE open mode: ${mode}`)
-  }
-}
-
 export class Runtime {
   private readonly config: DaemonConfig
   private readonly transport: ControlTransport
+  private readonly connection: ConnectionLifecycle
   private readonly capabilities: Record<string, CapabilityExecutor>
   private readonly processes: ProcessSupervisor
-  private readonly environment: Parameters<typeof detectEnvironmentInfo>[0] extends never ? never : ReturnType<typeof detectEnvironmentInfo>
+  private readonly environment: ReturnType<typeof detectEnvironmentInfo>
   private readonly daemonVersion: string
   private readonly journal: InvocationJournal
   private readonly resources: ReturnType<typeof createResourceRuntime>
@@ -184,14 +131,11 @@ export class Runtime {
   private readonly ideLease: IdeLeaseHandler | null
   private readonly temporaryResources: TemporaryResourceSweeper | null
   private readonly heartbeatIntervalMillis: number
-  private readonly initialReconnectDelayMillis: number
-  private readonly maxReconnectDelayMillis: number
   private readonly maxConcurrentInvocations: number
-  private readonly ideCommandTimeoutMillis: number
   private readonly monotonicNow: () => number
   private readonly runtimeStatus: RuntimeStatusTracker
   private readonly running = new Map<string, RunningInvocation>()
-  private readonly ideInFlight = new Map<string, AbortController>()
+  private readonly ideCommands: IdeCommandRuntime
   private readonly updateResults = new Map<string, UpdateReceipt>()
   /** 停机独立释放步骤与未收敛在途执行的失败：绝不阻断其余清理，由装配层显式聚合报告。 */
   private readonly shutdownFailures: unknown[] = []
@@ -209,21 +153,8 @@ export class Runtime {
   private temporaryResourceCleanupIntervalSeconds = 0
   private scheduledCleanupIntervalSeconds = 0
 
-  private activeConnection: ActiveConnection | null = null
-  private connectionGeneration = 0
-  private started = false
-  private closed = false
-  private connecting = false
-  private reconnectScheduled = false
-  private state: RuntimeState = 'STOPPED'
-  private failureReason: string | null = null
-  private nextReconnectDelay: number
-
   private heartbeatTimer: NodeJS.Timeout | null = null
-  private reconnectTimer: NodeJS.Timeout | null = null
   private sweepTimer: NodeJS.Timeout | null = null
-  private terminationResolve: (state: RuntimeState) => void = () => {}
-  private readonly termination: Promise<RuntimeState>
 
   constructor(options: RuntimeOptions) {
     this.config = options.config
@@ -246,63 +177,80 @@ export class Runtime {
       options.heartbeatIntervalMillis ?? DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
       'heartbeatIntervalMillis',
     )
-    this.initialReconnectDelayMillis = requireNonNegative(
+    const initialReconnectDelayMillis = requireNonNegative(
       options.initialReconnectDelayMillis ?? DEFAULT_INITIAL_RECONNECT_DELAY_MILLIS,
       'initialReconnectDelayMillis',
     )
-    this.maxReconnectDelayMillis = requirePositive(
+    const maxReconnectDelayMillis = requirePositive(
       options.maxReconnectDelayMillis ?? DEFAULT_MAX_RECONNECT_DELAY_MILLIS,
       'maxReconnectDelayMillis',
     )
-    if (this.initialReconnectDelayMillis > this.maxReconnectDelayMillis) {
+    if (initialReconnectDelayMillis > maxReconnectDelayMillis) {
       throw new Error('initialReconnectDelayMillis must not exceed maxReconnectDelayMillis')
     }
     this.maxConcurrentInvocations = requirePositive(
       options.maxConcurrentInvocations ?? DEFAULT_MAX_CONCURRENT_INVOCATIONS,
       'maxConcurrentInvocations',
     )
-    this.ideCommandTimeoutMillis = requirePositive(
+    const ideCommandTimeoutMillis = requirePositive(
       options.ideCommandTimeoutMillis ?? DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS,
       'ideCommandTimeoutMillis',
     )
-    this.nextReconnectDelay = this.initialReconnectDelayMillis
     this.resources = createResourceRuntime({
       ...(options.resources === undefined ? {} : { resources: options.resources }),
       ...(options.putObject === undefined ? {} : { putObject: options.putObject }),
       sendControl: (envelope: Envelope) => this.sendTransferControl(envelope),
     })
-    this.termination = new Promise<RuntimeState>((resolveTermination) => {
-      this.terminationResolve = resolveTermination
+    this.connection = new ConnectionLifecycle({
+      transport: this.transport,
+      initialReconnectDelayMillis,
+      maxReconnectDelayMillis,
+      callbacks: {
+        onEnvelope: (generation, envelope) => this.onEnvelope(generation, envelope),
+        onUpgradeFailed: (generation, statusCode, upgradeRequired) =>
+          this.handleUpgradeFailed(generation, statusCode, upgradeRequired),
+        onDisconnected: (connection) => this.onConnectionLost(connection),
+      },
+    })
+    this.ideCommands = new IdeCommandRuntime({
+      ide: this.ide,
+      timeoutMillis: ideCommandTimeoutMillis,
+      isUpdateHeld: () => this.updateAdmissionHeld(),
+      onResult: (invocationId, reply) => this.sendIdeResult(invocationId, reply),
+      track: (promise) => {
+        void this.track(promise)
+      },
     })
   }
 
   /** 启动连接生命周期并立即尝试建立连接；重复调用无副作用。 */
   start(): void {
-    if (this.closed || this.started) {
+    if (this.connection.isClosed()) {
       return
     }
-    this.started = true
-    this.state = 'DISCONNECTED'
-    this.heartbeatTimer = setInterval(() => this.sendHeartbeat(), this.heartbeatIntervalMillis)
-    this.scheduleReconnect(0)
+    const wasStarted = this.connection.isStarted()
+    this.connection.start()
+    if (!wasStarted && this.connection.isStarted()) {
+      this.heartbeatTimer = setInterval(() => this.sendHeartbeat(), this.heartbeatIntervalMillis)
+    }
   }
 
   /** 阻塞等待终止（由 close 或终态冲突触发）；返回终态。 */
   awaitTermination(): Promise<RuntimeState> {
-    return this.termination
+    return this.connection.awaitTermination()
   }
 
   /** 停机后所有在途执行真正收敛的完成信号；与 awaitTermination 同时发布。 */
   async awaitCompletion(): Promise<void> {
-    await this.termination
+    await this.connection.awaitTermination()
   }
 
   getState(): RuntimeState {
-    return this.state
+    return this.connection.getState()
   }
 
   getFailureReason(): string | null {
-    return this.failureReason
+    return this.connection.getFailureReason()
   }
 
   getBoundEnvironmentId(): string | null {
@@ -330,91 +278,15 @@ export class Runtime {
     this.shutdown('STOPPED', null)
   }
 
-  // -------------------------------------------------------------------------
-  // 连接生命周期
-  // -------------------------------------------------------------------------
-
-  private scheduleReconnect(delayMillis: number): boolean {
-    if (!this.started || this.reconnectScheduled) {
-      return this.started
-    }
-    this.reconnectScheduled = true
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectScheduled = false
-      this.connect()
-    }, Math.max(0, delayMillis))
-    return true
-  }
-
-  private connect(): void {
-    if (!this.started || this.connecting) {
-      return
-    }
-    this.connecting = true
-    this.state = 'CONNECTING'
-    const generation = ++this.connectionGeneration
-    const listener: ControlTransportListener = {
-      onEnvelope: (envelope) => this.onEnvelope(generation, envelope),
-      onUpgradeFailed: (statusCode, upgradeRequired) =>
-        this.handleUpgradeFailed(generation, statusCode, upgradeRequired),
-      onGoaway: () => this.handleGoaway(generation),
-      onDisconnected: () => this.handleDisconnected(generation),
-    }
-    this.transport.connect(listener).then(
-      (connection) => {
-        this.connecting = false
-        if (!this.started || generation !== this.connectionGeneration) {
-          connection.close()
-          return
-        }
-        const active = new ActiveConnection(generation, connection)
-        this.activeConnection = active
-        this.nextReconnectDelay = this.initialReconnectDelayMillis
-        // 握手头已在 transport 建立时发送；等待服务端 POST /control 推送 SETTINGS 帧
-      },
-      () => {
-        this.connecting = false
-        this.handleDisconnected(generation)
-      },
-    )
-  }
-
-  private handleDisconnected(generation: number): void {
-    const connection = this.activeConnection
-    if (connection !== null) {
-      if (connection.generation !== generation || this.activeConnection !== connection) {
-        return
-      }
-      this.activeConnection = null
-    } else if (this.state !== 'CONNECTING') {
-      return
-    }
-    if (!this.started || generation !== this.connectionGeneration) {
-      return
-    }
-    // 连接失效不影响 Invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与资源预算。
+  /** 连接失效不影响 Invocation journal，也绝不取消在途 Agent 执行；仅重置绑定与资源预算。 */
+  private onConnectionLost(connection: ActiveConnection | null): void {
     this.resources.onConnectionLost()
     this.maxResourceBytes = 0
     this.boundEnvironmentId = null
-    this.state = 'DISCONNECTED'
     this.activeIdeLeaseRound = null
     connection?.abort.abort('CONTROL_DISCONNECTED')
     // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
-    for (const controller of this.ideInFlight.values()) {
-      controller.abort('CONTROL_DISCONNECTED')
-    }
-    this.ideInFlight.clear()
-    const delay = this.nextReconnectDelay
-    this.nextReconnectDelay = Math.min(this.nextReconnectDelay * 2, this.maxReconnectDelayMillis)
-    this.scheduleReconnect(delay)
-  }
-
-  private handleGoaway(generation: number): void {
-    if (!this.started || generation !== this.connectionGeneration) {
-      return
-    }
-    this.nextReconnectDelay = 0
-    this.scheduleReconnect(0)
+    this.ideCommands.abortAll('CONTROL_DISCONNECTED')
   }
 
   private handleUpgradeFailed(
@@ -422,7 +294,7 @@ export class Runtime {
     statusCode: number,
     upgradeRequired?: UpgradeRequired,
   ): void {
-    if (!this.started || generation !== this.connectionGeneration) {
+    if (!this.connection.isCurrent(generation)) {
       return
     }
     if (statusCode === 401) {
@@ -470,16 +342,11 @@ export class Runtime {
       this.failTerminal('daemon requires protocol upgrade')
       return
     }
-    this.handleDisconnected(generation)
+    this.connection.handleDisconnected(generation)
   }
 
   private closeFailedHandshake(connection: ActiveConnection): void {
-    try {
-      connection.connection.close()
-    } catch {
-      // 关闭失败仍要走代际断开，避免停在 CONNECTING。
-    }
-    this.handleDisconnected(connection.generation)
+    this.connection.closeFailedHandshake(connection)
   }
 
   private sendReady(connection: ActiveConnection): boolean {
@@ -499,7 +366,7 @@ export class Runtime {
   }
 
   private sendHeartbeat(): void {
-    if (this.state !== 'READY') {
+    if (this.connection.getState() !== 'READY') {
       return
     }
     const runtimeStatus = this.currentRuntimeStatus()
@@ -527,21 +394,11 @@ export class Runtime {
   }
 
   private send(envelope: Envelope): boolean {
-    const connection = this.activeConnection
-    return connection !== null && this.sendOn(connection, envelope)
+    return this.connection.send(envelope)
   }
 
   private sendOn(connection: ActiveConnection, envelope: Envelope): boolean {
-    if (this.activeConnection !== connection || !connection.connection.isOpen()) {
-      return false
-    }
-    validate(envelope)
-    try {
-      return connection.connection.send(envelope)
-    } catch {
-      this.handleDisconnected(connection.generation)
-      return false
-    }
+    return this.connection.sendOn(connection, envelope)
   }
 
   // -------------------------------------------------------------------------
@@ -549,7 +406,7 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private onEnvelope(generation: number, envelope: Envelope): void {
-    const connection = this.activeConnection
+    const connection = this.connection.getActiveConnection()
     if (connection === null || connection.generation !== generation) {
       return
     }
@@ -606,7 +463,7 @@ export class Runtime {
       }
       // 初始 SETTINGS 失败时服务端尚未将会话标为 READY，不能依赖在线变更通知修复。
       // 关闭握手并重连，下一次从平台重新读取设置；已 READY 的连接仍可接收后续修正。
-      if (envelope.messageType === MessageType.SETTINGS && !connection.ready && this.activeConnection === connection) {
+      if (envelope.messageType === MessageType.SETTINGS && !connection.ready && this.connection.getActiveConnection() === connection) {
         this.closeFailedHandshake(connection)
       }
     }
@@ -650,21 +507,19 @@ export class Runtime {
     const cleanup = Number(budgets.temporaryResourceCleanupIntervalSeconds)
     this.applyTemporaryResourcePolicy(ttl, cleanup)
     if (!this.sendReady(connection)) {
-      if (this.activeConnection === connection) {
+      if (this.connection.getActiveConnection() === connection) {
         this.closeFailedHandshake(connection)
       }
       return
     }
-    if (this.activeConnection === connection) {
-      connection.ready = true
-      this.state = 'READY'
+    if (this.connection.markReady(connection)) {
       this.resources.onConnectionReady()
       this.resendUpdateResults()
     }
   }
 
   private handleTemporaryResourcePolicy(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
+    if (this.connection.getState() !== 'READY' || !envelope.environmentId) {
       throw new Error('TEMPORARY_RESOURCE_POLICY requires a READY bound connection')
     }
     const policy = envelope.payload.value as TemporaryResourcePolicy
@@ -700,7 +555,7 @@ export class Runtime {
 
   private handleError(connection: ActiveConnection, _envelope: Envelope): void {
     // 服务端发送的 ERROR 帧触发控制连接断开重连
-    this.handleDisconnected(connection.generation)
+    this.connection.handleDisconnected(connection.generation)
   }
 
   private handleTicket(envelope: Envelope): void {
@@ -714,7 +569,7 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private handleInvoke(connection: ActiveConnection, envelope: Envelope): void {
-    if (!this.started) {
+    if (!this.connection.isStarted()) {
       return
     }
     const invocationId = requireInvocationId(envelope)
@@ -770,7 +625,7 @@ export class Runtime {
       this.terminal(
         invocationId,
         MessageType.FAILED,
-        this.buildFailedPayload(safeMessage(error)),
+        failedPayload(safeMessage(error)),
         null,
       )
     }
@@ -829,7 +684,7 @@ export class Runtime {
         this.terminal(
           invocation.invocationId,
           MessageType.FAILED,
-          this.buildFailedPayload('capability result callId does not match invocationId'),
+          failedPayload('capability result callId does not match invocationId'),
           null,
         )
         invocation.finishOwnedCleanup()
@@ -878,7 +733,7 @@ export class Runtime {
         this.terminal(
           invocation.invocationId,
           MessageType.FAILED,
-          this.buildFailedPayload(`capability execution timed out after ${call.timeoutMillis}ms`),
+          failedPayload(`capability execution timed out after ${call.timeoutMillis}ms`),
           'TIMED_OUT',
         )
         if (executorFailed) {
@@ -889,7 +744,7 @@ export class Runtime {
       this.terminal(
         invocation.invocationId,
         MessageType.FAILED,
-        this.buildFailedPayload(safeMessage(error)),
+        failedPayload(safeMessage(error)),
         null,
       )
       // executor 抛错仍可能已有正向范围证据；后续上传/收尾抛错则不能确认清理完成。
@@ -960,7 +815,7 @@ export class Runtime {
       this.terminal(
         invocation.invocationId,
         MessageType.FAILED,
-        this.buildFailedPayload(`cannot encode partial capability result: ${safeMessage(error)}`),
+        failedPayload(`cannot encode partial capability result: ${safeMessage(error)}`),
         'CANCELLED',
       )
     }
@@ -1097,7 +952,7 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private sendTransferControl(envelope: Envelope): boolean {
-    if (this.state !== 'READY' || this.boundEnvironmentId === null) {
+    if (this.connection.getState() !== 'READY' || this.boundEnvironmentId === null) {
       return false
     }
     const invocationId = envelope.invocationId ?? ''
@@ -1119,7 +974,7 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private handleUpdate(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
+    if (this.connection.getState() !== 'READY' || !envelope.environmentId) {
       throw new Error('UPDATE requires a READY bound connection')
     }
     const command = envelope.payload.value as Update
@@ -1243,7 +1098,7 @@ export class Runtime {
   }
 
   private publishRuntimeStatus(): void {
-    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
+    if (this.connection.getState() === 'READY' && this.boundEnvironmentId !== null) {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.RUNTIME_STATUS,
@@ -1267,7 +1122,7 @@ export class Runtime {
     if (this.running.size > 0 || this.protectedExecutions.size > 0) {
       return 'protected execution is still running'
     }
-    if (this.ideInFlight.size > 0) {
+    if (this.ideCommands.inFlightCount > 0) {
       return 'IDE command is in progress'
     }
     if (this.ide !== null && !this.ide.canStartUpdate()) {
@@ -1301,7 +1156,7 @@ export class Runtime {
   }
 
   private sendUpdateResult(result: UpdateResult): void {
-    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
+    if (this.connection.getState() === 'READY' && this.boundEnvironmentId !== null) {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.UPDATE_RESULT,
@@ -1317,7 +1172,7 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private handleIdeLease(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
+    if (this.connection.getState() !== 'READY' || !envelope.environmentId) {
       throw new Error('IDE_LEASE requires a READY bound connection')
     }
     if (this.updateAdmissionHeld()) {
@@ -1329,19 +1184,9 @@ export class Runtime {
     }
     const active = requireFreshIdeLease(this.activeIdeLeaseRound, lease.round ?? 0n, this.monotonicNow())
     active.consumed = true
-    const plainLease = {
-      round: String(lease.round ?? 0n),
-      bindings: (lease.bindings ?? []).map((b) => ({
-        viewId: b.viewId,
-        documentId: b.documentId,
-        bindingEpoch: String(b.bindingEpoch ?? 0n),
-      })),
-    }
+    const proof = toIdeLeaseProof(lease)
     this.runExtensionHandler('IDE_LEASE', () =>
-      this.ideLease?.apply(
-        plainLease as any,
-        active.sentAt,
-      ),
+      this.ideLease?.apply(proof, active.sentAt),
     )
   }
 
@@ -1358,7 +1203,7 @@ export class Runtime {
   }
 
   private sendExtensionError(phase: string, error: unknown): void {
-    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
+    if (this.connection.getState() === 'READY' && this.boundEnvironmentId !== null) {
       this.send(
         create(EnvelopeSchema, {
           messageType: MessageType.ERROR,
@@ -1378,69 +1223,12 @@ export class Runtime {
   // -------------------------------------------------------------------------
 
   private handleIdeCommand(envelope: Envelope): void {
-    if (this.state !== 'READY' || !envelope.environmentId) {
+    if (this.connection.getState() !== 'READY' || !envelope.environmentId) {
       throw new Error('IDE_COMMAND requires a READY bound connection')
     }
     const invocationId = requireInvocationId(envelope)
     const protoCmd = envelope.payload.value as ProtoIdeCommand
-    const command: IdeCommand = {
-      action: toIdeAction(protoCmd.action),
-      viewId: protoCmd.viewId ?? undefined,
-      documentId: protoCmd.documentId ?? undefined,
-      eventNodeId: protoCmd.eventNodeId ?? undefined,
-      connectionId: protoCmd.connectionId ?? undefined,
-      claimId: protoCmd.claimId ?? undefined,
-      bindingEpoch: protoCmd.bindingEpoch !== undefined ? protoCmd.bindingEpoch.toString() : undefined,
-      mode: toIdeMode(protoCmd.mode),
-      directory: protoCmd.directory ?? undefined,
-      discard: protoCmd.discard ?? undefined,
-    }
-    const admission = admitIdeCommand({
-      invocationId,
-      command,
-      inFlight: this.ideInFlight,
-      updateHeld: this.updateAdmissionHeld(),
-      ide: this.ide,
-    })
-    if (admission.kind === 'ignore') {
-      return
-    }
-    if (admission.kind === 'reply') {
-      this.sendIdeResult(invocationId, admission.reply)
-      return
-    }
-    const controller = admission.controller
-    this.ideInFlight.set(invocationId, controller)
-    // Native close waits for a person; disconnect and shutdown still abort the command.
-    const timer = command.action === 'CLOSE_VIEW' && command.discard === false
-      ? null
-      : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
-    void this.track(this.runIdeCommand(invocationId, command, controller, timer))
-  }
-
-  private async runIdeCommand(
-    invocationId: string,
-    command: IdeCommand,
-    controller: AbortController,
-    timer: NodeJS.Timeout | null,
-  ): Promise<void> {
-    try {
-      const reply = await (this.ide as IdeService).handle(command, controller.signal)
-      if (this.ideInFlight.get(invocationId) === controller) {
-        this.sendIdeResult(invocationId, toProtoIdeResult(reply))
-      }
-    } catch (error) {
-      if (this.ideInFlight.get(invocationId) === controller) {
-        this.sendIdeResult(invocationId, ideFailureReply(error, safeMessage(error)))
-      }
-    } finally {
-      if (timer !== null) {
-        clearTimeout(timer)
-      }
-      if (this.ideInFlight.get(invocationId) === controller) {
-        this.ideInFlight.delete(invocationId)
-      }
-    }
+    this.ideCommands.handle(invocationId, protoCmd)
   }
 
   private sendIdeResult(invocationId: string, reply: IdeResult): void {
@@ -1466,22 +1254,13 @@ export class Runtime {
   }
 
   private shutdown(terminalState: RuntimeState, reason: string | null): void {
-    if (this.closed) {
+    if (this.connection.isClosed()) {
       return
     }
-    this.closed = true
-    this.started = false
-    this.state = terminalState
-    this.failureReason = reason
-    const connection = this.activeConnection
-    this.activeConnection = null
+    const connection = this.connection.beginShutdown(terminalState, reason)
     if (this.heartbeatTimer !== null) {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
-    }
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
     }
     if (this.sweepTimer !== null) {
       clearInterval(this.sweepTimer)
@@ -1508,10 +1287,7 @@ export class Runtime {
       })
     }
     this.running.clear()
-    for (const controller of this.ideInFlight.values()) {
-      controller.abort('SHUTDOWN')
-    }
-    this.ideInFlight.clear()
+    this.ideCommands.abortAll('SHUTDOWN')
     this.activeUpdate?.controller?.abort('SHUTDOWN')
     if (this.activeUpdate !== null) {
       this.activeUpdate.stopWatching?.()
@@ -1563,37 +1339,11 @@ export class Runtime {
         this.recordShutdownFailure('in-flight execution did not converge', outcome.reason)
       }
     }
-    this.terminationResolve(terminalState)
+    this.connection.resolveTermination(terminalState)
   }
 
   getShutdownFailures(): readonly unknown[] {
     return this.shutdownFailures
-  }
-
-  private buildFailedPayload(message: string): { case: 'failed'; value: Failed } {
-    return {
-      case: 'failed',
-      value: create(FailedSchema, { message }),
-    }
-  }
-}
-
-class ActiveConnection {
-  ready = false
-  readonly abort = new AbortController()
-  private settingsReceived = false
-
-  constructor(
-    readonly generation: number,
-    readonly connection: ControlConnection,
-  ) {}
-
-  markSettingsReceived(): boolean {
-    if (this.settingsReceived) {
-      return false
-    }
-    this.settingsReceived = true
-    return true
   }
 }
 
@@ -1654,24 +1404,6 @@ class RunningInvocation {
   }
 }
 
-function requireInvocationId(envelope: Envelope): string {
-  const invocationId = envelope.invocationId
-  if (invocationId === undefined || invocationId === null || invocationId.trim() === '') {
-    throw new Error(`${envelope.messageType} requires non-null invocationId`)
-  }
-  return invocationId
-}
-
-function safeMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const message = error.message
-    if (typeof message === 'string' && message.trim() !== '') {
-      return message
-    }
-  }
-  return FALLBACK_FAILURE_MESSAGE
-}
-
 function requirePositive(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive integer`)
@@ -1684,116 +1416,4 @@ function requireNonNegative(value: number, name: string): number {
     throw new Error(`${name} must not be negative`)
   }
   return value
-}
-
-async function encodeCompletedProto(
-  result: CapabilityResult,
-  maximumResourceBytes: number,
-  uploader: ((content: Extract<ResultContent, { type: 'binary' }>) => Promise<UploadedResource>) | null,
-): Promise<Completed> {
-  if (!Number.isSafeInteger(maximumResourceBytes) || maximumResourceBytes <= 0) {
-    throw new Error('maximumResourceBytes must be positive')
-  }
-  let aggregate = 0
-  for (const content of result.contents) {
-    let size = 0
-    if (content.type === 'resource') {
-      size = content.size
-    } else if (content.type === 'binary') {
-      size = content.bytes.byteLength
-    }
-    if (size > maximumResourceBytes - aggregate) {
-      throw new Error(`aggregate resource bytes exceed maximumResourceBytes: maximum=${maximumResourceBytes}`)
-    }
-    aggregate += size
-  }
-
-  const protoContents: Content[] = []
-  for (const content of result.contents) {
-    if (content.type === 'text') {
-      protoContents.push(
-        create(ContentSchema, {
-          body: {
-            case: 'text',
-            value: create(TextContentSchema, { text: content.text }),
-          },
-        }),
-      )
-    } else if (content.type === 'json') {
-      protoContents.push(
-        create(ContentSchema, {
-          body: {
-            case: 'json',
-            value: create(JsonContentSchema, { json: JSON.stringify(content.json) }),
-          },
-        }),
-      )
-    } else if (content.type === 'resource') {
-      protoContents.push(
-        create(ContentSchema, {
-          body: {
-            case: 'resource',
-            value: create(ResourceContentSchema, {
-              uploadId: content.uploadId,
-              mediaType: content.mediaType,
-              name: content.name ?? undefined,
-              size: BigInt(content.size),
-              sha256: content.sha256,
-            }),
-          },
-        }),
-      )
-    } else if (content.type === 'binary') {
-      if (uploader === null) {
-        throw new Error('resource upload is not configured')
-      }
-      const uploaded = await uploader(content)
-      protoContents.push(
-        create(ContentSchema, {
-          body: {
-            case: 'resource',
-            value: create(ResourceContentSchema, {
-              uploadId: uploaded.uploadId,
-              mediaType: uploaded.mediaType,
-              name: uploaded.name ?? undefined,
-              size: BigInt(uploaded.size),
-              sha256: uploaded.sha256,
-            }),
-          },
-        }),
-      )
-    }
-  }
-
-  return create(CompletedSchema, {
-    result: create(CapabilityResultSchema, {
-      callId: result.callId,
-      error: result.error,
-      detailsJson: JSON.stringify(result.details ?? {}),
-      contents: protoContents,
-    }),
-  })
-}
-
-function encodeProgressProto(result: CapabilityResult): Progress {
-  return create(ProgressSchema, {
-    result: create(CapabilityResultSchema, {
-      callId: result.callId,
-      error: result.error,
-      detailsJson: JSON.stringify(result.details ?? {}),
-      contents: result.contents.map((content) => {
-        if (content.type === 'text') {
-          return create(ContentSchema, {
-            body: { case: 'text', value: create(TextContentSchema, { text: content.text }) },
-          })
-        }
-        if (content.type === 'json') {
-          return create(ContentSchema, {
-            body: { case: 'json', value: create(JsonContentSchema, { json: JSON.stringify(content.json) }) },
-          })
-        }
-        throw new Error('progress does not allow binary content')
-      }),
-    }),
-  })
 }
