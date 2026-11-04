@@ -580,7 +580,7 @@ class StudioIssueControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].blobId").value(blobId.toString()))
         .andExpect(jsonPath("$.data[0].name").value("deliverable.txt"));
-    verify(issueEditingService).getIssue(issueId);
+    verify(issueEvidenceService).listEvidence(issueId);
   }
 
   @Test

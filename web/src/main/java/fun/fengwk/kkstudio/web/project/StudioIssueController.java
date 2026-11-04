@@ -126,7 +126,6 @@ public class StudioIssueController {
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit =
         RequestParameters.limit(limitStr, DEFAULT_ACTIVITY_LIMIT, MAX_ACTIVITY_LIMIT);
-    issueEditingService.getIssue(issueId);
     List<IssueActivity> activities =
         issueEditingService.listActivities(issueId, afterSequence, activityLimit);
     return ApiResponse.ok(activities.stream().map(mapper::toDto).toList());
@@ -312,7 +311,6 @@ public class StudioIssueController {
   public ApiResponse<List<IssueEvidenceDTO>> listEvidence(
       @PathVariable("issueId") String issueIdStr) {
     UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
-    issueEditingService.getIssue(issueId);
     return ApiResponse.ok(
         issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
   }
