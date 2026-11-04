@@ -114,8 +114,8 @@ describe('CompactionEntryBlock', () => {
     expect(rawSpans).toHaveLength(2)
     expect(rawSpans[0].textContent).toBe(
       '<read-files>\n'
-      + 'src/features/chat/runtime/thread-timeline-builder.ts\n'
-      + 'src/features/chat/runtime/thread-timeline/entry-event-projection.ts\n'
+      + 'src/features/thread/runtime/thread-timeline-builder.ts\n'
+      + 'src/features/thread/runtime/thread-timeline/entry-event-projection.ts\n'
       + '</read-files>',
     )
     expect(root.textContent).toContain('<modified-files>')

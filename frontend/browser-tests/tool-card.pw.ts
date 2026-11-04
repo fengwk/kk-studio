@@ -91,7 +91,7 @@ for (const width of [1440, 360, 320]) {
     await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
     const links = card.getByRole('link')
     await expect(links).toHaveCount(1)
-    await expect(links).toHaveAccessibleName('View subagent (00000000-0000-4000-8000-000000000005) execution')
+    await expect(links).toHaveAccessibleName('View subagent 00000000-0000-4000-8000-000000000005 execution')
     await expect(links).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
     const typography = await links.evaluate((element) => {
       const style = getComputedStyle(element)

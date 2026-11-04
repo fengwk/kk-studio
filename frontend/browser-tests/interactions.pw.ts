@@ -523,7 +523,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     // 只移除本卡，其余待处理项与目标 thread 均不受影响。
     await expect(toolName).toHaveCount(0)
-    await expect(page.getByText('迁移策略', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '迁移策略' })).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
@@ -545,7 +545,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await page.locator('.interaction-feed-item').first().locator('.interaction-deny-btn').click()
 
     await expect(page.locator('.interaction-approval-tool-name')).toHaveCount(0)
-    await expect(page.getByText('迁移策略', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '迁移策略' })).toBeVisible()
     expect(page.url()).toBe(beforeUrl)
     expect(approvals).toHaveLength(1)
     expect(approvals[0].url).toContain(
