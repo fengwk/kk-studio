@@ -512,6 +512,21 @@ describe('ThreadComposerControls environment menu', () => {
     expect(onEnvironmentChange).toHaveBeenCalledWith(null)
   })
 
+  /** 测试意图：执行根有运行中的子代理时，环境菜单提示切换同样生效；其他菜单不携带该提示。 */
+  it('renders the environment switch notice only inside the environment menu', () => {
+    const notice = '切换对正在运行的子 Agent 同样生效'
+    const environment = renderOpen('environment', createSettings({ environmentSwitchNotice: notice }))
+    expect(screen.getByText(notice)).toHaveAttribute('role', 'status')
+    environment.unmount()
+
+    const permission = renderOpen('permission', createSettings({ environmentSwitchNotice: notice }))
+    expect(screen.queryByText(notice)).toBeNull()
+    permission.unmount()
+
+    renderOpen('environment', createSettings())
+    expect(screen.queryByText(notice)).toBeNull()
+  })
+
   /** 测试意图：验证 ArrowDown 与 Enter 键盘快捷键在环境菜单中的导航与选中行为。 */
   it('supports keyboard navigation and Escape dismissal in environment menu', async () => {
     const user = userEvent.setup()

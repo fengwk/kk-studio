@@ -458,6 +458,10 @@ export const chatCatalog = {
     'en-US': 'None',
     'zh-CN': 'None',
   },
+  'ai.runtime.composer.environmentSwitchNotice': {
+    'en-US': 'The switch also applies to running subagents',
+    'zh-CN': '切换对正在运行的子 Agent 同样生效',
+  },
   'ai.runtime.composer.model': {
     'en-US': 'Model',
     'zh-CN': 'Model',
@@ -865,6 +869,14 @@ export const chatCatalog = {
   'ai.runtime.childThread.back': {
     'en-US': 'Back to parent agent',
     'zh-CN': '回到父 agent',
+  },
+  'ai.runtime.childThread.environment': {
+    'en-US': 'Environment: {{environment}} · Follows the main conversation',
+    'zh-CN': '环境：{{environment}} · 跟随主对话',
+  },
+  'ai.runtime.childThread.environmentNone': {
+    'en-US': 'Environment: not selected · Follows the main conversation',
+    'zh-CN': '环境：未选择 · 跟随主对话',
   },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',

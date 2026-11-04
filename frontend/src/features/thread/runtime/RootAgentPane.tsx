@@ -145,7 +145,19 @@ export function RootAgentPane({
     onRestoreFocus: pane.interaction == null ? pane.restoreComposerFocus : undefined,
   })
   const interactionPanel = renderInteractionPanel()
-  const composer = { ...pane.composer, interactionPanel, suspended: covered }
+  // 环境归执行根：执行树里有正在运行的子代理时，切换操作同样作用于它们，提示只在此条件下出现。
+  const environmentSwitchNotice = tree.activeCount > 0
+    ? t('ai.runtime.composer.environmentSwitchNotice')
+    : null
+  const composer = {
+    ...pane.composer,
+    interactionPanel,
+    suspended: covered,
+    settings: pane.composer.settings == null ? undefined : {
+      ...pane.composer.settings,
+      environmentSwitchNotice,
+    },
+  }
 
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (

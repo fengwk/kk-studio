@@ -43,6 +43,8 @@ export interface ThreadComposerSettingsInput {
   environmentName: string | null
   environments: readonly ThreadComposerEnvironmentOption[]
   status?: ThreadComposerSettingsStatus
+  /** 执行根有正在运行的子代理时的环境切换提示；由宿主按执行树决定，不在 Composer 内推断。 */
+  environmentSwitchNotice?: string | null
   onModelChange: (model: ThreadComposerModelSelection) => void
   onYoloChange: (enabled: boolean) => void
   onEnvironmentChange: (environmentName: string | null) => void
@@ -440,6 +442,11 @@ export function ThreadComposerControls({
               )
             })}
           </ul>
+          {menu === 'environment' && settings.environmentSwitchNotice ? (
+            <p className="thread-composer-menu-hint" role="status">
+              {settings.environmentSwitchNotice}
+            </p>
+          ) : null}
         </div>
       )}
     </div>

@@ -4542,6 +4542,56 @@ describe('AgentPane root control and child observation', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
+  function environmentCard(name: string): EnvironmentCardDTO {
+    return {
+      id: 'f1000000-0000-4000-8000-0000000000e1',
+      name,
+      status: 'READY',
+      statusExpiresAt: null,
+      ready: true,
+      lastSeen: 1789776000,
+      capabilities: [],
+      userName: null,
+      homeDirectory: null,
+      version: '1',
+      createTime: 1789776000,
+      updateTime: 1789776000,
+    }
+  }
+
+  it('warns in the environment menu that the switch also applies to running subagents', async () => {
+    // 环境归执行根：执行树里有 RUNNING 后代时，切换环境对它们同样生效。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotForThread(THREAD_ID))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
+    ])
+    bindPaneToRoot()
+    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentCard('NAS')])
+
+    const trigger = await screen.findByRole('button', { name: '环境' })
+    await user.click(trigger)
+    expect(screen.getByText('切换对正在运行的子 Agent 同样生效')).toBeInTheDocument()
+
+    // 提示不拦截切换本身：选择仍写入面板草稿。
+    await user.click(screen.getByRole('option', { name: 'NAS' }))
+    expect(trigger).toHaveTextContent('NAS')
+  })
+
+  it('does not warn about subagents when the execution tree has none running', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotForThread(THREAD_ID))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+    ])
+    bindPaneToRoot()
+    renderPane({ kind: 'CHAT', id: CHAT_ID }, [environmentCard('NAS')])
+
+    await user.click(await screen.findByRole('button', { name: '环境' }))
+    expect(screen.getByRole('option', { name: 'NAS' })).toBeInTheDocument()
+    expect(screen.queryByText('切换对正在运行的子 Agent 同样生效')).toBeNull()
+  })
 })
 
 describe('AgentPane root control mounting', () => {
