@@ -358,8 +358,9 @@ test('module boundary guard rejects a plugin depending on the platform runtime i
   }
 })
 
-test('plugin dependency guard rejects forbidden static import in isolation', () => {
-  // Test intent: production code compiling against opencli must fail closed, keeping the artifact boundary strict.
+test('web plugin import guard rejects forbidden static import in isolation', () => {
+  // Test intent: production code compiling against any plugin implementation must fail closed,
+  // keeping plugins runtime-scoped and the artifact boundary strict.
   const mirrorRoot = createRepositoryMirror()
   try {
     const mirrorWeb = path.join(mirrorRoot, 'web')
@@ -385,9 +386,7 @@ test('plugin dependency guard rejects forbidden static import in isolation', () 
       },
       (error) => {
         const stderr = error.stderr || ''
-        return stderr.includes(
-          'web production must not compile-import opencli plugin classes',
-        )
+        return stderr.includes('web production must not import plugin implementations')
       },
     )
   } finally {

@@ -557,13 +557,6 @@ function checkModuleBoundaries() {
       addError(`${file}: runtime must reach builtin tools only through the catalog (${imported})`)
     }
   }
-
-  // web 生产源码不得编译期接触 opencli；发行物按 web/pom.xml 的 runtime 依赖装配，可以不带该 Plugin。
-  for (const { file, imported } of javaImports(path.join(repositoryRoot, 'web/src/main/java'))) {
-    if (imported.startsWith('fun.fengwk.kkstudio.plugin.opencli.')) {
-      addError(`${file}: web production must not compile-import opencli plugin classes`)
-    }
-  }
 }
 
 /**
