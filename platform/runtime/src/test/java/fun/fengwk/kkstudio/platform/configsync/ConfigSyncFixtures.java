@@ -218,7 +218,6 @@ final class ConfigSyncFixtures {
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(subagents);
-    config.setInheritParentEnvironment(Boolean.TRUE);
     return config;
   }
 

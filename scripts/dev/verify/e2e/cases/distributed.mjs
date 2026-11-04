@@ -420,7 +420,6 @@ async function setupDistributedHarness(ctx, suffix) {
       tools: ['bash'],
       skills: [],
       subagents: [],
-      inheritParentEnvironment: true,
     },
   })
   const agent = envelopeData(agentRes.json)

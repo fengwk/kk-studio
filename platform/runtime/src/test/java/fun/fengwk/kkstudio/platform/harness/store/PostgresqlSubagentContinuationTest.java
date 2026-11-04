@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
@@ -68,7 +70,11 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -82,14 +88,21 @@ class PostgresqlSubagentContinuationTest {
   private HarnessRuntime runtime;
   private ThreadProcessor processor;
   private ScheduledExecutorService scheduler;
+  private final Map<UUID, List<String>> resolverEnvironments = new HashMap<>();
 
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     Clock clock = Clock.fixed(T1, ZoneOffset.UTC);
     TurnResolver resolver =
-        (threadId, path, preparation) ->
-            new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
+        (threadId, path, preparation) -> {
+          TurnStartPayload start = (TurnStartPayload) path.openTurnStart().orElseThrow().payload();
+          assertEquals(start.settings(), path.baseSettings());
+          resolverEnvironments
+              .computeIfAbsent(threadId, ignored -> new ArrayList<>())
+              .add(path.baseSettings().environmentName());
+          return new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
+        };
     DriverRegistry registry = new DriverRegistry(List.of(builtinDriver(store, resolver)));
     runtime = new HarnessRuntime(store, registry, () -> CompactionConfig.DEFAULT);
     scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -158,19 +171,17 @@ class PostgresqlSubagentContinuationTest {
     AcceptedCommands accepted =
         SpawnTestSupport.acceptAndJoin(runtime, resume, request, AcceptancePreflight.IDENTITY);
     assertEquals(2L, accepted.acceptedCommands().getFirst().sequence());
-    assertEquals(5L, accepted.acceptedCommands().getLast().sequence());
+    assertEquals(4L, accepted.acceptedCommands().getLast().sequence());
     ThreadSnapshot queued = snapshot(childId);
     List<ThreadCommand> pendingBatch = queued.queuedCommands();
-    assertEquals(4, pendingBatch.size());
+    assertEquals(3, pendingBatch.size());
     assertEquals(accepted.acceptedCommands(), pendingBatch);
-    assertEquals(
-        List.of(2L, 3L, 4L, 5L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
+    assertEquals(List.of(2L, 3L, 4L), pendingBatch.stream().map(ThreadCommand::sequence).toList());
     BranchSettings settings = running.entryState().baseSettings();
     assertEquals(
         List.of(
             new SetAgentCommandPayload(settings.agentName()),
             new SetExecutionCommandPayload(settings.execution()),
-            new SetEnvironmentCommandPayload(settings.environmentName()),
             new CustomMessageCommandPayload(AgentMessage.user("second task"))),
         pendingBatch.stream().map(ThreadCommand::payload).toList());
     for (ThreadCommand command : pendingBatch) {
@@ -214,7 +225,7 @@ class PostgresqlSubagentContinuationTest {
     processNext(childId);
     ThreadSnapshot secondTurn = snapshot(childId);
     assertEquals(ThreadRuntimeStatus.RUNNING, secondTurn.runtimeStatus());
-    assertEquals(5L, secondTurn.thread().inputThroughSequence());
+    assertEquals(4L, secondTurn.thread().inputThroughSequence());
     assertEquals(settings, secondTurn.entryState().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());
     assertNotEquals(running.generation().generationId(), secondTurn.generation().generationId());
@@ -240,7 +251,7 @@ class PostgresqlSubagentContinuationTest {
     assertTrue(second.matched());
     assertNull(second.supersededByInvocationId());
     assertEquals(1L, first.sourceCommandSequence());
-    assertEquals(5L, second.sourceCommandSequence());
+    assertEquals(4L, second.sourceCommandSequence());
     assertNotEquals(earlyTerminal, second.terminalEntryId());
     assertEquals(latest.thread().headEntryId(), second.terminalEntryId());
     assertNotNull(second.finalAnswerEntryId());
@@ -342,6 +353,151 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(receipts, notifications(parentId));
   }
 
+  @Test
+  void childTurnsFreezeTheRootEnvironmentAtEachSafeBoundary() {
+    // 根的 SET 只有经过安全边界才生效；正在执行的子 turn 不随之后的根设置变化。
+    BranchSettings rootSettings =
+        new BranchSettings(branchSettings().agentName(), branchSettings().execution(), "env-a");
+    AcceptedCommands parent =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewRootSession(
+                    UUID.randomUUID(), UUID.randomUUID(), rootSettings, false),
+                List.of(prompt("parent"))),
+            AcceptancePreflight.IDENTITY);
+    UUID parentId = parent.thread().id();
+    processNext(parentId);
+    finishModel(parentId, "parent final");
+    processNext(parentId);
+    AcceptedCommands child =
+        SpawnTestSupport.acceptAndJoin(
+            runtime,
+            new Child(
+                UUID.randomUUID(), UUID.randomUUID(), parentId, List.of(prompt("first task"))),
+            branchSettings(),
+            joinRequest(UUID.randomUUID(), parentId),
+            AcceptancePreflight.IDENTITY);
+    UUID childId = child.thread().id();
+    processNext(childId);
+    startModel(childId);
+    var firstStart = snapshot(childId).requireFullPath().openTurnStart().orElseThrow();
+    assertEquals("env-a", ((TurnStartPayload) firstStart.payload()).settings().environmentName());
+    assertEquals(List.of("env-a"), resolverEnvironments.get(childId));
+
+    SpawnTestSupport.acceptAndJoin(
+        runtime,
+        resume(childId, prompt("second task")),
+        joinRequest(UUID.randomUUID(), parentId),
+        AcceptancePreflight.IDENTITY);
+    processNext(childId); // 消费忙时 wake，不改变已冻结的调用。
+    ThreadState root = snapshot(parentId).thread();
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                parentId, root.headEntryId(), root.nextCommandSequence()),
+            List.of(environment("env-b"))),
+        AcceptancePreflight.IDENTITY);
+    assertEquals("env-a", snapshot(parentId).entryState().baseSettings().environmentName());
+    processNext(parentId);
+    assertEquals("env-b", snapshot(parentId).entryState().baseSettings().environmentName());
+    processNext(parentId); // 应用设置后的根唤醒不再产生回合。
+    assertEquals(firstStart, snapshot(childId).requireFullPath().openTurnStart().orElseThrow());
+    assertEquals(List.of("env-a"), resolverEnvironments.get(childId));
+
+    finishModel(childId, "first final");
+    processNext(childId);
+    processNext(childId); // 子 settings 前缀独立生效。
+    processNext(childId);
+    var secondPath = snapshot(childId).requireFullPath();
+    assertEquals(
+        "env-b",
+        ((TurnStartPayload) secondPath.openTurnStart().orElseThrow().payload())
+            .settings()
+            .environmentName());
+    assertTrue(secondPath.entries().contains(firstStart));
+    assertEquals(List.of("env-a", "env-b"), resolverEnvironments.get(childId));
+  }
+
+  @Test
+  void childEnvironmentCommandsAndSpawnSettingsAreRejectedWithoutWrites() {
+    Delegation delegation = runningChild();
+    UUID parentId = delegation.parent().thread().id();
+    UUID childId = delegation.child().thread().id();
+    ThreadSnapshot before = snapshot(childId);
+    List<ThreadCommand> beforeCommands = commands(childId);
+    // null 也是显式清除环境，不能绕过子线程限制。
+    for (String value : Arrays.asList("env-b", null)) {
+      NewThreadCommand set = environment(value);
+      ThreadState child = snapshot(childId).thread();
+      AcceptCommandsCommand direct =
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  childId, child.headEntryId(), child.nextCommandSequence()),
+              List.of(set, prompt("direct")));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> runtime.acceptCommands(direct, AcceptancePreflight.IDENTITY));
+      UUID continuationTicket = UUID.randomUUID();
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              SpawnTestSupport.acceptAndJoin(
+                  runtime,
+                  direct,
+                  joinRequest(continuationTicket, parentId),
+                  AcceptancePreflight.IDENTITY));
+      assertTrue(runtime.findJoin(continuationTicket).isEmpty());
+      UUID newTicket = UUID.randomUUID();
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              SpawnTestSupport.acceptAndJoin(
+                  runtime,
+                  new Child(
+                      UUID.randomUUID(),
+                      UUID.randomUUID(),
+                      parentId,
+                      List.of(set, prompt("new child"))),
+                  branchSettings(),
+                  joinRequest(newTicket, parentId),
+                  AcceptancePreflight.IDENTITY));
+      assertTrue(runtime.findJoin(newTicket).isEmpty());
+      assertEquals(beforeCommands, commands(childId));
+      assertEquals(before, snapshot(childId));
+    }
+    BranchSettings selected =
+        new BranchSettings(branchSettings().agentName(), branchSettings().execution(), "env-b");
+    Ticket ticket = joinRequest(UUID.randomUUID(), parentId);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SpawnTestSupport.request(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                selected,
+                List.of(prompt("new child")),
+                AcceptancePreflight.IDENTITY,
+                null,
+                false,
+                ticket));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            SpawnTestSupport.request(
+                childId,
+                null,
+                selected,
+                List.of(prompt("continuation")),
+                AcceptancePreflight.IDENTITY,
+                new SpawnRequest.Continuation(
+                    before.thread().headEntryId(), before.thread().nextCommandSequence()),
+                false,
+                ticket));
+    assertEquals(beforeCommands, commands(childId));
+    assertEquals(before, snapshot(childId));
+    assertTrue(runtime.findJoin(ticket.invocationId()).isEmpty());
+  }
+
   private void assertUnmatchedWithoutReceipts(Delegation delegation, UUID secondJoin) {
     for (UUID invocation : List.of(delegation.firstJoin(), secondJoin)) {
       assertFalse(join(invocation).matched());
@@ -356,11 +512,15 @@ class PostgresqlSubagentContinuationTest {
         new CustomMessageCommandPayload(AgentMessage.user(text)), UUID.randomUUID());
   }
 
+  private static NewThreadCommand environment(String name) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload(name), UUID.randomUUID());
+  }
+
   private AcceptCommandsCommand resume(UUID childId, NewThreadCommand prompt) {
     ThreadSnapshot snapshot = snapshot(childId);
     ThreadState child = snapshot.thread();
     BranchSettings settings = snapshot.entryState().baseSettings();
-    // 与 SubagentTaskRunner.appendCommand 一致：无条件发送完整 SET_* 前缀，再追加任务输入。
+    // 与 SubagentTaskRunner.appendCommand 一致：只发送子线程允许的设置，再追加任务输入。
     return new AcceptCommandsCommand(
         new AcceptCommandsTarget.Thread(childId, child.headEntryId(), child.nextCommandSequence()),
         List.of(
@@ -368,8 +528,6 @@ class PostgresqlSubagentContinuationTest {
                 new SetAgentCommandPayload(settings.agentName()), UUID.randomUUID()),
             new NewThreadCommand(
                 new SetExecutionCommandPayload(settings.execution()), UUID.randomUUID()),
-            new NewThreadCommand(
-                new SetEnvironmentCommandPayload(settings.environmentName()), UUID.randomUUID()),
             prompt));
   }
 

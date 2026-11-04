@@ -740,6 +740,12 @@ public final class ThreadProcessor {
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =
         reason == TurnStartReason.INPUT && ThreadInputDemand.hasUnconsumedNotification(tx, thread);
+    boolean childThread = !thread.id().equals(thread.rootThreadId());
+    String rootEnvironmentName = null;
+    if (childThread) {
+      ThreadState root = tx.threads().find(thread.rootThreadId()).orElseThrow();
+      rootEnvironmentName = tx.entries().loadBranchSettings(root.headEntryId()).environmentName();
+    }
     TurnPlan plan =
         planBuilder.build(
             thread.id(),
@@ -755,7 +761,9 @@ public final class ThreadProcessor {
             tx::nextId,
             now,
             preparation,
-            pendingNotificationInput);
+            pendingNotificationInput,
+            childThread,
+            rootEnvironmentName);
     resolveAndCommitTx(tx, claim, thread, plan);
   }
 

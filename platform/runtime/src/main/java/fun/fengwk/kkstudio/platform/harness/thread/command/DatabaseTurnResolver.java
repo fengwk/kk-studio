@@ -111,7 +111,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(path, compactionPreparation);
+        return resolveCompaction(compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, path.baseSettings(), clock.instant()));
@@ -430,7 +430,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
    * config 与 removedPrefixTokens 现算。
    */
-  private Result resolveCompaction(EntryPath parentPath, CompactionPreparation preparation) {
+  private Result resolveCompaction(CompactionPreparation preparation) {
     String compactionAgentName = BuiltinAgentDefinitions.COMPACTION_NAME;
     AgentDefinition agent =
         require(
@@ -469,11 +469,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
     ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
     BranchSettings childSettings =
-        new BranchSettings(
-            compactionAgentName,
-            compactorExecution,
-            parentPath.baseSettings().environmentName(),
-            null);
+        new BranchSettings(compactionAgentName, compactorExecution, null, null);
     return new TurnResolver.CompactionResolved(
         compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }

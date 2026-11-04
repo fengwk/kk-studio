@@ -245,7 +245,6 @@ function agent(): AgentDefinitionDTO {
     type: 'USER' as const,
     execution: { driver: 'builtin', settings: { modelName: 'model-1', variant: 'default' } },
     config: {
-      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

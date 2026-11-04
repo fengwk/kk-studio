@@ -63,7 +63,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         tools: ['read', 'bash'],
         skills: [{ packageName: 'dev-tools', name: 'dev' }],
         subagents: ['explorer'],
-        configurationJson: '{"inheritParentEnvironment":true,"tools":["read","bash"],"skills":[{"packageName":"dev-tools","name":"dev"}],"subagents":["explorer"]}',
+        configurationJson: '{"tools":["read","bash"],"skills":[{"packageName":"dev-tools","name":"dev"}],"subagents":["explorer"]}',
       },
     ],
     cacheControl: {
@@ -310,7 +310,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 tools: ['read', 'grep'],
                 skills: [{ packageName: 'core-pkg', name: 'dev' }],
                 subagents: ['searcher'],
-                configurationJson: '{"inheritParentEnvironment":true,"tools":["read","grep"],"skills":[{"packageName":"core-pkg","name":"dev"}],"subagents":["searcher"]}',
+                configurationJson: '{"tools":["read","grep"],"skills":[{"packageName":"core-pkg","name":"dev"}],"subagents":["searcher"]}',
               },
               {
                 name: 'helper',
@@ -318,7 +318,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 tools: [],
                 skills: [],
                 subagents: [],
-                configurationJson: '{"inheritParentEnvironment":false,"tools":[],"skills":[],"subagents":[]}',
+                configurationJson: '{"tools":[],"skills":[],"subagents":[]}',
               },
             ],
           })}
@@ -357,7 +357,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(subagentsTags.querySelectorAll('button')).toHaveLength(0)
 
       const configJson = screen.getByTestId('subagent-configuration-json')
-      expect(configJson.textContent).toContain('"inheritParentEnvironment": true')
+      expect(configJson.textContent).toContain('"tools": [')
       expect(configJson.textContent).toContain('"packageName": "core-pkg"')
 
       // 按 Escape 关闭

@@ -65,7 +65,18 @@ class TurnPlanBuilderContributorStateTest {
     var source = path(store, threadId);
 
     TurnPlan plan =
-        builder.build(threadId, source, reason, commands, 5L, UUID::randomUUID, NOW, null, false);
+        builder.build(
+            threadId,
+            source,
+            reason,
+            commands,
+            5L,
+            UUID::randomUUID,
+            NOW,
+            null,
+            false,
+            false,
+            null);
 
     assertEquals(
         reason == TurnStartReason.INPUT
@@ -125,7 +136,9 @@ class TurnPlanBuilderContributorStateTest {
                     UUID::randomUUID,
                     NOW,
                     null,
-                    false));
+                    false,
+                    false,
+                    null));
     assertTrue(error.getMessage().contains("requires at least one"));
     assertEquals(ThreadCommandState.QUEUED, command(store, threadId, key).state());
   }

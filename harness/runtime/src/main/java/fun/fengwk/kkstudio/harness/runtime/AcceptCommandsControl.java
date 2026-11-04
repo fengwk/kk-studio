@@ -457,6 +457,11 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight,
       SpawnRequest ticket,
       DriverRegistry driverRegistry) {
+    if (!thread.id().equals(thread.rootThreadId())
+        && commands.stream()
+            .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+      throw new IllegalArgumentException("only the execution root can set an environment");
+    }
     boolean genuineUserInput = isGenuineUserInput(commands);
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);

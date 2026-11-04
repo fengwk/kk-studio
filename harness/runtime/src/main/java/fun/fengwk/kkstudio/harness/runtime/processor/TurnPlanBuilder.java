@@ -56,7 +56,9 @@ final class TurnPlanBuilder {
       Supplier<UUID> idAllocator,
       Instant now,
       CompactionPreparation preparation,
-      boolean pendingNotificationInput) {
+      boolean pendingNotificationInput,
+      boolean childThread,
+      String rootEnvironmentName) {
     Objects.requireNonNull(sourcePath, "sourcePath");
     Objects.requireNonNull(reason, "reason");
     Objects.requireNonNull(plannedCommands, "plannedCommands");
@@ -89,6 +91,10 @@ final class TurnPlanBuilder {
     }
     var settings =
         harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands, idAllocator);
+    if (childThread) {
+      // 子线程没有环境选择；本次 turn 仅冻结规划时执行根的环境，历史调用不随之后的切换改变。
+      settings = settings.withEnvironmentName(rootEnvironmentName);
+    }
 
     UUID sessionId = sourcePath.root().sessionId();
 

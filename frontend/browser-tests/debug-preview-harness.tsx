@@ -45,7 +45,6 @@ const router = createMemoryRouter([{
             type: 'BUILTIN',
             execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
             config: {
-              inheritParentEnvironment: true,
               tools: ['read', 'bash'],
               skills: [],
               subagents: [],
@@ -60,7 +59,7 @@ const router = createMemoryRouter([{
             systemPrompt: null,
             type: 'USER',
             execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'anthropic/Claude' : 'missing/model', variant: 'fast' } },
-            config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+            config: { tools: [], skills: [], subagents: [] },
             version: '1',
             createTime: 1790812800,
             updateTime: 1790812800,

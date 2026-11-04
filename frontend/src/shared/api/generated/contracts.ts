@@ -16,7 +16,6 @@ export interface AgentDefinitionConfigDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
-  inheritParentEnvironment: boolean
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO */

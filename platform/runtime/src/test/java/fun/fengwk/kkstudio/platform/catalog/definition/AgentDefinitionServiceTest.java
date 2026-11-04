@@ -56,7 +56,6 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
-    assertEquals(Boolean.TRUE, definition.getConfig().getInheritParentEnvironment());
     assertEquals("0", definition.getVersion());
     assertThrows(
         AiDuplicateException.class,

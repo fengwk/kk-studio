@@ -158,7 +158,6 @@ describe('AI domain utilities', () => {
         type: 'USER',
         execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
-          inheritParentEnvironment: true,
           tools: ['search'],
           skills: [],
           subagents: [],
@@ -170,7 +169,6 @@ describe('AI domain utilities', () => {
     ).toMatchObject({
       name: 'assistant',
       model: 'MiniMax-M2.7',
-      inheritParentEnvironment: true,
       tools: ['search'],
       subagents: [],
     })
@@ -284,7 +282,6 @@ describe('AI domain utilities', () => {
       systemPrompt: ' prompt ',
       model: ' MiniMax-M2.7 ',
       variant: ' default ',
-      inheritParentEnvironment: true,
       tools: [' search ', ''],
       skills: [],
       subagents: [' helper '],
@@ -295,7 +292,6 @@ describe('AI domain utilities', () => {
       systemPrompt: 'prompt',
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['search'],
         skills: [],
         subagents: ['helper'],
@@ -307,7 +303,6 @@ describe('AI domain utilities', () => {
       systemPrompt: 'prompt',
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['search'],
         skills: [],
         subagents: ['helper'],
@@ -329,7 +324,6 @@ describe('AI domain utilities', () => {
         type: 'USER' as const,
         execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
-          inheritParentEnvironment: true,
           tools: [],
           skills: [],
           subagents: [],
@@ -475,7 +469,6 @@ describe('AI domain utilities', () => {
         type: 'USER',
         execution: { driver: 'builtin', settings: { modelName: 'gpt-5.4', variant: 'default' } },
         config: {
-          inheritParentEnvironment: true,
           tools: [],
           skills: [],
           subagents: [],

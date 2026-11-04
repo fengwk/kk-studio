@@ -56,7 +56,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 | `SETTINGS` | 回合间安全边界上的 settings 应用快照，不调度模型 |
 | `FORK` | 分支事实节点 `{mode, sourceEntryId, sourceThreadId}`，模型可见文本是固定英文通知 |
 
-执行父子关系不进历史，而是 Thread 行上不可变的 `parentThreadId`，因此 Entry Tree 始终是对话历史而不是运行树。Environment 以全局唯一、不可变的 name 进入 settings，每回合再解析为内部路由身份；目录只出现在每次工具调用自己的 arguments 里，历史中没有目录状态。
+执行父子关系不进历史，而是 Thread 行上不可变的 `parentThreadId`，因此 Entry Tree 始终是对话历史而不是运行树。Environment 是执行根的设置；子 Agent 的初始 settings 不带环境，也不能接受 `SET_ENVIRONMENT`。每次子回合规划在执行树事务内读取执行根已生效的当前环境，并将当时的 name 冻结在回合快照中，再解析为内部路由身份。环境切换在根的安全边界生效后，后续子回合使用新环境；已冻结的模型请求与工具调用继续使用原环境。目录只出现在每次工具调用自己的 arguments 里，历史中没有目录状态。
 
 [`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是从 `ROOT` 到 head 的不可变连续路径（同 Session、父链相接、ID 不重复、首节点是唯一的 `ROOT`）。[`EntrySlice`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntrySlice.java) 是同一条链的读取视图：`baseEntryId` 为空时就是这条完整路径；非空时只含该祖先之后、不含游标本身的连续子链，空列表表示游标就是 head。增量不满足 `EntryPath` 的 ROOT 约束，不能当作完整路径使用。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 在其上校验回合文法：
 

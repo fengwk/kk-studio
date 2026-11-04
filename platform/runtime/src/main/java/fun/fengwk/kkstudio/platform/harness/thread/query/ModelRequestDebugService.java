@@ -96,6 +96,14 @@ public final class ModelRequestDebugService {
     Objects.requireNonNull(model, "model");
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
     EntryPath path = snapshot.requireFullPath();
+    if (!threadId.equals(snapshot.thread().rootThreadId())) {
+      environmentName =
+          runtime
+              .getThreadSnapshot(snapshot.thread().rootThreadId())
+              .entryState()
+              .baseSettings()
+              .environmentName();
+    }
     if (!BuiltinExecution.DRIVER.equals(path.baseSettings().execution().driver())) {
       throw new IllegalArgumentException(
           "model request debug is only supported for builtin execution driver");
@@ -189,7 +197,7 @@ public final class ModelRequestDebugService {
     dto.setTools(List.copyOf(config.getTools()));
     dto.setSkills(List.copyOf(config.getSkills()));
     dto.setSubagents(List.copyOf(config.getSubagents()));
-    // canonical config JSON 只含 tools/skills/subagents/inheritParentEnvironment，不含任何凭据。
+    // canonical config JSON 只含 tools/skills/subagents，不含任何凭据。
     dto.setConfigurationJson(agentConfigCodec.encode(config));
     return dto;
   }

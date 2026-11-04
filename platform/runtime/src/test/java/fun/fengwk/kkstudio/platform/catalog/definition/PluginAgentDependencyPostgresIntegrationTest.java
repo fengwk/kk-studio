@@ -425,8 +425,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(ModelSelection.model(MODEL_NAME, null)))
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .version(0L)
             .build();
     return agent;

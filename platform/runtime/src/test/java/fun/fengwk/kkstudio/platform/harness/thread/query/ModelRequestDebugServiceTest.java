@@ -113,7 +113,7 @@ class ModelRequestDebugServiceTest {
   /** 目标 Agent 的持久化配置：subagents 里的 nested 只是声明，绝不递归解析。 */
   private static final String CODER_CONFIG_JSON =
       "{\"tools\":[\"read\"],\"skills\":[{\"packageName\":\"pkg\",\"name\":\"sk\"}],"
-          + "\"subagents\":[\"nested\"],\"inheritParentEnvironment\":true}";
+          + "\"subagents\":[\"nested\"]}";
 
   /** required-nullable 字段在真实 NON_NULL 序列化配置下也必须显式发射；声明序由显式关闭字母序保持。 */
   private static final ObjectMapper JSON =

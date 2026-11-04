@@ -67,7 +67,6 @@ describe('AiConsolePanels', () => {
               type: 'USER',
               execution: { driver: 'builtin', settings: { modelName: 'm1', variant: 'default' } },
               config: {
-                inheritParentEnvironment: true,
                 tools: ['bash'],
                 skills: [],
                 subagents: [],

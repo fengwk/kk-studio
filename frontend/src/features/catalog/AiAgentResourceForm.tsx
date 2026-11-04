@@ -265,16 +265,6 @@ export function AgentForm({
         ) : null}
       </fieldset>
 
-      <div className="form-group">
-        <Checkbox
-          checked={draft.inheritParentEnvironment}
-          onChange={(inheritParentEnvironment) =>
-            onChange({ ...draft, inheritParentEnvironment })
-          }
-          label={t('ai.catalog.form.inheritParentEnvironment')}
-        />
-      </div>
-
       {driver === 'builtin' && models.length === 0 && (
         <div className="inline-hint" role="status">
           {t('ai.catalog.form.needModel')}

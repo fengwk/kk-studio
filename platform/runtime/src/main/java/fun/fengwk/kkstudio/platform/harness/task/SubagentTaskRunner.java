@@ -90,7 +90,7 @@ public class SubagentTaskRunner implements SubagentRunner {
     if (request.resumeThreadId() != null) {
       requireResumeOwnership(runtime, request);
     }
-    BranchSettings settings = materializeTarget(request, parent);
+    BranchSettings settings = materializeTarget(request);
     // 默认 maxTurns 是软预算默认值：一次接受内只物化一次，避免重试/回放改写既有 join 的预算。
     int maxTurns =
         request.maxTurns() != null
@@ -310,16 +310,12 @@ public class SubagentTaskRunner implements SubagentRunner {
               + availableNames(allowed));
     }
     return new ParentInvocation(
-        request.parentThreadId(),
-        parent.thread().headEntryId(),
-        parent.entryState().baseSettings().environmentName(),
-        configProvider.subagentConfig());
+        request.parentThreadId(), parent.thread().headEntryId(), configProvider.subagentConfig());
   }
 
-  private BranchSettings materializeTarget(SubagentTaskRequest request, ParentInvocation parent) {
+  private BranchSettings materializeTarget(SubagentTaskRequest request) {
     try {
-      return settingsMaterializer.materializeSubagent(
-          request.subagentType(), parent.environmentName());
+      return settingsMaterializer.materialize(request.subagentType());
     } catch (RuntimeException failure) {
       throw reject(message(failure), failure);
     }
@@ -415,6 +411,5 @@ public class SubagentTaskRunner implements SubagentRunner {
   }
 
   /** 校验并冻结的父调用上下文：允许的 subagent 已由调用方校验，这里冻结 settings 事实与当前额度参数。 */
-  private record ParentInvocation(
-      UUID threadId, UUID headEntryId, String environmentName, SubagentConfig config) {}
+  private record ParentInvocation(UUID threadId, UUID headEntryId, SubagentConfig config) {}
 }

@@ -72,7 +72,9 @@ public final class TurnPlanPreview {
             UUID::randomUUID,
             now,
             null,
-            false)
+            false,
+            false,
+            null)
         .candidatePath();
   }
 }
