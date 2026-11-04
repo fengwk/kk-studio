@@ -47,6 +47,10 @@ import {
   RuntimeSnapshotSchema,
   RuntimeStatusSchema,
   SettingsSchema,
+  SkillPackageSchema,
+  SkillPackageStateSchema,
+  SkillStateSchema,
+  SkillSyncSchema,
   StartedSchema,
   TemporaryResourcePolicySchema,
   TextContentSchema,
@@ -1500,6 +1504,303 @@ describe('control framing', () => {
       },
     })
     expect(() => validate(duplicateViews)).toThrow(/must not repeat viewId/)
+  })
+
+  it('validates and roundtrips SKILL_SYNC and SKILL_STATE', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const syncEnv = create(EnvelopeSchema, {
+      messageType: MessageType.SKILL_SYNC,
+      environmentId: ENVIRONMENT_ID,
+      payload: {
+        case: 'skillSync',
+        value: create(SkillSyncSchema, {
+          packages: [
+            create(SkillPackageSchema, {
+              packageName: 'weather-skill',
+              sha256: validSha,
+              sizeBytes: 1024n,
+              downloadUrl: 'https://example.com/download/weather.zip',
+            }),
+          ],
+        }),
+      },
+    })
+    const encodedSync = encodeBinary(syncEnv)
+    const decodedSync = decodeBinary(encodedSync)
+    expect(decodedSync).toEqual(syncEnv)
+
+    const stateEnv = create(EnvelopeSchema, {
+      messageType: MessageType.SKILL_STATE,
+      environmentId: ENVIRONMENT_ID,
+      payload: {
+        case: 'skillState',
+        value: create(SkillStateSchema, {
+          packages: [
+            create(SkillPackageStateSchema, {
+              packageName: 'weather-skill',
+              installedSha256: validSha,
+              localPath: '/data/skills/weather-skill',
+            }),
+            create(SkillPackageStateSchema, {
+              packageName: 'failed-skill',
+              error: 'Download timeout',
+            }),
+          ],
+        }),
+      },
+    })
+    const encodedState = encodeBinary(stateEnv)
+    const decodedState = decodeBinary(encodedState)
+    expect(decodedState).toEqual(stateEnv)
+  })
+
+  it('validates SKILL_SYNC bounds and rejection rules', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+    // 1. InvocationId not allowed
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_SYNC,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'skillSync',
+            value: create(SkillSyncSchema, { packages: [] }),
+          },
+        }),
+      ),
+    ).toThrow(/must not declare invocationId/)
+
+    // 2. Non-canonical package name
+    for (const badName of ['Invalid_Name', 'UPPER', 'bad@pkg', '-leading', 'trailing-']) {
+      expect(() =>
+        encodeBinary(
+          create(EnvelopeSchema, {
+            messageType: MessageType.SKILL_SYNC,
+            environmentId: ENVIRONMENT_ID,
+            payload: {
+              case: 'skillSync',
+              value: create(SkillSyncSchema, {
+                packages: [
+                  create(SkillPackageSchema, {
+                    packageName: badName,
+                    sha256: validSha,
+                    sizeBytes: 100n,
+                    downloadUrl: 'https://example.com/pkg.zip',
+                  }),
+                ],
+              }),
+            },
+          }),
+        ),
+      ).toThrow(/not a canonical skill package name/)
+    }
+
+    // 3. Duplicate package name
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_SYNC,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillSync',
+            value: create(SkillSyncSchema, {
+              packages: [
+                create(SkillPackageSchema, {
+                  packageName: 'dup-pkg',
+                  sha256: validSha,
+                  sizeBytes: 100n,
+                  downloadUrl: 'https://example.com/1.zip',
+                }),
+                create(SkillPackageSchema, {
+                  packageName: 'dup-pkg',
+                  sha256: validSha,
+                  sizeBytes: 200n,
+                  downloadUrl: 'https://example.com/2.zip',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/duplicate package/)
+
+    // 4. Invalid sha256 (not 64 lowercase hex)
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_SYNC,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillSync',
+            value: create(SkillSyncSchema, {
+              packages: [
+                create(SkillPackageSchema, {
+                  packageName: 'pkg',
+                  sha256: 'UPPERCASE0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+                  sizeBytes: 100n,
+                  downloadUrl: 'https://example.com/pkg.zip',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/sha256/)
+
+    // 5. Negative sizeBytes
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_SYNC,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillSync',
+            value: create(SkillSyncSchema, {
+              packages: [
+                create(SkillPackageSchema, {
+                  packageName: 'pkg',
+                  sha256: validSha,
+                  sizeBytes: -1n,
+                  downloadUrl: 'https://example.com/pkg.zip',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/sizeBytes must not be negative/)
+
+    // 6. Invalid downloadUrl (non-http/https or control chars)
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_SYNC,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillSync',
+            value: create(SkillSyncSchema, {
+              packages: [
+                create(SkillPackageSchema, {
+                  packageName: 'pkg',
+                  sha256: validSha,
+                  sizeBytes: 100n,
+                  downloadUrl: 'ftp://example.com/pkg.zip',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must be an http\(s\) URL/)
+  })
+
+  it('validates SKILL_STATE bounds and rejection rules', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+    // 1. InvocationId not allowed
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_STATE,
+          environmentId: ENVIRONMENT_ID,
+          invocationId: INVOCATION_ID,
+          payload: {
+            case: 'skillState',
+            value: create(SkillStateSchema, { packages: [] }),
+          },
+        }),
+      ),
+    ).toThrow(/must not declare invocationId/)
+
+    // 2. installedSha256 and localPath must be declared together
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_STATE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillState',
+            value: create(SkillStateSchema, {
+              packages: [
+                create(SkillPackageStateSchema, {
+                  packageName: 'pkg',
+                  installedSha256: validSha,
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must declare installedSha256 and localPath together/)
+
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_STATE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillState',
+            value: create(SkillStateSchema, {
+              packages: [
+                create(SkillPackageStateSchema, {
+                  packageName: 'pkg',
+                  localPath: '/data/skills/pkg',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/must declare installedSha256 and localPath together/)
+
+    // 3. Duplicate package
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_STATE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillState',
+            value: create(SkillStateSchema, {
+              packages: [
+                create(SkillPackageStateSchema, {
+                  packageName: 'dup-pkg',
+                  installedSha256: validSha,
+                  localPath: '/data/skills/dup-pkg',
+                }),
+                create(SkillPackageStateSchema, {
+                  packageName: 'dup-pkg',
+                  error: 'failed',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/duplicate package/)
+
+    // 4. Control character in error
+    expect(() =>
+      encodeBinary(
+        create(EnvelopeSchema, {
+          messageType: MessageType.SKILL_STATE,
+          environmentId: ENVIRONMENT_ID,
+          payload: {
+            case: 'skillState',
+            value: create(SkillStateSchema, {
+              packages: [
+                create(SkillPackageStateSchema, {
+                  packageName: 'pkg',
+                  error: 'bad\ncontrol\rerror',
+                }),
+              ],
+            }),
+          },
+        }),
+      ),
+    ).toThrow(/error must not contain control characters/)
   })
 })
 

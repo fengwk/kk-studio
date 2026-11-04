@@ -17,7 +17,7 @@ import type {
   SkillPackageCheckDTO,
   SkillPackageDetailDTO,
   SkillPackageGitCreateDTO,
-  SkillPackageGitEditDTO,
+  SkillPackageEditDTO,
   SkillPackageGitPublishDTO,
   SkillPackagePreviewDTO,
   SkillPackageSummaryDTO,
@@ -123,9 +123,9 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     editSkillPackage: (
       name: string,
-      data: SkillPackageGitEditDTO,
+      data: SkillPackageEditDTO,
     ): Promise<SkillPackageDetailDTO> =>
-      client.put(`/skill-packages/git/${encodeURIComponent(name)}`, data),
+      client.put(`/skill-packages/${encodeURIComponent(name)}`, data),
 
     checkSkillPackage: (
       name: string,

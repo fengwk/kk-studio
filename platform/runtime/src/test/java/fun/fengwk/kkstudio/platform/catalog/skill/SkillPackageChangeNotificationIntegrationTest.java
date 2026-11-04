@@ -28,8 +28,8 @@ import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrches
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -146,22 +146,21 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       assertNoNotification(pg);
 
       // 编辑可编辑字段但事实未变化：服务直接返回，不写行、不通知。
-      SkillPackageGitEditDTO unchanged = new SkillPackageGitEditDTO();
+      SkillPackageEditDTO unchanged = new SkillPackageEditDTO();
       unchanged.setExpectedVersion("0");
       unchanged.setDescription("notify package");
       unchanged.setBranch("main");
-      skillCatalogService.editGitPackage(PACKAGE, unchanged);
+      skillCatalogService.editPackage(PACKAGE, unchanged);
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
 
       // 陈旧版本编辑：在写行前就 conflict，静默。
-      SkillPackageGitEditDTO stale = new SkillPackageGitEditDTO();
+      SkillPackageEditDTO stale = new SkillPackageEditDTO();
       stale.setExpectedVersion("9");
       stale.setDescription("changed");
       stale.setBranch("release");
       assertThrows(
-          AiVersionConflictException.class,
-          () -> skillCatalogService.editGitPackage(PACKAGE, stale));
+          AiVersionConflictException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
       assertNoNotification(pg);
       assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
     }

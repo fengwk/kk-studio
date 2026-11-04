@@ -33,8 +33,9 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillGitSourceDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillManifestEntryDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO;
@@ -47,6 +48,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -330,18 +332,47 @@ public class SkillCatalogService {
     }
   }
 
-  /** 编辑 Git 渠道的描述、检查 branch 与访问令牌；repository URL 不可修改。 */
+  /** 当前版本归档的文件清单；条目只来自服务端生成的 {@code storage_blob.archive_index}。 */
+  public List<SkillPackageFileDTO> listFiles(String packageName) {
+    SkillPackage skillPackage = requirePackage(packageName);
+    StorageBlob artifact = requireArtifact(skillPackage);
+    String encodedIndex = artifact.getArchiveIndex();
+    if (encodedIndex == null) {
+      throw new IllegalStateException("skill package archive has no server index: " + packageName);
+    }
+    return SkillArchiveIndex.decode(encodedIndex).entries().stream()
+        .sorted(Comparator.comparing(SkillArchiveIndex.Entry::path))
+        .map(SkillCatalogService::toFileDTO)
+        .toList();
+  }
+
+  /** 编辑技能包的描述与 Git 渠道设置；上传渠道只能修改描述。 */
   @Transactional
-  public SkillPackageDetailDTO editGitPackage(String packageName, SkillPackageGitEditDTO editDTO) {
+  public SkillPackageDetailDTO editPackage(String packageName, SkillPackageEditDTO editDTO) {
     if (editDTO == null) {
       throw new AiValidationException(RESOURCE, "request body must not be null");
     }
     String rawExpected = editDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
-    SkillPackage current = requireGitPackageForUpdate(packageName);
+    SkillPackage current = requirePackageForUpdate(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     String description = requireDescription(editDTO.getDescription());
-    String branch = requireBranch(editDTO.getBranch());
+    if (!current.isGit()) {
+      if (editDTO.getBranch() != null || editDTO.isTokenProvided()) {
+        throw new AiValidationException(
+            RESOURCE, "branch and token are only valid for Git packages");
+      }
+      if (!Objects.equals(description, current.description())) {
+        if (!skillPackageRepository.updateDescription(packageName, description, expected)) {
+          throw conflictOrMissing(packageName, rawExpected);
+        }
+      }
+      return getPackage(packageName);
+    }
+    String branch =
+        editDTO.getBranch() == null
+            ? current.gitSource().branch()
+            : requireBranch(editDTO.getBranch());
     boolean tokenChanged = false;
     String storedToken = current.gitSource().token();
     if (editDTO.isTokenProvided()) {
@@ -953,6 +984,13 @@ public class SkillCatalogService {
   private static String archiveFilename(SkillPackage skillPackage) {
     String version = skillPackage.packageVersion().replaceAll("[^A-Za-z0-9._-]", "_");
     return skillPackage.packageName() + "-" + version + ".zip";
+  }
+
+  private static SkillPackageFileDTO toFileDTO(SkillArchiveIndex.Entry entry) {
+    SkillPackageFileDTO dto = new SkillPackageFileDTO();
+    dto.setPath(entry.path());
+    dto.setSize(entry.size());
+    return dto;
   }
 
   private static SkillPackageSummaryDTO toSummary(SkillPackage skillPackage) {

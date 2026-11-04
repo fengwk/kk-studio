@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -118,13 +118,13 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.version").value("0"));
 
     // 编辑：只有可编辑字段变化，version 前进。
-    SkillPackageGitEditDTO edit = new SkillPackageGitEditDTO();
+    SkillPackageEditDTO edit = new SkillPackageEditDTO();
     edit.setExpectedVersion("0");
     edit.setDescription("updated description");
     edit.setBranch("release");
     mockMvc
         .perform(
-            put("/api/skill-packages/git/{name}", name)
+            put("/api/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
@@ -155,6 +155,15 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.skills.length()").value(2))
         .andExpect(jsonPath("$.data.version").value("2"));
 
+    // 文件清单只来自服务端归档索引，按路径升序返回 path 与解压后大小。
+    mockMvc
+        .perform(get("/api/skill-packages/{name}/files", name))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].path").value("dev/SKILL.md"))
+        .andExpect(jsonPath("$.data[0].size").isString())
+        .andExpect(jsonPath("$.data[1].path").value("review/SKILL.md"));
+
     // 归档下载返回预签名 GET 与摘要。
     mockMvc
         .perform(post("/api/skill-packages/{name}/archive-url", name))
@@ -177,6 +186,31 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "2"))
         .andExpect(status().isNoContent());
     mockMvc.perform(get("/api/skill-packages/{name}", name)).andExpect(status().isNotFound());
+  }
+
+  /** 测试意图：统一编辑省略 branch 时保持 Git 检查分支，只改描述也推进 CAS version。 */
+  @Test
+  void unifiedEditKeepsGitBranchWhenOmitted() throws Exception {
+    GitFixture git = GitFixture.init("edit-desc", Map.of("dev/SKILL.md", DEV_SKILL_MD));
+    String name = packageName("edit-desc");
+    mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
+
+    SkillPackageEditDTO edit = new SkillPackageEditDTO();
+    edit.setExpectedVersion("0");
+    edit.setDescription("description only");
+    mockMvc
+        .perform(
+            put("/api/skill-packages/{name}", name)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(edit)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.description").value("description only"))
+        .andExpect(jsonPath("$.data.git.branch").value("main"))
+        .andExpect(jsonPath("$.data.version").value("1"));
+
+    mockMvc
+        .perform(get("/api/skill-packages/{name}/files", packageName("missing")))
+        .andExpect(status().isNotFound());
   }
 
   /** 测试意图：重复 package 名、非法 repository URL 与无法解析的 branch 都被拒绝且不留下半成品行。 */
@@ -220,13 +254,13 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
                 .param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
 
-    SkillPackageGitEditDTO stale = new SkillPackageGitEditDTO();
+    SkillPackageEditDTO stale = new SkillPackageEditDTO();
     stale.setExpectedVersion("7");
     stale.setDescription("stale edit");
     stale.setBranch("main");
     mockMvc
         .perform(
-            put("/api/skill-packages/git/{name}", name)
+            put("/api/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(stale)))
         .andExpect(status().isConflict());

@@ -406,7 +406,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 
 事件 L1 使用 `/api/events`：heartbeat case 校验首帧 `connected` 的
 `eventNodeId` / `connectionId` 与保活帧，Project case 验证全局失效通知。
-L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`、`skill.sync`）；
+L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`）；
 它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与

@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.platform.daemon.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
+
+import java.util.List;
 
 /**
  * 会话事件窄端口：核心在状态推进后向宿主发出信号。
@@ -28,4 +31,11 @@ public interface EnvironmentSessionListener {
    */
   default void onHeartbeat(
       EnvironmentId environmentId, DaemonConnectionIdentity identity, Long ideLeaseRound) {}
+
+  /**
+   * 当前 READY 连接上报了一轮完整的技能安装状态。
+   *
+   * <p>回调在会话锁外执行；上报是 Daemon 对本轮期望集合对账后的全部事实，宿主据此整体替换连接行上的 {@code skill_state} 投影。实现异常不影响会话状态。
+   */
+  default void onSkillState(EnvironmentId environmentId, List<DaemonSkillStatePackage> packages) {}
 }

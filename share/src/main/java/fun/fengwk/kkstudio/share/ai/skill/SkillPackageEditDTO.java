@@ -9,9 +9,13 @@ import lombok.Setter;
 import lombok.ToString;
 import org.jspecify.annotations.Nullable;
 
-/** 编辑 Git 渠道技能包的描述、检查 branch 与访问令牌；repository URL 不可修改。 */
+/**
+ * 编辑技能包的描述与 Git 渠道设置；上传渠道只能改描述。
+ *
+ * <p>{@code branch} 省略表示保持当前检查分支；{@code token} 为三态：省略保持、显式 null 清除、非空替换。上传渠道传入任一 Git 字段都会被拒绝。
+ */
 @Data
-public class SkillPackageGitEditDTO {
+public class SkillPackageEditDTO {
 
   /** 客户端已展示的 CAS 版本号（十进制字符串）。 */
   private String expectedVersion;
@@ -19,8 +23,8 @@ public class SkillPackageGitEditDTO {
   /** 可空包描述；null 表示清空。 */
   private @Nullable String description;
 
-  /** 只用于检查候选更新的 branch。 */
-  private String branch;
+  /** Git 渠道的检查分支；省略表示保持当前值，上传渠道禁止提供。 */
+  private @Nullable String branch;
 
   /** 三态令牌：省略保持、显式 null 清除、非空替换；绝不回显。 */
   @Setter(AccessLevel.NONE)
