@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.project;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -10,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
@@ -37,15 +35,6 @@ class StudioProjectErrorAdviceTest {
   @AfterEach
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
-  }
-
-  @Test
-  void scopesAdviceToSupportedControllers() {
-    RestControllerAdvice ann =
-        StudioProjectErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
-    assertArrayEquals(
-        new Class<?>[] {StudioProjectController.class, StudioIssueController.class},
-        ann.assignableTypes());
   }
 
   @Test

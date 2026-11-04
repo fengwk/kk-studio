@@ -283,6 +283,46 @@ test('web production must not compile-import opencli plugin classes', () => {
   scan(webMainDir)
 })
 
+test('web architecture guard rejects undeclared harness imports and controller processors in isolation', () => {
+  // Test intent: the repository check owns the web composition-root boundary, so undeclared
+  // builtin/processor imports must fail closed even without a module-local architecture test.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorWeb = path.join(mirrorRoot, 'web')
+    rmSync(mirrorWeb, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'web'), mirrorWeb, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    writeFileSync(
+      path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/ArchGuardProbe.java'),
+      'package fun.fengwk.kkstudio.web;\nimport fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;\npublic class ArchGuardProbe {}\n',
+    )
+    writeFileSync(
+      path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/controller/ArchGuardProbeController.java'),
+      'package fun.fengwk.kkstudio.web.controller;\nimport fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;\npublic class ArchGuardProbeController {}\n',
+    )
+    assert.throws(
+      () => {
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      },
+      (error) => {
+        const stderr = error.stderr || ''
+        return (
+          stderr.includes('web must use only declared Harness boundaries') &&
+          stderr.includes('controllers must not depend on Harness runtime processors')
+        )
+      },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
 test('module boundary guard rejects a plugin depending on the platform runtime in isolation', () => {
   // Test intent: plugins reach the host only through the platform plugin SPI; a runtime dependency must fail closed.
   const mirrorRoot = createRepositoryMirror()

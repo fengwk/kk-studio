@@ -3,7 +3,7 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `RequestParameters` 解析校验 environmentId 与 limit 等）并返回结果；Harness 控制面的快照投影、写后回读、命令批归属判定、Agent 任务提交与 Environment owner 路由由 `web.harness` / `web.environment` 的应用服务编排。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -303,9 +303,10 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 
 ## 测试入口
 
-[`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
-HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、
-通知重连与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
+[`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖 Flyway、HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、
+通知重连与静态 SPA。Harness 端点测试按端点族拆分，领域夹具集中在 `HarnessRuntimeTestFixtures`；
+架构与依赖边界由 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 统一检查，模块内不重复写架构测试。
+Spring 集成基座使用真实 PostgreSQL。
 Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
 Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 

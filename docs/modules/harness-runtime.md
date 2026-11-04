@@ -255,7 +255,7 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 1. **模块**：新建 `harness/agent-<id>`，包根 `fun.fengwk.kkstudio.harness.<id>` 只属于该模块；只依赖 `harness-runtime` 的公开 API，需要 Environment 时再依赖 `harness-environment`。在根 POM 登记模块，在仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 中登记该模块允许的内部依赖与模块文档。
 2. **持久化与执行**：私有 Store 视图由 `platform-runtime` 实现；Work 处理器复用 `ClaimedExecutionSupport`。
-3. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集），向 `HarnessWorkDispatcher` 注册 Work 处理器，把本地取消与活跃检查并入 `HarnessRuntime` 与 `HarnessRuntimeLifecycle` 的组合函数，并在 `WebModuleArchitectureTest` 中按文件放行装配所需的导入。
+3. **装配**：在 Web 组合根注册 `AgentDriver` bean（由 `DriverRegistry` 收集），向 `HarnessWorkDispatcher` 注册 Work 处理器，把本地取消与活跃检查并入 `HarnessRuntime` 与 `HarnessRuntimeLifecycle` 的组合函数，并在 `scripts/dev/verify/repository/check.mjs` 中按文件放行装配所需的导入。
 4. **测试**：复用 `harness-runtime` 的 test-jar：内存 Store、Store 契约基类与 `FakeAgentDriver`。
 
 ## 压缩

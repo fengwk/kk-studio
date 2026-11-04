@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.advice;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -9,7 +8,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
@@ -20,15 +18,6 @@ import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
-import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
-import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
-import fun.fengwk.kkstudio.web.controller.StudioChatController;
-import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
-import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
-import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
-import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
-import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
@@ -39,27 +28,6 @@ class StudioDomainErrorAdviceTest {
   @AfterEach
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
-  }
-
-  @Test
-  void scopesAdviceToSupportedControllers() {
-    // 同步复用目录领域错误翻译；其余控制器不应被纳入此边界。
-    RestControllerAdvice advice =
-        StudioDomainErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
-
-    assertArrayEquals(
-        new Class<?>[] {
-          StudioAgentProviderController.class,
-          StudioAgentModelController.class,
-          StudioAgentDefinitionController.class,
-          StudioChatController.class,
-          StudioMcpServerController.class,
-          StudioEnvironmentController.class,
-          StudioSkillCatalogController.class,
-          StudioConfigSyncController.class,
-          StudioEnvironmentIdeController.class
-        },
-        advice.assignableTypes());
   }
 
   @Test
