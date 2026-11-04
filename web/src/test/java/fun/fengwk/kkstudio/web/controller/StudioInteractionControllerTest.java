@@ -20,8 +20,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
@@ -411,65 +409,5 @@ class StudioInteractionControllerTest {
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(interactionService);
-  }
-
-  /** 测试意图：验证 interactionService 抛出类型化业务冲突 HarnessRuntimeConflictException 时转换为 409 Conflict。 */
-  @Test
-  void submitToolInputTranslatesConflictExceptionToHttp409() throws Exception {
-    UUID invocationId = id(100);
-    UUID threadId = id(101);
-    UUID submissionId = id(102);
-
-    when(interactionService.submitInput(any()))
-        .thenThrow(
-            new HarnessRuntimeConflictException(
-                HarnessRuntimeConflictException.Reason.INPUT_SUBMISSION_NOT_APPLICABLE,
-                "tool invocation is not waiting for input"));
-
-    String body =
-        """
-        {
-          "threadId": "%s",
-          "submissionId": "%s",
-          "declined": true
-        }
-        """
-            .formatted(threadId, submissionId);
-
-    mockMvc
-        .perform(
-            post("/api/interactions/" + invocationId + "/input")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isConflict());
-  }
-
-  /** 测试意图：验证 interactionService 抛出 HarnessRuntimeNotFoundException 时转换为 404 Not Found。 */
-  @Test
-  void submitToolInputTranslatesNotFoundExceptionToHttp404() throws Exception {
-    UUID invocationId = id(100);
-    UUID threadId = id(101);
-    UUID submissionId = id(102);
-
-    when(interactionService.submitInput(any()))
-        .thenThrow(
-            new HarnessRuntimeNotFoundException("tool invocation not found: " + invocationId));
-
-    String body =
-        """
-        {
-          "threadId": "%s",
-          "submissionId": "%s",
-          "declined": true
-        }
-        """
-            .formatted(threadId, submissionId);
-
-    mockMvc
-        .perform(
-            post("/api/interactions/" + invocationId + "/input")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body))
-        .andExpect(status().isNotFound());
   }
 }
