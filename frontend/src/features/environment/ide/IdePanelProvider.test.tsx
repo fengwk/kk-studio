@@ -27,7 +27,7 @@ const service = vi.hoisted(() => ({
   closeIdeView: vi.fn(),
 }))
 
-vi.mock('@/shared/api/environment-service', () => ({ environmentService: service }))
+vi.mock('@/features/environment/environment-service', () => ({ environmentService: service }))
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'

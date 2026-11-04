@@ -74,22 +74,18 @@ export const PROVIDER_SPECS = [
  * Resolves to a list of status-line strings suitable for printing.
  */
 export async function syncProviderCredentials(backendUrl, env = process.env, request = undefined) {
-  // Explicit reads to satisfy static guard inspections
-  const envValues = {
-    [TEST_GOOGLE_BASE_URL]: env[TEST_GOOGLE_BASE_URL],
-    [TEST_GOOGLE_API_KEY]: env[TEST_GOOGLE_API_KEY],
-    [TEST_OPENAI_RESPONSES_BASE_URL]: env[TEST_OPENAI_RESPONSES_BASE_URL],
-    [TEST_OPENAI_RESPONSES_API_KEY]: env[TEST_OPENAI_RESPONSES_API_KEY],
-    [TEST_ANTHROPIC_BASE_URL]: env[TEST_ANTHROPIC_BASE_URL],
-    [TEST_ANTHROPIC_API_KEY]: env[TEST_ANTHROPIC_API_KEY],
-    [TEST_OPENAI_BASE_URL]: env[TEST_OPENAI_BASE_URL],
-    [TEST_OPENAI_API_KEY]: env[TEST_OPENAI_API_KEY],
-  }
-  return syncProviderSpecs(backendUrl, PROVIDER_SPECS, envValues, request)
+  return syncProviderSpecs(backendUrl, PROVIDER_SPECS, env, request)
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { 'backend-url': { type: 'string' } } })
+  const { values } = parseArgs({ options: { 'backend-url': { type: 'string' }, 'list-env': { type: 'boolean' } } })
+  if (values['list-env']) {
+    for (const spec of PROVIDER_SPECS) {
+      console.log(spec.baseUrlEnv)
+      console.log(spec.apiKeyEnv)
+    }
+    return 0
+  }
   if (!values['backend-url']) {
     process.stderr.write('error: the following arguments are required: --backend-url\n')
     return 2

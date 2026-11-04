@@ -82,9 +82,11 @@ public class AgentModelRepository {
       """;
 
   private final JdbcClient jdbcClient;
+  private final BuiltinAgentModelReferences builtinReferences;
 
   public AgentModelRepository(JdbcClient jdbcClient) {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
+    this.builtinReferences = new BuiltinAgentModelReferences(jdbcClient);
   }
 
   public Page<AgentModel> page(PageQuery pageQuery) {
@@ -174,19 +176,10 @@ public class AgentModelRepository {
   }
 
   /**
-   * 将模型由 oldName 重命名为 model.name：外键级联改写 Agent 引用，并显式推进这些 Agent 的版本；同步模型组成员引用并清除受影响组的冷却。
-   * 目标行缺失或版本不匹配抛出运行时异常以触发外层事务回滚。
+   * 将模型由 oldName 重命名为 model.name：同步 Agent 引用及版本、模型组成员引用，并清除受影响组的冷却。 目标行缺失或版本不匹配抛出运行时异常以触发外层事务回滚。
    */
   public void rename(String oldName, AgentModel model, long expectedVersion) {
-    // 外键级联会改写引用行但不推进版本：先锁定这些 Agent 行，改名后显式同步版本事实。
-    List<String> referencingAgents =
-        jdbcClient
-            .sql(
-                "select name from agent_definition"
-                    + " where model_name = :oldName order by name for update")
-            .param("oldName", oldName)
-            .query(String.class)
-            .list();
+    List<String> referencingAgents = builtinReferences.lockAgents(oldName);
     int renamed =
         jdbcClient
             .sql(
@@ -225,16 +218,7 @@ public class AgentModelRepository {
         .param("oldName", oldName)
         .param("name", model.name())
         .update();
-    for (String agentName : referencingAgents) {
-      jdbcClient
-          .sql(
-              "update agent_definition"
-                  + " set version = version + 1,"
-                  + " updated_at = greatest(updated_at, current_timestamp)"
-                  + " where name = :name")
-          .param("name", agentName)
-          .update();
-    }
+    builtinReferences.renameLockedAgents(referencingAgents, model.name());
     if (model.kind() == AgentModelKind.GROUP) {
       // 组改名同样是一次配置写：清除原名称下的冷却状态。
       deleteGroupCooldowns(model.name());
@@ -252,12 +236,7 @@ public class AgentModelRepository {
   }
 
   public boolean hasAgents(String name) {
-    return jdbcClient
-            .sql("select count(*) from agent_definition where model_name = :name")
-            .param("name", name)
-            .query(Long.class)
-            .single()
-        > 0;
+    return builtinReferences.hasAgents(name);
   }
 
   /** 是否有模型组把该名称作为成员引用。 */
@@ -282,18 +261,18 @@ public class AgentModelRepository {
 
   /** Agent 或模型组是否引用了该单 Model 的指定 Variant。 */
   public boolean hasVariantReferences(String name, String variant) {
+    if (builtinReferences.hasVariant(name, variant)) {
+      return true;
+    }
     return jdbcClient
             .sql(
                 """
-                select
-                    (select count(*) from agent_definition
-                     where model_name = :name and variant = :variant)
-                  + (select count(*)
-                     from agent_model g,
-                          lateral jsonb_array_elements(g.group_config -> 'members') as member(value)
-                     where g.kind = 'GROUP'
-                       and member.value ->> 'modelName' = :name
-                       and member.value ->> 'variant' = :variant)
+                select count(*)
+                from agent_model g,
+                     lateral jsonb_array_elements(g.group_config -> 'members') as member(value)
+                where g.kind = 'GROUP'
+                  and member.value ->> 'modelName' = :name
+                  and member.value ->> 'variant' = :variant
                 """)
             .param("name", name)
             .param("variant", variant)

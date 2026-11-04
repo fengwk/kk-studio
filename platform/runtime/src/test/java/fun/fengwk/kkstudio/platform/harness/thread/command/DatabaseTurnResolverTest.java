@@ -27,6 +27,37 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.ModelAttemptFailurePayload;
+import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -62,39 +93,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -206,8 +206,9 @@ class DatabaseTurnResolverTest {
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     // Agent 自带的 model/variant 引用是旧数据，绝不能被读取。
-    fixture.editAgent(agent -> agent.modelName("old-model"));
-    fixture.editAgent(agent -> agent.variant("old-variant"));
+    fixture.editAgent(
+        agent ->
+            agent.execution(BuiltinExecution.of(new ModelSelection("old-model", "old-variant"))));
     when(fixture.models.getByName("old-model")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
@@ -244,7 +245,8 @@ class DatabaseTurnResolverTest {
     fixture.missingModel();
     ModelSelection backup = ModelSelection.model("backup-model", "default");
     fixture.addModel("backup-provider", backup, Fixture.parsedModel());
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
 
@@ -259,7 +261,8 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("backup-model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("backup-model", null))));
 
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
@@ -267,7 +270,8 @@ class DatabaseTurnResolverTest {
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelName("model"));
+    fixture.editAgent(
+        agent -> agent.execution(BuiltinExecution.of(new ModelSelection("model", null))));
     assertEquals(
         "model model and the agent default model are both unavailable; bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
@@ -2285,7 +2289,7 @@ class DatabaseTurnResolverTest {
 
     // 上下文只剩 37 token 时严格取 remaining，不应用正数钳位或 variant 回退。
     long estimatedInputTokens =
-        CompactionPlanner.estimateRequestTokens(path, resolved.spec().systemInstruction());
+        TokenEstimator.estimateRequestTokens(path, resolved.spec().systemInstruction());
     fixture.modelLimits(estimatedInputTokens + 37, 600);
     resolved = fixture.resolvedResult(path, null);
     assertEquals(37, resolved.maxOutputTokens());
@@ -3056,6 +3060,8 @@ class DatabaseTurnResolverTest {
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private AgentProvider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
+
+    /** 输入 token 估算与正式发送同源：Fixture 用同一 runtime 实现绑定端口，测试期望值也来自该实现。 */
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
@@ -3323,6 +3329,7 @@ class DatabaseTurnResolverTest {
               new ProviderFactories(factories),
               () -> new CompactionConfig(20_000),
               contextResolver,
+              TokenEstimator::estimateRequestTokens,
               clock);
     }
 
@@ -3517,7 +3524,7 @@ class DatabaseTurnResolverTest {
               .systemPrompt(COMPACTION_SYSTEM_PROMPT)
               .configJson("agent-config");
       if (selection != null) {
-        compaction.modelName(selection.modelName()).variant(selection.variant());
+        compaction.execution(BuiltinExecution.of(selection));
       }
       when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }

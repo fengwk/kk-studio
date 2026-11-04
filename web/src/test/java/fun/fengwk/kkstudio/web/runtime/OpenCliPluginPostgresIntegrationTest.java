@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -152,7 +153,8 @@ class OpenCliPluginPostgresIntegrationTest {
               assertEquals("OpenCLI", registry.find(PLUGIN_ID).orElseThrow().descriptor().name());
 
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
-                CanvasFunctionCatalog catalog = lease.snapshot().canvasFunctionCatalog();
+                CanvasFunctionCatalog catalog =
+                    PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog();
                 assertEquals(
                     5, catalog.list().size(), "opencli must contribute 5 canvas functions");
                 for (CanvasFunctionCatalog.RegisteredFunction fn : catalog.list()) {
@@ -185,7 +187,9 @@ class OpenCliPluginPostgresIntegrationTest {
                   credentialRepository.find(PLUGIN_ID).orElseThrow().status());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 CanvasFunctionCatalog.RegisteredFunction registered =
-                    lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION);
+                    PluginCanvasFunctionCatalog.of(lease.snapshot())
+                        .catalog()
+                        .require(GPT_IMAGE_FUNCTION);
                 assertTrue(registered.enabled());
                 submit(registered.adapter(), "generate portrait");
               }
@@ -459,7 +463,10 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   private static CanvasFunctionAdapter adapter(PluginCatalogRuntime.Lease lease) {
-    return lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION).adapter();
+    return PluginCanvasFunctionCatalog.of(lease.snapshot())
+        .catalog()
+        .require(GPT_IMAGE_FUNCTION)
+        .adapter();
   }
 
   private void submit(CanvasFunctionAdapter adapter, String prompt) {
@@ -598,6 +605,7 @@ class OpenCliPluginPostgresIntegrationTest {
         configurationRepository,
         credentialRepository,
         configuration,
+        PluginCanvasFunctionCatalog::functionNames,
         mock(PluginAuthAttemptRepository.class),
         Duration.ofMinutes(5),
         Clock.systemUTC());

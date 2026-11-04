@@ -9,7 +9,7 @@ import {
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
-import { getCanvasResourceOriginalUrl } from '@/shared/api/studio-service'
+import { getCanvasResourceOriginalUrl } from '@/features/canvas/canvas-api'
 import { setLocale } from '@/shared/i18n'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
@@ -18,7 +18,7 @@ const NODE_ID = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
 const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'
 const RESOURCE_ID = 'd5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(() => new Promise(() => undefined)),
 }))
 

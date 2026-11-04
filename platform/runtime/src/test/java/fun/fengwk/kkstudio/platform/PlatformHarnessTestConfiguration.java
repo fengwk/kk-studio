@@ -7,9 +7,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
@@ -27,6 +31,14 @@ import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
  */
 @Configuration(proxyBeanMethods = false)
 public class PlatformHarnessTestConfiguration {
+
+  /** 目录测试使用真实 Builtin Driver 校验；测试宿主不执行其 turn 与存储端口。 */
+  @Bean
+  @ConditionalOnMissingBean(DriverRegistry.class)
+  public DriverRegistry platformDriverRegistry() {
+    return new DriverRegistry(
+        new BuiltinAgentDriver(mock(BuiltinStore.class), mock(TurnResolver.class)));
+  }
 
   @Bean
   public EnvironmentSessionListener environmentSessionListener() {

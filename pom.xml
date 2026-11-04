@@ -129,12 +129,12 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-canvas-core</artifactId>
+                <artifactId>kk-studio-canvas-spi</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-canvas-infra</artifactId>
+                <artifactId>kk-studio-canvas-runtime</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

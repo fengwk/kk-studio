@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
+import '@/features/chat/chat-workspace.css'
 import { setLocale } from '@/shared/i18n'
 import { ChatLayoutSelector } from '@/features/chat/ChatWorkspacePage'
 import {
@@ -10,20 +11,20 @@ import {
   type ChatLayout,
   type ChatPaneState,
 } from '@/features/chat/chat-pane-state'
-import { ThreadStatusFooter } from '@/features/chat/runtime/thread-panel/ThreadStatusFooter'
-import { ThinkingBlock } from '@/features/chat/runtime/thread-panel/messages/ThinkingBlock'
-import { UserMessageBlock } from '@/features/chat/runtime/thread-panel/messages/UserMessageBlock'
-import { MetaMessageBlock } from '@/features/chat/runtime/thread-panel/messages/MetaMessageBlock'
-import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
-import { EntryBranchContext } from '@/features/chat/runtime/thread-panel/entry-branch-context'
-import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
+import { ThreadStatusFooter } from '@/features/thread/runtime/thread-panel/ThreadStatusFooter'
+import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/ThinkingBlock'
+import { UserMessageBlock } from '@/features/thread/runtime/thread-panel/messages/UserMessageBlock'
+import { MetaMessageBlock } from '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock'
+import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
+import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline-builder'
 import { Button } from '@/shared/ui/controls/Button'
-import { formatTurnUsageText } from '@/features/chat/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import type {
   MetaDialogueMessage,
   TextDialogueMessage,
   TurnUsage,
-} from '@/features/chat/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline-types'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')

@@ -13,10 +13,10 @@
 - **身份声明**：`descriptor()` 返回全局唯一的 `PluginDescriptor(id, name, version)`。
 - **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。配置校验与存储遵循严格 JSON 规范，秘密绝不以明文回读或导出。
 - **认证规范**：`authenticationSpec()` 声明插件的认证模式，支持 `None`（无认证）、`StaticKey`（静态 API Key / Token，支持声明变更时失效认证代际的上下文关联字段）和 `DeepLink`（OAuth 风格的两阶段认证，支持区域候选）。
-- **两域实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例按需暴露两个独立端口：
-  - `contributor()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
-  - `canvasFunctionAdapter()`：向 Canvas 贡献图形节点执行适配器（`CanvasFunctionAdapter`）。
-  两域均可独立为空，无对应贡献的插件返回 `Optional.empty()`。
+- **实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例暴露两类贡献：
+  - `harnessContributors()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
+  - `contributions(Class<T>)`：按类型交出产品域贡献，Canvas 读取 `contributions(CanvasFunctionAdapter.class)` 得到图形节点执行适配器。
+  两类贡献都在 configure 期冻结、互不依赖，均可为空列表；插件因此同时依赖 platform-plugin-api、harness-runtime 与自己的产品 SPI（Canvas 为 `kk-studio-canvas-spi`）。
 
 当前发行物包含四个内置插件：
 

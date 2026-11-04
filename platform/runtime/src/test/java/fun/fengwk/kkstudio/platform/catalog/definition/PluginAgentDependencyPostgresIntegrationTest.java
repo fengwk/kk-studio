@@ -21,11 +21,12 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
@@ -142,7 +143,6 @@ class PluginAgentDependencyPostgresIntegrationTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             definitionRepository,
-            mock(AgentModelRepository.class),
             mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
             TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of())));
@@ -150,7 +150,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
         new AgentDefinitionService(
             definitionRepository,
             resolver,
-            mock(AgentModelDefaultVariantResolver.class),
+            mock(DriverRegistry.class),
+            mock(BuiltinAgentExecutionValidator.class),
             new AgentDefinitionConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
@@ -422,7 +423,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
             .name(name)
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
-            .modelName(MODEL_NAME)
+            .execution(BuiltinExecution.of(ModelSelection.model(MODEL_NAME, null)))
             .configJson(
                 "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
             .version(0L)

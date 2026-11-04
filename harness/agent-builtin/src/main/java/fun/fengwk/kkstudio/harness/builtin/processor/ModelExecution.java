@@ -3,6 +3,12 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -20,24 +26,18 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.processor.ClaimAdmissionGuard;
 import fun.fengwk.kkstudio.harness.runtime.processor.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.runtime.processor.WorkHeartbeat;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -835,8 +835,9 @@ public final class ModelExecution
 
   /**
    * 模型失败是否重试：先做统一候选判定（OVERFLOW/CANCELLED 排除，非 HTTP AUTHENTICATION/BILLING 排除），带 HTTP 状态时由现读的 {@link
-   * fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
-   * TRANSIENT/INVALID_RESPONSE 走 共享 {@link InvocationRetryPolicy} 预算。
+   * fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy} 唯一决定，其余非 HTTP
+   * TRANSIENT/INVALID_RESPONSE 走 共享 {@link
+   * fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy} 预算。
    */
   private boolean isRetryable(ModelInvocationError error) {
     if (!error.retryCandidate()) {

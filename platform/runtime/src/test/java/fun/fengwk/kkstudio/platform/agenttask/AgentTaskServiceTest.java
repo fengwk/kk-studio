@@ -18,28 +18,28 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 
 import java.time.Instant;
 import java.util.List;
@@ -73,13 +73,15 @@ class AgentTaskServiceTest {
   @Test
   void rootTaskSpawnsAsAReceiptOnlyControllerRun() {
     AcceptedCommands accepted = accepted(UUID.randomUUID());
-    when(runtime.spawn(any())).thenReturn(accepted);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
     AgentTaskRequest request = request(null, null, null);
 
     AgentTaskHandle handle = service.submit(request);
 
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(spawn.capture());
+    ArgumentCaptor<AcceptancePreflight> preflight =
+        ArgumentCaptor.forClass(AcceptancePreflight.class);
+    verify(runtime).spawn(spawn.capture(), preflight.capture());
     SpawnRequest spawned = spawn.getValue();
     assertEquals(SpawnTrigger.CONTROLLER, spawned.trigger());
     assertEquals(JoinDelivery.RECEIPT_ONLY, spawned.delivery());
@@ -88,6 +90,8 @@ class AgentTaskServiceTest {
     assertEquals(ThreadConstraints.NONE, spawned.constraints());
     assertEquals(request.ticketId(), spawned.ticketId());
     assertEquals(request.requestHash(), spawned.requestHash());
+    // 物化端口不在值对象里：同一个 preflight 以调用参数原样传给运行时。
+    assertSame(request.preflight(), preflight.getValue());
     assertEquals(accepted.thread().id(), handle.threadId());
     assertSame(accepted, handle.accepted());
   }
@@ -95,14 +99,14 @@ class AgentTaskServiceTest {
   @Test
   void childTaskNotifiesItsParent() {
     AcceptedCommands accepted = accepted(UUID.randomUUID());
-    when(runtime.spawn(any())).thenReturn(accepted);
+    when(runtime.spawn(any(), any())).thenReturn(accepted);
     UUID parentId = UUID.randomUUID();
     UUID parentHead = UUID.randomUUID();
 
     service.submit(request(parentId, parentHead, null));
 
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(spawn.capture());
+    verify(runtime).spawn(spawn.capture(), any());
     assertEquals(JoinDelivery.NOTIFY_PARENT, spawn.getValue().delivery());
     assertEquals(parentId, spawn.getValue().parentThreadId());
     assertEquals(parentHead, spawn.getValue().expectedParentHeadEntryId());
@@ -323,7 +327,7 @@ class AgentTaskServiceTest {
             });
 
     assertEquals(childThreadId, result);
-    verify(runtime, never()).spawn(any(SpawnRequest.class));
+    verify(runtime, never()).spawn(any(SpawnRequest.class), any());
   }
 
   @Test
@@ -347,7 +351,7 @@ class AgentTaskServiceTest {
                     }));
 
     assertEquals("join invocation identity reused", ex.getMessage());
-    verify(runtime, never()).spawn(any(SpawnRequest.class));
+    verify(runtime, never()).spawn(any(SpawnRequest.class), any());
   }
 
   @Test
@@ -463,7 +467,7 @@ class AgentTaskServiceTest {
     when(runtime.findJoin(ticketId))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(join(ticketId, threadId, false, false, hash)));
-    when(runtime.spawn(any(SpawnRequest.class)))
+    when(runtime.spawn(any(SpawnRequest.class), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
@@ -499,7 +503,7 @@ class AgentTaskServiceTest {
     when(runtime.findJoin(ticketId))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(join(ticketId, threadId, false, false, differentHash)));
-    when(runtime.spawn(any(SpawnRequest.class)))
+    when(runtime.spawn(any(SpawnRequest.class), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
@@ -535,7 +539,7 @@ class AgentTaskServiceTest {
             hash);
 
     when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
-    when(runtime.spawn(any(SpawnRequest.class)))
+    when(runtime.spawn(any(SpawnRequest.class), any()))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"));

@@ -1,18 +1,11 @@
-/** case 注册表。 */
-
-/** @type {Array<{id:string,level:string,title:string,requires:Set<string>,docs:string,run:Function}>} */
-export const ALL_CASES = []
-
-export function registerCase(def) {
-  ALL_CASES.push({
-    ...def,
-    requires: new Set(def.requires || []),
-  })
-  return def.run
+/** 创建只向指定数组添加 case 的函数，并统一规范化 requires。 */
+export function createCaseAdder(cases) {
+  return (def) => cases.push({ ...def, requires: new Set(def.requires || []) })
 }
 
-export function getCase(id) {
-  const c = ALL_CASES.find((x) => x.id === id)
+/** 按 ID 在指定的 case 数组中查找。 */
+export function findCase(cases, id) {
+  const c = cases.find((x) => x.id === id)
   if (!c) throw new Error(`unknown case: ${id}`)
   return c
 }

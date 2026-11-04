@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.spi.driver;
 
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 
 import java.util.UUID;
 

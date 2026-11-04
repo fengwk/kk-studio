@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
-import { getCanvasResourceOriginalUrl } from '@/shared/api/studio-service'
+import { getCanvasResourceOriginalUrl } from '@/features/canvas/canvas-api'
 
 type OriginalIntent = 'open' | 'download'
 

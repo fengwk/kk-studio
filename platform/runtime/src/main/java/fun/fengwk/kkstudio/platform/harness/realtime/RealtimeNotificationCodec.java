@@ -10,8 +10,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 
 import java.util.Iterator;
 import java.util.LinkedHashSet;

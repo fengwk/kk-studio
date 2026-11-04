@@ -19,6 +19,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -40,7 +41,6 @@ import java.net.ProxySelector;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 真实隔离 PostgreSQL 上 Media 插件的归属与启停往返。
@@ -87,12 +87,15 @@ class MediaPluginPostgresIntegrationTest {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
                 assertEquals(List.of(IMAGE_CROP_FUNCTION), functionNames(snapshot));
                 CanvasFunctionCatalog.RegisteredFunction registered =
-                    snapshot.canvasFunctionCatalog().require(IMAGE_CROP_FUNCTION);
+                    PluginCanvasFunctionCatalog.of(snapshot).catalog().require(IMAGE_CROP_FUNCTION);
                 assertTrue(registered.enabled(), "default configuration enables image.crop");
                 assertNull(registered.unavailableReason());
                 assertEquals(MEDIA_FUNCTION_ADAPTER, registered.adapter().getClass().getName());
                 PluginCatalogSnapshot.ConfiguredPlugin owner = snapshot.configuredPlugins().get(0);
-                assertEquals(Set.of(IMAGE_CROP_FUNCTION), owner.functionNames());
+                assertEquals(
+                    List.of(IMAGE_CROP_FUNCTION),
+                    PluginCanvasFunctionCatalog.of(snapshot)
+                        .functionNames(owner.descriptor().pluginId()));
                 assertTrue(owner.contributorIds().isEmpty(), "media contributes no harness");
               }
               assertEquals(
@@ -113,15 +116,21 @@ class MediaPluginPostgresIntegrationTest {
 
               configuration.configure(PLUGIN_ID, 1L, "{\"enabled\":false}", Map.of());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
-                assertTrue(lease.snapshot().canvasFunctionCatalog().list().isEmpty());
-                assertTrue(lease.snapshot().configuredPlugins().get(0).functionNames().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot())
+                        .functionNames(PLUGIN_ID)
+                        .isEmpty());
               }
               assertTrue(context.getBeansOfType(CanvasFunctionAdapter.class).isEmpty());
 
               configuration.configure(PLUGIN_ID, 2L, "{\"enabled\":true}", Map.of());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 CanvasFunctionCatalog.RegisteredFunction registered =
-                    lease.snapshot().canvasFunctionCatalog().require(IMAGE_CROP_FUNCTION);
+                    PluginCanvasFunctionCatalog.of(lease.snapshot())
+                        .catalog()
+                        .require(IMAGE_CROP_FUNCTION);
                 assertTrue(registered.enabled());
                 assertEquals(MEDIA_FUNCTION_ADAPTER, registered.adapter().getClass().getName());
               }
@@ -130,7 +139,7 @@ class MediaPluginPostgresIntegrationTest {
   }
 
   private static List<String> functionNames(PluginCatalogSnapshot snapshot) {
-    return snapshot.canvasFunctionCatalog().list().stream()
+    return PluginCanvasFunctionCatalog.of(snapshot).catalog().list().stream()
         .map(CanvasFunctionCatalog.RegisteredFunction::function)
         .map(CanvasFunctionDefinition::name)
         .toList();

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.realtime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimePayloadLimits;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadLimits;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

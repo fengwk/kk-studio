@@ -10,8 +10,8 @@ import java.util.Set;
  * classloader， 因此没有对应 JAR 就没有 descriptor、管理动作、后台任务与 Tool。
  *
  * <p>本接口区分「安装期定义」与「运行期实例」：{@link #configure(PluginConfig, PluginContext)} 按一次配置产出一个由 Plugin 拥有、可关闭的
- * {@link PluginInstance}，它是 Plugin 两域贡献（Harness / Canvas）与实例资源的唯一所有者。Plugin 通过 {@link
- * PluginContext} 接触 Platform：只能读取本 Plugin 的凭据快照与调用期作废，不持有 repository、lease、加密主密钥或任何 DTO。
+ * {@link PluginInstance}，它是 Plugin 的 Harness 贡献、产品贡献与实例资源的唯一所有者。Plugin 通过 {@link PluginContext} 接触
+ * Platform：只能读取本 Plugin 的凭据快照与调用期作废，不持有 repository、lease、加密主密钥或任何 DTO。
  */
 public interface StudioPlugin {
 

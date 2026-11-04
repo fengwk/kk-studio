@@ -9,7 +9,10 @@ import {
   pageResults,
 } from '../lib/http.mjs'
 import { canonicalUuid } from '../lib/harness.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /** ProjectDTO 精确字段集合：Project 只拥有展示事实、workflow 与 YOLO 启动策略，没有 Coordinator 身份字段。 */
 const PROJECT_FIELDS = [

@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
-import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionKeyValidator;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 
 import java.util.ArrayList;
 import java.util.Collections;

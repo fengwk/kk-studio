@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+
 /** 冻结约束的合并语义：沿执行树只收紧、不放宽，非法输出上限创建即拒绝。 */
 class ThreadConstraintsTest {
 

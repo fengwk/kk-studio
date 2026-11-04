@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+
 /** CompactionConfig 统一 keep/reserve/threshold/manual/output 公式。 */
 class CompactionConfigTest {
 

@@ -19,7 +19,7 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn().mockResolvedValue([{ name: 'macos' }, { name: 'ubuntu' }]),
     getEnvironmentRuntime: vi.fn(),
@@ -150,6 +150,29 @@ describe('Projects 双语渲染', () => {
     expect(en).toContain('2147483647')
     expect(zh).not.toBe(en)
     expect(`${zh}${en}`).not.toContain('⟦missing')
+  })
+
+  it('YOLO 帮助提示可在基础信息页键盘展开并关联读屏说明', async () => {
+    const user = userEvent.setup()
+    renderWorkflowEditor()
+
+    const help = screen.getByRole('button', { name: '帮助：启用 YOLO 执行策略' })
+    help.focus()
+    await user.keyboard('{Enter}')
+    expect(help).toHaveAttribute('aria-expanded', 'true')
+    expect(help).toHaveAttribute('aria-describedby', screen.getByRole('note').id)
+    expect(screen.getByRole('note')).toHaveTextContent('自主执行，跳过人工交互门禁。')
+  })
+
+  it('后续阶段帮助提示仅在需要时展开说明', async () => {
+    const user = userEvent.setup()
+    renderWorkflowEditor()
+    await user.click(screen.getByRole('tab', { name: '工作流' }))
+
+    const help = screen.getByRole('button', { name: '帮助：后续阶段' })
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    await user.click(help)
+    expect(screen.getByRole('note')).toHaveTextContent('仅这些阶段可通过正常流转到达。')
   })
 
   it('Issue 详情弹窗在 en-US 下使用英文标签与英文操作名', async () => {

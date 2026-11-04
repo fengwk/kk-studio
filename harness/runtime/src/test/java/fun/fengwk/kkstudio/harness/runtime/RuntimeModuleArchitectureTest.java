@@ -19,10 +19,6 @@ import java.util.stream.Stream;
 /** 内核内部的架构守卫；模块之间的依赖方向与契约包边界由仓库检查 {@code scripts/dev/verify/repository/check.mjs} 统一校验。 */
 class RuntimeModuleArchitectureTest {
 
-  /** JGit 只为权限路径的 gitignore 语义服务，其它代码不得借此引入 Git 能力。 */
-  private static final String JGIT_OWNER =
-      "fun/fengwk/kkstudio/harness/runtime/permission/PermissionPathPattern.java";
-
   @Test
   void manualCompactionControlDoesNotDependOnProcessorInternals() throws IOException {
     Path manualControl =
@@ -45,8 +41,9 @@ class RuntimeModuleArchitectureTest {
         "ThreadProcessor public operations must be limited to claimed THREAD work reduction");
   }
 
+  /** 权限路径实现迁出后，内核源码不再引用 JGit。 */
   @Test
-  void jgitIsConfinedToPermissionPathPattern() throws IOException {
+  void kernelDoesNotDependOnGit() throws IOException {
     Path main = mainJava();
     List<String> users;
     try (Stream<Path> files = Files.walk(main)) {
@@ -57,7 +54,7 @@ class RuntimeModuleArchitectureTest {
               .map(path -> main.relativize(path).toString().replace('\\', '/'))
               .toList();
     }
-    assertEquals(List.of(JGIT_OWNER), users);
+    assertEquals(List.of(), users, "kernel sources must not import JGit");
   }
 
   private static String readUnchecked(Path path) {
