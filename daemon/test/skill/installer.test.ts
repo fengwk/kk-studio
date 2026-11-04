@@ -268,6 +268,54 @@ describe('SkillPackageInstaller', () => {
     expect(marker).toBe(`${goodSha}\n`)
   })
 
+  it('second rename failure restores the previous version and reports the error', async () => {
+    const packageDir = path.join(skillsRoot, 'rollback-pkg')
+    const v1 = buildZipFixture([{ name: 'version.txt', content: 'v1' }])
+    const v1Sha = sha256Of(v1)
+    const v2 = buildZipFixture([{ name: 'version.txt', content: 'v2' }])
+    const v2Sha = sha256Of(v2)
+    routes.set('/rollback-v1.zip', { body: v1 })
+    routes.set('/rollback-v2.zip', { body: v2 })
+
+    let failStagingMove = false
+    const installer = new SkillPackageInstaller(skillsRoot, {
+      privateFs: createTestPrivateFs(),
+      // 第一次安装使用真实改名；v2 安装时只让 staging -> packageDir 这一步失败。
+      directoryMover: async (source, target) => {
+        if (failStagingMove && path.basename(source).startsWith('.staging-') && target === packageDir) {
+          throw new Error('injected second rename failure')
+        }
+        await fs.promises.rename(source, target)
+      },
+    })
+
+    const state1 = await installer.install(
+      'rollback-pkg',
+      v1Sha,
+      v1.length,
+      `${serverUrl}/rollback-v1.zip`,
+    )
+    expect(state1.error).toBeUndefined()
+    failStagingMove = true
+
+    const state2 = await installer.install(
+      'rollback-pkg',
+      v2Sha,
+      v2.length,
+      `${serverUrl}/rollback-v2.zip`,
+    )
+
+    // 第二次改名失败后回滚到旧安装：状态仍是 v1，错误被上报，旧标记与文件未被破坏。
+    expect(state2.installedSha256).toBe(v1Sha)
+    expect(state2.localPath).toBe(packageDir)
+    expect(state2.error).toContain('injected second rename failure')
+    expect(fs.readFileSync(path.join(packageDir, MARKER_FILENAME), 'utf8')).toBe(`${v1Sha}\n`)
+    expect(fs.readFileSync(path.join(packageDir, 'version.txt'), 'utf8')).toBe('v1')
+    expect(
+      fs.readdirSync(skillsRoot).filter((name) => name.startsWith('.staging-') || name.startsWith('.old-')),
+    ).toEqual([])
+  })
+
   it('remove refuses to delete a directory without a marker file', async () => {
     const installer = new SkillPackageInstaller(skillsRoot, {
       privateFs: createTestPrivateFs(),
