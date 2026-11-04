@@ -29,6 +29,8 @@ public class StorageUploadRepository {
           + "declared_sha256, cleanup_requested_at, cleanup_token, cleanup_until, "
           + "created_at as create_time";
 
+  private static final String SELECT_SQL = "select " + COLUMNS + " from storage_upload";
+
   private static final String INSERT_SQL =
       """
       insert into storage_upload (
@@ -74,12 +76,12 @@ public class StorageUploadRepository {
   }
 
   public StorageUpload getById(UUID id) {
-    return findOne("select " + COLUMNS + " from storage_upload where id = :id", id);
+    return findOne(SELECT_SQL + " where id = :id", id);
   }
 
   /** 行级锁定读取（{@code for update}），用于 complete 绑定与 READY 消费。 */
   public StorageUpload getByIdForUpdate(UUID id) {
-    return findOne("select " + COLUMNS + " from storage_upload where id = :id for update", id);
+    return findOne(SELECT_SQL + " where id = :id for update", id);
   }
 
   /** CAS 标记显式清理请求；调用方必须在同一事务内按 READY 状态恰好 release 一次。 */

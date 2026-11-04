@@ -176,8 +176,10 @@ public final class StorageMaintenance
         wakeRequested.set(false);
         drainUntilIdle();
       } while (running && wakeRequested.get());
-    } catch (RuntimeException ignored) {
-      log.warn("storage maintenance drain failed; next wake or poll will retry");
+    } catch (RuntimeException error) {
+      log.warn(
+          "storage maintenance drain failed; next wake or poll will retry: {}",
+          error.getClass().getSimpleName());
     } finally {
       drainRunning.set(false);
       if (running && wakeRequested.get() && drainRunning.compareAndSet(false, true)) {
@@ -203,8 +205,10 @@ public final class StorageMaintenance
   private int expire(StorageUploadService uploadService) {
     try {
       return uploadService.expireOnce();
-    } catch (RuntimeException ignored) {
-      log.warn("storage upload maintenance failed; next wake or poll will retry");
+    } catch (RuntimeException error) {
+      log.warn(
+          "storage upload maintenance failed; next wake or poll will retry: {}",
+          error.getClass().getSimpleName());
       return 0;
     }
   }
@@ -212,8 +216,10 @@ public final class StorageMaintenance
   private int sweep(StorageBlobManager blobManager) {
     try {
       return blobManager.sweepDeleting();
-    } catch (RuntimeException ignored) {
-      log.warn("storage blob maintenance failed; next wake or poll will retry");
+    } catch (RuntimeException error) {
+      log.warn(
+          "storage blob maintenance failed; next wake or poll will retry: {}",
+          error.getClass().getSimpleName());
       return 0;
     }
   }
@@ -221,8 +227,10 @@ public final class StorageMaintenance
   private int cleanupObjects(StorageObjectCleanupService objectCleanupService) {
     try {
       return objectCleanupService.sweepOnce();
-    } catch (RuntimeException ignored) {
-      log.warn("storage object cleanup maintenance failed; next wake or poll will retry");
+    } catch (RuntimeException error) {
+      log.warn(
+          "storage object cleanup maintenance failed; next wake or poll will retry: {}",
+          error.getClass().getSimpleName());
       return 0;
     }
   }

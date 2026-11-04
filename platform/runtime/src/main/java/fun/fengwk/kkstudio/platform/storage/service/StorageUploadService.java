@@ -1,5 +1,12 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.decodeHex;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.normalizeMediaType;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateFilename;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSha256;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSize;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.verifyObject;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -7,8 +14,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.Assert;
-import org.springframework.util.MimeTypeUtils;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
@@ -43,13 +48,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -69,10 +70,8 @@ import java.util.UUID;
  * （{@code candidate_blob_id}）作为耐久锚点，任何对象清理都留给后台按行事实执行，绝不按异常分支盲目删除候选对象。
  *
  * <p>过期没有持久化的权威列：未请求清理且未被 claim 的上传在 {@code created_at + 当前 upload TTL} 之后过期，{@code created_at}
- * 与所有「当下」判定都由同一注入 {@link Clock}
- * 写入/换算，避免节点时钟漂移。每次操作（reserve/stage/complete/consume/expireOnce/claim） 只读取一份 {@link
- * SystemSettingsSnapshot} TTL 快照并贯穿该操作：候选按 {@code created_at <= now - TTL} 索引阈值筛选，claim 前在操作锁内以同一
- * TTL 重验。缩短 TTL 让存量立即过期，延长 TTL 让未 claim 的存量继续有效；一旦 claim 写入 cleanup_token 就不再受 TTL 影响。
+ * 与所有「当下」判定都由同一注入 {@link Clock} 写入/换算，避免节点时钟漂移。上传契约只负责在 reserve/stage/complete/consume 时读取当前 TTL
+ * 快照并拒绝过期事实；候选扫描、 cleanup lease 与对象回收由 {@link StorageUploadExpiryService} 承担。
  *
  * @author fengwk
  */
@@ -80,7 +79,7 @@ import java.util.UUID;
 public class StorageUploadService {
 
   /** 过期批次上限：每次后台回收最多检查的候选 upload 行数；后台维护据此判断是否已排空。 */
-  public static final int MAX_EXPIRY_BATCH = 16;
+  public static final int MAX_EXPIRY_BATCH = StorageUploadExpiryService.MAX_EXPIRY_BATCH;
 
   private final StorageUploadRepository uploadRepository;
   private final StorageBlobRepository blobRepository;
@@ -89,15 +88,14 @@ public class StorageUploadService {
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
-  private final StorageObjectCleanupService objectCleanupService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
   private final S3StorageProperties s3Properties;
   private final SystemSettingsSnapshot settingsSnapshot;
   private final Clock clock;
-  private final Duration cleanupLease;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate mandatoryTransactionTemplate;
+  private final StorageUploadExpiryService expiryService;
 
   public StorageUploadService(
       StorageUploadRepository uploadRepository,
@@ -122,24 +120,29 @@ public class StorageUploadService {
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
-    this.objectCleanupService =
-        Objects.requireNonNull(objectCleanupService, "objectCleanupService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.settingsSnapshot = Objects.requireNonNull(settingsSnapshot, "settingsSnapshot");
-    this.cleanupLease =
-        requirePositiveDuration(
-            Objects.requireNonNull(maintenanceProperties, "maintenanceProperties")
-                .getCleanupLease(),
-            "cleanupLease");
     this.clock = Objects.requireNonNull(clock, "clock");
+    Objects.requireNonNull(maintenanceProperties, "maintenanceProperties");
     PlatformTransactionManager requiredTransactionManager =
         Objects.requireNonNull(transactionManager, "transactionManager");
     this.transactionTemplate = new TransactionTemplate(requiredTransactionManager);
     this.mandatoryTransactionTemplate = new TransactionTemplate(requiredTransactionManager);
     this.mandatoryTransactionTemplate.setPropagationBehavior(
         TransactionDefinition.PROPAGATION_MANDATORY);
+    this.expiryService =
+        new StorageUploadExpiryService(
+            uploadRepository,
+            blobManager,
+            s3StorageService,
+            objectCleanupService,
+            operationLock,
+            settingsSnapshot,
+            clock,
+            maintenanceProperties.getCleanupLease(),
+            transactionTemplate);
   }
 
   /** 预约上传：内容命中返回 READY，否则返回 PENDING（含预签名 PUT）。 */
@@ -226,7 +229,7 @@ public class StorageUploadService {
       // READY 重试：幂等并自愈最终对象，随后清理残留的临时对象与未使用的候选对象。
       ensureBlobOriginal(upload.getBlobId(), uploadId);
       s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
-      cleanupUnusedCandidate(upload);
+      expiryService.cleanupUnusedCandidate(upload);
       generatePreviewBestEffort(upload.getBlobId());
       return toDTO(
           uploadId, upload.getBlobId(), expiresAt(upload.getCreateTime(), uploadTtl), null);
@@ -365,13 +368,13 @@ public class StorageUploadService {
       // 去重落败：未使用的候选对象幂等清理（预览先于原始）；READY 上传行（candidate_blob_id）
       // 是崩溃窗口的恢复证据。
       if (bestEffortObjectCleanup) {
-        cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
+        expiryService.cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
       } else {
-        cleanupCandidateObjects(upload.getCandidateBlobId());
+        expiryService.cleanupCandidateObjects(upload.getCandidateBlobId());
       }
     }
     if (bestEffortObjectCleanup) {
-      deleteObjectBestEffort(tempKey);
+      expiryService.deleteObjectBestEffort(tempKey);
     } else {
       s3StorageService.deleteObjectIfExists(tempKey);
     }
@@ -474,110 +477,9 @@ public class StorageUploadService {
     return new ReadyUpload(upload.getBlobId(), upload.getFilename());
   }
 
-  /**
-   * 后台回收：先列出可清理的候选行（显式 cleanup request 或已过期，且无有效 lease），再逐行先取该 upload 的操作锁、锁内重读当下事实并 claim，事务外删除对象，
-   * 最后以 token-fenced 短事务删除行；锁忙（complete/stage 正在写对象或另一节点在处理）的行跳过本轮，绝不在无锁状态下删除证据。显式 request 的 READY
-   * 行不重复 release，普通过期 READY 行在 finalize 中 release。返回成功 finalize 的行数，单行失败保留 lease 且不中断批次。
-   */
+  /** 后台回收入口：由 {@link StorageUploadExpiryService} 执行候选扫描、claim 与对象回收。 */
   public int expireOnce() {
-    // 候选扫描只读快照：用扫描时刻的 TTL 选出可能可清理的行；claim 前在锁内重新读取最新 policy，
-    // 因此扫描不是冻结旧 policy 的删除依据——扫描后 extend 会让该行不再 due 而被跳过，绝不误删。
-    long scanTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
-    String cleanupToken = UUID.randomUUID().toString();
-    List<UUID> candidates =
-        transactionTemplate.execute(
-            status -> {
-              Instant now = clock.instant();
-              return uploadRepository.listCleanupCandidateIds(
-                  StorageUploadService.MAX_EXPIRY_BATCH, now, now.minusSeconds(scanTtl));
-            });
-    int finalized = 0;
-    for (UUID uploadId : candidates) {
-      // 先取该 upload 的操作锁，再 claim：正在写对象/绑定的 complete 绝不受影响（claim 会拒绝其绑定），
-      // 而我们也不会在无锁状态下删除可能正被复制的临时/候选对象或上传行。锁忙（complete/stage/其它节点在处理）则跳过本轮。
-      try (StorageUploadOperationLock.Handle handle = operationLock.tryAcquire(uploadId)) {
-        if (handle == null) {
-          continue;
-        }
-        try {
-          if (cleanupClaimedUpload(uploadId, cleanupToken)) {
-            finalized++;
-          }
-        } catch (RuntimeException ignored) {
-          // 对象或 finalize 失败时保留 lease；过期后由任意节点幂等重试。
-          log.warn("storage expiry failed for upload {}", uploadId);
-        }
-      }
-    }
-    return finalized;
-  }
-
-  /**
-   * 持锁后重新读取当下事实与最新 policy 并 claim 单行清理事实；不再满足 claim 条件时跳过，绝不使用过期快照。
-   *
-   * <p>这里现读一份 TTL 快照：扫描之后、claim 之前发生的 extend 会让本行不再过期从而被跳过（不误删）； 已请求清理或已 claim 的行不受 TTL
-   * 影响，只用于把清理续完。
-   */
-  private boolean cleanupClaimedUpload(UUID uploadId, String cleanupToken) {
-    Instant claimNow = clock.instant();
-    long uploadTtl = settingsSnapshot.get().storageMedia().uploadExpiresSeconds();
-    Instant claimCutoff = claimNow.minusSeconds(uploadTtl);
-    StorageUpload claimed =
-        transactionTemplate.execute(
-            status -> {
-              StorageUpload fresh = uploadRepository.getById(uploadId);
-              if (!isCleanupDue(fresh, claimNow, claimCutoff)) {
-                return null;
-              }
-              StorageUpload claimedRow =
-                  uploadRepository.claimById(
-                      uploadId, claimNow, claimNow.plus(cleanupLease), cleanupToken);
-              if (claimedRow != null) {
-                // 与 claim 同一事务登记：claim 冻结了之后的绑定（setBlobIdIfNull 要求未 claim），
-                // 因此这一刻起该 upload 的对象 key 不再可能被绑定为事实；迟到的 PUT/COPY 由耐久记录收敛。
-                enqueueCleanupTargets(claimedRow);
-              }
-              return claimedRow;
-            });
-    if (claimed == null) {
-      return false;
-    }
-    cleanupUploadObjects(claimed);
-    return finalizeClaimed(claimed, cleanupToken);
-  }
-
-  /**
-   * 登记该 upload 的确定性对象 key：临时对象，以及未被绑定为自身 blob 的 candidate 原始/预览对象。
-   *
-   * <p>{@code candidate_blob_id} 一旦等于 {@code blob_id} 就是被正式引用的 ACTIVE blob，其对象由 blob 生命周期负责，
-   * 绝不在此登记； 其余情况下 candidate 行不存在或注定被回收，登记后即使迟到写入也会被清扫。
-   */
-  private void enqueueCleanupTargets(StorageUpload upload) {
-    objectCleanupService.enqueue(StorageObjectKeys.uploadOriginal(upload.getId()));
-    UUID candidateBlobId = upload.getCandidateBlobId();
-    if (candidateBlobId != null && !candidateBlobId.equals(upload.getBlobId())) {
-      objectCleanupService.enqueue(StorageObjectKeys.blobPreview(candidateBlobId));
-      objectCleanupService.enqueue(StorageObjectKeys.blobOriginal(candidateBlobId));
-    }
-  }
-
-  /**
-   * 当下事实是否可清理：显式 cleanup request、已 claim（cleanup_token 非空）或已过期（{@code created_at <=
-   * expiryCutoff}）；且没有有效 lease。
-   *
-   * <p>已请求/已 claim 的行不受 TTL 影响：cleanup 一旦开始就只沿 finalize 收敛，延长 TTL 绝不复活； 即使 claim lease
-   * 已过期，也只是让任意节点续完清理，绝不回到可存活/可绑定状态。
-   */
-  static boolean isCleanupDue(StorageUpload upload, Instant now, Instant expiryCutoff) {
-    if (upload == null) {
-      return false;
-    }
-    boolean cleanupStarted =
-        upload.getCleanupRequestedAt() != null || upload.getCleanupToken() != null;
-    if (!cleanupStarted && upload.getCreateTime().isAfter(expiryCutoff)) {
-      return false;
-    }
-    return upload.getCleanupToken() == null || !upload.getCleanupUntil().isAfter(now);
+    return expiryService.expireOnce();
   }
 
   /** 在上传行锁保护的事务内消解或创建去重 Blob，并与当前上传记录安全绑定。 */
@@ -598,41 +500,13 @@ public class StorageUploadService {
     // 唯一索引冲突与 retain 在一条语句内完成；与最后一次 release 在 blob 行上串行化。
     UUID blobId = blobRepository.retainOrInsertActive(newCandidateBlob(upload, facts));
     // 行锁在手：setBlobIdIfNull 不可能被并发 complete 抢走，失败即上传行状态异常。
-    if (!uploadRepository.setBlobIdIfNull(upload.getId(), blobId, expiryCutoff(uploadTtl))) {
+    if (!uploadRepository.setBlobIdIfNull(
+        upload.getId(),
+        blobId,
+        StorageUploadExpiryService.expiryCutoff(clock.instant(), uploadTtl))) {
       throw new IllegalStateException("upload " + upload.getId() + " changed while completing");
     }
     return blobId;
-  }
-
-  /**
-   * 幂等清理未使用的候选对象：仅当候选 id 未被绑定为最终 blob 时删除。
-   *
-   * <p>候选对象在 complete 预复制后可能因去重落败或事务失败而未被引用，此时上传行（{@code candidate_blob_id}）仍保留着恢复证据，
-   * delete/过期路径与本方法据此清理，避免孤儿对象。
-   */
-  private void cleanupUnusedCandidate(StorageUpload upload) {
-    if (upload.getBlobId() == null || !upload.getBlobId().equals(upload.getCandidateBlobId())) {
-      cleanupCandidateObjects(upload.getCandidateBlobId());
-    }
-  }
-
-  /** 幂等清理候选对象的预览与原始内容：预览先于原始，与两阶段删除顺序一致。 */
-  private void cleanupCandidateObjects(UUID candidateBlobId) {
-    s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobPreview(candidateBlobId));
-    s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobOriginal(candidateBlobId));
-  }
-
-  private void cleanupCandidateObjectsBestEffort(UUID candidateBlobId) {
-    deleteObjectBestEffort(StorageObjectKeys.blobPreview(candidateBlobId));
-    deleteObjectBestEffort(StorageObjectKeys.blobOriginal(candidateBlobId));
-  }
-
-  private void deleteObjectBestEffort(String key) {
-    try {
-      s3StorageService.deleteObjectIfExists(key);
-    } catch (RuntimeException error) {
-      log.warn("deferred cleanup for storage object {}", key);
-    }
   }
 
   /**
@@ -649,30 +523,6 @@ public class StorageUploadService {
     } catch (RuntimeException error) {
       log.warn("failed to request cleanup for staged upload {}", upload.getId());
     }
-  }
-
-  private void cleanupUploadObjects(StorageUpload upload) {
-    s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(upload.getId()));
-    cleanupUnusedCandidate(upload);
-  }
-
-  private boolean finalizeClaimed(StorageUpload upload, String cleanupToken) {
-    Boolean finalized =
-        transactionTemplate.execute(
-            status -> {
-              if (upload.getBlobId() == null) {
-                return uploadRepository.finalizePending(upload.getId(), cleanupToken);
-              }
-              if (!uploadRepository.finalizeReady(
-                  upload.getId(), upload.getBlobId(), cleanupToken)) {
-                return false;
-              }
-              if (upload.getCleanupRequestedAt() == null) {
-                blobManager.release(upload.getBlobId());
-              }
-              return true;
-            });
-    return Boolean.TRUE.equals(finalized);
   }
 
   private void requestCleanupInCurrentTransaction(UUID uploadId) {
@@ -703,7 +553,7 @@ public class StorageUploadService {
       throw new StorageVerificationException(
           "upload " + upload.getId() + " cleanup is already claimed");
     }
-    if (isExpired(upload.getCreateTime(), clock.instant(), uploadTtl)) {
+    if (StorageUploadExpiryService.isExpired(upload.getCreateTime(), clock.instant(), uploadTtl)) {
       throw new StorageVerificationException("upload " + upload.getId() + " expired");
     }
   }
@@ -716,9 +566,10 @@ public class StorageUploadService {
             try {
               StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
               wakeup.wake();
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException error) {
               // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
-              log.warn("storage upload maintenance wake failed");
+              log.warn(
+                  "storage upload maintenance wake failed: {}", error.getClass().getSimpleName());
             }
           }
         });
@@ -746,41 +597,8 @@ public class StorageUploadService {
     }
   }
 
-  private void verifyObject(S3ObjectMetadata head, StorageUpload upload) {
-    if (head.contentLength() != upload.getDeclaredSize()) {
-      throw new StorageVerificationException(
-          "upload "
-              + upload.getId()
-              + " size mismatch: declared "
-              + upload.getDeclaredSize()
-              + " but object has "
-              + head.contentLength());
-    }
-    byte[] expected = decodeHex(upload.getDeclaredSha256());
-    byte[] actual;
-    try {
-      actual = Base64.getDecoder().decode(head.checksumSha256());
-    } catch (IllegalArgumentException | NullPointerException e) {
-      throw new StorageVerificationException(
-          "upload " + upload.getId() + " checksum unavailable or malformed");
-    }
-    if (!Arrays.equals(expected, actual)) {
-      throw new StorageVerificationException("upload " + upload.getId() + " checksum mismatch");
-    }
-  }
-
   private static long presignExpiresSeconds(SystemSettings.StorageMedia media) {
     return Math.min(media.uploadExpiresSeconds(), media.s3PresignMaxExpiresSeconds());
-  }
-
-  /** 过期权威事实：未请求清理且未被 claim 的上传在 {@code createdAt + 当前 upload TTL} 之后过期。 */
-  static boolean isExpired(Instant createdAt, Instant now, long uploadTtlSeconds) {
-    return !createdAt.plusSeconds(uploadTtlSeconds).isAfter(now);
-  }
-
-  /** 绑定/候选的索引阈值：{@code created_at <= now - TTL} 即过期。 */
-  private Instant expiryCutoff(long uploadTtlSeconds) {
-    return clock.instant().minusSeconds(uploadTtlSeconds);
   }
 
   /** DTO 快照到期时刻：仅按当下 TTL 换算的展示值，绝不作为过期权威事实。 */
@@ -840,60 +658,6 @@ public class StorageUploadService {
         .presignedPut(presignedPut)
         .expiresAt(expiresAt)
         .build();
-  }
-
-  private static String validateFilename(String filename) {
-    Assert.hasText(filename, "filename must not be blank");
-    Assert.isTrue(filename.length() <= 512, "filename must not exceed 512 characters");
-    return filename;
-  }
-
-  private static long validateSize(Long sizeBytes) {
-    Assert.isTrue(sizeBytes != null, "sizeBytes must not be null");
-    Assert.isTrue(sizeBytes >= 0L, "sizeBytes must be greater than or equal to 0");
-    return sizeBytes;
-  }
-
-  private static String validateSha256(String sha256) {
-    Assert.hasText(sha256, "sha256 must not be blank");
-    String normalized = sha256.trim().toLowerCase(Locale.ROOT);
-    Assert.isTrue(
-        normalized.matches("[0-9a-f]{64}"), "sha256 must be a 64-character hexadecimal digest");
-    return normalized;
-  }
-
-  private static String normalizeMediaType(String mediaType) {
-    Assert.hasText(mediaType, "mediaType must not be blank");
-    for (int i = 0; i < mediaType.length(); i++) {
-      Assert.isTrue(
-          !Character.isISOControl(mediaType.charAt(i)),
-          "mediaType must not contain control characters");
-    }
-    String normalized = mediaType.trim();
-    Assert.isTrue(normalized.length() <= 255, "mediaType must not exceed 255 characters");
-    try {
-      return MimeTypeUtils.parseMimeType(normalized).toString();
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException("mediaType must be a valid media type", e);
-    }
-  }
-
-  private static byte[] decodeHex(String hex) {
-    byte[] bytes = new byte[hex.length() / 2];
-    for (int i = 0; i < bytes.length; i++) {
-      int high = Character.digit(hex.charAt(i * 2), 16);
-      int low = Character.digit(hex.charAt(i * 2 + 1), 16);
-      bytes[i] = (byte) ((high << 4) | low);
-    }
-    return bytes;
-  }
-
-  private static Duration requirePositiveDuration(Duration value, String name) {
-    Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative()) {
-      throw new IllegalArgumentException(name + " must be positive");
-    }
-    return value;
   }
 
   private record ReserveOutcome(StorageUpload upload, UUID blobId) {}
