@@ -39,8 +39,12 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase, getCase } from '../lib/registry.mjs'
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(cases, id)
 
 const PI_MODEL_CATALOG = JSON.parse(
   readFileSync(
@@ -121,7 +125,7 @@ registerCase({
   id: 'seed.agent_and_provider',
   level: 'L1',
   title: 'Agent/Provider seed 可用',
-  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，八种协议映射及 nullable baseUrl wire 形态正确',
+  docs: 'seed Agent 以 name/execution 引用；Provider 以 name 标识，八种协议映射及 nullable baseUrl wire 形态正确',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
@@ -130,7 +134,7 @@ registerCase({
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
     const agent = agents.find((candidate) => candidate.name === 'default-assistant')
-      || agents.find((candidate) => candidate.type === 'USER' && candidate.model)
+      || agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
     assert(agent, 'need a configured USER Agent')
     assertExactFields(
       agent,
@@ -139,8 +143,7 @@ registerCase({
         'type',
         'description',
         'systemPrompt',
-        'model',
-        'variant',
+        'execution',
         'config',
         'version',
         'createTime',
@@ -148,7 +151,7 @@ registerCase({
       ],
       'AgentDefinitionDTO',
     )
-    assert(agent.name && agent.model && agent.variant && agent.config, JSON.stringify(agent))
+    assert(agent.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName && agent.config, JSON.stringify(agent))
     ctx.vars.agent = agent
 
     const { json: providersJson } = await ctx.call(
@@ -397,13 +400,12 @@ registerCase({
         name: `e2e-agent-preview-${suffix}`,
         description: 'Local readonly preview E2E agent.',
         systemPrompt: 'Reply with a short deterministic acknowledgement.',
-        model: model.name,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentResponse.json)
       assert(
-        agent?.name && agent.model === model.name,
+        agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name,
         JSON.stringify(agentResponse.json),
       )
 
@@ -419,8 +421,7 @@ registerCase({
         sessionId,
         threadId: tid,
         rootSettings: branchSettingsOf(agent, {
-          modelName: model.name,
-          variant: 'default',
+          ...agent.execution.settings,
         }),
         yoloEnabled: false,
         commands: [userMessageCommand(`preview readonly ${suffix}`, cid())],
@@ -2525,16 +2526,12 @@ function deriveSessionName(text) {
   return [...collapsed].slice(0, 40).join('')
 }
 
-/** 由 seed Agent + seed Model 构造 branchSettings.model 引用；model 是全局逻辑名。 */
+/** 由 seed Agent 的 execution 构造 Builtin 模型选择。 */
 function modelSelectionOf(ctx) {
   const agent = ctx.vars.agent
-  const model = ctx.vars.seedModel
-  const modelName = String(agent.model || '')
-  assert(modelName, `agent.model must be a logical model name: ${JSON.stringify(agent)}`)
-  return {
-    modelName,
-    variant: agent.variant || model.config.defaultVariant,
-  }
+  const { modelName, variant } = agent.execution?.settings || {}
+  assert(agent.execution?.driver === 'builtin' && modelName && (variant === null || typeof variant === 'string'), `invalid agent execution: ${JSON.stringify(agent)}`)
+  return { modelName, variant }
 }
 
 /** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
@@ -2546,12 +2543,11 @@ async function resolveAnyCatalogTarget(ctx) {
     (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')).json,
   )
   for (const agent of agents) {
-    const modelName = String(agent.model || '')
-    if (!modelName) continue
+    if (agent.execution?.driver !== 'builtin') continue
+    const { modelName, variant } = agent.execution.settings || {}
+    if (!modelName || (variant !== null && typeof variant !== 'string')) continue
     const model = models.find((candidate) => candidate.name === modelName)
     if (!model) continue
-    const variant = agent.variant || model.config?.defaultVariant
-    if (!variant) continue
     return {
       agent,
       model: { modelName, variant },

@@ -2,7 +2,7 @@
  * 仅用于测试的内存版参考 store 与 fixture。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore} 是 {@link
- * fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 的确定性参考实现。事务核心 {@link
+ * fun.fengwk.kkstudio.harness.spi.store.HarnessStore} 的确定性参考实现。事务核心 {@link
  * fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessTransaction} 只持有唯一复制快照 {@link
  * fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryState}、事务时钟、id 分配与锁阶梯；九个聚合原语分别在 {@code
  * InMemorySessionStore}、{@code InMemoryEntryStore}、{@code InMemoryThreadStore}、{@code

@@ -6,11 +6,8 @@ import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
-import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
-import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
-import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -19,7 +16,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
 import java.time.Duration;
 import java.util.List;
@@ -31,10 +27,10 @@ import java.util.function.Consumer;
 /**
  * {@code issue_transition}：Issue Agent 唯一显式选择的业务写工具，用于请求把当前阶段交接到 workflow 声明的下一阶段。
  *
- * <p>工具是 SELECTABLE 贡献：由 Issue Agent 的配置显式声明，不再由运行时按 Thread owner 注入。执行身份来自 durable {@link
- * fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext}：runId 与 sourceThreadId 只从本
- * branch 冻结的 {@code project/run} contributor state 读取，全部授权与合法边校验都在 {@link IssueTransitionService}
- * 的事务内按当前 Run 重新核验，工具本身不做任何状态判断。
+ * <p>工具是 SELECTABLE 贡献：由 Issue Agent 的配置显式声明，不再由运行时按 Thread owner 注入。执行身份只来自 durable {@link
+ * fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext}：调用 Thread 与该调用的 assistant 入口都由
+ * Harness 冻结，模型参数里没有、也不接受任何 Run 身份。全部授权、合法边与调用归属校验都在 {@link IssueTransitionService} 的事务内按当前活动 Run
+ * 重新核验，工具本身不做任何状态判断。
  *
  * <p>参数 schema 只能声明状态编码的形状，合法目标集合取决于当前阶段的实时 workflow，因此在执行期校验而不是在静态 schema 里枚举。
  */
@@ -80,32 +76,21 @@ public final class IssueTransitionTool implements Tool {
 
   @Override
   public ToolRequirements requirements() {
-    // 交接只读写 Project 事实；执行身份从本 contributor 冻结的 run custom state 读取，因此声明只读访问。
-    return new ToolRequirements(
-        EnvironmentSupport.NONE,
-        List.of(new StateDeclaration(ProjectRunScope.CUSTOM_TYPE, StateMode.READ)));
+    // 交接只读写 Project 事实：执行身份来自 Harness 冻结的执行上下文，不读取任何 branch custom state。
+    return ToolRequirements.none();
   }
 
   @Override
   public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
     try {
-      if (request.context() == null || request.context().threadId() == null) {
-        throw new IllegalArgumentException(
-            NAME + " requires a durable tool execution context with a thread identity");
+      ToolExecutionContext context = request.context();
+      if (context == null) {
+        throw new IllegalArgumentException(NAME + " requires a durable tool execution context");
       }
       String toState = requireToState(request.call().argumentsJson());
-      CustomStateSnapshot scope =
-          request
-              .context()
-              .branch()
-              .latestCustomEntry(ProjectRunScope.CUSTOM_TYPE)
-              .orElseThrow(
-                  () ->
-                      new IllegalArgumentException(
-                          NAME + " requires the current run's frozen context"));
       IssueTransitionService.IssueTransitionResult result =
-          transitionService.accept(request.context().threadId(), scope.dataJson(), toState);
+          transitionService.accept(context.threadId(), context.assistantEntryId(), toState);
       return success(request, result);
     } catch (RuntimeException error) {
       return error(request, error);

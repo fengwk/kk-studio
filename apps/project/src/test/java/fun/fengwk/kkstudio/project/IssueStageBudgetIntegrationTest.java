@@ -206,10 +206,9 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 终态消耗：FAILED/CANCELLED/UNKNOWN 各按 {@code (issue,state)} 高水位消耗一次，不因收尾状态被豁免。
+   * 终态消耗：FAILED/CANCELLED 各按 {@code (issue,state)} 高水位消耗一次，不因收尾状态被豁免。
    *
-   * <p>意图：锁定真实 SQL 计数的「失败、取消与 UNKNOWN 同样计数」语义——三种终态各消费一次后额度耗尽；人工核查 UNKNOWN 门禁并恢复后，新建 Run
-   * 因额度耗尽被确定性拒绝，而不是被门禁或活动 Run 拒绝。
+   * <p>意图：锁定真实 SQL 计数的「失败与取消同样计数」语义——三种终态各消费一次后额度耗尽；显式恢复暂停后，新建 Run 因额度耗尽被确定性拒绝，而不是被 门禁或活动 Run 拒绝。
    */
   @Test
   void terminalRunsOfEveryStatusConsumeBudget() {
@@ -247,24 +246,21 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     Issue afterCancel = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
 
-    IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.markUnknown(
-        unknownRun.getId(),
-        unknownRun.getVersion(),
-        key("unknown"),
-        appendHistoryEntry(unknownRun.getThreadId()),
-        "side effect lost");
+    IssueRun thirdRun = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.failRun(
+        thirdRun.getId(),
+        thirdRun.getVersion(),
+        key("fail-2"),
+        appendHistoryEntry(thirdRun.getThreadId()),
+        "Run stopped with in-flight side effects; outcome unknown");
     StageBudgetView exhausted = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
-    assertEquals(3L, exhausted.usedRuns(), "UNKNOWN run consumes one");
+    assertEquals(3L, exhausted.usedRuns(), "a second FAILED run consumes one");
     assertEquals(0L, exhausted.remainingRuns());
 
-    // UNKNOWN 门禁先由人工核查解除再恢复；此后唯一阻塞新 Run 的因素是额度耗尽。
-    Issue afterUnknown = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.resolveUnknown(
-        afterUnknown.getId(), afterUnknown.getVersion(), key("resolve"), "checked");
-    Issue afterResolve = issueEditingService.getIssue(issue.getId());
+    // 先显式解除 ERROR 暂停；此后唯一阻塞新 Run 的因素是额度耗尽。
+    Issue afterFailure = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.resumeIssue(
-        afterResolve.getId(), afterResolve.getVersion(), key("resume"));
+        afterFailure.getId(), afterFailure.getVersion(), key("resume"));
 
     ProjectValidationException budgetExhausted =
         assertThrows(

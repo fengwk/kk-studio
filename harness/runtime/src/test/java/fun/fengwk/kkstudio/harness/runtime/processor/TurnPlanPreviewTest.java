@@ -8,22 +8,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.time.Instant;
 import java.util.List;

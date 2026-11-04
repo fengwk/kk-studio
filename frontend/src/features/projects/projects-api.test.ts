@@ -257,21 +257,6 @@ describe('projectsApi', () => {
     })
   })
 
-  it('resolveUnknown should post to /issues/:id/resolve-unknown', async () => {
-    // 测试意图：验证 resolveUnknown 解除 UNKNOWN 门禁
-    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, pauseReason: null })
-    await api.resolveUnknown(mockIssue.id, {
-      expectedVersion: '4',
-      requestKey: 'k-unk',
-      verification: 'Verified no external changes',
-    })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/resolve-unknown`, {
-      expectedVersion: '4',
-      requestKey: 'k-unk',
-      verification: 'Verified no external changes',
-    })
-  })
-
   it('deleteIssue should delete with query param expectedVersion', async () => {
     // 测试意图：验证 deleteIssue 发送 DELETE
     vi.mocked(mockClient.delete).mockResolvedValueOnce(undefined)

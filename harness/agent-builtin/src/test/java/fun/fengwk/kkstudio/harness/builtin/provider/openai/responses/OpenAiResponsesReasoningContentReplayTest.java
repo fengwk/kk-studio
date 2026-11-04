@@ -16,8 +16,11 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -37,9 +40,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoder;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStreamAccumulator;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 
 import java.io.InputStream;
 import java.time.Duration;

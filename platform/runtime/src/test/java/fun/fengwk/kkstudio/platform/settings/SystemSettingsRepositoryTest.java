@@ -11,8 +11,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.LinkedHashMap;

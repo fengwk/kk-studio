@@ -1,5 +1,14 @@
 package fun.fengwk.kkstudio.harness.builtin.request;
 
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
@@ -12,15 +21,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -43,7 +43,7 @@ import java.util.Objects;
  * 绝不把原生 payload 附着到已被改写的内容上；未被改写的消息原样保留 replay。
  *
  * <p>USER 上下文中每一项的动作来自调用冻结时的 Tool 语义 action（{@link
- * fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent#historyAction()}）；缺失 action
+ * fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent#historyAction()}）；缺失 action
  * 的调用使用确定性中性回退 {@code external operation} 加逐字 arguments 围栏，因此投影永不猜测第三方工具的语义，也永不需要重新调用 Tool 代码。
  *
  * <p>对当前连续 Tool chain 中未配对的 native ToolCall，在角色切换或 Context 结束前合成 error ToolResult：{@code No result

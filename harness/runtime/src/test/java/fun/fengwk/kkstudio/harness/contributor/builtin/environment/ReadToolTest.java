@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -271,10 +272,17 @@ class ReadToolTest {
       ReadTool tool, BoundEnvironment environment, String argumentsJson) {
     BranchView branch = mock(BranchView.class);
     ToolExecutionContext context =
-        environment == null
-            ? new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), branch)
-            : new ToolExecutionContext(
-                UUID.randomUUID(), UUID.randomUUID(), Instant.now(), branch, environment);
+        new ToolExecutionContext(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            Instant.now(),
+            TurnMediaCapabilities.NONE,
+            branch,
+            Optional.ofNullable(environment));
     return new ToolExecutionRequest(
         tool.descriptor(), new ToolCall("c1", "read", argumentsJson), Duration.ZERO, context);
   }

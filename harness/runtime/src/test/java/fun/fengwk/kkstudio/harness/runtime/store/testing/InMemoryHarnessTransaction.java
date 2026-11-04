@@ -1,17 +1,17 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.store.CommandStore;
-import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
-import fun.fengwk.kkstudio.harness.runtime.store.StopReceiptStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
-import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
-import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
+import fun.fengwk.kkstudio.harness.spi.store.CommandStore;
+import fun.fengwk.kkstudio.harness.spi.store.EntryStore;
+import fun.fengwk.kkstudio.harness.spi.store.ExecutionExitStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
+import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
+import fun.fengwk.kkstudio.harness.spi.store.StopReceiptStore;
+import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
+import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
 
 import java.time.Instant;
 import java.util.Map;

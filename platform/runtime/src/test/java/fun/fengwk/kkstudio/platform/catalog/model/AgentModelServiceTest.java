@@ -15,6 +15,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.page.PageQuery;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
@@ -36,9 +37,12 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -52,10 +56,71 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
   @Autowired private AgentModelService agentModelService;
+  @Autowired private AgentModelRepository agentModelRepository;
   @Autowired private AgentDefinitionService agentDefinitionService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ConfigSyncService configSyncService;
+
+  @Test
+  public void builtinReferencesAreRenamedButOtherDriversAreUntouched() {
+    String suffix = Long.toString(System.nanoTime());
+    String original = "reference-model-" + suffix;
+    String renamed = "reference-renamed-" + suffix;
+    String builtin = "builtin-ref-" + suffix;
+    String other = "other-ref-" + suffix;
+    String providerName = "reference-provider-" + suffix;
+    provider(providerName);
+    AgentModelDTO model = agentModelService.createModel(model(providerName, original));
+    // 相同字段出现在其他 driver 中时不是 Builtin 模型引用。
+    jdbc.update(
+        "insert into agent_definition(name, execution, config) values"
+            + " (?, jsonb_build_object('driver', ?, 'settings',"
+            + " jsonb_build_object('modelName', ?, 'variant', 'default')), '{}'::jsonb)",
+        builtin,
+        "builtin",
+        original);
+    jdbc.update(
+        "insert into agent_definition(name, execution, config) values"
+            + " (?, jsonb_build_object('driver', ?, 'settings',"
+            + " jsonb_build_object('modelName', ?, 'variant', 'default')), '{}'::jsonb)",
+        other,
+        "other",
+        original);
+    assertThrows(AiInUseException.class, () -> agentModelService.deleteModel(original, "0"));
+    assertTrue(agentModelRepository.hasVariantReferences(original, "default"));
+    assertFalse(agentModelRepository.hasVariantReferences(original, "other"));
+    AgentModelDTO result =
+        agentModelService.updateModel(original, modelUpdate(model, renamed, "renamed"));
+    assertEquals(
+        renamed,
+        jdbc.queryForObject(
+            "select execution -> 'settings' ->> 'modelName' from agent_definition where name = ?",
+            String.class,
+            builtin));
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select version from agent_definition where name = ?", Long.class, builtin));
+    assertEquals(
+        original,
+        jdbc.queryForObject(
+            "select execution -> 'settings' ->> 'modelName' from agent_definition where name = ?",
+            String.class,
+            other));
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "select version from agent_definition where name = ?", Long.class, other));
+    assertFalse(agentModelRepository.hasAgents(original));
+    assertFalse(agentModelRepository.hasVariantReferences(original, "default"));
+    AgentModelDTO recreated = agentModelService.createModel(model(providerName, original));
+    agentModelService.deleteModel(original, recreated.getVersion());
+    assertThrows(
+        AiInUseException.class, () -> agentModelService.deleteModel(renamed, result.getVersion()));
+    jdbc.update("delete from agent_definition where name = ?", builtin);
+    agentModelService.deleteModel(renamed, result.getVersion());
+  }
 
   @Test
   public void shouldEnforceGlobalModelNamesAcrossProviders() {
@@ -128,7 +193,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     String agentName = "agent-ref-" + suffix;
     AgentDefinitionDTO agentDto =
         agentDefinitionService.createAgent(agent(originalModel, agentName));
-    assertEquals(originalModel, agentDto.getModel());
+    assertEquals(originalModel, agentDto.getExecution().getSettings().get("modelName"));
 
     insertCooldown(group.getName(), originalModel, "default", Long.parseLong(group.getVersion()));
 
@@ -148,7 +213,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
             .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
-    assertEquals(renamedModel, updatedAgent.getModel());
+    assertEquals(renamedModel, updatedAgent.getExecution().getSettings().get("modelName"));
     assertEquals("1", updatedAgent.getVersion());
 
     AgentModelDTO renamedGroup =
@@ -480,7 +545,13 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
   private AgentDefinitionCreateDTO agent(String model, String name) {
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
-    dto.setModel(model);
+    Map<String, Object> settings = new HashMap<>();
+    settings.put("modelName", model);
+    settings.put("variant", null);
+    HarnessExecutionSelectionDTO execution = new HarnessExecutionSelectionDTO();
+    execution.setDriver(BuiltinExecution.DRIVER);
+    execution.setSettings(settings);
+    dto.setExecution(execution);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());

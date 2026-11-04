@@ -16,7 +16,6 @@ import type {
   RecoverIssueRequestDTO,
   ReopenIssueRequestDTO,
   ResetStageBudgetRequestDTO,
-  ResolveUnknownIssueRequestDTO,
   StopIssueRequestDTO,
   TransitionIssueRequestDTO,
   UpdateIssueRequestDTO,
@@ -72,8 +71,6 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       client.post(`/issues/${encodeURIComponent(issueId)}/recover`, request),
     stopIssue: (issueId: string, request: StopIssueRequestDTO): Promise<IssueDTO> =>
       client.post(`/issues/${encodeURIComponent(issueId)}/stop`, request),
-    resolveUnknown: (issueId: string, request: ResolveUnknownIssueRequestDTO): Promise<IssueDTO> =>
-      client.post(`/issues/${encodeURIComponent(issueId)}/resolve-unknown`, request),
     deleteIssue: (issueId: string, expectedVersion: string): Promise<void> =>
       client.delete(`/issues/${encodeURIComponent(issueId)}`, { params: { expectedVersion } }),
     reopenIssue: (issueId: string, request: ReopenIssueRequestDTO): Promise<IssueDTO> =>

@@ -1,33 +1,39 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -167,7 +173,7 @@ final class ManualCompactionControl {
                 ? start.settings().execution()
                 : start.compaction().execution();
         if (execution.equals(path.baseSettings().execution())) {
-          long projectedTokens = CompactionPlanner.estimateProjectionTokens(path);
+          long projectedTokens = TokenEstimator.estimateProjectionTokens(path);
           long minimum = compactionConfig.manualMinimum(start.contextWindow());
           if (projectedTokens < minimum) {
             return ManualDecision.disabled(

@@ -10,6 +10,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -30,12 +36,6 @@ import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonC
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesEncodedRequest;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoder;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStreamAccumulator;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.time.Duration;
 import java.util.List;

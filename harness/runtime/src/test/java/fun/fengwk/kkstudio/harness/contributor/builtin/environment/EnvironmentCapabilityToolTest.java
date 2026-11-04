@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -222,7 +223,16 @@ class EnvironmentCapabilityToolTest {
     BranchView branchView = mock(BranchView.class);
     ToolExecutionContext context =
         new ToolExecutionContext(
-            UUID.randomUUID(), UUID.randomUUID(), Instant.now(), branchView, Optional.of(boundEnv));
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            Instant.now(),
+            TurnMediaCapabilities.NONE,
+            branchView,
+            Optional.of(boundEnv));
 
     ToolExecutionRequest request =
         new ToolExecutionRequest(

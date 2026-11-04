@@ -31,27 +31,28 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 
 import javax.sql.DataSource;
 
@@ -78,9 +79,9 @@ import java.util.function.UnaryOperator;
  */
 class PostgresqlHarnessTransactionNotificationTest {
 
-  private static final String VERSION_CHANNEL = "harness_thread_version";
-  private static final String TREE_CHANNEL = "harness_thread_tree";
-  private static final String INTERACTION_CHANNEL = "harness_tool_interaction";
+  private static final String VERSION_CHANNEL = HarnessNotificationChannel.THREAD_VERSION;
+  private static final String TREE_CHANNEL = HarnessNotificationChannel.THREAD_TREE;
+  private static final String INTERACTION_CHANNEL = HarnessNotificationChannel.TOOL_INTERACTION;
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 

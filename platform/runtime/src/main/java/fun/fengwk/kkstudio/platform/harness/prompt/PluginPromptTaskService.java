@@ -3,20 +3,19 @@ package fun.fengwk.kkstudio.platform.harness.prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.ChangeGate;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -189,7 +188,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
 
   /** 接受事务内的 durable 形态：按捕获的内容位置把媒体物化为 RESOURCE，不解析任何插件文本。 */
   private AcceptancePreflight preflight(String systemText, List<PluginPromptContent> contents) {
-    return (tx, session, commands) -> {
+    return (session, commands, copiedEntries) -> {
       if (commands.size() != 1
           || !(commands.getFirst().payload() instanceof CustomMessageCommandPayload)) {
         throw new IllegalStateException(

@@ -1,43 +1,49 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
-import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -390,7 +396,12 @@ final class StopControl {
         }
       }
 
-      // 所有上下文都先撤销 Driver 执行权：generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
+      // Tool 结果与子行必须先收敛，Driver 才能删除其私有 parent；Thread head 仍保持原样供 Driver 校验。
+      UUID toolOutcomeHead =
+          context instanceof ThreadContext.ToolActive active
+              ? settleTools(tx, path, active, now)
+              : null;
+      // generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
       // 返回的 executionIds 在本事务提交后交给组合根提供的 Driver 执行取消函数。
       DriverStopResult driverStop =
           driver.stop(tx, thread, path, driverState, commit(tx), stopRequestId);
@@ -405,7 +416,7 @@ final class StopControl {
             case ThreadContext.GenerationActive active -> stopGeneration(
                 tx, thread, path, driverStop, stopRequestId, now);
             case ThreadContext.ToolActive active -> stopTools(
-                tx, thread, path, driverState, active, stopRequestId, now);
+                tx, thread, path, toolOutcomeHead, stopRequestId, now);
             case ThreadContext.GenerationTerminalPending ignored -> throw new IllegalStateException(
                 "terminal generation context escaped the Stop guard");
             case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
@@ -760,18 +771,8 @@ final class StopControl {
     return new NodeStop(stopped, turnEndId);
   }
 
-  private NodeStop stopTools(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      EntryPath path,
-      LockedDriverState driverState,
-      ThreadContext.ToolActive active,
-      UUID stopRequestId,
-      Instant now) {
-    UUID turnStartEntryId =
-        path.openTurnStart()
-            .orElseThrow(() -> new IllegalStateException("tool stop requires an open TURN_START"))
-            .id();
+  private static UUID settleTools(
+      HarnessStore.Transaction tx, EntryPath path, ThreadContext.ToolActive active, Instant now) {
     UUID parentId = active.assistant().id();
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
@@ -785,6 +786,21 @@ final class StopControl {
           ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
       parentId = applied.headEntryId();
     }
+    tx.tools().deleteByIds(active.siblings().stream().map(ToolInvocation::id).toList());
+    return parentId;
+  }
+
+  private NodeStop stopTools(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      UUID parentId,
+      UUID stopRequestId,
+      Instant now) {
+    UUID turnStartEntryId =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("tool stop requires an open TURN_START"))
+            .id();
     UUID turnEndId = tx.nextId();
     tx.entries()
         .insert(
@@ -796,7 +812,6 @@ final class StopControl {
                 now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
     tx.threads().update(stopped);
-    tx.tools().deleteByIds(active.siblings().stream().map(ToolInvocation::id).toList());
     return new NodeStop(stopped, turnEndId);
   }
 

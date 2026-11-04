@@ -14,7 +14,7 @@ import java.util.UUID;
  * {@code project_issue_run} 行：冻结自己的 Issue/state/Session/Thread 坐标与历史区间。
  *
  * <p>状态语义复用领域 {@link IssueRunStatus}：RUNNING/WAITING 是活动状态且无终态区间，终态必须冻结 {@code endEntryId/endedAt}，
- * FAILED/UNKNOWN 必须给出原因。{@code version} 是内部回调/收尾 CAS，不是用户配置版本。
+ * FAILED 必须给出原因（结果未定的在途副作用同样按 FAILED 记录为结果未知）。{@code version} 是内部回调/收尾 CAS，不是用户配置版本。
  */
 @Data
 @Builder

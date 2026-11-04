@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.pluginhost.catalog;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
@@ -22,6 +21,8 @@ import java.util.function.Function;
  *
  * <p>启动时为新安装的 Plugin 写入默认配置并构建首个快照；{@link #refresh()} 回读全部配置，修订有变化时构建新快照并原子替换，构建失败时保留旧快照并记录 {@link
  * #applicationError()}。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，因此在途调用不会看到实例被关闭。
+ *
+ * <p>产品目录视图由注入的 {@link Function} 在每次快照构建时冻结一次；平台只保存结果，不解释产品类型。
  */
 @Slf4j
 public final class PluginCatalogRuntime implements AutoCloseable {
@@ -30,7 +31,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
   private final PluginConfigurationRepository repository;
   private final Function<String, PluginContext> contexts;
   private final List<HarnessContributor> builtins;
-  private final List<CanvasFunctionAdapter> builtinAdapters;
+  private final Function<PluginCatalogSnapshot, ?> productCatalog;
 
   private final Object lifecycleLock = new Object();
   private final Object refreshLock = new Object();
@@ -44,12 +45,12 @@ public final class PluginCatalogRuntime implements AutoCloseable {
       PluginConfigurationRepository repository,
       Function<String, PluginContext> contexts,
       List<HarnessContributor> builtins,
-      List<CanvasFunctionAdapter> builtinAdapters) {
+      Function<PluginCatalogSnapshot, ?> productCatalog) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.repository = Objects.requireNonNull(repository, "repository");
     this.contexts = Objects.requireNonNull(contexts, "contexts");
     this.builtins = List.copyOf(builtins);
-    this.builtinAdapters = List.copyOf(builtinAdapters);
+    this.productCatalog = Objects.requireNonNull(productCatalog, "productCatalog");
     for (StudioPlugin plugin : registry.plugins()) {
       repository.insertIfMissing(
           plugin.descriptor().pluginId(), plugin.configurationSchema().defaultsJson());
@@ -113,7 +114,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
 
   private PluginCatalogSnapshot build(Map<String, PluginConfig> configurations) {
     return PluginCatalogSnapshot.build(
-        registry, configurations, contexts, builtins, builtinAdapters);
+        registry, configurations, contexts, builtins, productCatalog);
   }
 
   private void publish(PluginCatalogSnapshot candidate) {

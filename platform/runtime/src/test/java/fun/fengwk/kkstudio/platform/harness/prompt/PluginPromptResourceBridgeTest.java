@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;

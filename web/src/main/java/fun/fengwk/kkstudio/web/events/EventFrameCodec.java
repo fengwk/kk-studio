@@ -10,7 +10,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;

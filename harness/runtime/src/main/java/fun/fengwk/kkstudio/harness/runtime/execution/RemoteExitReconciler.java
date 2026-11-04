@@ -2,13 +2,16 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;

@@ -2,23 +2,17 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
-import { ALL_CASES } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import {
   REAL_MODEL_DEFINITIONS,
   MINIMAX_ANTHROPIC_M3,
 } from '../lib/real-models.mjs'
 
-test('lib/real-models 模块无副作用导出', async () => {
-  // 测试意图：确保独立导入 lib/real-models.mjs 时具备零副作用（不触发 case 注册）。
-  assert.equal(
-    ALL_CASES.length,
-    0,
-    'importing lib/real-models.mjs must have zero top-level side effects (no case registration)',
-  )
-
-  await import('../cases/real.mjs')
-  assert.ok(ALL_CASES.length > 0, 'importing cases/real.mjs registers real cases')
+test('real case 模块显式导出 case 数组', async () => {
+  // 矩阵行展开后仍可独立导入，不依赖全局注册顺序。
+  const { cases } = await import('../cases/real.mjs')
+  assert.ok(cases.length > 0)
+  assert.ok(cases.every((entry) => entry.requires instanceof Set))
 })
 
 test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对齐', () => {

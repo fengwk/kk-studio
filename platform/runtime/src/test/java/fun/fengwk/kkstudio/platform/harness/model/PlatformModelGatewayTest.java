@@ -35,7 +35,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;

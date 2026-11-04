@@ -12,55 +12,34 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
-import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@link IssueTransitionTool} 的模型可见契约：执行身份（runId/sourceThreadId）只从本 branch 冻结的 {@code project/run}
- * contributor state 读取，业务结论由 {@link IssueTransitionService} 决定，工具只负责参数解析与结果/错误信封。
+ * {@link IssueTransitionTool} 的模型可见契约：执行身份只来自 Harness 冻结的执行上下文（调用 Thread 与该调用的 assistant 入口），业务结论由
+ * {@link IssueTransitionService} 决定，工具只负责参数解析与结果/错误信封。
  */
 class IssueTransitionToolTest {
 
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID INVOCATION_ID = new UUID(0L, 2L);
-  private static final UUID RUN_ID = new UUID(0L, 3L);
-  private static final UUID ISSUE_ID = new UUID(0L, 4L);
-  private static final UUID PROJECT_ID = new UUID(0L, 5L);
-
-  private static final String SCOPE_JSON =
-      new ProjectRunScopeJsonCodec()
-          .encode(
-              new ProjectRunScope(
-                  RUN_ID,
-                  ISSUE_ID,
-                  PROJECT_ID,
-                  THREAD_ID,
-                  1L,
-                  "t",
-                  null,
-                  "DESIGN",
-                  "n",
-                  null,
-                  List.of(),
-                  "designer",
-                  true));
+  private static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 3L);
+  private static final UUID RUN_ID = new UUID(0L, 4L);
+  private static final UUID SESSION_ID = new UUID(0L, 6L);
+  private static final UUID ROOT_THREAD_ID = new UUID(0L, 7L);
+  private static final UUID ROOT_SESSION_ID = new UUID(0L, 8L);
 
   private final IssueTransitionService service = mock(IssueTransitionService.class);
   private final IssueTransitionTool tool = new IssueTransitionTool(service);
@@ -73,17 +52,23 @@ class IssueTransitionToolTest {
         context);
   }
 
-  /** 带冻结 {@code project/run} state 的执行上下文：工具据此定位本次 Run 的 runId 与 sourceThreadId。 */
-  private static ToolExecutionContext context(UUID threadId) {
-    BranchView branch = mock(BranchView.class);
-    when(branch.latestCustomEntry(ProjectRunScope.CUSTOM_TYPE))
-        .thenReturn(Optional.of(new CustomStateSnapshot(SCOPE_JSON)));
-    return new ToolExecutionContext(INVOCATION_ID, threadId, Instant.now(), branch);
+  /** 冻结的执行上下文：工具据此定位调用 Thread 与该调用的真实 assistant 入口，模型参数里没有 Run 身份。 */
+  private static ToolExecutionContext context(UUID threadId, UUID assistantEntryId) {
+    return new ToolExecutionContext(
+        INVOCATION_ID,
+        threadId,
+        SESSION_ID,
+        ROOT_THREAD_ID,
+        ROOT_SESSION_ID,
+        assistantEntryId,
+        Instant.now(),
+        TurnMediaCapabilities.NONE,
+        mock(BranchView.class),
+        Optional.empty());
   }
 
-  /** 没有冻结 contributor state 的普通 branch。 */
-  private static ToolExecutionContext contextWithoutScope(UUID threadId) {
-    return new ToolExecutionContext(INVOCATION_ID, threadId, Instant.now(), mock(BranchView.class));
+  private static ToolExecutionContext context(UUID threadId) {
+    return context(threadId, ASSISTANT_ENTRY_ID);
   }
 
   private ToolResult execute(String argumentsJson, ToolExecutionContext context) {
@@ -94,15 +79,13 @@ class IssueTransitionToolTest {
     return ((TextResultContent) result.contents().get(0)).text();
   }
 
-  /** 测试意图：工具身份、副作用级别、schema 与只读 state 声明冻结为受控交接契约；它不声明任何 Environment 依赖。 */
+  /** 测试意图：工具身份、副作用级别与 schema 冻结为受控交接契约；它不声明 Environment 或任何 branch state 依赖。 */
   @Test
   void descriptorFreezesTheControlledContract() {
     assertEquals("issue_transition", tool.descriptor().name());
     assertEquals(ToolSideEffect.IDEMPOTENT, tool.descriptor().sideEffect());
     assertEquals(EnvironmentSupport.NONE, tool.requirements().environmentSupport());
-    assertEquals(
-        List.of(new StateDeclaration(ProjectRunScope.CUSTOM_TYPE, StateMode.READ)),
-        tool.requirements().stateAccesses());
+    assertTrue(tool.requirements().stateAccesses().isEmpty());
     assertTrue(tool.descriptor().inputSchema().properties().containsKey("to_state"));
     assertEquals(Set.of("to_state"), tool.descriptor().inputSchema().required());
   }
@@ -110,7 +93,7 @@ class IssueTransitionToolTest {
   /** 测试意图：被接受的交接返回可读回执，并提示模型收尾（不再发起新的业务写）。 */
   @Test
   void returnsAcceptedHandoffReceipt() {
-    when(service.accept(THREAD_ID, SCOPE_JSON, "REVIEW"))
+    when(service.accept(THREAD_ID, ASSISTANT_ENTRY_ID, "REVIEW"))
         .thenReturn(
             new IssueTransitionService.IssueTransitionResult("DESIGN", "REVIEW", RUN_ID, false));
 
@@ -125,7 +108,7 @@ class IssueTransitionToolTest {
   /** 测试意图：幂等重放回执必须与首次接受可区分，避免模型误判自己没有交接成功而重复尝试。 */
   @Test
   void returnsReplayReceiptForIdempotentRetry() {
-    when(service.accept(THREAD_ID, SCOPE_JSON, "REVIEW"))
+    when(service.accept(THREAD_ID, ASSISTANT_ENTRY_ID, "REVIEW"))
         .thenReturn(
             new IssueTransitionService.IssueTransitionResult("DESIGN", "REVIEW", RUN_ID, true));
 
@@ -135,7 +118,7 @@ class IssueTransitionToolTest {
     assertTrue(text(result).contains("already accepted"), text(result));
   }
 
-  /** 测试意图：没有 durable Thread 身份时不得推断归属，直接返回错误结果。 */
+  /** 测试意图：没有 durable 执行上下文时不得推断归属，直接返回错误结果。 */
   @Test
   void returnsErrorWithoutDurableContext() {
     ToolResult result = execute("{\"to_state\":\"REVIEW\"}", null);
@@ -144,19 +127,10 @@ class IssueTransitionToolTest {
     assertTrue(text(result).contains("durable tool execution context"), text(result));
   }
 
-  /** 测试意图：没有本 branch 冻结的 run state 时不得推断归属，直接返回错误结果。 */
-  @Test
-  void returnsErrorWithoutFrozenRunContext() {
-    ToolResult result = execute("{\"to_state\":\"REVIEW\"}", contextWithoutScope(THREAD_ID));
-
-    assertTrue(result.error());
-    assertTrue(text(result).contains("frozen context"), text(result));
-  }
-
   /** 测试意图：业务拒绝原因必须原样回到模型，否则模型无法修正目标阶段。 */
   @Test
   void returnsValidationMessageFromService() {
-    when(service.accept(eq(THREAD_ID), eq(SCOPE_JSON), anyString()))
+    when(service.accept(eq(THREAD_ID), eq(ASSISTANT_ENTRY_ID), anyString()))
         .thenThrow(
             new AiValidationException("issue_run", "state DESIGN cannot transition to DONE"));
 
@@ -169,7 +143,7 @@ class IssueTransitionToolTest {
   /** 测试意图：未知失败绝不回显内部细节，只给出稳定的通用错误。 */
   @Test
   void hidesUnknownFailureDetail() {
-    when(service.accept(eq(THREAD_ID), eq(SCOPE_JSON), anyString()))
+    when(service.accept(eq(THREAD_ID), eq(ASSISTANT_ENTRY_ID), anyString()))
         .thenThrow(new IllegalStateException("jdbc connection lost"));
 
     ToolResult result = execute("{\"to_state\":\"REVIEW\"}", context(THREAD_ID));
@@ -185,5 +159,19 @@ class IssueTransitionToolTest {
 
     assertTrue(result.error());
     assertTrue(text(result).contains("to_state"), text(result));
+  }
+
+  /** 测试意图：工具把执行上下文里的 assistant 入口原样交给业务事务，不做任何身份推断。 */
+  @Test
+  void forwardsAssistantEntryIdentityToTheTransaction() {
+    UUID laterEntryId = UUID.randomUUID();
+    when(service.accept(THREAD_ID, laterEntryId, "REVIEW"))
+        .thenReturn(
+            new IssueTransitionService.IssueTransitionResult("DESIGN", "REVIEW", RUN_ID, false));
+
+    ToolResult result = execute("{\"to_state\":\"REVIEW\"}", context(THREAD_ID, laterEntryId));
+
+    assertFalse(result.error());
+    assertTrue(text(result).contains("DESIGN -> REVIEW"), text(result));
   }
 }

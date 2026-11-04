@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.realtime;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 
 import java.util.UUID;
 import java.util.function.Consumer;

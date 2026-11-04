@@ -8,20 +8,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh"
+resolve_repo_root "$SCRIPT_DIR"
+source "$SCRIPT_DIR/../../lib/test-stack.sh"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:performance-baseline}
 DURATION_SECONDS=10
@@ -142,17 +131,16 @@ export CANVAS_TEST_MOCK_PORT=18089
 export PERFORMANCE_IMAGE="$APP_IMAGE"
 export PERFORMANCE_SKIP_BUILD="$SKIP_BUILD"
 
-COMPOSE=(docker compose -f "$COMPOSE_FILE")
+export COMPOSE_PROFILES=canvas-test
+COMPOSE=(docker compose --project-name kk-studio-canvas-test -f "$COMPOSE_FILE")
 
 cleanup() {
   local status=$?
   if ((status != 0)); then
     printf '\n==> Performance baseline failed; collecting compose diagnostics\n' >&2
-    "${COMPOSE[@]}" --profile app ps -a >&2 || true
-    "${COMPOSE[@]}" --profile app logs --no-color >&2 || true
   fi
   printf '\n==> Cleaning isolated performance stack\n' >&2
-  "${COMPOSE[@]}" --profile app down --volumes --remove-orphans >/dev/null 2>&1 || true
+  cleanup_test_stack "$status"
 }
 
 on_signal() {

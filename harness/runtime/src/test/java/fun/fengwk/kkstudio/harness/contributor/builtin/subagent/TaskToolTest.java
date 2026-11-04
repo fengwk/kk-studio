@@ -24,9 +24,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
@@ -47,6 +49,10 @@ class TaskToolTest {
       UUID.fromString("00000000-0000-0000-0000-000000000003");
   private static final UUID CHILD_THREAD_ID =
       UUID.fromString("00000000-0000-0000-0000-000000000004");
+  private static final UUID PARENT_SESSION_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000005");
+  private static final UUID ROOT_THREAD_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000006");
 
   /** descriptor 固定暴露 name/renderer/sideEffect/no-timeout 与 snake_case 参数 schema。 */
   @Test
@@ -282,7 +288,16 @@ class TaskToolTest {
       TaskTool tool, String callId, String argumentsJson) {
     ToolExecutionContext context =
         new ToolExecutionContext(
-            INVOCATION_ID, PARENT_THREAD_ID, Instant.now(), mock(BranchView.class));
+            INVOCATION_ID,
+            PARENT_THREAD_ID,
+            CHILD_SESSION_ID,
+            ROOT_THREAD_ID,
+            PARENT_SESSION_ID,
+            UUID.randomUUID(),
+            Instant.now(),
+            TurnMediaCapabilities.NONE,
+            mock(BranchView.class),
+            Optional.empty());
     return new ToolExecutionRequest(
         tool.descriptor(),
         new ToolCall(callId, TaskTool.NAME, argumentsJson),

@@ -26,6 +26,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -200,6 +202,14 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     config.setSkills(skills);
     config.setSubagents(subagents);
     return config;
+  }
+
+  /** 构造测试使用的 builtin 执行选择。 */
+  protected static HarnessExecutionSelectionDTO execution(String model, String variant) {
+    HarnessExecutionSelectionDTO selection = new HarnessExecutionSelectionDTO();
+    selection.setDriver(BuiltinExecution.DRIVER);
+    selection.setSettings(Map.of("modelName", model, "variant", variant));
+    return selection;
   }
 
   protected static SkillRefDTO skillRef(String packageName, String name) {

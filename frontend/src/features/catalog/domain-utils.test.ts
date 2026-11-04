@@ -151,8 +151,7 @@ describe('AI domain utilities', () => {
         description: 'desc',
         systemPrompt: 'prompt',
         type: 'USER',
-        model: 'MiniMax-M2.7',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: ['search'],
@@ -289,8 +288,7 @@ describe('AI domain utilities', () => {
       name: 'assistant',
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['search'],
@@ -302,8 +300,7 @@ describe('AI domain utilities', () => {
     expect(toEditableAgentUpdate(agentInput)).toEqual({
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'MiniMax-M2.7',
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: {
         inheritParentEnvironment: true,
         tools: ['search'],
@@ -311,7 +308,9 @@ describe('AI domain utilities', () => {
         subagents: ['helper'],
       },
     })
-    expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
+    expect(toEditableAgent({ ...agentInput, variant: ' ' }).execution).toEqual({
+      driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: null },
+    })
   })
 
   /** 搜索与展示辅助函数覆盖结构化的 model 默认值。 */
@@ -323,8 +322,7 @@ describe('AI domain utilities', () => {
         description: 'Cloud agent',
         systemPrompt: null,
         type: 'USER' as const,
-        model: 'MiniMax-M2.7',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: [],
@@ -432,8 +430,7 @@ describe('AI domain utilities', () => {
         description: null,
         systemPrompt: null,
         type: 'USER',
-        model: 'gpt-5.4',
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: 'gpt-5.4', variant: 'default' } },
         config: {
           inheritParentEnvironment: true,
           tools: [],

@@ -6,15 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
@@ -22,6 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinAgentExecutionMaterializer;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
@@ -38,8 +41,8 @@ class AgentBranchSettingsMaterializerTest {
     materializer =
         new AgentBranchSettingsMaterializer(
             agentRepository,
-            modelRepository,
-            new AgentModelRuntimeConfigParser(JsonMapper.builder().build()),
+            new BuiltinAgentExecutionMaterializer(
+                modelRepository, new AgentModelRuntimeConfigParser(JsonMapper.builder().build())),
             new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
   }
 
@@ -52,8 +55,7 @@ class AgentBranchSettingsMaterializerTest {
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(agentName)
-            .modelName("gpt-x")
-            .variant(variant)
+            .execution(BuiltinExecution.of(new ModelSelection("gpt-x", variant)))
             .configJson(
                 "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":"
                     + inheritParentEnvironment
@@ -121,6 +123,39 @@ class AgentBranchSettingsMaterializerTest {
     assertEquals(BuiltinExecution.of(new ModelSelection("gpt-x", "fast")), settings.execution());
   }
 
+  /** GROUP 原样物化且不能携带组级 Variant。 */
+  @Test
+  void materializesGroupWithoutVariant() {
+    stub("alpha", null, validModelConfig());
+    when(modelRepository.getByName("gpt-x"))
+        .thenReturn(AgentModel.builder().name("gpt-x").kind(AgentModelKind.GROUP).build());
+    assertEquals(
+        BuiltinExecution.of(ModelSelection.group("gpt-x")),
+        materializer.materialize("alpha").execution());
+    when(agentRepository.getByName("alpha"))
+        .thenReturn(
+            AgentDefinition.builder()
+                .name("alpha")
+                .execution(BuiltinExecution.of(new ModelSelection("gpt-x", "fast")))
+                .build());
+    assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha"));
+  }
+
+  /** 非 builtin execution 原样透传，不访问模型目录。 */
+  @Test
+  void passesThroughNonBuiltinExecution() {
+    ExecutionSelection execution = new ExecutionSelection("custom", "{\"profile\":\"fast\"}");
+    when(agentRepository.getByName("alpha"))
+        .thenReturn(AgentDefinition.builder().name("alpha").execution(execution).build());
+
+    BranchSettings settings = materializer.materialize("alpha");
+
+    assertEquals("alpha", settings.agentName());
+    assertEquals(execution, settings.execution());
+    assertNull(settings.environmentName());
+    verifyNoInteractions(modelRepository);
+  }
+
   /** Agent 缺失、model 缺失、variant 缺失与非法配置都以稳定 IllegalArgumentException 失败。 */
   @Test
   void rejectsMissingOrInvalidCatalogInputs() {
@@ -164,7 +199,7 @@ class AgentBranchSettingsMaterializerTest {
     AgentDefinition broken =
         AgentDefinition.builder()
             .name("broken")
-            .modelName("gpt-x")
+            .execution(BuiltinExecution.of(new ModelSelection("gpt-x", null)))
             .configJson("{\"tools\":[]}")
             .build();
     when(agentRepository.getByName("broken")).thenReturn(broken);
@@ -179,7 +214,7 @@ class AgentBranchSettingsMaterializerTest {
     assertInstanceOf(IllegalStateException.class, error.getCause());
   }
 
-  /** 测试意图：未配置模型的内置 Agent（两列同为 null）被明确拒绝，而不是 NPE 或回退到其它模型。 */
+  /** 测试意图：未配置 execution 的内置 Agent 被明确拒绝，而不是 NPE 或回退到其它模型。 */
   @Test
   void rejectsUnconfiguredAgentModelExplicitly() {
     AgentDefinition unconfigured =
@@ -197,7 +232,8 @@ class AgentBranchSettingsMaterializerTest {
     assertTrue(
         error
             .getMessage()
-            .contains("agent model is not configured: " + BuiltinAgentDefinitions.COMPACTION_NAME));
+            .contains(
+                "agent execution is not configured: " + BuiltinAgentDefinitions.COMPACTION_NAME));
   }
 
   private static String validModelConfig() {
