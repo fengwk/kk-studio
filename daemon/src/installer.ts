@@ -7,7 +7,7 @@ import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
 
 import type { DaemonConfig } from './contracts.js'
-import { getOutboundNetwork, type OutboundNetwork } from './network.js'
+import { getOutboundNetwork, subprocessEnvironment, type OutboundNetwork } from './network.js'
 import { ensurePrivateDirectory, writePrivateFile } from './native/index.js'
 import { currentPlatformKey } from './release.js'
 import type { UpdateOutcomeLike } from './runtime-ports.js'
@@ -45,7 +45,7 @@ function encoded(script: string): string {
 }
 
 export interface InstallerDependencies {
-  network: Pick<OutboundNetwork, 'withResponse' | 'selectProxy'>
+  network: Pick<OutboundNetwork, 'withResponse'>
   platform: NodeJS.Platform
   arch: string
   home: string
@@ -112,17 +112,18 @@ export async function prepareInstaller(
     }
     await writePrivateFile(installer, Buffer.concat(chunks))
   })
-  // The current network policy already resolves environment/system proxy and bypass rules.
-  // The proxy slice will replace this with its platform-provided subprocess environment.
-  const choice = await deps.network.selectProxy('https://github.com/', timeout)
-  const proxy = choice.kind === 'proxy' ? choice.url : ''
+  // Snapshot the platform settings for this job, independently of the daemon's environment.
+  const settings = subprocessEnvironment({})
+  const proxy = settings.HTTPS_PROXY ?? ''
+  const noProxy = settings.NO_PROXY ?? ''
   // The independent job needs the user manager's session, not the daemon's service scope.
   const serviceEnvironment = process.env
   const unit = `kk-studio-daemon-update-${operationId}`
   if (deps.platform === 'win32') {
     const actionScript = [
       `$ErrorActionPreference = 'Stop'`,
-      `$env:https_proxy = ${ps(proxy)}; $env:HTTPS_PROXY = ${ps(proxy)}; $env:KK_DAEMON_INSTALL_PROXY_ENV = '1'`,
+      `Get-ChildItem Env: | Where-Object { $_.Name -match '^(http|https|all|no)_proxy$' } | Remove-Item`,
+      `$env:HTTP_PROXY = ${ps(proxy)}; $env:HTTPS_PROXY = ${ps(proxy)}; $env:NO_PROXY = ${ps(noProxy)}; $env:KK_DAEMON_INSTALL_PROXY_ENV = '1'`,
       `try {`,
       `  [IO.File]::WriteAllText(${ps(join(directory, 'ready'))}, '')`,
       `  $deadline = (Get-Date).AddSeconds(120)`,
@@ -145,8 +146,9 @@ export async function prepareInstaller(
   } else {
     const runner = join(directory, 'run.sh')
     await writePrivateFile(runner, UNIX_RUNNER)
-    const invoke = ['env', `HOME=${deps.home}`, `https_proxy=${proxy}`, `HTTPS_PROXY=${proxy}`,
-      `http_proxy=${proxy}`, `HTTP_PROXY=${proxy}`, 'all_proxy=', 'ALL_PROXY=', 'no_proxy=', 'NO_PROXY=',
+    const invoke = ['env', '-i', `HOME=${deps.home}`, `PATH=${serviceEnvironment.PATH ?? '/usr/bin:/bin'}`,
+      `https_proxy=${proxy}`, `HTTPS_PROXY=${proxy}`, `http_proxy=${proxy}`, `HTTP_PROXY=${proxy}`,
+      `no_proxy=${noProxy}`, `NO_PROXY=${noProxy}`,
       ...(serviceEnvironment.XDG_RUNTIME_DIR ? [`XDG_RUNTIME_DIR=${serviceEnvironment.XDG_RUNTIME_DIR}`] : []),
       ...(serviceEnvironment.DBUS_SESSION_BUS_ADDRESS ? [`DBUS_SESSION_BUS_ADDRESS=${serviceEnvironment.DBUS_SESSION_BUS_ADDRESS}`] : []),
       'bash', runner, permit, log,

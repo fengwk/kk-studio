@@ -353,9 +353,11 @@ try {
     # Managed updates pass their proxy decision explicitly, including on PowerShell 5.1.
     $oldMode = $env:KK_DAEMON_INSTALL_PROXY_ENV
     $oldProxy = $env:HTTPS_PROXY
+    $oldNoProxy = $env:NO_PROXY
     try {
         $env:KK_DAEMON_INSTALL_PROXY_ENV = "1"
         $env:HTTPS_PROXY = "http://127.0.0.1:8080"
+        $env:NO_PROXY = "localhost"
         $script:NetworkProxies = @()
         $exit = Invoke-Installer -Parameters @{
             Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
@@ -364,10 +366,31 @@ try {
         foreach ($proxy in $script:NetworkProxies) {
             Assert-Equal -Actual $proxy -Expected "http://127.0.0.1:8080" -Message "archive request uses managed proxy"
         }
+        # A platform bypass applies to both the release host and its subdomains.
+        $env:NO_PROXY = "github.com"
+        $script:NetworkProxies = @()
+        $exit = Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        }
+        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "bypass install succeeds"
+        foreach ($proxy in $script:NetworkProxies) {
+            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "bypassed archive request is direct"
+        }
+        $env:HTTPS_PROXY = ""
+        $env:NO_PROXY = ""
+        $script:NetworkProxies = @()
+        $exit = Invoke-Installer -Parameters @{
+            Command = "install"; ConfigFile = $pairs[0]; TokenFile = $pairs[1]; Version = $daemonVersion
+        }
+        Assert-True -Condition ($exit -eq 0 -and $script:NetworkProxies.Count -eq 2) -Message "direct install succeeds"
+        foreach ($proxy in $script:NetworkProxies) {
+            Assert-True -Condition ([string]::IsNullOrEmpty($proxy)) -Message "direct archive request has no proxy"
+        }
     }
     finally {
         $env:KK_DAEMON_INSTALL_PROXY_ENV = $oldMode
         $env:HTTPS_PROXY = $oldProxy
+        $env:NO_PROXY = $oldNoProxy
     }
     foreach ($bad in @("", "../bad", ("a" * 65), "bad`n")) {
         $script:NetworkCalls = @()

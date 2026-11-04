@@ -607,34 +607,55 @@ function Assert-ReleaseTag {
     }
 }
 
+function Get-ManagedProxyArguments {
+    param([string] $Uri)
+    $arguments = @{}
+    if ($env:KK_DAEMON_INSTALL_PROXY_ENV -ne "1") { return $arguments }
+
+    $target = [Uri] $Uri
+    $direct = [string]::IsNullOrEmpty($env:HTTPS_PROXY)
+    if (-not $direct -and -not [string]::IsNullOrEmpty($env:NO_PROXY)) {
+        foreach ($item in $env:NO_PROXY.Split(",")) {
+            $rule = $item.Trim()
+            # Release URLs use DNS names; numeric address and CIDR rules cannot match them.
+            if ($rule -notmatch '^(\*|(?:\*\.)?\.?[a-zA-Z0-9.-]+)(?::([0-9]+))?$') { continue }
+            $hostRule = $Matches[1]
+            if ($Matches[2] -and [int] $Matches[2] -ne $target.Port) { continue }
+            if ($hostRule -eq "*") { $direct = $true; break }
+            $hostRule = $hostRule -replace '^\*\.', '' -replace '^\.', ''
+            if ($target.Host -ieq $hostRule -or $target.Host.EndsWith(".$hostRule", [StringComparison]::OrdinalIgnoreCase)) {
+                $direct = $true
+                break
+            }
+        }
+    }
+    # PowerShell 5.1 has no -NoProxy; suppress the machine default explicitly.
+    [Net.WebRequest]::DefaultWebProxy = $null
+    if ($direct) {
+        if ($PSVersionTable.PSVersion.Major -ge 6) { $arguments.NoProxy = $true }
+    }
+    else {
+        $arguments.Proxy = $env:HTTPS_PROXY
+    }
+    return $arguments
+}
+
 function Get-ReleaseArchive {
     # PS 5.1 otherwise negotiates obsolete TLS on some Windows installations.
     $savedProtocol = [Net.ServicePointManager]::SecurityProtocol
     $savedProxy = [Net.WebRequest]::DefaultWebProxy
-    $proxyArguments = @{}
     try {
         [Net.ServicePointManager]::SecurityProtocol =
             $savedProtocol -bor [Net.SecurityProtocolType]::Tls12
-        # Windows PowerShell 5.1 does not consistently honor HTTPS_PROXY. The managed
-        # update job supplies an explicit decision, including direct, without credentials.
-        if ($env:KK_DAEMON_INSTALL_PROXY_ENV -eq "1") {
-            if ([string]::IsNullOrEmpty($env:HTTPS_PROXY)) {
-                [Net.WebRequest]::DefaultWebProxy = $null
-                if ($PSVersionTable.PSVersion.Major -ge 6) {
-                    $proxyArguments.NoProxy = $true
-                }
-            }
-            else {
-                $proxyArguments.Proxy = $env:HTTPS_PROXY
-            }
-        }
         if ($script:InvocationParameters.ContainsKey("Version")) {
             $tag = "v$Version"
         }
         else {
             try {
+                $releaseUri = "https://api.github.com/repos/fengwk/kk-studio/releases/latest"
+                $proxyArguments = Get-ManagedProxyArguments -Uri $releaseUri
                 $release = Invoke-RestMethod `
-                    -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
+                    -Uri $releaseUri `
                     -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" } @proxyArguments
             }
             catch {
@@ -649,6 +670,7 @@ function Get-ReleaseArchive {
         # Windows daemon distribution for this host.
         $asset = "kk-studio-daemon-$tag-windows-amd64.tar.gz"
         $baseUri = "https://github.com/fengwk/kk-studio/releases/download/$tag"
+        $proxyArguments = Get-ManagedProxyArguments -Uri $baseUri
         $script:DownloadDirectory = Join-Path ([IO.Path]::GetTempPath()) (
             "kk-studio-release-" + [Guid]::NewGuid().ToString("N")
         )

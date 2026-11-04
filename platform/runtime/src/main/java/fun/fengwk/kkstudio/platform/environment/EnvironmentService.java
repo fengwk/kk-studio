@@ -253,7 +253,8 @@ public class EnvironmentService {
         RegistrationTokens.hash(token))) {
       throw new AiValidationException(RESOURCE, "invalid or expired install code");
     }
-    return EnvironmentInstallScripts.install(env.getInstallConfig(), token);
+    return EnvironmentInstallScripts.install(
+        env.getInstallConfig(), token, snapshot.get().network());
   }
 
   /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
@@ -271,7 +272,7 @@ public class EnvironmentService {
   }
 
   public String uninstallationScript(String operatingSystem) {
-    return EnvironmentInstallScripts.uninstall(operatingSystem);
+    return EnvironmentInstallScripts.uninstall(operatingSystem, snapshot.get().network());
   }
 
   @Transactional

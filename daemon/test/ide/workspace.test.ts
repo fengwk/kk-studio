@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, opendir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 import type { DaemonConfig } from '../../src/contracts.js'
@@ -19,6 +19,11 @@ import {
   writeRecoveryBackup,
   type RecoveryBackup,
 } from '../../src/ide/workspace.js'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, opendir: vi.fn(actual.opendir), realpath: vi.fn(actual.realpath), stat: vi.fn(actual.stat) }
+})
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -83,17 +88,25 @@ describe('view identity and workspace files', () => {
   })
 
   it('bounds listings by both entry count and serialized bytes', async () => {
-    // A short parent keeps the byte limit from masking the 1000-entry limit.
-    const dir = await mkdtemp(join(tmpdir(), 'x'))
-    cleanups.push(() => rm(dir, { recursive: true, force: true }))
-    const many = dir
-    const long = join(dir, 'long')
-    await mkdir(long)
-    await Promise.all(Array.from({ length: 1001 }, (_, i) => mkdir(join(many, String(i).padStart(4, '0')))))
+    // A virtual short path isolates the count limit from the real temporary path's byte length.
+    const many = join(parse(process.cwd()).root, 'x')
+    vi.mocked(realpath).mockResolvedValueOnce(many as never)
+    vi.mocked(stat).mockResolvedValueOnce({ isDirectory: () => true } as never)
+    vi.mocked(opendir).mockResolvedValueOnce({
+      async *[Symbol.asyncIterator]() {
+        for (let i = 1000; i >= 0; i--) {
+          yield { name: String(i).padStart(4, '0'), isDirectory: () => true }
+        }
+      },
+    } as never)
     const count = await listDirectories(many)
     expect(count.truncated).toBe(true)
     expect(count.children).toHaveLength(1000)
     expect(count.children.at(-1)?.name).toBe('0999')
+
+    const dir = await tempDir()
+    const long = join(dir, 'long')
+    await mkdir(long)
     await Promise.all(Array.from({ length: 300 }, (_, i) => mkdir(join(long, `${String(i).padStart(4, '0')}${'界'.repeat(60)}`))))
     const bytes = await listDirectories(long)
     // Multibyte names hit the byte bound well before the count bound.

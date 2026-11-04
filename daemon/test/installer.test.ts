@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DaemonConfig } from '../src/contracts.js'
 import { handleUpdate, launchInstallerJob, prepareInstaller, type InstallerDependencies } from '../src/installer.js'
+import { applyNetworkSettings } from '../src/network.js'
 
 const operationId = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
 const command = { operationId, targetVersion: '2.0.0' }
@@ -52,7 +53,6 @@ function deps(home: string, script: string): InstallerDependencies {
     platform: 'linux',
     arch: 'x64',
     network: {
-      async selectProxy() { return { kind: 'proxy', url: 'http://localhost:8080' } },
       async withResponse(url, init, _signal, use) {
         expect(url).toBe('https://raw.githubusercontent.com/fengwk/kk-studio/v2.0.0/scripts/daemon/install.sh')
         expect(init.redirect).toBe('error')
@@ -64,6 +64,8 @@ function deps(home: string, script: string): InstallerDependencies {
 }
 
 afterEach(async () => {
+  applyNetworkSettings(null, '')
+  vi.unstubAllEnvs()
   await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })))
 })
 
@@ -71,13 +73,17 @@ describe('official installer handoff', () => {
   it('holds the independent job until the receipt permit, then invokes the pinned installer with existing inputs', async () => {
     // Execute the real generated runner, not an imitation of its wait/argument logic.
     const { home, config } = await fixture()
+    applyNetworkSettings('http://localhost:8080', 'localhost,.internal')
+    vi.stubEnv('HtTp_PrOxY', 'http://host-proxy.invalid:3128')
     const marker = join(home, 'installer-args')
-    const adapter = deps(home, `printf '%s\\n' "$@" > '${marker}'\n`)
+    const environment = join(home, 'installer-env')
+    const adapter = deps(home, `printf '%s\\n' "$@" > '${marker}'\nenv > '${environment}'\n`)
     let child: ChildProcess | undefined
     adapter.launch = async (file, args) => {
       expect(file).toBe('systemd-run')
       const envIndex = args.indexOf('env')
       expect(args).toContain('https_proxy=http://localhost:8080')
+      expect(args).toContain('NO_PROXY=localhost,.internal')
       expect(args).toContain(`HOME=${home}`)
       child = spawn(args[envIndex]!, args.slice(envIndex + 1), { stdio: 'ignore' })
       await waitForFile(join(args[args.indexOf('bash') + 2]!, '..', 'ready'))
@@ -96,6 +102,10 @@ describe('official installer handoff', () => {
     expect((await readFile(marker, 'utf8')).trim().split('\n')).toEqual([
       'install', '--config-file', config.configPath, '--token-file', config.tokenPath, '--version', '2.0.0',
     ])
+    const inherited = await readFile(environment, 'utf8')
+    expect(inherited).toContain('HTTPS_PROXY=http://localhost:8080\n')
+    expect(inherited).toContain('NO_PROXY=localhost,.internal\n')
+    expect(inherited).not.toContain('host-proxy.invalid')
     expect(await readFile(config.tokenPath, 'utf8')).toBe('private-token')
   })
 
@@ -194,6 +204,7 @@ describe('official installer handoff', () => {
   it('uses an encoded, non-repeating Windows scheduled task with the target version', async () => {
     // Decode both task-registration layers to verify argv and avoid shell-injection assumptions.
     const { home, config } = await fixture()
+    applyNetworkSettings('http://localhost:8080', 'localhost,.internal')
     const adapter = deps(home, 'official installer')
     adapter.platform = 'win32'
     adapter.network.withResponse = async (_url, _init, _signal, use) =>
@@ -213,9 +224,43 @@ describe('official installer handoff', () => {
     const task = Buffer.from(action![1]!, 'base64').toString('utf16le')
     expect(task).toContain(`-Version '2.0.0'`)
     expect(task).toContain(`-TokenFile '${config.tokenPath}'`)
+    expect(task).toContain("$env:HTTPS_PROXY = 'http://localhost:8080'")
+    expect(task).toContain("$env:NO_PROXY = 'localhost,.internal'")
     expect(task).not.toContain('private-token')
     expect(task).toContain('Unregister-ScheduledTask')
     expect(registration).not.toContain('New-ScheduledTaskTrigger')
     await result.releasePermit!()
+  })
+
+  it.each(['linux', 'win32'] as const)('explicitly clears inherited proxy for a direct %s job', async (platform) => {
+    // The service manager may have a different environment from the daemon.
+    vi.stubEnv('HTTPS_PROXY', 'http://host-proxy.invalid:3128')
+    const { home, config } = await fixture()
+    const adapter = deps(home, 'installer')
+    adapter.platform = platform
+    if (platform === 'win32') {
+      adapter.network.withResponse = async (_url, _init, _signal, use) =>
+        use({ statusCode: 200, statusMessage: 'OK', headers: {}, body: Readable.from(['installer']), async dispose() {} })
+    }
+    adapter.launch = async (_file, args) => {
+      if (platform === 'linux') {
+        expect(args).toContain('-i')
+        expect(args).toContain('https_proxy=')
+        expect(args).toContain('NO_PROXY=')
+        expect(args.join(' ')).not.toContain('host-proxy.invalid')
+        await writeFile(join(args[args.indexOf('bash') + 2]!, '..', 'ready'), '')
+      } else {
+        const registration = Buffer.from(args.at(-1)!, 'base64').toString('utf16le')
+        const action = /-EncodedCommand ([A-Za-z0-9+/=]+)/.exec(registration)
+        const task = Buffer.from(action![1]!, 'base64').toString('utf16le')
+        expect(task).toContain('Remove-Item')
+        expect(task).toContain("$env:HTTPS_PROXY = ''")
+        expect(task).toContain("$env:NO_PROXY = ''")
+        expect(task).not.toContain('host-proxy.invalid')
+        const ready = /\[IO\.File\]::WriteAllText\('([^']+[/\\]ready)'/.exec(task)
+        await writeFile(ready![1]!, '')
+      }
+    }
+    expect((await prepareInstaller(command, config, AbortSignal.timeout(5000), adapter)).phase).toBe('PREPARED')
   })
 })
