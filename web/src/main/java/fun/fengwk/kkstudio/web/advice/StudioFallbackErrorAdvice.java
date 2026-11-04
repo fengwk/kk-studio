@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

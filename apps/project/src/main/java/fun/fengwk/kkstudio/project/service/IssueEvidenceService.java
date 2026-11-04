@@ -196,6 +196,9 @@ public class IssueEvidenceService {
 
   public List<IssueEvidence> listEvidence(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
+    if (issueRepository.getById(issueId) == null) {
+      throw new ProjectNotFoundException("issue");
+    }
     return issueEvidenceRepository.listByIssueId(issueId).stream()
         .limit(MAX_EVIDENCE_LIMIT)
         .toList();

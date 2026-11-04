@@ -1,0 +1,23 @@
+package fun.fengwk.kkstudio.project.dto;
+
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/** 恢复 Issue 请求 DTO。 */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class RecoverIssueRequestDTO {
+
+  private String expectedVersion;
+  private String requestKey;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("Unknown request field");
+  }
+}

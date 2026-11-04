@@ -9,7 +9,7 @@ import java.util.function.Consumer;
  *
  * <p>{@code key} 为 null 表示全局资源订阅（接收全部合法通知），非 null 表示按 key 定点订阅。通知只来自 PostgreSQL {@code LISTEN}；畸形
  * payload 与 LISTEN 重连由实现退化为全量 resync。Harness 的版本/执行树/交互失效走 {@code harness.api} 的公开契约， 本接口只承载 web
- * 自有资源（Environment）。
+ * 自有资源（Project、Environment）。
  */
 interface InvalidationEventSource {
 

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.ide.web.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;
+import fun.fengwk.kkstudio.platform.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
@@ -36,7 +37,6 @@ import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadCommandBatchControl
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadStreamCatchupController;
 import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
-import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
 import java.util.Map;

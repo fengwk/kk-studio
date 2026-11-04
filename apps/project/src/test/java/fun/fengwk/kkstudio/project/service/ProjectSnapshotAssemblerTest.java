@@ -24,12 +24,12 @@ import tools.jackson.databind.ser.std.ToStringSerializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
+import fun.fengwk.kkstudio.project.dto.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;

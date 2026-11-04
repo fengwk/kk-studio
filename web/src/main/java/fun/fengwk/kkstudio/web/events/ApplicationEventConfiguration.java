@@ -19,15 +19,16 @@ import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
+import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationHub;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
+import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
-import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
@@ -46,6 +47,12 @@ public class ApplicationEventConfiguration {
   @Bean
   public EventFrameCodec eventFrameCodec() {
     return new EventFrameCodec(new RealtimeEventJsonCodec());
+  }
+
+  @Bean
+  public NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub() {
+    return new NotificationInvalidationHub<>(
+        InvalidationEventSource.Event::changed, InvalidationEventSource.Event::fullResync);
   }
 
   /**
@@ -74,7 +81,8 @@ public class ApplicationEventConfiguration {
           BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher,
       HarnessChangeNotifications harnessNotifications,
       CanvasVersionHub canvasVersionHub,
-      ProjectInvalidationHub projectInvalidationHub,
+      @Qualifier("projectInvalidationHub")
+          NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
       EnvironmentChangeHub environmentChangeHub,
@@ -117,7 +125,7 @@ public class ApplicationEventConfiguration {
                 canvasVersionHub::broadcastResync),
             // 4. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
             new PostgresqlNotificationHandler(
-                ProjectInvalidationHub.CHANNEL,
+                ProjectChangeNotifier.CHANNEL,
                 projectInvalidationHub::onNotification,
                 projectInvalidationHub::broadcastResync),
             // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
@@ -209,7 +217,8 @@ public class ApplicationEventConfiguration {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      ProjectInvalidationHub projectInvalidationHub,
+      @Qualifier("projectInvalidationHub")
+          NotificationInvalidationHub<InvalidationEventSource.Event> projectInvalidationHub,
       EnvironmentChangeHub environmentChangeHub,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
@@ -217,7 +226,7 @@ public class ApplicationEventConfiguration {
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
-        projectInvalidationHub,
+        (key, consumer) -> projectInvalidationHub.subscribe(key, consumer)::run,
         environmentChangeHub,
         settings.queueCapacity());
   }

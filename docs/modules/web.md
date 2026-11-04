@@ -3,7 +3,7 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换，web 在 HTTP 边界调用；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
+Web 保留组合根自身与 Harness/Platform 的 Controller；Canvas、Project 的 Controller、DTO 映射与错误 advice 随各自产品模块，经自动装配进入 MVC。Controller 解析请求（统一使用 `Uuids.parseCanonical`、`DecimalLongs` 以及 `platform.http.RequestParameters` 解析校验 environmentId 与 limit 等）、调用用例并返回结果。DTO 映射规则：Harness 领域类型由 web 的 Harness mapper 映射；Canvas、Project 领域服务返回领域类型，由各自模块的映射器转换；Platform 用例服务直接返回 share DTO。领域行为、用例组装与事务由相应模块持有，Web 模块不直连业务表或业务 repository。
 
 ## 组合与生命周期
 
@@ -86,8 +86,8 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 `model` / `variant` 不属于请求契约。Driver、模型与 Variant 的校验和引用事务见
 [Platform Catalog](platform.md#catalog)。
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
-| Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
-| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档 |
+| Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建（控制器在 [apps/project](project.md)） |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档（控制器在 [apps/project](project.md)） |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |

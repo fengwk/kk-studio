@@ -481,6 +481,13 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(blob1, list.get(1).getBlobId());
   }
 
+  /** 不存在的 Issue 不应伪装成空证据列表。 */
+  @Test
+  void listEvidenceRejectsMissingIssue() {
+    assertThrows(
+        ProjectNotFoundException.class, () -> issueEvidenceService.listEvidence(UUID.randomUUID()));
+  }
+
   /**
    * 仅通过 {@link Import} 生效的存储假件配置：刻意不加 {@code @TestConfiguration}/{@code @Configuration}，避免被
    * platform 组件的扫描拾取后污染其他测试上下文。
