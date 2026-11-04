@@ -808,7 +808,7 @@ public final class ModelExecution
     }
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), isRetryable(error), attempt);
+            config.retryPolicyProvider().get(), isRetryable(error), attempt);
     if (decision.retry()) {
       Duration delay = decision.delay();
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
@@ -844,7 +844,7 @@ public final class ModelExecution
       return false;
     }
     if (error.httpStatus() != null) {
-      return config.httpErrorPolicyProvider().policy(providerName).allowsRetry(error.httpStatus());
+      return config.httpErrorPolicyProvider().apply(providerName).allowsRetry(error.httpStatus());
     }
     return true;
   }
@@ -1012,7 +1012,7 @@ public final class ModelExecution
             boolean retryable = isRetryable(error);
             InvocationRetryDecision retryDecision =
                 InvocationRetryDecision.decide(
-                    config.retryPolicyProvider().retryPolicy(),
+                    config.retryPolicyProvider().get(),
                     retryable,
                     Math.addExact(progress.memberAttempts(), 1));
             ModelGroupFailureDecider.Action action =

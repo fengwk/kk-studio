@@ -113,7 +113,6 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.WorkHeartbeat;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.ToolHistoryActionResolver;
-import fun.fengwk.kkstudio.harness.spi.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
@@ -415,7 +414,7 @@ class ModelProcessorTest {
                 FALLBACK_DELAY,
                 ModelStreamConfig.DEFAULT,
                 null,
-                ModelHttpErrorPolicyProvider.DEFAULT),
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
@@ -1493,7 +1492,7 @@ class ModelProcessorTest {
             false,
             ModelStreamConfig.DEFAULT,
             null,
-            ModelHttpErrorPolicyProvider.DEFAULT);
+            providerName -> ModelHttpErrorPolicy.DEFAULT);
     truncated.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
@@ -1518,7 +1517,7 @@ class ModelProcessorTest {
             false,
             ModelStreamConfig.DEFAULT,
             null,
-            ModelHttpErrorPolicyProvider.DEFAULT);
+            providerName -> ModelHttpErrorPolicy.DEFAULT);
     filtered.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
@@ -4109,7 +4108,8 @@ class ModelProcessorTest {
   }
 
   private Fixture fixture(
-      InvocationRetryPolicy retryPolicy, ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+      InvocationRetryPolicy retryPolicy,
+      Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
     return new Fixture(
         retryPolicy,
         requestSpec(),
@@ -4174,7 +4174,7 @@ class ModelProcessorTest {
           compactionChild,
           flushConfig,
           null,
-          ModelHttpErrorPolicyProvider.DEFAULT);
+          providerName -> ModelHttpErrorPolicy.DEFAULT);
     }
 
     Fixture(
@@ -4188,7 +4188,7 @@ class ModelProcessorTest {
           false,
           ModelStreamConfig.DEFAULT,
           toolHistoryActionResolver,
-          ModelHttpErrorPolicyProvider.DEFAULT);
+          providerName -> ModelHttpErrorPolicy.DEFAULT);
     }
 
     Fixture(
@@ -4198,7 +4198,7 @@ class ModelProcessorTest {
         boolean compactionChild,
         ModelStreamConfig flushConfig,
         ToolHistoryActionResolver toolHistoryActionResolver,
-        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+        Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
       this(
           retryPolicy,
           requestSpec,
@@ -4218,7 +4218,7 @@ class ModelProcessorTest {
         boolean ownerSettledSummary,
         ModelStreamConfig flushConfig,
         ToolHistoryActionResolver toolHistoryActionResolver,
-        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+        Function<String, ModelHttpErrorPolicy> httpErrorPolicyProvider) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
       this.baseline = seedBaseline(store, NOW, constraints);

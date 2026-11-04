@@ -516,7 +516,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     ToolSideEffect sideEffect = request.binding().descriptor().sideEffect();
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(),
+            config.retryPolicyProvider().get(),
             retryable && sideEffect != ToolSideEffect.NON_IDEMPOTENT,
             attempt);
     if (decision.retry()) {
