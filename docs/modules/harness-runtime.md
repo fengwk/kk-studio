@@ -296,7 +296,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 `ask_user` 不经过 preflight 或网关：ToolProcessor 在锁内把 READY 冻结为 `WAITING_INPUT`，问卷由调用 arguments 冻结。`submitToolInput` 在单事务内校验调用仍处于当前 `TOOL_ACTIVE` 上下文，按问卷校验并规范化答案，答案与提交回执同事务落盘（答复或明确拒答都收敛为 `SUCCEEDED`），随后唤醒 THREAD 物化结果；答案非法、目标不适用与提交身份冲突分别为 `INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE` 与 `INPUT_SUBMISSION_MISMATCH`。`listPendingInteractions` 按 `(createdAt, id)` keyset 分页读取两种等待态，产品归属由上层解析。
 
-[Tool 权限策略](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/PermissionEvaluator.java) 由平台在 Tool 网关的 preflight 边界实现：`PermissionEvaluator` 按有序规则产出 Allow / Ask / Deny 候选：规则键是 `*` 或模型可见工具名，从全局到具体工具求值，数组顺序即求值顺序；文件路径取调用显式的绝对 `path`，按 gitignore 语义匹配，非绝对路径（如 `kkstudio:` URI）只命中通配规则。工具不携带 `workdir`，不存在隐藏默认目录。真实文件边界、符号链接与进程隔离由 Environment Daemon 在执行入口落实。部署范围内的 permission 设置由 [`ToolSettingsProvider`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/ToolSettingsProvider.java) 在每次 preflight 前现读，不缓存快照。
+[Tool 权限策略](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/PermissionEvaluator.java) 由平台在 Tool 网关的 preflight 边界实现：`PermissionEvaluator` 按有序规则产出 Allow / Ask / Deny 候选：规则键是 `*` 或模型可见工具名，从全局到具体工具求值，数组顺序即求值顺序；文件路径取调用显式的绝对 `path` 或 `vfs:/` 路径，按 gitignore 语义匹配，VFS 路径保留 `vfs:/` 前缀，其他非绝对路径只命中通配规则。工具不携带 `workdir`，不存在隐藏默认目录。真实文件边界、符号链接与进程隔离由 Environment Daemon 在执行入口落实。部署范围内的 permission 设置由 [`ToolSettingsProvider`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/ToolSettingsProvider.java) 在每次 preflight 前现读，不缓存快照。
 
 ## 子智能体委派与 Join
 

@@ -13,8 +13,7 @@ import java.util.regex.Pattern;
  * 去掉 root 前缀，Windows 保留 root-qualified）交给 JGit gitignore 语义匹配；Bash/普通 command 候选仍使用简单
  * wildcard。这里只生成策略候选，不承担真实路径与符号链接安全。
  *
- * <p>非绝对 {@code path}（例如 {@code kkstudio:} 资源 URI、drive-relative 或普通相对文本）不进入 path 规则，而回落 wildcard
- * 规则；路径本身是否为 合法绝对路径由目标 Daemon 判定。
+ * <p>{@code vfs:/} 路径以保留 scheme 的坐标匹配；其他非绝对 {@code path} 回落 wildcard 规则。路径合法性由执行方判定。
  */
 public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;
@@ -47,7 +46,7 @@ public final class PermissionEvaluator {
     return promptPreview(context, readArguments(context.argumentsJson()));
   }
 
-  /** 只有绝对 {@code path} 才是文件系统路径目标；URI scheme 与相对文本一律不作为 path 坐标。 */
+  /** 绝对宿主路径与 VFS 路径参与路径规则；其他 URI 和相对文本不作为路径坐标。 */
   private static boolean isAbsolutePathTarget(JsonNode pathNode) {
     return pathNode.isString()
         && !pathNode.asText().trim().isEmpty()
@@ -56,7 +55,7 @@ public final class PermissionEvaluator {
 
   /**
    * 把绝对 {@code path} 词法解析为 filesystem-root 匹配坐标：Unix 去掉 {@code /} 前缀，Windows drive/UNC 保留
-   * root-qualified；全程不读取 Backend cwd/HOME，Environment root 与 Backend 文件系统都不参与 pattern 坐标。
+   * root-qualified，VFS 保留 scheme；全程不读取 Backend cwd/HOME。
    */
   PathTarget describePathTarget(String rawPath) {
     boolean directory = rawPath.endsWith("/") || rawPath.endsWith("\\");

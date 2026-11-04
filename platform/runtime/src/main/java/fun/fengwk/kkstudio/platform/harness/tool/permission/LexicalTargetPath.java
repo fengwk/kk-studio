@@ -9,17 +9,16 @@ import java.util.Deque;
  * <p>文件工具只接受绝对路径，因此 permission path 规则的匹配坐标是 filesystem-root 坐标：Unix 绝对路径去掉 root 前缀（{@code
  * /srv/proj/a.ts} → {@code srv/proj/a.ts}），Windows drive 与 UNC 绝对路径保留 root-qualified 形态（{@code
  * C:/proj/a.ts}、{@code //server/share/proj/a.ts}）。这样 gitignore 语义里无内部分隔符的 pattern 仍按任意层级匹配，带内部分隔符的
- * pattern 锚定 filesystem root。
+ * pattern 锚定 filesystem root。VFS 路径保留 {@code vfs:/} 前缀，避免与环境文件系统混淆。
  *
  * <p>本类只做分隔符归一（统一为 {@code '/'}）、词法 {@code .}/{@code ..} 折叠与 root 识别；所有输出都使用 {@code '/'} 分隔，供
- * gitignore pattern 匹配。非绝对形态（含 {@code kkstudio:}/{@code http:} 等 URI
- * scheme、drive-relative）不被当作路径坐标。
+ * gitignore pattern 匹配。其他 URI scheme 和 drive-relative 形态不被当作路径坐标。
  */
 final class LexicalTargetPath {
 
   private LexicalTargetPath() {}
 
-  /** 该文本是否是受支持的绝对路径形态（Unix root、Windows drive 或 UNC）。 */
+  /** 该文本是否是受支持的绝对路径形态（VFS、Unix root、Windows drive 或 UNC）。 */
   static boolean isAbsolute(String value) {
     if (value == null || value.isBlank()) {
       return false;
@@ -29,7 +28,7 @@ final class LexicalTargetPath {
 
   /**
    * 词法计算 filesystem-root 坐标：分隔符统一为 {@code '/'}，折叠 {@code .} 与 {@code ..}（不越出 root），Unix 去掉 root 前缀，
-   * Windows drive/UNC 保留 root-qualified 形态。
+   * Windows drive/UNC 和 VFS 保留 root-qualified 形态。
    *
    * @throws IllegalArgumentException 输入为空白或不是绝对路径
    */
@@ -81,6 +80,9 @@ final class LexicalTargetPath {
     private static Root detect(String unified) {
       if (unified.isEmpty()) {
         return null;
+      }
+      if (unified.startsWith("vfs:/") && !unified.startsWith("vfs://")) {
+        return new Root("vfs:/", unified.substring(5));
       }
       if (unified.startsWith("//")) {
         String remainder = unified.substring(2);
