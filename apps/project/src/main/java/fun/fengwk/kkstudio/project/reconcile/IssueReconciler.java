@@ -11,15 +11,10 @@ import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -36,7 +31,6 @@ import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.platform.EvidenceBlobs;
 import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
 import fun.fengwk.kkstudio.project.platform.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -45,7 +39,6 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
@@ -104,8 +97,7 @@ public class IssueReconciler {
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueRunService issueRunService;
-  private final IssueEvidenceService issueEvidenceService;
-  private final EvidenceBlobs evidenceBlobPort;
+  private final IssueReconcileEvidence evidence;
   private final DurableWorkStore issueWorkQueue;
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
@@ -121,8 +113,7 @@ public class IssueReconciler {
       IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
-      IssueEvidenceService issueEvidenceService,
-      EvidenceBlobs evidenceBlobPort,
+      IssueReconcileEvidence evidence,
       DurableWorkStore issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
@@ -135,8 +126,7 @@ public class IssueReconciler {
         issueAgentThreadRepository,
         stageBudgetRepository,
         issueRunService,
-        issueEvidenceService,
-        evidenceBlobPort,
+        evidence,
         issueWorkQueue,
         threadExecutions,
         workflowCodec,
@@ -152,8 +142,7 @@ public class IssueReconciler {
       IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
-      IssueEvidenceService issueEvidenceService,
-      EvidenceBlobs evidenceBlobPort,
+      IssueReconcileEvidence evidence,
       DurableWorkStore issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
@@ -169,9 +158,7 @@ public class IssueReconciler {
     this.stageBudgetRepository =
         Objects.requireNonNull(stageBudgetRepository, "stageBudgetRepository");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
-    this.issueEvidenceService =
-        Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
-    this.evidenceBlobPort = Objects.requireNonNull(evidenceBlobPort, "evidenceBlobPort");
+    this.evidence = Objects.requireNonNull(evidence, "evidence");
     this.issueWorkQueue = Objects.requireNonNull(issueWorkQueue, "issueWorkQueue");
     this.threadExecutions = Objects.requireNonNull(threadExecutions, "threadExecutions");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
@@ -332,15 +319,17 @@ public class IssueReconciler {
                         "matched root join has no receipt for run " + run.getId()));
     switch (receipt.outcome()) {
       case COMPLETED -> {
-        publishEvidence(issue, run, binding, view, join.finalAnswerEntryId());
+        evidence.publishEvidence(issue, run, binding, view, join.finalAnswerEntryId());
         String nextState = current ? run.getNextState() : null;
-        issueRunService.completeRun(
+        issueRunService.finishRun(
             run.getId(),
             run.getVersion(),
             completeKey(run),
+            IssueRunStatus.COMPLETED,
             join.terminalEntryId(),
             join.finalAnswerEntryId(),
-            nextState);
+            nextState,
+            null);
         if (!current) {
           return finish(
               claim, true, properties.getActiveDelay(), IssueReconcileOutcome.STALE_RUN_CLOSED);
@@ -366,11 +355,15 @@ public class IssueReconciler {
             current ? IssueReconcileOutcome.RUN_FAILED : IssueReconcileOutcome.STALE_RUN_CLOSED);
       }
       case CANCELLED -> {
-        issueRunService.cancelRun(
+        issueRunService.finishRun(
             run.getId(),
             run.getVersion(),
             cancelKey(run, join.terminalEntryId()),
-            join.terminalEntryId());
+            IssueRunStatus.CANCELLED,
+            join.terminalEntryId(),
+            null,
+            null,
+            null);
         return finish(
             claim,
             true,
@@ -511,82 +504,17 @@ public class IssueReconciler {
       String reason,
       WorkClaim claim,
       IssueReconcileOutcome outcome) {
-    issueRunService.failRun(
-        run.getId(), run.getVersion(), failKey(run, endEntryId), endEntryId, reason);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        failKey(run, endEntryId),
+        IssueRunStatus.FAILED,
+        endEntryId,
+        null,
+        null,
+        reason);
     // 失败与 ERROR 暂停门禁同事务写入，等待显式恢复；mailbox 保留以便恢复后立即推进。
     return finish(claim, true, properties.getBlockedDelay(), outcome);
-  }
-
-  /**
-   * 只发布最终 assistant 答复明确引用、且来源 Run Session 当前持有的 Resource。
-   *
-   * <p>中间消息、工具结果与用户附件保持私有。{@code finalAnswerEntryId} 必须落在本次 Run 的可见区间内。
-   */
-  private void publishEvidence(
-      Issue issue,
-      IssueRun run,
-      IssueAgentThread binding,
-      IssueThreadView view,
-      UUID finalAnswerEntryId) {
-    if (finalAnswerEntryId == null || binding == null) {
-      return;
-    }
-    EntryPath path = view.entryPath();
-    List<Entry> entries = path.entries();
-    List<UUID> entryIds = entries.stream().map(Entry::id).toList();
-    int start = entryIds.indexOf(run.getStartEntryId());
-    int end = entryIds.indexOf(view.headEntryId());
-    int answer = entryIds.indexOf(finalAnswerEntryId);
-    if (start < 0 || answer <= start || end < answer) {
-      return;
-    }
-    Entry entry = entries.get(answer);
-    if (!(entry.payload() instanceof MessagePayload msg)) {
-      return;
-    }
-    if (msg.message().role() != AgentMessageRole.ASSISTANT) {
-      return;
-    }
-    UUID sessionId = view.sessionId();
-    for (AgentMessageContent content : msg.message().contents()) {
-      if (content instanceof ResourceMessageContent res
-          && isPublishableResource(res, binding, sessionId)) {
-        issueEvidenceService.publishBlob(
-            issue.getId(), binding.agentName(), run.getId(), res.blobId(), res.name());
-      }
-    }
-  }
-
-  /**
-   * 确定性预校验 Resource 是否属于可发布的合法受管 Blob：非空、显示名合法、Agent 名合法、且 Blob 存在且为 ACTIVE 状态。
-   *
-   * <p>在调用 `@Transactional` 参与方 {@code publishBlob} 之前完成所有前置判定，避免异常逃逸导致共享事务被标记为 rollback-only。
-   */
-  private boolean isPublishableResource(
-      ResourceMessageContent res, IssueAgentThread binding, UUID sessionId) {
-    if (res == null || res.blobId() == null || sessionId == null) {
-      return false;
-    }
-    if (!evidenceBlobPort.isSessionBlobRef(sessionId, res.blobId())) {
-      return false;
-    }
-    if (binding == null || binding.agentName() == null || binding.agentName().isBlank()) {
-      return false;
-    }
-    String name = res.name();
-    if (name == null
-        || name.isBlank()
-        || !name.equals(name.strip())
-        || name.codePointCount(0, name.length()) > 512) {
-      return false;
-    }
-    String agentName = binding.agentName();
-    if (agentName.indexOf('/') >= 0
-        || !agentName.equals(agentName.strip())
-        || agentName.codePointCount(0, agentName.length()) > 64) {
-      return false;
-    }
-    return evidenceBlobPort.isBlobActive(res.blobId());
   }
 
   /** 本次 Run 的 root Join 已冻结结果时返回它，否则返回 {@code null}。 */

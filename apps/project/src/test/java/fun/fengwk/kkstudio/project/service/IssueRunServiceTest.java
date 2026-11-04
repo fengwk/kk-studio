@@ -294,13 +294,43 @@ class IssueRunServiceTest {
     when(executions.getIfAvailable()).thenReturn(threadExecutions);
     when(threadExecutions.readThread(threadId)).thenReturn(view);
 
-    service.completeRun(runId, 3L, "complete-1", endEntryId, null, null);
+    service.finishRun(
+        runId, 3L, "complete-1", IssueRunStatus.COMPLETED, endEntryId, null, null, null);
 
     // 历史区间校验仍然读取权威路径，但整个收尾不产生任何 Harness 命令接受。
     verify(threadExecutions).readThread(threadId);
     verify(threadExecutions, never()).acceptCommands(any(), any());
     assertEquals(IssueRunStatus.COMPLETED, run.getStatus());
     assertEquals(endEntryId, run.getEndEntryId());
+  }
+
+  @Test
+  void rejectsInvalidTerminalArgumentsBeforeReadingRun() {
+    // 不合法状态和跨终态字段不能访问持久化或被幂等重放掩盖。
+    UUID runId = UUID.randomUUID();
+    UUID end = UUID.randomUUID();
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.RUNNING, end, null, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", null, end, null, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () ->
+            service.finishRun(runId, 0, "key", IssueRunStatus.COMPLETED, end, null, null, "error"));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.CANCELLED, end, end, null, null));
+    assertThrows(
+        ProjectValidationException.class,
+        () ->
+            service.finishRun(
+                runId, 0, "key", IssueRunStatus.FAILED, end, null, "REVIEW", "error"));
+    assertThrows(
+        ProjectValidationException.class,
+        () -> service.finishRun(runId, 0, "key", IssueRunStatus.FAILED, end, null, null, null));
+    verify(issueRunRepository, never()).getById(any());
   }
 
   private static Issue issue() {

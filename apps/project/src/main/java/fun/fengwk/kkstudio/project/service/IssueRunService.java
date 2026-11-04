@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.nio.charset.StandardCharsets;
@@ -115,27 +116,18 @@ public class IssueRunService {
     if (issueRepository.getById(issueId) == null) {
       throw new ProjectNotFoundException("issue");
     }
-    IssueActivity applied =
-        IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
-    if (applied != null) {
-      return replayAcceptedRun(applied);
+    ReceiptLock<OwnerLock> receipt =
+        IssueActivityIdempotency.lockUnlessReplayed(
+            issueActivityRepository,
+            issueId,
+            identity,
+            () -> lockOwner(issueId),
+            l -> l.issue().getId());
+    if (receipt.activity() != null) {
+      return replayAcceptedRun(receipt.activity());
     }
-    Issue initial = issueRepository.getById(issueId);
-    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
-    if (project == null) {
-      throw new ProjectNotFoundException("project");
-    }
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new ProjectNotFoundException("issue");
-    }
-    if (!issue.getProjectId().equals(project.getId())) {
-      throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
-    }
-    applied = IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
-    if (applied != null) {
-      return replayAcceptedRun(applied);
-    }
+    Project project = receipt.locked().project();
+    Issue issue = receipt.locked().issue();
     if (project.isArchived()) {
       throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
     }
@@ -349,46 +341,91 @@ public class IssueRunService {
   }
 
   @Transactional
-  public IssueRun completeRun(
+  public IssueRun finishRun(
       UUID runId,
       long expectedVersion,
       String requestKey,
+      IssueRunStatus status,
       UUID endEntryId,
       UUID finalAnswerEntryId,
-      String nextState) {
+      String nextState,
+      String error) {
     Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(endEntryId, "endEntryId");
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    if (status != IssueRunStatus.COMPLETED
+        && status != IssueRunStatus.CANCELLED
+        && status != IssueRunStatus.FAILED) {
+      throw new ProjectValidationException("issue_run", "A terminal status is required");
+    }
+    if ((status != IssueRunStatus.COMPLETED && (finalAnswerEntryId != null || nextState != null))
+        || (status != IssueRunStatus.FAILED && error != null)) {
+      throw new ProjectValidationException("issue_run", "Invalid terminal inputs");
+    }
+    String validError =
+        status == IssueRunStatus.FAILED
+            ? ProjectValidationUtils.requireUtf8Text(
+                error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES)
+            : null;
     boolean handoff = nextState != null;
     Identity identity =
-        handoff
+        status == IssueRunStatus.CANCELLED
             ? IssueActivityIdempotency.identity(
-                IssueActivityKind.STATE_CHANGE,
-                "HANDOFF",
-                key,
-                runId,
-                endEntryId,
-                finalAnswerEntryId,
-                nextState)
-            : IssueActivityIdempotency.identity(
                 IssueActivityKind.CONTROL,
-                "COMPLETE_RUN",
+                "CANCEL_RUN",
                 key,
                 runId,
                 endEntryId,
-                finalAnswerEntryId);
-    if (replayed(runId, identity)) {
-      return currentRun(runId);
+                PauseReason.USER.name())
+            : status == IssueRunStatus.FAILED
+                ? IssueActivityIdempotency.identity(
+                    IssueActivityKind.CONTROL, "FAIL_RUN", key, runId, endEntryId, validError)
+                : handoff
+                    ? IssueActivityIdempotency.identity(
+                        IssueActivityKind.STATE_CHANGE,
+                        "HANDOFF",
+                        key,
+                        runId,
+                        endEntryId,
+                        finalAnswerEntryId,
+                        nextState)
+                    : IssueActivityIdempotency.identity(
+                        IssueActivityKind.CONTROL,
+                        "COMPLETE_RUN",
+                        key,
+                        runId,
+                        endEntryId,
+                        finalAnswerEntryId);
+    IssueRun peek = requireRun(runId);
+    ReceiptLock<RunLock> receipt =
+        IssueActivityIdempotency.lockUnlessReplayed(
+            issueActivityRepository,
+            peek.getIssueId(),
+            identity,
+            () -> lockRun(runId),
+            l -> l.issue().getId());
+    if (receipt.activity() != null) {
+      return receipt.locked() == null ? currentRun(runId) : receipt.locked().run();
     }
-    RunLock locked = lockRun(runId);
-    if (replayedUnderLock(locked, identity)) {
-      return locked.run();
-    }
+    RunLock locked = receipt.locked();
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
     requireWithinRunInterval(
-        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, finalAnswerEntryId, true);
+        entryPath(run.getThreadId()),
+        run.getStartEntryId(),
+        endEntryId,
+        finalAnswerEntryId,
+        status == IssueRunStatus.COMPLETED);
+    if (status != IssueRunStatus.COMPLETED) {
+      terminate(run, status, endEntryId, validError, expectedVersion);
+      applyPauseGate(
+          locked,
+          identity,
+          status == IssueRunStatus.CANCELLED ? PauseReason.USER : PauseReason.ERROR,
+          status == IssueRunStatus.CANCELLED ? "Run was stopped by a human" : validError);
+      return issueRunRepository.getById(runId);
+    }
     Issue issue = locked.issue();
     if (handoff) {
       ProjectWorkflow workflow = workflowCodec.decode(locked.project().getWorkflowJson());
@@ -419,65 +456,6 @@ public class IssueRunService {
     return issueRunRepository.getById(runId);
   }
 
-  @Transactional
-  public IssueRun cancelRun(UUID runId, long expectedVersion, String requestKey, UUID endEntryId) {
-    Objects.requireNonNull(runId, "runId");
-    Objects.requireNonNull(endEntryId, "endEntryId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL,
-            "CANCEL_RUN",
-            key,
-            runId,
-            endEntryId,
-            PauseReason.USER.name());
-    if (replayed(runId, identity)) {
-      return currentRun(runId);
-    }
-    RunLock locked = lockRun(runId);
-    if (replayedUnderLock(locked, identity)) {
-      return locked.run();
-    }
-    IssueRun run = locked.run();
-    requireActive(run);
-    requireVersion(run, expectedVersion);
-    requireWithinRunInterval(
-        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
-    terminate(run, IssueRunStatus.CANCELLED, endEntryId, null, expectedVersion);
-    applyPauseGate(locked, identity, PauseReason.USER, "Run was stopped by a human");
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  public IssueRun failRun(
-      UUID runId, long expectedVersion, String requestKey, UUID endEntryId, String error) {
-    Objects.requireNonNull(runId, "runId");
-    Objects.requireNonNull(endEntryId, "endEntryId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
-    String validError =
-        ProjectValidationUtils.requireUtf8Text(
-            error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
-    Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.CONTROL, "FAIL_RUN", key, runId, endEntryId, validError);
-    if (replayed(runId, identity)) {
-      return currentRun(runId);
-    }
-    RunLock locked = lockRun(runId);
-    if (replayedUnderLock(locked, identity)) {
-      return locked.run();
-    }
-    IssueRun run = locked.run();
-    requireActive(run);
-    requireVersion(run, expectedVersion);
-    requireWithinRunInterval(
-        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
-    terminate(run, IssueRunStatus.FAILED, endEntryId, validError, expectedVersion);
-    applyPauseGate(locked, identity, PauseReason.ERROR, validError);
-    return issueRunRepository.getById(runId);
-  }
-
   private void terminate(
       IssueRun run, IssueRunStatus status, UUID endEntryId, String error, long expectedVersion) {
     run.setStatus(status);
@@ -498,25 +476,6 @@ public class IssueRunService {
     locked.issue().setPauseReason(reason.name());
     locked.issue().setPauseDetail(detail);
     persistIssue(locked.issue(), locked.issueVersion());
-  }
-
-  /**
-   * 锁前快速路径：命中同键同指纹时跳过版本、状态与区间校验。
-   *
-   * <p>未命中不能作为最终结论。并发首次提交可能落在本次检查与 owner 锁之间，调用方必须持锁后再查一次。
-   */
-  private boolean replayed(UUID runId, Identity identity) {
-    IssueRun peek = requireRun(runId);
-    return IssueActivityIdempotency.findApplied(
-            issueActivityRepository, peek.getIssueId(), identity)
-        != null;
-  }
-
-  /** owner 锁内的精确重试判定：同键同指纹返回当前 Run，同键异指纹冲突，未命中才继续版本与状态校验。 */
-  private boolean replayedUnderLock(RunLock locked, Identity identity) {
-    return IssueActivityIdempotency.findApplied(
-            issueActivityRepository, locked.issue().getId(), identity)
-        != null;
   }
 
   private void requireActive(IssueRun run) {
@@ -586,6 +545,22 @@ public class IssueRunService {
             "issue_run", "Run final answer must be inside the run interval (start, end]");
       }
     }
+  }
+
+  private OwnerLock lockOwner(UUID issueId) {
+    Issue initial = issueRepository.getById(issueId);
+    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
+    if (project == null) {
+      throw new ProjectNotFoundException("project");
+    }
+    Issue issue = issueRepository.lockById(issueId);
+    if (issue == null) {
+      throw new ProjectNotFoundException("issue");
+    }
+    if (!issue.getProjectId().equals(project.getId())) {
+      throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
+    }
+    return new OwnerLock(project, issue);
   }
 
   private RunLock lockRun(UUID runId) {
@@ -739,6 +714,8 @@ public class IssueRunService {
     }
     return port;
   }
+
+  private record OwnerLock(Project project, Issue issue) {}
 
   private record RunLock(IssueRun run, Issue issue, long issueVersion, Project project) {}
 }

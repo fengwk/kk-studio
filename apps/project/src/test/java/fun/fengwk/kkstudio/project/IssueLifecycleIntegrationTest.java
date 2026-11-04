@@ -234,11 +234,14 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
-    issueRunService.failRun(
+    issueRunService.finishRun(
         activeRun.getId(),
         activeRun.getVersion(),
         key("unknown"),
+        IssueRunStatus.FAILED,
         headEntry(activeRun.getThreadId()),
+        null,
+        null,
         "Run stopped with in-flight side effects; outcome unknown");
     Issue failedIssue = issueEditingService.getIssue(issue.getId());
     assertEquals(PauseReason.ERROR.name(), failedIssue.getPauseReason());
@@ -292,15 +295,29 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun run1 = issueRunService.acceptRun(inDesign.getId(), key("run1"));
     UUID endEntry1 = appendHistoryEntry(run1.getThreadId());
-    issueRunService.completeRun(
-        run1.getId(), run1.getVersion(), key("comp1"), endEntry1, null, "REVIEW");
+    issueRunService.finishRun(
+        run1.getId(),
+        run1.getVersion(),
+        key("comp1"),
+        IssueRunStatus.COMPLETED,
+        endEntry1,
+        null,
+        "REVIEW",
+        null);
 
     // 2. 在 REVIEW 阶段接受并完成一次 Run
     Issue inReview = issueEditingService.getIssue(issue.getId());
     IssueRun run2 = issueRunService.acceptRun(inReview.getId(), key("run2"));
     UUID endEntry2 = appendHistoryEntry(run2.getThreadId());
-    issueRunService.completeRun(
-        run2.getId(), run2.getVersion(), key("comp2"), endEntry2, null, "DONE");
+    issueRunService.finishRun(
+        run2.getId(),
+        run2.getVersion(),
+        key("comp2"),
+        IssueRunStatus.COMPLETED,
+        endEntry2,
+        null,
+        "DONE",
+        null);
 
     // 3. 发布一份证据
     UUID blobId = UUID.randomUUID();
@@ -366,13 +383,27 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign1 = issueEditingService.getIssue(issue1.getId());
     IssueRun run1 = issueRunService.acceptRun(inDesign1.getId(), key("run1"));
     UUID endEntry1 = appendHistoryEntry(run1.getThreadId());
-    issueRunService.completeRun(
-        run1.getId(), run1.getVersion(), key("comp1"), endEntry1, null, "REVIEW");
+    issueRunService.finishRun(
+        run1.getId(),
+        run1.getVersion(),
+        key("comp1"),
+        IssueRunStatus.COMPLETED,
+        endEntry1,
+        null,
+        "REVIEW",
+        null);
     Issue inReview1 = issueEditingService.getIssue(issue1.getId());
     IssueRun run1r = issueRunService.acceptRun(inReview1.getId(), key("run1r"));
     UUID endEntry1r = appendHistoryEntry(run1r.getThreadId());
-    issueRunService.completeRun(
-        run1r.getId(), run1r.getVersion(), key("comp1r"), endEntry1r, null, "DONE");
+    issueRunService.finishRun(
+        run1r.getId(),
+        run1r.getVersion(),
+        key("comp1r"),
+        IssueRunStatus.COMPLETED,
+        endEntry1r,
+        null,
+        "DONE",
+        null);
 
     // Issue 2: 拥有活动 Run
     Issue issue2 = createIssue(projectId);
@@ -387,11 +418,14 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         () -> projectService.deleteProject(projectId, project.getVersion()));
 
     // 2. 将 Issue 2 的结果不明收尾为 FAILED + ERROR 暂停
-    issueRunService.failRun(
+    issueRunService.finishRun(
         run2.getId(),
         run2.getVersion(),
         key("unk2"),
+        IssueRunStatus.FAILED,
         headEntry(run2.getThreadId()),
+        null,
+        null,
         "Run stopped with in-flight side effects; outcome unknown");
 
     // 3. 无活动 Run 后项目深删除直接成功：暂停只阻止新派发，不是删除门禁
@@ -472,7 +506,15 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // resetStageBudget (requires no active run)
     UUID end = appendHistoryEntry(run.getThreadId());
-    issueRunService.completeRun(run.getId(), run.getVersion(), key("comp"), end, null, null);
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        key("comp"),
+        IssueRunStatus.COMPLETED,
+        end,
+        null,
+        null,
+        null);
     Issue fresh = issueEditingService.getIssue(issue.getId());
     var resetBudget =
         issueStageBudgetService.resetStageBudget(
@@ -579,11 +621,27 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 完成并交接到 DONE
     UUID end = appendHistoryEntry(run.getThreadId());
-    issueRunService.completeRun(run.getId(), run.getVersion(), key("comp"), end, null, "REVIEW");
+    issueRunService.finishRun(
+        run.getId(),
+        run.getVersion(),
+        key("comp"),
+        IssueRunStatus.COMPLETED,
+        end,
+        null,
+        "REVIEW",
+        null);
     Issue inReview = issueEditingService.getIssue(issue.getId());
     IssueRun run2 = issueRunService.acceptRun(inReview.getId(), key("acc2"));
     UUID end2 = appendHistoryEntry(run2.getThreadId());
-    issueRunService.completeRun(run2.getId(), run2.getVersion(), key("comp2"), end2, null, "DONE");
+    issueRunService.finishRun(
+        run2.getId(),
+        run2.getVersion(),
+        key("comp2"),
+        IssueRunStatus.COMPLETED,
+        end2,
+        null,
+        "DONE",
+        null);
 
     // DONE 重开到 INIT
     Issue doneIssue = issueEditingService.getIssue(issue.getId());

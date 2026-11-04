@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -44,13 +45,15 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, endEntry, "Run start entry must belong to the frozen session");
 
     IssueRun completed =
-        issueRunService.completeRun(
+        issueRunService.finishRun(
             first.getId(),
             first.getVersion(),
             key("complete"),
+            IssueRunStatus.COMPLETED,
             appendHistoryEntry(firstThread),
             null,
-            "REVIEW");
+            "REVIEW",
+            null);
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals("COMPLETED", completed.getStatus().name());
 
@@ -77,11 +80,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun runA = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         runA.getId(),
         runA.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(runA.getThreadId()),
+        null,
         null,
         null);
 
@@ -110,11 +115,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         run.getId(),
         run.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(run.getThreadId()),
+        null,
         null,
         null);
 
@@ -135,11 +142,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         run.getId(),
         run.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(run.getThreadId()),
+        null,
         null,
         null);
 
@@ -218,11 +227,14 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.failRun(
+    issueRunService.finishRun(
         failedRun.getId(),
         failedRun.getVersion(),
         key("fail"),
+        IssueRunStatus.FAILED,
         failedRun.getStartEntryId(),
+        null,
+        null,
         "boom");
     assertEquals(
         1L,
@@ -233,11 +245,15 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
 
     IssueRun cancelledRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.cancelRun(
+    issueRunService.finishRun(
         cancelledRun.getId(),
         cancelledRun.getVersion(),
         key("cancel"),
-        appendHistoryEntry(cancelledRun.getThreadId()));
+        IssueRunStatus.CANCELLED,
+        appendHistoryEntry(cancelledRun.getThreadId()),
+        null,
+        null,
+        null);
     assertEquals(
         2L,
         issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
@@ -247,11 +263,14 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
 
     IssueRun thirdRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.failRun(
+    issueRunService.finishRun(
         thirdRun.getId(),
         thirdRun.getVersion(),
         key("fail-2"),
+        IssueRunStatus.FAILED,
         appendHistoryEntry(thirdRun.getThreadId()),
+        null,
+        null,
         "Run stopped with in-flight side effects; outcome unknown");
     StageBudgetView exhausted = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
     assertEquals(3L, exhausted.usedRuns(), "a second FAILED run consumes one");

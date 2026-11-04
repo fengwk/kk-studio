@@ -223,10 +223,12 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 读侧由 [`ProjectSnapshotAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSnapshotAssembler.java) 与
 [`IssueDetailAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueDetailAssembler.java)
 在模块内部完成快照用例聚合；
-`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
+`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作，最终答复证据的预校验和发布由
+`IssueReconcileEvidence` 在同一事务内负责；
 [`IssueMutationSupport`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueMutationSupport.java)
-只集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、幂等 receipt、版本/归档门禁与活动落库，
-不承载具体动作或状态/额度规则；Repository 只做单表读写与 CAS 行数判定。
+集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、版本/归档门禁与活动落库；
+`IssueActivityIdempotency` 统一锁前、锁内两次 receipt 判定；Run 的完成、取消与失败由同一事务入口收尾。
+阶段额度仓库读取额度时按 Run 历史聚合已消耗次数；其余仓库负责实体读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker

@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -41,13 +42,12 @@ public class IssueStageBudgetService {
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "AUTHORIZE", key, state, maxRuns);
-    if (mutationSupport.replayed(issueId, identity)) {
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
       return getStageBudget(issueId, state);
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return getStageBudget(issueId, state);
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     ProjectStateCode code = ProjectStateCode.of(state);
@@ -80,13 +80,12 @@ public class IssueStageBudgetService {
     String key = ProjectValidationUtils.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESET", key, state, maxRuns);
-    if (mutationSupport.replayed(issueId, identity)) {
+    ReceiptLock<IssueMutationSupport.Locked> receipt =
+        mutationSupport.lockUnlessReplayed(issueId, identity);
+    if (receipt.activity() != null) {
       return getStageBudget(issueId, state);
     }
-    IssueMutationSupport.Locked locked = mutationSupport.lockOwner(issueId);
-    if (mutationSupport.replayedUnderLock(locked.issue(), identity)) {
-      return getStageBudget(issueId, state);
-    }
+    IssueMutationSupport.Locked locked = receipt.locked();
     mutationSupport.requireMutable(locked, false);
     mutationSupport.requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
