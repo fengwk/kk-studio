@@ -1,30 +1,12 @@
 package fun.fengwk.kkstudio.platform.environment.skill;
 
 import lombok.extern.slf4j.Slf4j;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.daemon.DaemonWorkdirSyntax;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillPackage;
+import fun.fengwk.kkstudio.platform.daemon.DaemonSkillStatePackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -32,36 +14,27 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
+import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.regex.Pattern;
 
 /**
- * Environment Skill Package 的异步收敛编排器。
+ * Environment 技能期望集合的下发与状态收敛编排器。
  *
- * <p>触发源只有两个：READY 会话事件（该 Environment 全量同步）与 PostgreSQL {@code skill_package_changed} 通知（单 Package
- * 增量同步，通知重连时全量对账）。编排器不缓存连接事实：每个 Package 同步前都重新读取 {@code environment_connection} 行，因此 owner + lease
- * token + 未过期 READY 三者共同围栏每一次状态与事件写回， 迟到的回调一律 fail-closed。
+ * <p>触发源只有三个：READY 会话事件、PostgreSQL {@code skill_package_changed} 通知与用户点击「重新同步」。每次触发都下发一份**完整**
+ * 期望集合（包名、归档摘要、大小与预签名下载地址），Daemon 据此对账并回报全部包状态；平台不在请求路径上等待安装，也不轮询。
  *
- * <p>同一 Environment 的同步在进程内串行：Environment 按固定 stripe 数分锁，同一 Environment 恒定落在同一把锁上， 不同 stripe 的
- * Environment 互不阻塞；锁数量与见过的 Environment 数量无关，历史 key 不会无界增长。单个 Package 失败只记录该 Package 的失败投影与事件，
- * 既不影响其它 Package，也绝不覆盖上一次成功安装的事实。
- *
- * <p>调用完全复用 Environment server core 的 capability 传输契约：每次调用使用新的 UUID，结果不确定（send-uncertain） 绝不重放。 它是
- * Environment 级管理任务，不属于 Thread Tool body，远端退出通知也不伪造 Thread 执行上下文或账本。
+ * <p>同一 Environment 单飞：运行期间的新触发只保留一个标记，本轮结束后再跑一次；不同 Environment 互不阻塞。状态上报是完整事实，只在投影真正变化时以 owner +
+ * lease token 围栏整体替换连接行。
  */
 @Slf4j
 public class EnvironmentSkillSyncOrchestrator {
@@ -69,107 +42,192 @@ public class EnvironmentSkillSyncOrchestrator {
   /** PostgreSQL 通知 channel：与 schema 的 {@code skill_package_changed} 触发器一致。 */
   public static final String CHANNEL = "skill_package_changed";
 
-  private static final ObjectMapper JSON =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .build();
-
-  private static final Pattern ERROR_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
-  private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
-
-  /** skill.sync 成功结果的全部字段：多一个、少一个都视为协议违约。 */
-  private static final Set<String> RESULT_FIELDS =
-      Set.of("packageName", "installedCommit", "localPath");
-
-  private static final String SEND_FAILURE = "skill package sync could not be sent";
-  private static final String RESULT_FAILURE = "skill package sync failed";
-
-  /** 固定 stripe 数：锁数量与见过的 Environment 数量解耦，历史 key 不会无界增长。 */
-  static final int LOCK_STRIPES = 64;
-
   private final EnvironmentRegistry environmentRegistry;
   private final SkillPackageRepository skillPackageRepository;
-  private final EnvironmentCapabilityTransport capabilityTransport;
   private final StorageBlobManager storageBlobManager;
+  private final EnvironmentSkillTransport transport;
   private final ExecutorService executor;
   private final Clock clock;
-  private final ReentrantLock[] environmentLocks = new ReentrantLock[LOCK_STRIPES];
+  private final Set<EnvironmentId> scheduled = ConcurrentHashMap.newKeySet();
+  private final Set<EnvironmentId> pending = ConcurrentHashMap.newKeySet();
 
   public EnvironmentSkillSyncOrchestrator(
       EnvironmentRegistry environmentRegistry,
       SkillPackageRepository skillPackageRepository,
-      EnvironmentCapabilityTransport capabilityTransport,
       StorageBlobManager storageBlobManager,
+      EnvironmentSkillTransport transport,
       ExecutorService executor,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.skillPackageRepository =
         Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
-    this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
+    this.transport = Objects.requireNonNull(transport, "transport");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.clock = Objects.requireNonNull(clock, "clock");
-    for (int i = 0; i < environmentLocks.length; i++) {
-      environmentLocks[i] = new ReentrantLock();
-    }
   }
 
-  /** 以 EnvironmentId 的稳定 hash 选出 stripe：同一 Environment 恒落同一把锁，不同 stripe 互不阻塞。 */
-  static int stripeIndexOf(EnvironmentId environmentId) {
-    return Math.floorMod(environmentId.hashCode(), LOCK_STRIPES);
-  }
-
-  /**
-   * READY 会话事件：把全局 catalog 的全部 Skill Package 依次同步到该 Environment。
-   *
-   * <p>立即返回，绝不在会话核心的状态推进路径上执行任何发送或数据库 IO。
-   */
+  /** READY 会话事件：向该 Environment 下发最新期望集合。 */
   public void onEnvironmentReady(EnvironmentId environmentId) {
-    if (environmentId == null) {
-      return;
-    }
-    submit(environmentId, () -> syncEnvironment(environmentId));
+    trigger(environmentId);
   }
 
-  /**
-   * Package 变更通知：把该 Package 同步到本节点当前持有的全部 READY Environment。
-   *
-   * <p>Package 已从 catalog 消失时不做任何写：残留投影不参与任何路径选择，最近一次 READY 的全量同步会重建投影。
-   */
+  /** Package 变更通知：向本节点持有的全部 READY Environment 重新下发期望集合。 */
   public void onPackageChanged(String packageName) {
     if (packageName == null || packageName.isBlank()) {
       return;
     }
     for (EnvironmentConnection connection : readyOwnedEnvironments()) {
-      EnvironmentId environmentId = connection.environmentId();
-      submit(environmentId, () -> syncPackage(environmentId, packageName));
+      trigger(connection.environmentId());
     }
   }
 
-  /** 通知重连对账：对本节点当前持有的全部 READY Environment 各做一次全量同步。 */
+  /** 通知重连对账或用户重新同步：对全部 READY Environment 重新下发期望集合。 */
   public void reconcileReadyEnvironments() {
     for (EnvironmentConnection connection : readyOwnedEnvironments()) {
-      EnvironmentId environmentId = connection.environmentId();
-      submit(environmentId, () -> syncEnvironment(environmentId));
+      trigger(connection.environmentId());
     }
   }
 
-  private void submit(EnvironmentId environmentId, Runnable task) {
+  /**
+   * Daemon 上报一轮完整安装状态：按当前租约围栏整体替换 {@code skill_state} 投影。
+   *
+   * <p>上报与当前投影相同则不写数据库（不产生无意义的环境失效通知）；任何形状非法的条目都拒绝整轮上报。
+   */
+  public void onSkillState(
+      EnvironmentId environmentId, List<DaemonSkillStatePackage> reportedPackages) {
+    if (environmentId == null || reportedPackages == null) {
+      return;
+    }
+    EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
+    if (connection == null || connection.status() != LiveEnvironmentStatus.READY) {
+      return;
+    }
+    List<EnvironmentSkillState> states;
     try {
-      executor.execute(
-          () -> {
-            ReentrantLock lock = environmentLocks[stripeIndexOf(environmentId)];
-            lock.lock();
-            try {
-              task.run();
-            } finally {
-              lock.unlock();
-            }
-          });
+      states = toSkillStates(reportedPackages);
+    } catch (IllegalArgumentException error) {
+      log.warn(
+          "environment skill state was rejected: environmentId={}, reason={}",
+          environmentId,
+          error.getMessage());
+      return;
+    }
+    if (states.equals(connection.skillState())) {
+      return;
+    }
+    try {
+      environmentRegistry.replaceSkillState(
+          environmentId,
+          connection.leaseToken(),
+          states,
+          new EnvironmentEvent(
+              clock.instant(),
+              EnvironmentEvent.LEVEL_INFO,
+              EnvironmentEvent.TYPE_SKILL_STATE_UPDATED,
+              "skill state updated: " + states.size() + " packages"));
+    } catch (RuntimeException error) {
+      log.warn("environment skill state could not be recorded: environmentId={}", environmentId);
+    }
+  }
+
+  private void trigger(EnvironmentId environmentId) {
+    if (environmentId == null) {
+      return;
+    }
+    pending.add(environmentId);
+    schedule(environmentId);
+  }
+
+  /** 已排队的 Environment 不重复提交；任务结束时若又有触发则补跑一次。 */
+  private void schedule(EnvironmentId environmentId) {
+    if (!scheduled.add(environmentId)) {
+      return;
+    }
+    try {
+      executor.execute(() -> run(environmentId));
     } catch (RejectedExecutionException error) {
+      scheduled.remove(environmentId);
       log.warn("environment skill sync was rejected: environmentId={}", environmentId);
     }
+  }
+
+  private void run(EnvironmentId environmentId) {
+    try {
+      do {
+        pending.remove(environmentId);
+        reconcile(environmentId);
+      } while (pending.contains(environmentId));
+    } finally {
+      scheduled.remove(environmentId);
+      if (pending.contains(environmentId)) {
+        schedule(environmentId);
+      }
+    }
+  }
+
+  /** 下发一份完整期望集合；连接已不 READY 或队列满时放弃，下一次触发会重新收敛。 */
+  private void reconcile(EnvironmentId environmentId) {
+    EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
+    if (connection == null || connection.status() != LiveEnvironmentStatus.READY) {
+      return;
+    }
+    try {
+      List<DaemonSkillPackage> packages = desiredPackages();
+      transport.sendSkillSync(environmentId, packages);
+    } catch (RuntimeException error) {
+      log.warn(
+          "environment skill sync could not be sent: environmentId={}, reason={}",
+          environmentId,
+          error.getClass().getSimpleName());
+    }
+  }
+
+  private List<DaemonSkillPackage> desiredPackages() {
+    List<DaemonSkillPackage> packages = new ArrayList<>();
+    for (SkillPackage skillPackage : skillPackageRepository.listPackages()) {
+      try {
+        StorageBlob artifact = storageBlobManager.getBlob(skillPackage.artifactBlobId());
+        if (artifact == null || artifact.getState() != StorageBlobState.ACTIVE) {
+          log.warn(
+              "skill package artifact is unavailable for environment sync: {}",
+              skillPackage.packageName());
+          continue;
+        }
+        StoragePresignedUrlDTO download =
+            storageBlobManager.presignOriginalUrl(skillPackage.artifactBlobId());
+        packages.add(
+            new DaemonSkillPackage(
+                skillPackage.packageName(),
+                artifact.getSha256(),
+                artifact.getSizeBytes(),
+                download.getUrl()));
+      } catch (RuntimeException error) {
+        log.warn(
+            "skill package could not be prepared for environment sync: {}",
+            skillPackage.packageName());
+      }
+    }
+    return List.copyOf(packages);
+  }
+
+  private static List<EnvironmentSkillState> toSkillStates(
+      List<DaemonSkillStatePackage> reportedPackages) {
+    List<EnvironmentSkillState> states = new ArrayList<>(reportedPackages.size());
+    Set<String> names = new HashSet<>();
+    for (DaemonSkillStatePackage reported : reportedPackages) {
+      Objects.requireNonNull(reported, "reported skill state");
+      if (!names.add(reported.packageName())) {
+        throw new IllegalArgumentException("duplicate skill package state");
+      }
+      states.add(
+          new EnvironmentSkillState(
+              reported.packageName(),
+              reported.installedSha256(),
+              reported.localPath(),
+              reported.error()));
+    }
+    return List.copyOf(states);
   }
 
   private List<EnvironmentConnection> readyOwnedEnvironments() {
@@ -178,309 +236,6 @@ public class EnvironmentSkillSyncOrchestrator {
     } catch (RuntimeException error) {
       log.warn("environment skill sync could not list ready owned environments", error);
       return List.of();
-    }
-  }
-
-  /** 全量同步：按 catalog 顺序逐包同步，单包失败只影响该包。 */
-  private void syncEnvironment(EnvironmentId environmentId) {
-    List<String> packageNames;
-    try {
-      packageNames =
-          skillPackageRepository.listPackages().stream().map(SkillPackage::packageName).toList();
-    } catch (RuntimeException error) {
-      log.warn("environment skill sync could not list skill packages", error);
-      return;
-    }
-    for (String packageName : packageNames) {
-      try {
-        syncPackage(environmentId, packageName);
-      } catch (RuntimeException error) {
-        // 单包的意外失败绝不中断其它包的收敛。
-        log.warn("environment skill sync aborted for one package: environmentId={}", environmentId);
-      }
-    }
-  }
-
-  /** 同步单个 Package：读取当前行 → 记录 STARTED 事件 → 发送调用 → 在同一围栏下写回投影与终态事件。 */
-  private void syncPackage(EnvironmentId environmentId, String packageName) {
-    SkillPackage skillPackage = skillPackageRepository.getPackage(packageName);
-    if (skillPackage == null || !skillPackage.isGit()) {
-      // 上传渠道的包没有 Git 事实，等 Daemon 对账控制消息落地后统一下发归档摘要与预签名地址。
-      return;
-    }
-    StorageBlob artifact = storageBlobManager.getBlob(skillPackage.artifactBlobId());
-    if (artifact == null) {
-      return;
-    }
-    EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
-    if (connection == null || connection.status() != LiveEnvironmentStatus.READY) {
-      return;
-    }
-    UUID leaseToken = connection.leaseToken();
-    if (!recordEvent(
-        environmentId,
-        leaseToken,
-        EnvironmentEvent.LEVEL_INFO,
-        EnvironmentEvent.TYPE_SKILL_SYNC_STARTED,
-        startedMessage(packageName))) {
-      return;
-    }
-    EnvironmentSkillState previous = connection.skillStateOf(packageName).orElse(null);
-    SyncOutcome outcome = invoke(connection, skillPackage);
-    EnvironmentSkillState entry;
-    EnvironmentEvent terminalEvent;
-    if (outcome.succeeded()) {
-      entry =
-          EnvironmentSkillState.installed(packageName, artifact.getSha256(), outcome.localPath());
-      terminalEvent =
-          new EnvironmentEvent(
-              clock.instant(),
-              EnvironmentEvent.LEVEL_INFO,
-              EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
-              terminalMessage(EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED, packageName));
-    } else {
-      entry = EnvironmentSkillState.failed(packageName, previous, outcome.failureSummary());
-      terminalEvent =
-          new EnvironmentEvent(
-              clock.instant(),
-              EnvironmentEvent.LEVEL_ERROR,
-              EnvironmentEvent.TYPE_SKILL_SYNC_FAILED,
-              terminalMessage(EnvironmentEvent.TYPE_SKILL_SYNC_FAILED, packageName));
-    }
-    try {
-      environmentRegistry.replaceSkillState(
-          environmentId, leaseToken, mergedSkillState(connection, entry), terminalEvent);
-    } catch (RuntimeException error) {
-      log.warn(
-          "environment skill sync could not record the result: environmentId={}", environmentId);
-    }
-  }
-
-  /** 以本次同步开始时读到的投影为基线合并该 Package：其它 Package 的条目原样保留。 */
-  private static List<EnvironmentSkillState> mergedSkillState(
-      EnvironmentConnection connection, EnvironmentSkillState entry) {
-    Map<String, EnvironmentSkillState> merged = new LinkedHashMap<>();
-    for (EnvironmentSkillState state : connection.skillState()) {
-      merged.put(state.packageName(), state);
-    }
-    merged.put(entry.packageName(), entry);
-    return List.copyOf(new ArrayList<>(merged.values()));
-  }
-
-  private boolean recordEvent(
-      EnvironmentId environmentId, UUID leaseToken, String level, String type, String message) {
-    try {
-      boolean recorded =
-          environmentRegistry.recordEvent(
-              environmentId,
-              leaseToken,
-              new EnvironmentEvent(clock.instant(), level, type, message));
-      if (!recorded) {
-        log.debug("environment skill sync fence lost: environmentId={}", environmentId);
-      }
-      return recorded;
-    } catch (RuntimeException error) {
-      log.warn("environment skill sync could not record an event: environmentId={}", environmentId);
-      return false;
-    }
-  }
-
-  /** 发起一次 skill.sync 调用并等待唯一终态，并在同一处按本次请求事实校验结果。 */
-  private SyncOutcome invoke(EnvironmentConnection connection, SkillPackage skillPackage) {
-    EnvironmentId environmentId = connection.environmentId();
-    EnvironmentCapabilityDescriptor descriptor =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC);
-    EnvironmentCapabilityExecutionRequest request;
-    try {
-      request =
-          new EnvironmentCapabilityExecutionRequest(
-              descriptor,
-              new EnvironmentCapabilityCall(
-                  UUID.randomUUID().toString(), argumentsJson(skillPackage)),
-              descriptor.defaultTimeout());
-    } catch (RuntimeException error) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
-    EnvironmentCapabilityExecutionHandle handle;
-    try {
-      handle =
-          capabilityTransport.invoke(
-              environmentId,
-              request,
-              new EnvironmentCapabilityExecutionListener() {
-
-                @Override
-                public void onComplete(EnvironmentCapabilityResult result) {
-                  terminal.complete(result);
-                }
-
-                @Override
-                public void onError(Throwable error) {
-                  terminal.completeExceptionally(error);
-                }
-
-                @Override
-                public void onExitConfirmed() {
-                  // skill.sync 是 Environment 级管理任务，不绑定 Thread Tool body，不能伪造 Thread 执行账本。
-                }
-              });
-    } catch (RuntimeException error) {
-      // 发送前失败：调用肯定未执行，或结果不确定而不可重放。
-      return SyncOutcome.failure(SEND_FAILURE);
-    }
-    try {
-      return interpret(
-          terminal.get(),
-          skillPackage,
-          connection.daemonCapabilities().environment().operatingSystem());
-    } catch (InterruptedException error) {
-      Thread.currentThread().interrupt();
-      handle.cancel();
-      return SyncOutcome.failure(RESULT_FAILURE);
-    } catch (ExecutionException | RuntimeException error) {
-      handle.cancel();
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-  }
-
-  /** 只接受成功结果中的精确安装事实；错误结果只保留 Daemon 的稳定错误码。 */
-  private static SyncOutcome interpret(
-      EnvironmentCapabilityResult result,
-      SkillPackage skillPackage,
-      DaemonOperatingSystem operatingSystem) {
-    if (result.error()) {
-      return SyncOutcome.failure(failureSummary(result.detailsJson()));
-    }
-    for (ResultContent content : result.contents()) {
-      if (content instanceof JsonResultContent json) {
-        return parseOutcome(
-            json.json(),
-            skillPackage.packageName(),
-            skillPackage.packageVersion(),
-            operatingSystem);
-      }
-    }
-    return SyncOutcome.failure(RESULT_FAILURE);
-  }
-
-  /**
-   * 严格解析 skill.sync 终态 JSON。
-   *
-   * <p>成功结果必须恰好是 {@code packageName}、{@code installedCommit}、{@code localPath} 三个字段的 object：Package
-   * 名与 request 一致，commit 与 request 的 currentCommit 一致且是 canonical 形状，localPath 是目标 Daemon OS 上的显式
-   * 绝对路径且最后一段正是该 Package 的安装根目录。缺失、多余、未知或形状不符的值一律收敛为固定的去敏失败摘要，绝不把 Daemon 的自由文本带入投影。
-   */
-  private static SyncOutcome parseOutcome(
-      String json,
-      String packageName,
-      String expectedCommit,
-      DaemonOperatingSystem operatingSystem) {
-    JsonNode node;
-    try {
-      node = JSON.readTree(json);
-    } catch (JacksonException error) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    if (!node.isObject() || node.size() != RESULT_FIELDS.size()) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    Set<String> names = new HashSet<>();
-    node.propertyNames().forEach(names::add);
-    if (!names.equals(RESULT_FIELDS)) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    JsonNode installedCommit = node.get("installedCommit");
-    JsonNode reportedPackageName = node.get("packageName");
-    JsonNode localPath = node.get("localPath");
-    if (!reportedPackageName.isTextual() || !packageName.equals(reportedPackageName.textValue())) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    if (!installedCommit.isTextual()
-        || !COMMIT_PATTERN.matcher(installedCommit.textValue()).matches()
-        || !expectedCommit.equals(installedCommit.textValue())) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    if (!localPath.isTextual()
-        || !isPackageRoot(localPath.textValue(), packageName, operatingSystem)) {
-      return SyncOutcome.failure(RESULT_FAILURE);
-    }
-    // localPath 按 Daemon 原生文本保留：目标 OS 的路径分隔符不在 Platform 侧改写。
-    return new SyncOutcome(installedCommit.textValue(), localPath.textValue(), null);
-  }
-
-  /**
-   * localPath 必须按目标 Daemon OS 的冻结形态是显式绝对路径，且最后一段就是该 Package 的安装根目录。
-   *
-   * <p>词法校验复用 workdir 的同一冻结形状：Platform 不解析远端路径，也不做 {@code ~} 或环境变量展开。
-   */
-  private static boolean isPackageRoot(
-      String localPath, String packageName, DaemonOperatingSystem operatingSystem) {
-    String unified;
-    try {
-      unified = DaemonWorkdirSyntax.requireAbsolute(localPath, operatingSystem);
-    } catch (IllegalArgumentException error) {
-      return false;
-    }
-    int separator = unified.lastIndexOf('/');
-    return separator >= 0 && unified.substring(separator + 1).equals(packageName);
-  }
-
-  /** 稳定错误码是 Daemon 唯一的诊断事实：只接受受限语法，绝不复述任何自由文本。 */
-  private static String failureSummary(String detailsJson) {
-    JsonNode code;
-    try {
-      code = JSON.readTree(detailsJson).path("code");
-    } catch (JacksonException error) {
-      return RESULT_FAILURE;
-    }
-    if (!code.isTextual() || !ERROR_CODE_PATTERN.matcher(code.textValue()).matches()) {
-      return RESULT_FAILURE;
-    }
-    return RESULT_FAILURE + ": " + code.textValue();
-  }
-
-  private String argumentsJson(SkillPackage skillPackage) {
-    ObjectNode node = JSON.createObjectNode();
-    node.put("packageName", skillPackage.packageName());
-    node.put("repositoryUrl", skillPackage.gitSource().repositoryUrl());
-    node.put("branch", skillPackage.gitSource().branch());
-    node.put("targetCommit", skillPackage.packageVersion());
-    // 私有仓库令牌从加密事实解析后只进入这条受信任的 capability 通道；绝不进入模型上下文、事件或日志。
-    String credential = skillPackage.gitSource().token();
-    if (credential != null) {
-      node.put("credential", credential);
-    }
-    try {
-      return JSON.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode skill.sync arguments", error);
-    }
-  }
-
-  private static String startedMessage(String packageName) {
-    return "skill package sync started: " + packageName;
-  }
-
-  private static String terminalMessage(String type, String packageName) {
-    return type.endsWith("SUCCEEDED")
-        ? "skill package sync succeeded: " + packageName
-        : "skill package sync failed: " + packageName;
-  }
-
-  /** 单次同步的收敛结果：成功时携带精确提交与本地稳定路径，否则只携带去敏摘要。 */
-  private record SyncOutcome(String installedCommit, String localPath, String failure) {
-
-    static SyncOutcome failure(String failure) {
-      return new SyncOutcome(null, null, failure);
-    }
-
-    boolean succeeded() {
-      return failure == null;
-    }
-
-    String failureSummary() {
-      return failure == null ? RESULT_FAILURE : failure;
     }
   }
 }

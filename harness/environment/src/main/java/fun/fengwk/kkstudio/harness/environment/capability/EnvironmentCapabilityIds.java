@@ -21,8 +21,6 @@ public final class EnvironmentCapabilityIds {
       new EnvironmentCapabilityId("lsp.workspace-symbols");
   public static final EnvironmentCapabilityId LSP_JAVA_DECOMPILE =
       new EnvironmentCapabilityId("lsp.java-decompile");
-  public static final EnvironmentCapabilityId SKILL_SYNC =
-      new EnvironmentCapabilityId("skill.sync");
 
   private EnvironmentCapabilityIds() {}
 }

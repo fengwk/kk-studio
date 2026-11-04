@@ -33,9 +33,8 @@ id / inputSchema / defaultTimeout
 | `lsp.goto-definition` | 3 分钟 | 无 | `lsp_goto_definition` |
 | `lsp.workspace-symbols` | 3 分钟 | 无 | `lsp_workspace_symbols` |
 | `lsp.java-decompile` | 3 分钟 | 无 | `lsp_java_decompile` |
-| `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
-`skill.sync` 与 `fs.edit.preview` 由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
+`fs.edit.preview` 由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
 [`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
 固化标识；Contributor 的 visibility 决定模型选择面。
 
@@ -44,8 +43,8 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
 `workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
-必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI；
-`skill.sync` 不接受 `workdir`。`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
+必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
+`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
@@ -214,14 +213,8 @@ runtimeStatus: {
 
 二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
 
-内部 `skill.sync` 与模型可见环境工具复用同一 INVOKE/STARTED/PROGRESS/终态协议。其
-arguments 只携带 Package、repository URL 与 Platform 当前确认的 exact commit；branch
-只能作为 fetch hint，Daemon 必须以 commit 校验安装结果。该 capability 不注册为模型
-Tool，READY 与 Package 发布后的同步由 Platform 发起。
-
-技能远程仓库只支持 HTTP/HTTPS；`file:` 保留本地仓库读取，不经代理。Git 连接超时 60 秒、
-网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，
-没有外层总期限，但断线、关闭和取消仍会收尾在途任务。其他 capability 的默认超时不变。
+技能同步不作为原子 capability，而是通过连接级控制信封 `SKILL_SYNC` / `SKILL_STATE` 进行期望状态对账：
+Platform 下发包含包名、SHA-256、大小与下载地址的全量期望集合，Daemon 异步完成单飞对账，下载归档并解压验证，删除未在期望集中的标记目录，最终以 `SKILL_STATE` 上报所有受管技能包状态。
 
 ## workdir 词法契约（`process.exec`）
 

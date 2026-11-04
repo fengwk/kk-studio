@@ -37,6 +37,8 @@ enum MessageType {
   IDE_RESULT = 22;
   IDE_LEASE = 23;
   ERROR = 24;
+  SKILL_SYNC = 25;
+  SKILL_STATE = 26;
 }
 
 enum OperatingSystem {
@@ -121,6 +123,8 @@ message Envelope {
     IdeResult ide_result = 25;
     IdeLease ide_lease = 26;
     Error error = 27;
+    SkillSync skill_sync = 28;
+    SkillState skill_state = 29;
   }
 }
 
@@ -288,6 +292,30 @@ message ResourceUploadCommit {
 message TemporaryResourcePolicy {
   optional int64 temporary_resource_ttl_seconds = 1;
   optional int64 temporary_resource_cleanup_interval_seconds = 2;
+}
+
+// Studio 下发给连接的完整技能期望集合；Daemon 据此对账本地安装。
+message SkillSync {
+  repeated SkillPackage packages = 1;
+}
+
+message SkillPackage {
+  optional string package_name = 1;
+  optional string sha256 = 2;
+  optional int64 size_bytes = 3;
+  optional string download_url = 4;
+}
+
+// Daemon 回报本轮对账后的全部技能包状态。
+message SkillState {
+  repeated SkillPackageState packages = 1;
+}
+
+message SkillPackageState {
+  optional string package_name = 1;
+  optional string installed_sha256 = 2;
+  optional string local_path = 3;
+  optional string error = 4;
 }
 
 message Update {
