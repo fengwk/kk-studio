@@ -47,11 +47,8 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
-import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -69,8 +66,6 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -714,35 +709,7 @@ public final class HarnessRuntime {
    * decidedAt}，不要求当前 branch/status，不递增 version，不请求 Work）；任何不匹配均为 APPROVAL_DECISION_MISMATCH。
    */
   public ToolInvocation decideToolApproval(ToolApprovalCommand command) {
-    Objects.requireNonNull(command, "command");
-    return store.transaction(
-        tx -> {
-          ThreadState thread = tx.threads().lock(command.threadId()).orElse(null);
-          if (thread == null) {
-            throw approvalNotApplicable("thread " + command.threadId() + " does not exist");
-          }
-          ToolInvocation probe = tx.tools().find(command.toolInvocationId()).orElse(null);
-          if (probe == null) {
-            throw approvalNotApplicable(
-                "tool invocation " + command.toolInvocationId() + " does not exist");
-          }
-          if (!probe.threadId().equals(command.threadId())) {
-            throw approvalNotApplicable(
-                "tool invocation "
-                    + probe.id()
-                    + " does not belong to thread "
-                    + command.threadId());
-          }
-          ToolApproval probeApproval = probe.approval();
-          if (probeApproval == null || !probeApproval.required()) {
-            throw approvalNotApplicable(
-                "tool invocation " + probe.id() + " has no required approval");
-          }
-          if (probeApproval.decision() != null) {
-            return replayDecidedApproval(tx, probe, command);
-          }
-          return decideUndecidedApproval(tx, thread, probe, command);
-        });
+    return toolInputControl.decideApproval(command);
   }
 
   /**
@@ -906,106 +873,6 @@ public final class HarnessRuntime {
     return CompactionTurns.ofResult(path, resultEntryId).freezing();
   }
 
-  /**
-   * 已决策 approval：按公共锁序 Thread -&gt; Tool 锁定 target，并对照已锁定的当前 approval 验证精确 replay，返回已锁定的当前
-   * ToolInvocation。工具归属固定在 Thread/TurnStart/Assistant，不读取 Model。
-   */
-  private ToolInvocation replayDecidedApproval(
-      HarnessStore.Transaction tx, ToolInvocation probe, ToolApprovalCommand command) {
-    ToolInvocation tool =
-        tx.tools()
-            .lock(probe.id())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "tool invocation "
-                            + probe.id()
-                            + " could not be locked for approval replay"));
-    if (!tool.threadId().equals(command.threadId())
-        || !tool.turnStartEntryId().equals(probe.turnStartEntryId())
-        || !tool.assistantEntryId().equals(probe.assistantEntryId())) {
-      throw new IllegalStateException(
-          "tool invocation " + tool.id() + " changed its ownership during approval replay");
-    }
-    ToolApproval approval = tool.approval();
-    if (approval == null || !approval.required() || approval.decision() == null) {
-      throw new IllegalStateException(
-          "tool invocation " + tool.id() + " lost its required decided approval during replay");
-    }
-    try {
-      Instant now = tx.now();
-      ToolApproval replayed =
-          approval.decide(
-              command.decision(), command.decisionId(), command.actor(), command.reason(), now);
-      if (replayed != approval) {
-        throw new IllegalStateException("a decided approval must replay exactly");
-      }
-    } catch (IllegalArgumentException error) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.APPROVAL_DECISION_MISMATCH,
-          "approval of tool invocation " + tool.id() + " does not replay the stored decision");
-    }
-    return tool;
-  }
-
-  /**
-   * 未决策 approval：target 必须是已锁定当前 TOOL_ACTIVE context 内、状态为 WAITING_APPROVAL 的 invocation；transition
-   * basis 为已锁定 siblings 中的 ToolInvocation。Thread version 恰好被触碰一次，并请求匹配的 Work target。
-   */
-  private ToolInvocation decideUndecidedApproval(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      ToolInvocation probe,
-      ToolApprovalCommand command) {
-    LockedThreadContext locked = ThreadContextLock.loadTools(tx, thread);
-    if (!(locked.context() instanceof ThreadContext.ToolActive active)) {
-      throw approvalNotApplicable(
-          "tool invocation " + probe.id() + " is not in the current tool context");
-    }
-    ToolInvocation tool = null;
-    for (ToolInvocation sibling : active.siblings()) {
-      if (sibling.id().equals(probe.id())) {
-        tool = sibling;
-        break;
-      }
-    }
-    if (tool == null) {
-      throw approvalNotApplicable(
-          "tool invocation " + probe.id() + " is not in the current tool context");
-    }
-    if (tool.status() != ToolInvocationStatus.WAITING_APPROVAL) {
-      throw approvalNotApplicable("tool invocation " + tool.id() + " is not waiting for approval");
-    }
-    ToolApproval approval = tool.approval();
-    if (approval == null || !approval.required() || approval.decision() != null) {
-      throw new IllegalStateException(
-          "tool invocation " + tool.id() + " changed its approval state before being decided");
-    }
-    Instant mutationNow = tx.now();
-    ToolInvocation updated =
-        tool.decideApproval(
-            command.decision(),
-            command.decisionId(),
-            command.actor(),
-            command.reason(),
-            mutationNow,
-            mutationNow);
-    tx.tools().update(List.of(updated));
-    tx.threads().update(thread.touchVersion(mutationNow));
-    if (command.decision() == ToolApprovalDecision.ALLOWED) {
-      // 批准后重建 Work 时同样只要求环境专用工具：逐调用路由的工具不得因为 vfs: 路径等待环境。
-      EnvironmentId environmentId =
-          tool.binding() != null
-                  && tool.binding().environmentSupport() == EnvironmentSupport.REQUIRED
-              ? tool.binding().environmentId()
-              : null;
-      tx.work().request(new WorkTarget(WorkTargetType.TOOL, tool.id()), environmentId);
-    } else {
-      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-    }
-    return updated;
-  }
-
   private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
     Objects.requireNonNull(processor, "toolProcessor");
     return processor::cancel;
@@ -1035,10 +902,5 @@ public final class HarnessRuntime {
   private static HarnessRuntimeConflictException conflict(
       HarnessRuntimeConflictException.Reason reason, String message) {
     return new HarnessRuntimeConflictException(reason, message);
-  }
-
-  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
-    return new HarnessRuntimeConflictException(
-        HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
   }
 }

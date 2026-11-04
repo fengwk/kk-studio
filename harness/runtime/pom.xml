@@ -95,6 +95,8 @@
                                         <include>fun.fengwk.kkstudio.harness.api.tool.ToolBinding</include>
                                         <include>fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.AcceptCommandsReplay</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.AcceptCommandsValidation</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.AgentSpawner</include>
                                         <include>fun.fengwk.kkstudio.harness.api.SpawnRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.api.SpawnRequest.Continuation</include>

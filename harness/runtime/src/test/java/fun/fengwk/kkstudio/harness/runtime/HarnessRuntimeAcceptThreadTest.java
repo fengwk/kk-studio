@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
@@ -485,6 +486,23 @@ class HarnessRuntimeAcceptThreadTest {
         new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")), idempotencyKey);
   }
 
+  private static NewThreadCommand setEnvironmentCommand(UUID idempotencyKey, String name) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload(name), idempotencyKey);
+  }
+
+  private static ThreadCommand durable(UUID threadId, long sequence, NewThreadCommand request) {
+    return new ThreadCommand(
+        threadId,
+        sequence,
+        request.payload(),
+        request.idempotencyKey(),
+        request.requestHash(),
+        null,
+        null,
+        null,
+        T0);
+  }
+
   private static Ticket rootTicket(UUID invocationId) {
     return Ticket.task(invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1);
   }
@@ -564,5 +582,95 @@ class HarnessRuntimeAcceptThreadTest {
                     AcceptancePreflight.IDENTITY));
     assertTrue(error.getMessage().contains("batches must end with exactly one user-like input"));
     assertTrue(runtime.findJoin(join.invocationId()).isEmpty());
+  }
+
+  /** 既有 Thread 的 SET_EXECUTION 不得切换 Driver，即使目标 Driver 已安装且 settings 合法。 */
+  @Test
+  void existingThreadRejectsDriverChange() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                runtime.acceptCommands(
+                    thread(
+                        baseline.threadId(),
+                        baseline.rootEntryId(),
+                        1,
+                        List.of(
+                            new NewThreadCommand(
+                                new SetExecutionCommandPayload(
+                                    new ExecutionSelection("builtin", "{}")),
+                                TestIds.id(1)),
+                            userMessageCommand(TestIds.id(2), "hello"))),
+                    AcceptancePreflight.IDENTITY));
+    assertTrue(error.getMessage().contains("driver cannot be changed on an existing thread"));
+  }
+
+  /** durable 命令 sequence 不连续时 ordered replay 拒绝，不返回部分或跨越 gap 的接受事实。 */
+  @Test
+  void orderedReplayRejectsNonContiguousDurableSequences() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    NewThreadCommand first = setAgentCommand(TestIds.id(1));
+    NewThreadCommand second = userMessageCommand(TestIds.id(2), "hello");
+    store.transaction(
+        tx -> {
+          tx.threads().lock(baseline.threadId());
+          tx.commands()
+              .insert(
+                  List.of(
+                      durable(baseline.threadId(), 1, first),
+                      durable(baseline.threadId(), 3, second)));
+          return null;
+        });
+    HarnessRuntimeConflictException error =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.acceptCommands(
+                    thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(first, second)),
+                    AcceptancePreflight.IDENTITY));
+    assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
+    assertTrue(error.getMessage().contains("not contiguous"));
+  }
+
+  /** 只有执行根可以接受 SET_ENVIRONMENT；子 Thread 即使 cursor 合法也必须零写入拒绝。 */
+  @Test
+  void childThreadCannotSetEnvironment() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    Ticket childTicket =
+        Ticket.task(
+            TestIds.id(500),
+            baseline.threadId(),
+            baseline.rootEntryId(),
+            SpawnTestSupport.HASH,
+            "assistant",
+            3,
+            3,
+            1,
+            1);
+    AcceptedCommands child =
+        SpawnTestSupport.acceptAndJoin(
+            runtime,
+            SpawnTestSupport.child(501, 502, baseline.threadId()),
+            childTicket,
+            AcceptancePreflight.IDENTITY);
+    ThreadState childThread = child.thread();
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                runtime.acceptCommands(
+                    thread(
+                        childThread.id(),
+                        childThread.headEntryId(),
+                        childThread.nextCommandSequence(),
+                        List.of(
+                            setEnvironmentCommand(TestIds.id(600), "local"),
+                            userMessageCommand(TestIds.id(601), "hello"))),
+                    AcceptancePreflight.IDENTITY));
+    assertTrue(error.getMessage().contains("only the execution root can set an environment"));
+    assertEquals(
+        childThread, store.transaction(tx -> tx.threads().find(childThread.id()).orElseThrow()));
   }
 }
