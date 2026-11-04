@@ -11,6 +11,8 @@ import java.util.UUID;
 @Component
 public class ProjectChangeNotifier {
 
+  public static final String CHANNEL = "project_issue_changed";
+
   private final JdbcClient jdbc;
 
   public ProjectChangeNotifier(JdbcClient jdbc) {
@@ -19,7 +21,8 @@ public class ProjectChangeNotifier {
 
   public void projectChanged(UUID projectId) {
     requireTransaction();
-    jdbc.sql("select pg_notify('project_issue_changed', :projectId)")
+    jdbc.sql("select pg_notify(:channel, :projectId)")
+        .param("channel", CHANNEL)
         .param("projectId", projectId.toString())
         .query(String.class)
         .single();

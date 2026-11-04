@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Sink;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
-import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -64,7 +63,7 @@ class ApplicationEventHubTest {
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
-  private ProjectInvalidationHub projectInvalidationHub;
+  private InvalidationEventSource projectInvalidationHub;
   private HarnessInvalidationChanges executionTreeChangeSource;
   private HarnessInvalidationChanges interactionChangeSource;
   private InvalidationEventSource environmentChangeSource;
@@ -77,7 +76,7 @@ class ApplicationEventHubTest {
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
-    projectInvalidationHub = mock(ProjectInvalidationHub.class);
+    projectInvalidationHub = mock(InvalidationEventSource.class);
     executionTreeChangeSource = mock(HarnessInvalidationChanges.class);
     interactionChangeSource = mock(HarnessInvalidationChanges.class);
     environmentChangeSource = mock(InvalidationEventSource.class);
@@ -355,14 +354,13 @@ class ApplicationEventHubTest {
 
   @Test
   void projectInvalidationFansOutAndReleasesItsUpstream() throws Exception {
-    AtomicReference<Consumer<UUID>> projectConsumer = new AtomicReference<>();
-    AtomicReference<Runnable> projectResync = new AtomicReference<>();
+    AtomicReference<Consumer<InvalidationEventSource.Event>> projectConsumer =
+        new AtomicReference<>();
     AutoCloseable projectHandle = mock(AutoCloseable.class);
     when(projectInvalidationHub.subscribe(any(), any()))
         .thenAnswer(
             inv -> {
-              projectConsumer.set(inv.getArgument(0));
-              projectResync.set(inv.getArgument(1));
+              projectConsumer.set(inv.getArgument(1));
               return projectHandle;
             });
 
@@ -372,8 +370,8 @@ class ApplicationEventHubTest {
     projectSubscription.activate();
 
     UUID projectId = UUID.randomUUID();
-    projectConsumer.get().accept(projectId);
-    projectResync.get().run();
+    projectConsumer.get().accept(InvalidationEventSource.Event.changed(projectId));
+    projectConsumer.get().accept(InvalidationEventSource.Event.fullResync());
     assertEquals(
         List.of(new Signal.ProjectChanged(projectId), new Signal.Resync()), projectSignals);
 

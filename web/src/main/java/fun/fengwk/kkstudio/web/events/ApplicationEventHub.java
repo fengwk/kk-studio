@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
-import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -125,7 +124,7 @@ final class ApplicationEventHub implements AutoCloseable {
   private final RealtimeEventSource realtimeSource;
   private final RealtimeSubscriptionService realtimeSubscriptions;
   private final CanvasVersionEventSource canvasVersionSource;
-  private final ProjectInvalidationHub projectInvalidationHub;
+  private final InvalidationEventSource projectInvalidationSource;
   private final InvalidationEventSource environmentChangeSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
@@ -148,7 +147,7 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
-      ProjectInvalidationHub projectInvalidationHub,
+      InvalidationEventSource projectInvalidationSource,
       InvalidationEventSource environmentChangeSource,
       int maxBufferedSignals) {
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
@@ -156,8 +155,8 @@ final class ApplicationEventHub implements AutoCloseable {
     this.realtimeSubscriptions =
         Objects.requireNonNull(realtimeSubscriptions, "realtimeSubscriptions");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
-    this.projectInvalidationHub =
-        Objects.requireNonNull(projectInvalidationHub, "projectInvalidationHub");
+    this.projectInvalidationSource =
+        Objects.requireNonNull(projectInvalidationSource, "projectInvalidationSource");
     this.environmentChangeSource =
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     if (maxBufferedSignals <= 0) {
@@ -272,9 +271,7 @@ final class ApplicationEventHub implements AutoCloseable {
         state.cursor = version.cursor();
       }
       case PROJECTS -> state.invalidationHandle =
-          projectInvalidationHub.subscribe(
-              projectId -> fanout(state, new Signal.ProjectChanged(projectId)),
-              () -> fanout(state, new Signal.Resync()));
+          projectInvalidationSource.subscribe(null, event -> fanoutInvalidation(state, event));
       case TREE -> state.invalidationHandle =
           harnessChanges
               .executionTree()
@@ -318,10 +315,11 @@ final class ApplicationEventHub implements AutoCloseable {
       fanout(state, new Signal.Resync());
       return;
     }
-    if (state.key.kind() != ResourceKind.ENVIRONMENTS) {
-      throw new IllegalStateException("unexpected invalidation resource: " + state.key);
+    switch (state.key.kind()) {
+      case PROJECTS -> fanout(state, new Signal.ProjectChanged(event.key()));
+      case ENVIRONMENTS -> fanout(state, new Signal.EnvironmentChanged());
+      default -> throw new IllegalStateException("unexpected invalidation resource: " + state.key);
     }
-    fanout(state, new Signal.EnvironmentChanged());
   }
 
   private void fanoutVersion(ResourceState state, CanvasVersionEventSource.Event event) {
