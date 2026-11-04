@@ -37,8 +37,8 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [harness/admission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission) | Model 与 Tool 网关共用的进程内并发槽位 `ConcurrencyAdmission`：无等待队列、幂等释放，不持久化、不跨进程协调 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseAgentTurnContextResolver` 解析与模型无关的 Agent 目录快照；`DatabaseTurnResolver` 在其上规划模型、压缩与预算，不反查 Thread 归属 |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
-| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、payload 解析、进程内定点分发与 resync |
-| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅 fan-out 容器与 NOTIFY 失效分发基座，供 Harness 源与 web 的画布、环境失效共用 |
+| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、Thread version 的权威 cursor、payload 解析与 resync |
+| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
@@ -71,13 +71,14 @@ channel 名只在
 定义一次，写事务按它投递，订阅源按同一常量监听；组合根只按
 [`HarnessNotificationBinding`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessNotificationBinding.java)
 的 channel 与回调装配统一 LISTEN 连接，不需要知道 payload 协议。
-[`ThreadVersionHub`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/ThreadVersionHub.java)
-先注册订阅再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor，畸形 payload 与重连退化为 resync，未知 Thread 失败且不留注册。
-执行树与交互共用
+Thread version 的注册与分发复用 `platform.notification` 的
+[`VersionNotificationHub`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification/VersionNotificationHub.java)：
+订阅先注册 consumer，再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor；畸形 payload 与重连退化为 resync，未知 Thread
+失败且不留注册。执行树与交互共用
 [`HarnessInvalidationSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessInvalidationSource.java)：
 按真实执行根定点失效，空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
-`platform.notification` 的 `SubscriptionFanOut` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和分发语义，
-Canvas 与 Environment 的失效 hub 也复用它，不经过 Harness 契约。
+`platform.notification` 的 `SubscriptionFanOut`、`VersionNotificationHub` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和
+分发语义；channel、payload 与事件类型由各生产方定义，Canvas、Project 与 Environment 的失效源也组合它们，不经过 Harness 契约。
 
 ### 事务边界与锁序
 
@@ -254,7 +255,9 @@ Work 可领取时间和执行租约的最小值，不使用全局交互截止点
 或无未来边界时不定时。这四项是读取时 sidecar，不属于 Thread version 所保证的
 durable 快照，到期后同 version 重新 GET 会自然变化，无额外持久写入。
 
-数据库 `environment_changed` 同时失效环境与交互查询。连接认领、READY（包括宿主信息与
+数据库 `environment_changed` 同时失效环境与交互查询；channel 与订阅入口由
+[`EnvironmentChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentChangeNotifications.java)
+定义，写侧在同一事务内投递。连接认领、READY（包括宿主信息与
 Skill 投影重建）、断线、释放及运维事件等事实变更仍在写事务内发布；围栏失败不发布，
 发布失败回滚对应状态写。心跳仅在既有 owner/token/有效期围栏下持久续租 `last_seen_at`
 和 `lease_until`，不再因续租发布通知。心跳中若携带实质变化的运行态，或独立运行态消息

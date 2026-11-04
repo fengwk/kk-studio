@@ -231,7 +231,8 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 `IssueActivityIdempotency` 统一锁前、锁内两次 receipt 判定；Run 的完成、取消与失败由同一事务入口收尾。
 阶段额度仓库读取额度时按 Run 历史聚合已消耗次数；其余仓库负责实体读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
-用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
+用 [`ProjectChangeNotifications`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/notification/ProjectChangeNotifications.java)
+定义的 `project_issue_changed` channel 发送 `projectId` 快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
 写入也会覆盖。Work 租约/唤醒只影响内部调度，走共享的 `durable_work` 通道，不产生项目快照失效信号。
 幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放；`body` 的非空性按 `kind` 固定：
