@@ -40,7 +40,8 @@ Chat 是直接持有 Harness Session 的产品之一：一次对话把多个 Ses
 
 所有响应使用平台的 `ApiResponse` 信封；响应的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为
 null）。`agentName` 与 `environmentName` 只按名称软引用目录行，不建立
-外键：Agent 或 Environment 硬删除期间引用暂时无法解析，同名重建后重新生效；写入时由本模块按当前目录校验。
+外键：Agent 或 Environment 硬删除期间引用暂时无法解析，同名重建后重新生效。名称的 canonical
+校验只由本模块写入路径按当前目录完成，数据库不重复目录命名规则；`chat` 也不保存归档状态。
 版本是 non-negative 十进制字符串，客户端每次更新必须回传。
 
 ## 归属与深删除

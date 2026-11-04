@@ -68,6 +68,7 @@ Canvas Resource 与 pin 使用同画布外键，Run 固定 requestId 与 lease�
 
 实体 UUID 和业务版本由应用生成。复合外键保持 Entry 父链、Thread head、
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
+Agent、Environment 等目录名称的 canonical 规则只在应用写入路径校验，数据库不复刻。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
 Plugin 配置每个 pluginId 一行，`revision` 为正并以 CAS 推进。`values_json` 是 text：
