@@ -563,12 +563,17 @@ final class EnvironmentDaemonServerTestSupport {
     void updateSettings(long ttlSeconds, long cleanupIntervalSeconds) {
       settings.set(
           new EnvironmentServerSettings(
-              Duration.ofSeconds(60), 16L * 1024 * 1024, ttlSeconds, cleanupIntervalSeconds));
+              Duration.ofSeconds(60),
+              16L * 1024 * 1024,
+              ttlSeconds,
+              cleanupIntervalSeconds,
+              null,
+              ""));
     }
 
     private static EnvironmentServerSettings defaultSettings() {
       return new EnvironmentServerSettings(
-          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L);
+          Duration.ofSeconds(60), 16L * 1024 * 1024, 259200L, 1800L, null, "");
     }
 
     void failRegistrationDirectory() {
@@ -853,6 +858,7 @@ final class EnvironmentDaemonServerTestSupport {
     volatile boolean busyNextOffer;
     volatile boolean failNextOffer;
     volatile boolean holdNextOffer;
+    volatile Runnable afterOffer;
     Throwable closeFailure;
 
     private volatile int closeAfterFlushCount = 0;
@@ -901,6 +907,10 @@ final class EnvironmentDaemonServerTestSupport {
         throw new IllegalStateException("transport send failed");
       }
       envelopes.add(envelope);
+      Runnable callback = afterOffer;
+      if (callback != null) {
+        callback.run();
+      }
       return DaemonOfferResult.ACCEPTED;
     }
 

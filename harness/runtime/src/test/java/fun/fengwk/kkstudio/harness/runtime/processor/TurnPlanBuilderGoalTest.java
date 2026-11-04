@@ -65,7 +65,9 @@ class TurnPlanBuilderGoalTest {
             ids(),
             NOW,
             null,
-            false);
+            false,
+            false,
+            null);
 
     assertEquals(List.of(goal), plan.consumedCommands());
     // 原子：turn 内只有 TURN_START + 一条冻结 USER 消息。
@@ -105,7 +107,9 @@ class TurnPlanBuilderGoalTest {
             ids,
             NOW,
             null,
-            false);
+            false,
+            false,
+            null);
     GoalSetting firstSetting = first.candidatePath().baseSettings().goal();
     ThreadCommand repeated =
         new ThreadCommand(
@@ -128,7 +132,9 @@ class TurnPlanBuilderGoalTest {
             ids,
             NOW,
             null,
-            false);
+            false,
+            false,
+            null);
     GoalSetting secondSetting = second.candidatePath().baseSettings().goal();
     assertEquals("same text", secondSetting.text());
     assertFalse(secondSetting.id().equals(firstSetting.id()));
@@ -154,7 +160,9 @@ class TurnPlanBuilderGoalTest {
             ids,
             NOW,
             null,
-            false);
+            false,
+            false,
+            null);
     assertNull(cleared.candidatePath().baseSettings().goal());
     // 清除与设置走同一原子路径：候选 turn 内出现明确的取消 USER 消息，正文严格表达无用户设定 Goal。
     assertEquals("No active user-set goal.", textOf(clearedUserMessage(cleared)));
@@ -178,7 +186,9 @@ class TurnPlanBuilderGoalTest {
             ids(),
             NOW,
             null,
-            false);
+            false,
+            false,
+            null);
 
     assertEquals(List.of(), plan.consumedCommands());
     assertEquals(1, plan.candidateEntries().size());

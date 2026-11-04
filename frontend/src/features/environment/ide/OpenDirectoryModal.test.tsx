@@ -2,14 +2,14 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type { EnvironmentIdeDirectoryListingDTO } from '@/shared/api/generated/contracts'
 import {
   OpenDirectoryModal,
   type OpenDirectoryModalProps,
 } from '@/features/environment/ide/OpenDirectoryModal'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: { listIdeDirectories: vi.fn() },
 }))
 

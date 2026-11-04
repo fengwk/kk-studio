@@ -132,3 +132,33 @@ it('snapshot 最早自然截止单次回读，续租注销旧 timer，旧过期�
   expect(get).toHaveBeenCalledTimes(3)
   unmount()
 })
+
+it('无通知续租时在旧截止点回读，并在新租约自然到期后显示等待环境', async () => {
+  // 心跳只续租而不发通知；旧截止点的回读必须取得新截止点，最终发现无写事件的过期。
+  const now = Date.now()
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  let current = snapshot(ROOT, {
+    waitingForEnvironment: false,
+    environmentWaitFreshnessAt: (now + 10000) / 1000,
+  })
+  const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockImplementation(async () => current)
+  const { result } = renderHook(() => useAgentThreadQueries(ROOT), { wrapper })
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(false)
+
+  current = snapshot(ROOT, {
+    waitingForEnvironment: false,
+    environmentWaitFreshnessAt: (now + 20000) / 1000,
+  })
+  await act(async () => vi.advanceTimersByTimeAsync(10250))
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(false)
+
+  current = snapshot(ROOT, { waitingForEnvironment: true, environmentWaitFreshnessAt: null })
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(get).toHaveBeenCalledTimes(3)
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(true)
+  await act(async () => vi.advanceTimersByTimeAsync(60000))
+  expect(get).toHaveBeenCalledTimes(3)
+})

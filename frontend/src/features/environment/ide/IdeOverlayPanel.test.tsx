@@ -6,7 +6,7 @@ import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
 
 const listIdeDirectories = vi.hoisted(() => vi.fn())
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: { listIdeDirectories },
 }))
 

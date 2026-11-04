@@ -300,6 +300,7 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
       payload: {
         case: 'settings',
         value: create(SettingsSchema, {
+          noProxyHosts: '',
           resourceBudgets: create(ResourceBudgetsSchema, {
             maxResourceBytes: BigInt(rawPayload.resourceBudgets?.maxResourceBytes ?? 1024 * 1024),
             temporaryResourceTtlSeconds: BigInt(rawPayload.resourceBudgets?.temporaryResourceTtlSeconds ?? 60),
@@ -318,8 +319,6 @@ function serverMessage(type: string, options: { environmentId?: string; invocati
         value: create(UpdateSchema, {
           operationId: rawPayload.operationId ?? '',
           targetVersion: rawPayload.targetVersion ?? '',
-          artifactUrl: rawPayload.artifactUrl ?? '',
-          artifactSha256: rawPayload.artifactSha256 ?? '',
         }),
       },
     })
@@ -1361,8 +1360,6 @@ describe('runtime update handling', () => {
   const command = {
     operationId,
     targetVersion: artifactFixture.targetVersion,
-    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
-    artifactSha256: artifactFixture.artifactSha256,
   }
 
   it('acknowledges ACCEPTED then reports PREPARED and dedups by operationId', async () => {
@@ -1430,6 +1427,34 @@ describe('runtime update handling', () => {
       'daemon update permit release failed: Error',
     )
     stderr.mockRestore()
+    setup.runtime.close()
+  })
+
+  it('reports a post-handoff installer failure and releases update admission', async () => {
+    // A failed download before service stop must not leave the daemon permanently busy.
+    let reportFailure: ((message: string) => void) | undefined
+    let stopped = false
+    const update: UpdatePort = {
+      async handleUpdate() {
+        return {
+          phase: 'PREPARED',
+          watchFailure(report) {
+            reportFailure = report
+            return () => { stopped = true }
+          },
+        }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(() => reportFailure !== undefined)
+    reportFailure!('official installer failed; check local install.log')
+    await waitFor(() => sent(setup.transport).some(envelope =>
+      envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'FAILED'))
+    expect(stopped).toBe(true)
+    expect(sent(setup.transport).filter(envelope => envelope.messageType === 'RUNTIME_STATUS').at(-1)?.payload)
+      .toMatchObject({ status: { update: null } })
     setup.runtime.close()
   })
 
@@ -1543,7 +1568,6 @@ describe('runtime update handling', () => {
           ...command,
           operationId: '44444444-4444-4555-8666-777777777777',
           targetVersion: '9.9.10',
-          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, '9.9.10'),
         },
       }),
     )
@@ -1593,7 +1617,7 @@ describe('runtime update handling', () => {
     })
 
     setup.transport.receive(
-      serverMessage('UPDATE', { environmentId: ENV, payload: { ...command, artifactSha256: 'b'.repeat(64) } }),
+      serverMessage('UPDATE', { environmentId: ENV, payload: { ...command, targetVersion: '9.9.10' } }),
     )
     await tick()
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(true)
@@ -1617,7 +1641,6 @@ describe('runtime update handling', () => {
         payload: {
           ...command,
           targetVersion: DAEMON_VERSION,
-          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, DAEMON_VERSION),
         },
       }),
     )
@@ -2118,8 +2141,6 @@ describe('runtime extension handlers', () => {
   const command = {
     operationId,
     targetVersion: artifactFixture.targetVersion,
-    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
-    artifactSha256: artifactFixture.artifactSha256,
   }
   const binding = {
     generation: '1',
@@ -2546,7 +2567,8 @@ describe('runtime connection management', () => {
     const updateGate = Promise.withResolvers<void>()
     let observedSignal: AbortSignal | null = null
     const update: UpdatePort = {
-      async handleUpdate(_cmd, _cfg, signal) {
+      async handleUpdate(cmd, _cfg, signal) {
+        expect(cmd).toMatchObject({ targetVersion: '1.0.0' })
         observedSignal = signal
         expect(signal.aborted).toBe(false)
         await updateGate.promise
@@ -2558,7 +2580,7 @@ describe('runtime connection management', () => {
     await waitFor(() => setup.transport.connection !== null)
     setup.transport.listener?.onUpgradeFailed(426, {
       targetProtocolVersion: 1,
-      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-linux-x64-v1.0.0.tar.gz',
+      artifactUrl: 'https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-studio-daemon-v1.0.0-linux-amd64.tar.gz',
       artifactSha256: 'a'.repeat(64),
     })
     await waitFor(() => setup.runtime.getRuntimeStatus().status.update !== null)
@@ -2567,7 +2589,7 @@ describe('runtime connection management', () => {
     expect(setup.runtime.getState()).not.toBe('FAILED')
 
     updateGate.resolve()
-    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1')
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.targetVersion === '1.0.0')
     expect(setup.runtime.getState()).not.toBe('FAILED')
     expect((observedSignal as unknown as AbortSignal).aborted).toBe(false)
 
@@ -2772,8 +2794,6 @@ describe('runtime IDE command lifetime and shutdown convergence', () => {
         payload: {
           operationId: '55555555-4444-4555-8666-777777777777',
           targetVersion: artifactFixture.targetVersion,
-          artifactUrl: artifactFixture.accepted[1]!.artifactUrl,
-          artifactSha256: artifactFixture.artifactSha256,
         },
       }),
     )

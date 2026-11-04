@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -42,24 +41,15 @@ class AgentBranchSettingsMaterializerTest {
         new AgentBranchSettingsMaterializer(
             agentRepository,
             new BuiltinAgentExecutionMaterializer(
-                modelRepository, new AgentModelRuntimeConfigParser(JsonMapper.builder().build())),
-            new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
+                modelRepository, new AgentModelRuntimeConfigParser(JsonMapper.builder().build())));
   }
 
   private void stub(String agentName, String variant, String modelConfigJson) {
-    stub(agentName, variant, modelConfigJson, true);
-  }
-
-  private void stub(
-      String agentName, String variant, String modelConfigJson, boolean inheritParentEnvironment) {
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(agentName)
             .execution(BuiltinExecution.of(new ModelSelection("gpt-x", variant)))
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":"
-                    + inheritParentEnvironment
-                    + "}")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .build();
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
@@ -86,31 +76,6 @@ class AgentBranchSettingsMaterializerTest {
     assertEquals(BuiltinExecution.of(new ModelSelection("gpt-x", "quality")), settings.execution());
     // root/普通调用没有父调用，environmentName 恒为 null。
     assertNull(settings.environmentName());
-  }
-
-  /** 测试意图：验证 subagent 物化只在 inheritParentEnvironment=true 时使用父调用冻结的 Environment name。 */
-  @Test
-  void inheritsParentEnvironmentOnlyWhenSubagentEnablesIt() {
-    stub("alpha", null, validModelConfig(), true);
-
-    BranchSettings inherited = materializer.materializeSubagent("alpha", "env-a");
-
-    assertEquals("env-a", inherited.environmentName());
-    assertEquals(
-        BuiltinExecution.of(new ModelSelection("gpt-x", "quality")), inherited.execution());
-
-    stub("beta", null, validModelConfig(), false);
-    BranchSettings isolated = materializer.materializeSubagent("beta", "env-a");
-
-    assertNull(isolated.environmentName());
-  }
-
-  /** 测试意图：验证父子环境为 null 时（父 branch 未选择 Environment）继承开关也不会凭空造出环境。 */
-  @Test
-  void keepsNullEnvironmentWhenParentHasNone() {
-    stub("alpha", null, validModelConfig(), true);
-
-    assertNull(materializer.materializeSubagent("alpha", null).environmentName());
   }
 
   /** Agent 显式 variant 覆盖默认 variant。 */
@@ -191,27 +156,6 @@ class AgentBranchSettingsMaterializerTest {
     assertTrue(
         modelConfigError.getMessage().contains("invalid subagent model configuration: alpha"));
     assertInstanceOf(IllegalArgumentException.class, modelConfigError.getCause());
-  }
-
-  /** 测试意图：验证 subagent 物化读取损坏的 Agent config 时以带上下文与原因链的稳定异常失败。 */
-  @Test
-  void wrapsCorruptAgentConfigsWithContext() {
-    AgentDefinition broken =
-        AgentDefinition.builder()
-            .name("broken")
-            .execution(BuiltinExecution.of(new ModelSelection("gpt-x", null)))
-            .configJson("{\"tools\":[]}")
-            .build();
-    when(agentRepository.getByName("broken")).thenReturn(broken);
-
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materializeSubagent("broken", "env-a"));
-
-    assertTrue(
-        error.getMessage().contains("invalid subagent configuration: broken"), error.getMessage());
-    assertInstanceOf(IllegalStateException.class, error.getCause());
   }
 
   /** 测试意图：未配置 execution 的内置 Agent 被明确拒绝，而不是 NPE 或回退到其它模型。 */

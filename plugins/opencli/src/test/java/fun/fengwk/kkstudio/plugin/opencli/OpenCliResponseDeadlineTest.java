@@ -376,10 +376,6 @@ class OpenCliResponseDeadlineTest {
               1000,
               (int) requestTimeoutMillis,
               121_000,
-              1024,
-              512 * 1024,
-              4096,
-              65_535,
               OpenCliTestSettings.defaults().gptImage2(),
               OpenCliTestSettings.defaults().seedance());
       PluginCredentialAccess credentials = fakeCredentialAccess("test-api-key");

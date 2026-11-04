@@ -817,7 +817,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       description: 'Local completion agent for free Footer usage tests.',
       systemPrompt: 'Return the deterministic local response.',
       execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
-      config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+      config: { tools: [], skills: [], subagents: [] },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
     state.agent = envelopeData(agentResponse.json)
@@ -862,7 +862,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       description: 'Second environment-bound agent for Footer projection tests.',
       systemPrompt: 'Return the deterministic local response.',
       execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
-      config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+      config: { tools: [], skills: [], subagents: [] },
     })
     assert(
       otherAgentResponse.status === 201,
@@ -1037,7 +1037,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       description: 'Held child used by the TaskStatus browser fixture.',
       systemPrompt: 'Stay in the deterministic local model call.',
       execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
-      config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+      config: { tools: [], skills: [], subagents: [] },
     })
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
     state.childAgent = envelopeData(childResponse.json)
@@ -1051,7 +1051,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
         tools: [],
         skills: [],
         subagents: [state.childAgent.name],
-        inheritParentEnvironment: true,
       },
     })
     assert(parentResponse.status === 201, `create task parent: ${JSON.stringify(parentResponse)}`)
@@ -1202,7 +1201,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
         tools: ['write', 'edit', 'bash'],
         skills: [],
         subagents: [],
-        inheritParentEnvironment: true,
       },
     })
     assert(agentResponse.status === 201, `create tool-card agent: ${JSON.stringify(agentResponse)}`)

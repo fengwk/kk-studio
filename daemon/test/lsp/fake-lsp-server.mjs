@@ -19,6 +19,14 @@ record({
   cwd: process.cwd(),
 })
 
+if (mode === 'capture-proxy') {
+  // 只记录本测试代理字段，不泄露语言服务器继承的其他环境变量。
+  record({
+    event: 'proxy',
+    values: Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(http|https|all|no)_proxy$/i.test(key))),
+  })
+}
+
 if (mode === 'dead') {
   process.exit(7)
 }

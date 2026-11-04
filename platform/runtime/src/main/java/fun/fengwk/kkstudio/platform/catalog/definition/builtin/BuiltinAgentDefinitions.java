@@ -52,7 +52,6 @@ public final class BuiltinAgentDefinitions {
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
-    config.setInheritParentEnvironment(Boolean.TRUE);
     return config;
   }
 

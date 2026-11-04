@@ -3,18 +3,9 @@ import net from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Agent } from 'undici'
 
-import type { SystemProxyResolver } from '../src/contracts.js'
 import { installOutboundNetwork, type InstalledOutboundNetwork } from '../src/network.js'
 
 // 共享出站网络的失败收敛：只伪造 undici SDK 边界（Agent close/destroy），走真实 openResponse/withResponse/close。
-
-/** 测试用系统回退：明确直连。 */
-const systemDirect: SystemProxyResolver = {
-  async resolve(): Promise<string | null> {
-    return null
-  },
-  async close(): Promise<void> {},
-}
 
 interface Origin {
   url: string
@@ -54,7 +45,7 @@ async function withFailureSeam<T>(
   run: (installed: InstalledOutboundNetwork, origin: Origin) => Promise<T>,
 ): Promise<T> {
   const origin = await startOrigin()
-  const installed = await installOutboundNetwork({}, systemDirect)
+  const installed = await installOutboundNetwork()
   cleanups.push(origin.close)
   try {
     return await run(installed, origin)

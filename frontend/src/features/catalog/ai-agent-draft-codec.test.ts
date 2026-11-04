@@ -51,14 +51,12 @@ describe('ai-agent-draft-codec', () => {
     expect(emptyAgentDraft(model())).toMatchObject({
       model: 'model',
       variant: '',
-      inheritParentEnvironment: true,
       subagents: [],
       skills: [],
     })
     expect(emptyAgentDraft()).toMatchObject({
       model: '',
       variant: '',
-      inheritParentEnvironment: true,
       subagents: [],
       skills: [],
     })
@@ -96,7 +94,6 @@ describe('ai-agent-draft-codec', () => {
       type: 'USER',
       execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: false,
         tools: [' read ', ''],
         skills: [{ packageName: ' core ', name: ' dev ' }],
         subagents: [' writer ', ''],
@@ -113,7 +110,6 @@ describe('ai-agent-draft-codec', () => {
       execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       model: 'model',
       variant: 'quality',
-      inheritParentEnvironment: false,
       tools: ['read'],
       skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['writer'],
@@ -134,7 +130,6 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: 'prompt',
       execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
@@ -146,7 +141,6 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: 'prompt',
       execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
@@ -161,7 +155,6 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
@@ -202,52 +195,12 @@ describe('ai-agent-draft-codec', () => {
     },
   )
 
-  it('writes the strict config shape with tools, skills, subagents, and inheritParentEnvironment', () => {
+  it('writes the strict config shape with tools, skills, and subagents', () => {
     expect(toEditableAgent(draft()).config).toEqual({
-      inheritParentEnvironment: true,
       tools: ['read', 'bash'],
       skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['helper'],
     })
-  })
-
-  it('encodes and decodes inheritParentEnvironment as exact required boolean', () => {
-    const defaultDraft = emptyAgentDraft()
-    expect(defaultDraft.inheritParentEnvironment).toBe(true)
-
-    const trueAgent: AgentDefinitionDTO = {
-      name: 'assistant-true',
-      description: null,
-      systemPrompt: null,
-      type: 'USER',
-      execution: { driver: 'builtin', settings: { modelName: 'model', variant: null } },
-      config: {
-        inheritParentEnvironment: true,
-        tools: [],
-        skills: [],
-        subagents: [],
-      },
-      version: '1',
-      createTime: 0,
-      updateTime: 0,
-    }
-    const trueDraft = toAgentDraft(trueAgent)
-    expect(trueDraft.inheritParentEnvironment).toBe(true)
-    expect(toEditableAgent(trueDraft).config.inheritParentEnvironment).toBe(true)
-    expect(toEditableAgentUpdate(trueDraft).config.inheritParentEnvironment).toBe(true)
-
-    const falseAgent: AgentDefinitionDTO = {
-      ...trueAgent,
-      name: 'assistant-false',
-      config: {
-        ...trueAgent.config,
-        inheritParentEnvironment: false,
-      },
-    }
-    const falseDraft = toAgentDraft(falseAgent)
-    expect(falseDraft.inheritParentEnvironment).toBe(false)
-    expect(toEditableAgent(falseDraft).config.inheritParentEnvironment).toBe(false)
-    expect(toEditableAgentUpdate(falseDraft).config.inheritParentEnvironment).toBe(false)
   })
 
   it('projects an unconfigured built-in model as empty and only BUILTIN may write null without leaking type', () => {
@@ -258,7 +211,6 @@ describe('ai-agent-draft-codec', () => {
       type: 'BUILTIN',
       execution: null,
       config: {
-        inheritParentEnvironment: true,
         tools: [],
         skills: [],
         subagents: [],

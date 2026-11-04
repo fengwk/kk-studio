@@ -5,7 +5,7 @@
  * 以默认 TLS 验证（信任 `NODE_EXTRA_CA_CERTS` 注入的测试 CA）经真实代理 CONNECT 访问 HTTPS 目标，把响应体
  * 写入 stdout。目标 URL 与代理地址只通过环境变量传入；脚本本身不包含任何凭据。
  */
-import { installOutboundNetwork } from '../../../dist/network.js'
+import { applyNetworkSettings, installOutboundNetwork } from '../../../dist/network.js'
 
 const url = process.env.KK_PROBE_URL
 const proxy = process.env.KK_PROBE_PROXY
@@ -14,14 +14,8 @@ if (url === undefined || proxy === undefined) {
   process.exit(2)
 }
 
-const system = {
-  async resolve() {
-    return null
-  },
-  async close() {},
-}
-
-const installed = await installOutboundNetwork({ https_proxy: proxy }, system)
+const installed = await installOutboundNetwork()
+applyNetworkSettings(proxy, '')
 try {
   const body = await installed.network.withResponse(url, {}, new AbortController().signal, async (response) => {
     const chunks = []

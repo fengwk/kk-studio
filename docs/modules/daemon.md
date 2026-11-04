@@ -24,11 +24,10 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   skills/<package>/          # 已安装技能包
   skill-work/staging/        # 技能安装暂存
   skill-work/backup/         # 技能替换备份
-  updates/install.lock       # 安装目录级内核互斥（独立更新器持有）
-  updates/<operation-id>/    # 受管在线更新工作目录（handoff / permit / takeover / steps / result）
+  updates/<operation-id>-*/  # 受管在线更新工作目录（安装脚本、许可和日志）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫；技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录只保存本机交接事实，不承载凭据，也不进入 Server 状态。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫；技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录保存安装脚本、许可与日志，不承载凭据。
 
 ## 能力装配与运行时调度
 
@@ -39,8 +38,8 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 负责控制连接、会话与消息调度，底层使用统一传输层 [`DaemonTransport`](../../daemon/src/transport/daemon-transport.ts)：
 - 统一传输管道：在单一 WSS 连接上运行标准 HTTP/2 协议。Stream 1 为双向控制流，传输基于 Protobuf 编码的 [`Envelope`](../../daemon/src/generated/control_pb.ts) 信封；IDE HTTP 与 WebSocket 隧道在同一连接上通过 HTTP/2 流多路复用。
-- 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识与资源配额，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。
-- 故障恢复与重连：连接断开时采用指数退避重连（1 秒至 30 秒）；重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。
+- 握手流程：连接建立后服务端首先在 Stream 1 发送 `SETTINGS` 帧下发环境标识、资源配额与网络设置，Daemon 确认后向服务端回送 `READY` 帧公布实例与能力状态，随后进入就绪状态。设置变更使用后续 `SETTINGS` 更新代理，不重复发送 READY；控制 WSS 始终直连。
+- 故障恢复与重连：连接断开时按重连策略重试（1 秒至 30 秒）；首条 `SETTINGS` 中的网络设置无效时断开握手并重试。重连后重新进行 `SETTINGS` / `READY` 协商，不改变进程内已有执行事实。无效的在线网络更新不会覆盖当前设置，可通过后续更新修正。
 - 运行状态：`READY` 携带必需的 `runtimeStatus`，`HEARTBEAT` 固定携带 `{runtimeStatus, ideLeaseRound}`，状态关键变更时触发发送 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`。revision 仅在状态内容变化时推进递增，心跳重发同一内容沿用同一 revision。
 - IDE 使用证明：有活跃视图时心跳递增 `ideLeaseRound` 并与本轮发出时的本机单调时间记录；无活跃视图时该轮次为空。Daemon 只接受当前未过期轮次的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图。
 - 任务调用与幂等恢复：`INVOKE` 经 Protobuf 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。重连后服务端发送 `RECOVER` 查询在途调用，未命中记录时回复 `RECOVER_NOT_FOUND`，命中时重放最新状态。
@@ -140,18 +139,11 @@ LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.serv
 
 二进制文件与媒体结果先向服务端申请预签名上传票据，通过 [`transport/resources.ts`](../../daemon/src/transport/resources.ts) 直接 HTTP PUT 上传对象存储，字节不经过 WebSocket 控制管道。
 
-受管更新由 [`update.ts`](../../daemon/src/update.ts) 驱动：校验官方发布物 URL、SHA-256 摘要与发行清单后，将暂存产物交给操作系统级独立任务
-（Linux `systemd-run`、macOS `launchctl`、Windows 计划任务）执行二进制目录原子替换并重启受管服务。
-下载 watchdog 只由非空 body chunk 刷新：连续 300 秒没有有效数据才中止，headers、redirect 与空 chunk 不算进展，累计下载时长不设硬上限。
-body 完整交付后先停止 watchdog，再关闭 dispatcher；外部取消、无进展超时与网络失败分别报告，不自动重试或续传，也不泄漏 URL 与凭据。
-
-更新是当前状态而不是任务流水：Daemon 只在内存里维护 `runtimeStatus`，没有更新历史表，也没有历史查询接口。
-替换由本机更新器完成，它持有安装目录级内核互斥（`updates/install.lock`）贯穿旧进程退出、备份与替换：
-Daemon 先把本次交接冻结为私有 `handoff.json`，再写出许可 `permit` 与接管确认 `update-takeover.json`，独立更新器据此停止旧受管范围、
-把旧发行改名为备份、再把暂存目录改名为发行位置，每一步写入 `update-steps.json`。
-新 Daemon 完成本机版本与配置预检后写入 `startup-ack.json`，并等待更新器写出 `update-result.json` 且释放互斥，之后才进入正常 READY。
-崩溃后只能凭明确的 handoff、目录布局与进程事实完成或拒绝恢复；失败路径保持旧归档可用，不承诺任意失败点都能自动回滚。
-正式的成功证据来自目标版本 Daemon 的 READY，而不是文件下载完成或连接断开。
+受管更新由 [`installer.ts`](../../daemon/src/installer.ts) 驱动：UPDATE 只携带操作 ID 和目标版本。
+Daemon 从目标版本 tag 下载官方安装脚本，并创建操作系统级独立任务（Linux `systemd-run`、
+macOS `launchctl`、Windows 计划任务）。任务等待准备回执的许可后调用安装脚本，复用现有配置与令牌。
+安装脚本负责发行归档的校验、安装与服务重启；独立任务将输出写入本机日志。
+Daemon 在内存中维护当前更新状态；最终成功以目标版本 Daemon 的 READY 为准。
 
 ## 质量守卫与验证
 

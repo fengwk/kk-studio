@@ -240,8 +240,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .name(name)
             .type(AgentDefinitionType.BUILTIN)
             .systemPrompt("builtin prompt")
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .build();
     definitionRepository.create(builtin);
   }
@@ -252,7 +251,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of(BuiltinAgentDefinitions.COMPACTION_NAME));
-    config.setInheritParentEnvironment(Boolean.TRUE);
 
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);

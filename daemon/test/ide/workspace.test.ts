@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, opendir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 import type { DaemonConfig } from '../../src/contracts.js'
@@ -8,6 +8,7 @@ import { verifyPrivateFile } from '../../src/native/index.js'
 import {
   RecoveryQuotaError,
   canonicalDirectory,
+  epochValue,
   hostHome,
   listDirectories,
   newViewId,
@@ -19,6 +20,11 @@ import {
   writeRecoveryBackup,
   type RecoveryBackup,
 } from '../../src/ide/workspace.js'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, opendir: vi.fn(actual.opendir), realpath: vi.fn(actual.realpath), stat: vi.fn(actual.stat) }
+})
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -83,17 +89,25 @@ describe('view identity and workspace files', () => {
   })
 
   it('bounds listings by both entry count and serialized bytes', async () => {
-    // A short parent keeps the byte limit from masking the 1000-entry limit.
-    const dir = await mkdtemp(join(tmpdir(), 'x'))
-    cleanups.push(() => rm(dir, { recursive: true, force: true }))
-    const many = dir
-    const long = join(dir, 'long')
-    await mkdir(long)
-    await Promise.all(Array.from({ length: 1001 }, (_, i) => mkdir(join(many, String(i).padStart(4, '0')))))
+    // A virtual short path isolates the count limit from the real temporary path's byte length.
+    const many = join(parse(process.cwd()).root, 'x')
+    vi.mocked(realpath).mockResolvedValueOnce(many as never)
+    vi.mocked(stat).mockResolvedValueOnce({ isDirectory: () => true } as never)
+    vi.mocked(opendir).mockResolvedValueOnce({
+      async *[Symbol.asyncIterator]() {
+        for (let i = 1000; i >= 0; i--) {
+          yield { name: String(i).padStart(4, '0'), isDirectory: () => true }
+        }
+      },
+    } as never)
     const count = await listDirectories(many)
     expect(count.truncated).toBe(true)
     expect(count.children).toHaveLength(1000)
     expect(count.children.at(-1)?.name).toBe('0999')
+
+    const dir = await tempDir()
+    const long = join(dir, 'long')
+    await mkdir(long)
     await Promise.all(Array.from({ length: 300 }, (_, i) => mkdir(join(long, `${String(i).padStart(4, '0')}${'界'.repeat(60)}`))))
     const bytes = await listDirectories(long)
     // Multibyte names hit the byte bound well before the count bound.
@@ -107,6 +121,7 @@ describe('view identity and workspace files', () => {
     expect(() => validateViewId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA')).toThrow(IdeError)
     expect(() => validateViewId('pane-1')).toThrow(IdeError)
     expect(validateBindingEpoch('1')).toBe('1')
+    expect(epochValue('3')).toBe(3n)
     expect(validateBindingEpoch('9223372036854775807')).toBe('9223372036854775807')
     expect(() => validateBindingEpoch('0')).toThrow(IdeError)
     expect(() => validateBindingEpoch('9223372036854775808')).toThrow(IdeError)
@@ -135,9 +150,62 @@ describe('view identity and workspace files', () => {
   it('serialises the managed single folder workspace', () => {
     expect(JSON.parse(workspaceFileContent('/home/user'))).toEqual({ folders: [{ path: '/home/user' }] })
   })
+
+  it('rejects unsafe directory names without exposing them in listings', async () => {
+    if (process.platform === 'win32') return
+    const dir = await tempDir()
+    await mkdir(join(dir, 'valid'))
+    await mkdir(join(dir, '  '))
+    await mkdir(join(dir, 'bad\nname'))
+    const listing = await listDirectories(dir)
+    expect(listing.truncated).toBe(true)
+    expect(listing.children.map(child => child.name)).toEqual(['valid'])
+    await expect(listDirectories(join(dir, 'bad\nname'))).rejects.toThrow('directory path is invalid')
+  })
 })
 
 describe('private recovery backups', () => {
+  it('enforces aggregate quota and leaves existing recovery data intact', async () => {
+    const cfg = config(await tempDir())
+    const first = backup(newViewId(), 'first')
+    const second = backup(newViewId(), 'second')
+    const firstBytes = Buffer.byteLength(`${JSON.stringify(first)}\n`)
+    const secondBytes = Buffer.byteLength(`${JSON.stringify(second)}\n`)
+    await writeRecoveryBackup(cfg, first, firstBytes + secondBytes)
+    // Each backup fits alone, but the combined directory budget does not.
+    await expect(writeRecoveryBackup(cfg, second, firstBytes + secondBytes - 1))
+      .rejects.toThrow('recovery data quota is exhausted')
+    expect(await readRecoveryBackup(cfg, first.viewId, firstBytes)).toEqual(first)
+    expect(await readRecoveryBackup(cfg, second.viewId, secondBytes)).toBeNull()
+    await expect(writeRecoveryBackup(cfg, first, 0)).rejects.toThrow('recovery quota is invalid')
+    await expect(readRecoveryBackup(cfg, first.viewId, firstBytes - 1))
+      .rejects.toThrow('recovery backup exceeds the configured quota')
+  })
+
+  it('reports malformed JSON and filesystem errors without leaking paths', async () => {
+    const cfg = config(await tempDir())
+    const viewId = newViewId()
+    const directory = recoveryDirectory(cfg)
+    await mkdir(directory, { recursive: true })
+    const file = join(directory, `${viewId}.json`)
+    await writeFile(file, '{')
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is corrupt')
+    await rm(file)
+    await mkdir(file)
+    await expect(readRecoveryBackup(cfg, viewId, 1024)).rejects.toThrow('recovery backup is unreadable:')
+  })
+
+  it('reports quota measurement failures for dangling recovery entries', async () => {
+    if (process.platform === 'win32') return
+    const cfg = config(await tempDir())
+    const directory = recoveryDirectory(cfg)
+    await mkdir(directory, { recursive: true })
+    await symlink(join(directory, 'missing'), join(directory, 'dangling.json'))
+    // A dangling entry must not be silently excluded from the quota.
+    await expect(writeRecoveryBackup(cfg, backup(newViewId()), 4096))
+      .rejects.toThrow('recovery quota could not be measured: ENOENT')
+  })
+
   it('round-trips a complete backup and replaces only the same view', async () => {
     const dir = await tempDir()
     const cfg = config(dir)

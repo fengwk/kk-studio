@@ -3,7 +3,7 @@
  *
  * These tests pin the platform-level facts: every publication path runs the repository script suite
  * (including Unix fixtures), the daemon matrix runs the macOS system-Bash contract, both Windows PowerShell
- * hosts run the native installer/update suites, and a failed gate blocks publication.
+ * hosts run the native installer suite, and a failed gate blocks publication.
  */
 
 import assert from 'node:assert/strict'
@@ -14,7 +14,6 @@ import test from 'node:test'
 import { repositoryRoot } from '../../dev/lib/repo-root.mjs'
 
 const REPOSITORY_ROOT = repositoryRoot()
-const TESTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon/tests')
 const SUITE_COMMAND = 'node --test scripts/daemon/tests/*.test.mjs'
 
 const workflow = (name) => readFileSync(path.join(REPOSITORY_ROOT, '.github/workflows', name), 'utf8')
@@ -28,7 +27,7 @@ function jobBlock(text, name) {
 
 test('test intent: every publication path runs the repository script suite', () => {
   // Docker validate and release stage run the complete repository discovery, which includes the
-  // daemon install/update fixtures; the daemon matrix additionally runs the macOS system Bash path.
+  // daemon installer fixtures; the daemon matrix additionally runs the macOS system Bash path.
   for (const [name, jobName] of [
     ['docker-publish.yml', 'validate'],
     ['daemon-release.yml', 'stage'],
@@ -63,16 +62,6 @@ test('test intent: the Windows gate runs both PowerShell hosts', () => {
   ]) {
     assert.throws(() => jobBlock(workflow(name), jobName), /missing job/u, `${name}: duplicate Windows job must stay removed`)
   }
-})
-
-test('test intent: the Windows gate chains the managed-update native suite', () => {
-  // The CI-invoked installer suite must also run the update suite on both hosts.
-  const installer = readFileSync(path.join(TESTS_DIR, 'test_daemon_install_windows.ps1'), 'utf8')
-  assert.ok(installer.includes('test_daemon_update_windows.ps1'))
-  assert.ok(installer.includes('& $hostExe'))
-  const update = readFileSync(path.join(TESTS_DIR, 'test_daemon_update_windows.ps1'), 'utf8')
-  assert.ok(update.includes('daemon\\src\\update-scripts.ts'))
-  assert.ok(update.includes('WINDOWS_UPDATE_SCRIPT'))
 })
 
 test('test intent: publish and release require the shared gates', () => {

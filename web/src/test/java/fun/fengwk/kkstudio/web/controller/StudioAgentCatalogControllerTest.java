@@ -227,7 +227,7 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
                 .andExpect(jsonPath("$.data.config.subagents").isEmpty())
-                .andExpect(jsonPath("$.data.config.inheritParentEnvironment").value(true))
+                .andExpect(jsonPath("$.data.config.inheritParentEnvironment").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
     assertEquals(agentName, agentData.path("name").asText());

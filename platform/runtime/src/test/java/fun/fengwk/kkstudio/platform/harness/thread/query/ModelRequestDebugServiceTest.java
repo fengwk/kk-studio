@@ -113,7 +113,7 @@ class ModelRequestDebugServiceTest {
   /** 目标 Agent 的持久化配置：subagents 里的 nested 只是声明，绝不递归解析。 */
   private static final String CODER_CONFIG_JSON =
       "{\"tools\":[\"read\"],\"skills\":[{\"packageName\":\"pkg\",\"name\":\"sk\"}],"
-          + "\"subagents\":[\"nested\"],\"inheritParentEnvironment\":true}";
+          + "\"subagents\":[\"nested\"]}";
 
   /** required-nullable 字段在真实 NON_NULL 序列化配置下也必须显式发射；声明序由显式关闭字母序保持。 */
   private static final ObjectMapper JSON =
@@ -253,6 +253,81 @@ class ModelRequestDebugServiceTest {
         "model",
         BuiltinExecution.model(snapshot.entryState().baseSettings().execution()).modelName());
     assertEquals("env-b", snapshot.entryState().baseSettings().environmentName());
+  }
+
+  /** 子线程预览以执行根当前环境为准，而非草稿或子线程路径中的环境。 */
+  @Test
+  void usesExecutionRootEnvironmentForChildPreview() {
+    UUID childId = new UUID(0L, 10L);
+    EntryPath path = basePath();
+    ThreadState child =
+        new ThreadState(
+            childId,
+            SESSION_ID,
+            THREAD_ID,
+            USER_ENTRY_ID,
+            CREATION_REQUEST_HASH,
+            "child",
+            THREAD_ID,
+            false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            NOW,
+            NOW);
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            child,
+            EntryCurrentState.from(path),
+            new EntrySlice(null, path.entries()),
+            List.of(),
+            null,
+            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
+            List.of(),
+            0,
+            false,
+            List.of(),
+            false);
+    EntryPath rootPath =
+        new EntryPath(
+            List.of(
+                new Entry(
+                    SESSION_ID,
+                    SESSION_ID,
+                    null,
+                    new RootPayload(branchSettings().withEnvironmentName("root-env")),
+                    NOW)));
+    ThreadSnapshot root = mock(ThreadSnapshot.class);
+    when(root.thread()).thenReturn(thread(SESSION_ID));
+    when(root.entryState()).thenReturn(EntryCurrentState.from(rootPath));
+    when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(root);
+    when(turnResolver.planLiveWithSettings(eq(childId), eq(path), any()))
+        .thenReturn(successfulPlan());
+    stubCoderDefinition();
+
+    HarnessModelRequestDebugDTO debug =
+        service.getModelRequestDebug(childId, DRAFT_MODEL, DRAFT_ENV);
+
+    verify(runtime).getThreadSnapshot(THREAD_ID);
+    verify(turnResolver)
+        .planLiveWithSettings(
+            childId,
+            path,
+            branchSettings()
+                .withExecution(BuiltinExecution.of(DRAFT_MODEL))
+                .withEnvironmentName("root-env"));
+    assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
+    assertEquals("draft-model", debug.getModel().getModelName());
+    assertEquals("draft-variant", debug.getModel().getVariant());
+    assertEquals("root-env", debug.getEnvironmentName());
+    assertEquals("system instruction", debug.getSystemInstruction());
+    assertNull(debug.getPlanningError());
+    assertNull(debug.getFrozenInvocation());
   }
 
   /** 测试意图：environment 的 null（未选）/ 选中 / clear 只是逐次透传给同一 planner，服务本身不缓存或改写选择。 */

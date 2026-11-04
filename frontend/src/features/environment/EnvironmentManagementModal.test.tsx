@@ -94,7 +94,8 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment(), onClose)
 
-    const closeBtn = screen.getByRole('button', { name: '关闭' })
+    // 底部关闭动作与标题关闭按钮都可用；优先验证新增的底部动作。
+    const closeBtn = screen.getAllByRole('button', { name: '关闭' })[1]
     await user.click(closeBtn)
     expect(onClose).toHaveBeenCalled()
   })

@@ -207,6 +207,31 @@ class ConfigSyncParserTest {
             .anyMatch(skip -> "agents".equals(skip.getKind()) && "a".equals(skip.getName())));
   }
 
+  /** 测试意图：旧环境开关作为未知字段报告，配置同步不得导入该 Agent。 */
+  @Test
+  void legacyAgentEnvironmentFieldSkipsEntry() {
+    String yaml =
+        "agents:\n"
+            + "  - name: a\n"
+            + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
+            + "    config:\n"
+            + "      tools: []\n"
+            + "      skills: []\n"
+            + "      subagents: []\n"
+            + "      inheritParentEnvironment: true\n";
+    ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
+
+    assertTrue(document.agents().isEmpty());
+    assertTrue(
+        document.skipped().stream()
+            .anyMatch(
+                skip ->
+                    "agents".equals(skip.getKind())
+                        && "a".equals(skip.getName())
+                        && skip.getReason().contains("unsupported field:")
+                        && skip.getReason().contains("inheritParentEnvironment")));
+  }
+
   @Test
   void settingsUnknownLeafIsPrunedAndReportedWhileSupportedSectionsRemain() {
     Map<String, Object> settings =

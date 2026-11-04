@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * Windows 原生退出诊断：只有 Windows 且显式设置 `KK_WINDOWS_NATIVE_DIAGNOSTIC=1` 时才包装模块；否则直接返回真实模块。
@@ -37,6 +37,7 @@ import {
   type Ready,
 } from '../src/generated/control_pb.js'
 import * as native from '../src/native/index.js'
+import * as network from '../src/network.js'
 import * as transportModule from '../src/transport/index.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
@@ -66,18 +67,6 @@ import {
  */
 
 const cleans: Array<() => void | Promise<void>> = []
-beforeEach(() => {
-  // 装配测试使用显式直连，不依赖开发机或 CI 用户的桌面代理设置。
-  vi.stubEnv('http_proxy', '')
-  vi.stubEnv('https_proxy', '')
-  vi.stubEnv('no_proxy', '')
-  if (process.platform === 'darwin') {
-    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue({
-      async resolve() { return null },
-      async close() {},
-    })
-  }
-})
 afterEach(async () => {
   for (const clean of cleans.splice(0).reverse()) {
     await clean()
@@ -226,7 +215,7 @@ async function readFileText(file: string): Promise<string> {
 describe('daemon main information commands', () => {
   it('does not initialize network or parse proxy settings for information commands', async () => {
     vi.stubEnv('http_proxy', 'invalid-proxy-credential-marker')
-    const factory = vi.spyOn(native, 'createSystemProxyResolver').mockImplementation(() => {
+    const factory = vi.spyOn(network, 'installOutboundNetwork').mockImplementation(() => {
       throw new Error('network factory must not run for information commands')
     })
     const captured = capture()
@@ -325,84 +314,17 @@ describe('daemon main information commands', () => {
 
 // 装配/释放在 Linux 与 macOS 上都走真实 POSIX supervisor。macOS 没有子进程收养，但不拒绝启动。
 describe('daemon main real assembly', () => {
-  it('fails before transport or READY when the startup handoff result is failed', async () => {
+  it('ignores invalid inherited proxy settings while connecting directly', async () => {
     const fixture = await createControlServer()
     cleans.push(() => fixture.dispose())
     await writeConfig(fixture)
-
-    const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-    const updatesDir = await native.ensurePrivateDirectory(join(fixture.dataDir, 'updates'))
-    const operationDir = await native.ensurePrivateDirectory(join(updatesDir, operationId))
-    const handoff = {
-      state: 'ACCEPTED',
-      operationId,
-      targetVersion: '9.9.9',
-      artifactUrl: 'https://example.invalid/kk-studio.tar.gz',
-      artifactSha256: 'a'.repeat(64),
-      extractDir: join(operationDir, 'extract'),
-      installedDir: fixture.dataDir,
-      configFile: fixture.configPath,
-      updateScript: join(operationDir, 'update.sh'),
-      permitFile: join(operationDir, 'permit'),
-      startupToken: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-    }
-    await native.writePrivateFile(join(operationDir, 'handoff.json'), `${JSON.stringify(handoff)}\n`)
-    await native.writePrivateFile(
-      join(operationDir, 'update-result.json'),
-      `${JSON.stringify({
-        operationId,
-        phase: 'FAILED',
-        message: 'startup handoff test failure',
-      })}\n`,
-    )
-
-    const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
-    const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
-    const transportSpy = vi.spyOn(transportModule, 'createDaemonTransport')
-    const captured = capture()
-    let code: number
-    let transportCalls = -1
-    try {
-      code = await main(['--config', fixture.configPath])
-      transportCalls = transportSpy.mock.calls.length
-    } finally {
-      captured.restore()
-      transportSpy.mockRestore()
-    }
-
-    expect(code).toBe(1)
-    expect(transportCalls).toBe(0)
-    expect(fixture.received).toEqual([])
-    expect(captured.out.join('')).toBe('')
-    expect(captured.err.join('')).toContain('daemon failed: update handoff failed: startup handoff test failure')
-    expect(new Set(process.listeners('SIGINT'))).toEqual(beforeInt)
-    expect(new Set(process.listeners('SIGTERM'))).toEqual(beforeTerm)
-    // main 已退出且释放目录锁；能够重新取得锁证明失败路径没有把进程锁遗留在原实例。
-    const lock = await native.acquireDirectoryLock(fixture.dataDir)
-    await lock.close()
-  })
-
-  it('rejects invalid proxies before connecting and closes the resolver and data lock', async () => {
-    const fixture = await createControlServer()
-    cleans.push(() => fixture.dispose())
-    await writeConfig(fixture)
-    const resolver = {
-      resolve: vi.fn(async () => null),
-      close: vi.fn(async () => undefined),
-    }
-    vi.spyOn(native, 'createSystemProxyResolver').mockReturnValue(resolver)
     const marker = 'proxy-credential-marker'
     vi.stubEnv('http_proxy', `http://user:${marker}@proxy.invalid:8080`)
     const harness = startMain(fixture.configPath)
-    expect(await harness.run).toBe(1)
-    expect(fixture.received).toEqual([])
-    expect(resolver.resolve).not.toHaveBeenCalled()
-    expect(resolver.close).toHaveBeenCalledTimes(1)
-    expect(harness.stderr.join('')).toContain('Invalid HTTP proxy or bypass configuration')
+    cleans.push(() => harness.stop())
+    await waitFor(() => fixture.received.some((envelope) => envelope.messageType === MessageType.READY), 30_000)
     expect(harness.stderr.join('')).not.toContain(marker)
-    const lock = await native.acquireDirectoryLock(fixture.dataDir)
-    await lock.close()
-    harness.assertSignalListenersRestored()
+    await harness.stop()
   })
 
   it(

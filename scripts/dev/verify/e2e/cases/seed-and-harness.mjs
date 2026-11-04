@@ -401,7 +401,7 @@ registerCase({
         description: 'Local readonly preview E2E agent.',
         systemPrompt: 'Reply with a short deterministic acknowledgement.',
         execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentResponse.json)
       assert(

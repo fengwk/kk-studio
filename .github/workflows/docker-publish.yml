@@ -132,12 +132,6 @@ jobs:
             -Dtest=WebApplicationStartupSubprocessTest \
             -Dsurefire.failIfNoSpecifiedTests=false \
             "-Dkkstudio.startup.test.jar=${APP_JAR}"
-      - name: Verify Java update commands with the Node decoder
-        # Java producer 的产物由同一次 distribution verify 写入 platform/daemon-server/target；
-        # 这里用同一份产物驱动生产 Node decoder，两端对共享 fixture 的接受/拒绝集合必须一致。
-        run: |
-          set -euo pipefail
-          node scripts/daemon/verify-java-update-commands.mjs platform/daemon-server/target/daemon-update-java-commands.json
       - name: Stage the verified distribution artifact
         # 只把已验收的 Fat JAR 与版本/提交/摘要清单放进 artifact；
         # 上传目录由脚本重建为封闭文件集合，不包含工作树、环境或凭据。

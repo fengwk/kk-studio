@@ -48,7 +48,7 @@ export function ChatWorkspacePane({
 }) {
   return (
     <AgentPane
-      owner={{ type: 'CHAT', chatId: chat.id }}
+      owner={{ kind: 'CHAT', id: chat.id }}
       paneId={pane.id}
       agents={agents}
       environments={environments}
@@ -72,12 +72,7 @@ export function ChatWorkspacePane({
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
       onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-      loadSessions={(owner) => {
-        if (owner.type !== 'CHAT') {
-          return Promise.resolve([])
-        }
-        return chatService.listChatSessions(owner.chatId)
-      }}
+      loadSessions={() => chatService.listChatSessions(chat.id)}
     />
   )
 }

@@ -523,7 +523,10 @@ data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
 焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、
-遮罩与关闭按钮。[`NumberInput`](../../frontend/src/shared/ui/controls/NumberInput.tsx) 是整数输入
+遮罩与关闭按钮。普通确认使用 `ConfirmActionModal`，复杂表单使用 `Dialog` 的
+`modal-body` 与 `modal-footer`；已迁移的弹窗通过 `modal-touch-target` 在窄屏提供 44px 操作触区、
+安全区留白和正文滚动，弹窗内 Select 的 portal 选项也遵循相同触区。
+[`NumberInput`](../../frontend/src/shared/ui/controls/NumberInput.tsx) 是整数输入
 （字符串值、自绘步进），十进制参数保留原生 `step=any` 输入语义。Escape 优先级由
 [`blocking-overlay`](../../frontend/src/shared/ui/blocking-overlay.ts) 统一，弹层与菜单优先于 pane 输入。
 i18n 支持 zh-CN/en-US，浏览器偏好保存 locale，切换同步 document.lang。

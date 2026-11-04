@@ -5,47 +5,33 @@ import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
-/**
- * 产品命令批次的 owner wire DTO。
- *
- * <p>只表达真正持有 Harness Session 的产品归属：{@code CHAT} 由 {@code chat_session} 直接持有，给出 {@code chatId}；
- * {@code ISSUE_AGENT} 由 {@code (issueId, agentName) -> threadId} 稳定绑定持有，给出 {@code issueId} 与 {@code
- * agentName}。 Canvas 不持有 Harness Session，因此没有 owner 形态；Issue+Agent 命令的公共入口是 Issue 业务工作流，本 DTO 只描述
- * owner 事实本身。
- */
+/** 不透明的产品归属身份；title 与 link 仅供展示，不用于授权。 */
 @Data
 public class HarnessCommandOwnerDTO {
 
-  /** owner 类型：{@code CHAT} 或 {@code ISSUE_AGENT}。 */
-  private String type;
+  private String kind;
+  private String id;
+  private @Nullable String title;
+  private @Nullable String link;
 
-  /** Chat owner 的 canonical UUID string。 */
-  private @Nullable String chatId;
-
-  /** Issue+Agent owner 的 canonical UUID string。 */
-  private @Nullable String issueId;
-
-  /** Issue+Agent owner 的 Agent 自然名称。 */
-  private @Nullable String agentName;
-
-  @JsonSetter("type")
-  public void setType(Object value) {
-    this.type = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.type");
+  @JsonSetter("kind")
+  public void setKind(Object value) {
+    this.kind = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.kind");
   }
 
-  @JsonSetter("chatId")
-  public void setChatId(Object value) {
-    this.chatId = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.chatId");
+  @JsonSetter("id")
+  public void setId(Object value) {
+    this.id = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.id");
   }
 
-  @JsonSetter("issueId")
-  public void setIssueId(Object value) {
-    this.issueId = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.issueId");
+  @JsonSetter("title")
+  public void setTitle(Object value) {
+    this.title = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.title");
   }
 
-  @JsonSetter("agentName")
-  public void setAgentName(Object value) {
-    this.agentName = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.agentName");
+  @JsonSetter("link")
+  public void setLink(Object value) {
+    this.link = HarnessRuntimeDtoSupport.requireJsonString(value, "owner.link");
   }
 
   @JsonAnySetter

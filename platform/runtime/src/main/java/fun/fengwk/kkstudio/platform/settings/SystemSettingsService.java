@@ -6,7 +6,6 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.util.Objects;
@@ -100,14 +99,8 @@ public class SystemSettingsService {
   }
 
   private SystemSettingsDTO toDto(SystemSettingsRepository.SystemSettingsRecord record) {
-    SystemSettingsSectionsDTO sections = systemSettingsCodec.toSections(record.settings());
-    SystemSettingsDTO dto = new SystemSettingsDTO();
-    dto.setTool(sections.getTool());
-    dto.setAiRuntime(sections.getAiRuntime());
-    dto.setEnvironment(sections.getEnvironment());
-    dto.setNetwork(sections.getNetwork());
-    dto.setStorageMedia(sections.getStorageMedia());
-    dto.setAdvanced(sections.getAdvanced());
+    SystemSettingsDTO dto =
+        systemSettingsCodec.toSections(record.settings(), new SystemSettingsDTO());
     dto.setVersion(SystemSettingsVersions.format(record.version()));
     dto.setCreateTime(record.createTime());
     dto.setUpdateTime(record.updateTime());

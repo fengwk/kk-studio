@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -40,6 +42,26 @@ class AgentModelRuntimeConfigParserTest {
 
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
+
+  /** 独立计价入口仍校验未信任 DTO；完整配置和独立入口对缺省与非法费率一致。 */
+  @Test
+  void standalonePricingAndConfigUseTheSameValidation() {
+    assertEquals(ModelPricing.ZERO, AgentModelPricingCodec.parsePricing(null));
+    AgentModelConfigDTO config = parser.decode(validConfig());
+    AgentModelPricingDTO pricing = new AgentModelPricingDTO();
+    config.setPricing(pricing);
+    assertEquals(AgentModelPricingCodec.parsePricing(pricing), parser.parse(config).pricing());
+
+    AgentModelRateSetDTO base = pricing.getBase();
+    base.setInput(BigDecimal.valueOf(-1));
+    String direct =
+        assertThrows(
+                IllegalArgumentException.class, () -> AgentModelPricingCodec.parsePricing(pricing))
+            .getMessage();
+    assertEquals(
+        direct,
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(config)).getMessage());
+  }
 
   /** 定价段落按完整定义解析：基础费率与 TTL 价格精确保留，不再存在旧 6 个扁平价格字段。 */
   @Test

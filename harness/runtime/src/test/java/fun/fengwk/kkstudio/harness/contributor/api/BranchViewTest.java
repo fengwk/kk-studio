@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/** {@link BranchView} 纯接口契约与自定义状态快照、追加意图、上下文投影等值对象测试。 */
+/** {@link BranchView} 纯接口契约与自定义状态快照、追加意图等值对象测试。 */
 class BranchViewTest {
 
   /** 验证 BranchView 是纯接口且不暴露任何底层历史路径或实现细节。 */
@@ -122,50 +122,5 @@ class BranchViewTest {
     assertEquals(spaced, new CustomStateSnapshot(spaced).dataJson());
     String precise = "{\"n\":0.123456789012345678901234567890}";
     assertEquals(precise, new AppendCustomEntry("goal.state", precise).dataJson());
-  }
-
-  /** 验证 ContextFragment 文本非空校验与值对象语义。 */
-  @Test
-  void contextFragmentValidatesText() {
-    ContextFragment fragment = new ContextFragment("Summary: done");
-    assertEquals("Summary: done", fragment.text());
-
-    assertThrows(NullPointerException.class, () -> new ContextFragment(null));
-
-    ContextFragment same = new ContextFragment("Summary: done");
-    assertEquals(fragment, same);
-    assertEquals(fragment.hashCode(), same.hashCode());
-  }
-
-  /** 验证 ContextProjector 接收 BranchView 并返回 List<ContextFragment> 契约。 */
-  @Test
-  void contextProjectorProjectsBranchViewToFragments() {
-    ContextProjector projector =
-        view -> {
-          Optional<CustomStateSnapshot> latest = view.latestCustomEntry("state");
-          return latest.map(s -> List.of(new ContextFragment(s.dataJson()))).orElse(List.of());
-        };
-
-    BranchView viewWithState =
-        new BranchView() {
-          @Override
-          public List<CustomStateSnapshot> customEntries(String customType) {
-            return List.of(new CustomStateSnapshot("{\"state\":\"data\"}"));
-          }
-
-          @Override
-          public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-            return Optional.of(new CustomStateSnapshot("{\"state\":\"data\"}"));
-          }
-
-          @Override
-          public Optional<GoalSnapshot> goal() {
-            return Optional.empty();
-          }
-        };
-
-    List<ContextFragment> fragments = projector.project(viewWithState);
-    assertEquals(1, fragments.size());
-    assertEquals("{\"state\":\"data\"}", fragments.get(0).text());
   }
 }

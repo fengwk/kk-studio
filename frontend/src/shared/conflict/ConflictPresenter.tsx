@@ -13,17 +13,20 @@ export function ConflictPresenter({
   onRefresh,
   onRetry,
   onClose,
+  className,
 }: {
   conflict: ConflictPresentation | null
   onRefresh: () => void
   onRetry?: () => void
   onClose: () => void
+  className?: string
 }) {
   if (conflict == null) {
     return null
   }
   return (
     <Dialog
+      className={className}
       role="alertdialog"
       title={translate('shared.conflict.title')}
       onClose={onClose}

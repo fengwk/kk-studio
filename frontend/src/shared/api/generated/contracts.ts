@@ -16,7 +16,6 @@ export interface AgentDefinitionConfigDTO {
   tools: string[]
   skills: SkillRefDTO[]
   subagents: string[]
-  inheritParentEnvironment: boolean
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO */
@@ -1084,10 +1083,10 @@ export interface HarnessCommandCreateDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO */
 export interface HarnessCommandOwnerDTO {
-  type: string
-  chatId?: string | null
-  issueId?: string | null
-  agentName?: string | null
+  kind: string
+  id: string
+  title?: string | null
+  link?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO */
@@ -1464,13 +1463,10 @@ export interface InteractionDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO */
 export interface InteractionOwnerDTO {
-  type: string
-  chatId: string | null
-  chatTitle: string | null
-  issueId: string | null
-  issueTitle: string | null
-  agentName: string | null
-  rootThreadName: string | null
+  kind: string
+  id: string
+  title: string | null
+  link: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO */

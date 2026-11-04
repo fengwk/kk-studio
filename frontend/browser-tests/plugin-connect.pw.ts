@@ -254,14 +254,14 @@ for (const stage of ['prepare', 'complete'] as const) {
     await opener.click()
     const dialog = page.getByRole('dialog')
     const input = dialog.getByTestId('plugin-callback-input')
-    await expect(input).toHaveCSS('height', '32px')
+    await expect(input).toHaveCSS('height', '44px')
     await expect(input).toHaveAttribute('type', 'password')
     await expect(input).toHaveAttribute('autocomplete', 'off')
 
     const login = dialog.getByRole('button', { name: '打开官方登录页面' })
-    await expect(login).toHaveCSS('height', '32px')
+    await expect(login).toHaveCSS('min-height', '44px')
     const close = dialog.getByRole('button', { name: '关闭' })
-    await expect(close).toHaveCSS('height', '32px')
+    await expect(close).toHaveCSS('height', '44px')
 
     if (stage === 'prepare') {
       await input.fill('offline-callback')

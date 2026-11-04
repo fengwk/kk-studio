@@ -1,5 +1,28 @@
 import { expect, test } from './fixture'
 
+test('discarding a corrupt pending record uses the shared confirmation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 740 })
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'kkstudio.canvas.pending-run:8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f:00000000-0000-4000-8000-000000000009',
+      'invalid-json',
+    )
+  })
+  await page.goto('/browser-tests/canvas-generation-harness.html')
+  const discard = page.getByTestId('discard-pending-btn')
+  await discard.click()
+  const confirm = page.getByRole('alertdialog', { name: '确认放弃未决记录' })
+  await expect(confirm.getByText('这不会撤销服务端运行，核实后再继续')).toBeVisible()
+  await expect(confirm.getByRole('button', { name: '取消' })).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('canvas-discard-mobile.png') })
+  await page.keyboard.press('Escape')
+  await expect(confirm).toHaveCount(0)
+  await expect(discard).toBeFocused()
+  await discard.click()
+  await confirm.getByRole('button', { name: '确认放弃' }).click()
+  await expect(page.getByTestId('local-pending-error')).toHaveCount(0)
+})
+
 test.describe('Canvas Generation Panel Real Browser Layout Regression', () => {
   test('Standard desktop layout: renders prompt textarea, attached reference chips, candidate buttons, parameter controls, and expansion toggle', async ({
     page,

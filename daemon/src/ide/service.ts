@@ -1,5 +1,4 @@
-import { realpath, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
 import type {
   DaemonConfig,
   IdeCommand,
@@ -10,30 +9,28 @@ import type {
   IdeViewSummary,
   ProcessSupervisor,
 } from '../contracts.js'
-import type { IdeLease } from '../generated/control_pb.js'
-import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
-import { createIdeBridge, type BridgeDocument, type BridgeResult, type IdeBridge } from './bridge.js'
+import { writePrivateFile } from '../native/index.js'
+import { createIdeBridge, type IdeBridge } from './bridge.js'
 import {
   createCodeServerManager,
   idePaths,
   type CodeServerManager,
   type CodeServerSession,
-  type ManagedViewCloseMode,
 } from './codeServer.js'
 import { IdeError, failureReply } from './errors.js'
+import { createClosePath } from './serviceClose.js'
+import { createCommandHandler } from './serviceCommands.js'
+import { createViewLease } from './serviceLease.js'
+import { createViewRegistry } from './serviceRegistry.js'
+import type { ActiveStream, ClaimRecord, ViewRecord } from './serviceTypes.js'
 import {
   LONG_MAX,
   RecoveryQuotaError,
   canonicalDirectory,
-  hostHome,
-  listDirectories,
   readRecoveryBackup,
   validateBindingEpoch,
-  validateUuid,
   validateViewId,
   workspaceFileContent,
-  writeRecoveryBackup,
-  type RecoveryBackup,
 } from './workspace.js'
 
 /**
@@ -43,7 +40,7 @@ import {
  * a per-view lock. A claim reservation counts toward the fixed view quota before any process or
  * filesystem work starts, so concurrent opens cannot oversubscribe one Environment. Usage proof
  * never creates or extends a view beyond its own epoch: Runtime supplies the local monotonic time
- * at which the lease round was sent, and DETACH freezes that epoch against late proofs.
+ * at which the lease round was sent; old binding epochs cannot be renewed.
  */
 
 export const IDE_MAX_VIEWS = 64
@@ -52,7 +49,6 @@ export const IDE_VIEW_EXPIRY_MILLIS = 600_000
 export const IDE_IDLE_STOP_MILLIS = 60_000
 export const IDE_CLOSE_BUDGET_MILLIS = 10_000
 export const DEFAULT_RECOVERY_QUOTA_BYTES = 16 * 1024 * 1024
-const MAX_CACHED_CLAIMS = 256
 const MAX_COMMAND_TEXT_CHARS = 4096
 const MAX_STREAM_PATH_BYTES = 8192
 const MAX_STREAM_HEADERS = 100
@@ -99,46 +95,6 @@ export interface IdeServiceOptions {
   onEvent?: (event: IdeServiceEvent) => void
   recoveryQuotaBytes?: number
   maxViews?: number
-}
-
-interface ActiveStream {
-  viewId: string
-  bindingEpoch: string
-  controller: AbortController
-  closed: Promise<void>
-  resolveClosed: () => void
-  released: boolean
-}
-
-interface ViewRecord {
-  viewId: string
-  documentId: string
-  eventNodeId: string
-  connectionId: string
-  claimId: string
-  bindingEpoch: string
-  directory: string
-  workspacePath: string
-  workspaceOwned: boolean
-  state: 'OPEN' | 'CLOSING'
-  cleanupFailed: boolean
-  createdAt: number
-  lastProofAt: number | null
-  detachedAt: number | null
-  expiresAt: number
-  expiryTimer?: unknown
-  streams: Set<ActiveStream>
-  closePromise?: Promise<IdeReply>
-  forceAllowed?: boolean
-  nativeClosePending?: boolean
-  sessionGeneration: number
-}
-
-interface ClaimRecord {
-  shape: string
-  reply: IdeReply
-  viewId: string
-  bindingEpoch: string
 }
 
 const systemScheduler: IdeScheduler = {
@@ -202,37 +158,6 @@ function summary(view: ViewRecord): IdeViewSummary {
     workspacePath: view.workspacePath,
     state: view.state,
   }
-}
-
-function openReply(view: ViewRecord): IdeReply {
-  return {
-    ok: true,
-    viewId: view.viewId,
-    documentId: view.documentId,
-    eventNodeId: view.eventNodeId,
-    connectionId: view.connectionId,
-    claimId: view.claimId,
-    bindingEpoch: view.bindingEpoch,
-    directory: view.directory,
-    workspacePath: view.workspacePath,
-  }
-}
-
-function openCommandShape(command: IdeCommand): string {
-  const mode = required(command.mode, 'mode')
-  if (mode !== 'create' && mode !== 'resume') {
-    throw new IdeError('mode is invalid')
-  }
-  return JSON.stringify({
-    action: 'OPEN_VIEW',
-    viewId: validateViewId(required(command.viewId, 'viewId')),
-    documentId: validateUuid(required(command.documentId, 'documentId'), 'documentId'),
-    eventNodeId: validateUuid(required(command.eventNodeId, 'eventNodeId'), 'eventNodeId'),
-    connectionId: validateUuid(required(command.connectionId, 'connectionId'), 'connectionId'),
-    claimId: validateUuid(required(command.claimId, 'claimId'), 'claimId'),
-    mode,
-    directory: boundedText(command.directory, 'directory') ?? null,
-  })
 }
 
 function upstreamPath(request: IdeStreamRequest, viewId: string, bindingEpoch: string): string {
@@ -374,26 +299,8 @@ export async function createIdeService(
   /** claims are global: the same claimId must never create two bindings under different view locks. */
   const withClaimLock = <T>(claimId: string, task: () => Promise<T>): Promise<T> => withLock(claimLocks, claimId, task)
 
-  const clearTimer = (view: ViewRecord): void => {
-    if (view.expiryTimer !== undefined) {
-      scheduler.clearTimeout(view.expiryTimer)
-      view.expiryTimer = undefined
-    }
-  }
-
-  const scheduleExpiry = (view: ViewRecord, notBefore = 0): void => {
-    clearTimer(view)
-    if (view.state !== 'OPEN' || view.nativeClosePending || closed) {
-      return
-    }
-    const base = view.detachedAt ?? view.lastProofAt ?? view.createdAt
-    view.expiresAt = Math.max(base + IDE_VIEW_EXPIRY_MILLIS, notBefore)
-    const delay = Math.max(0, view.expiresAt - scheduler.now())
-    view.expiryTimer = scheduler.setTimeout(() => {
-      view.expiryTimer = undefined
-      void expireView(view.viewId, view.bindingEpoch)
-    }, delay)
-  }
+  const lease = createViewLease(views, scheduler, IDE_VIEW_EXPIRY_MILLIS, () => closed, (id, epoch) => expireView(id, epoch))
+  const { clearTimer, scheduleExpiry } = lease
 
   const cancelIdle = (): void => {
     if (idleTimer !== undefined) {
@@ -499,26 +406,6 @@ export async function createIdeService(
     await releaseInvalidatedViews([...views.values()])
   }
 
-  const rememberClaim = (claimId: string, record: ClaimRecord): void => {
-    claims.delete(claimId)
-    claims.set(claimId, record)
-    while (claims.size > MAX_CACHED_CLAIMS) {
-      const oldest = claims.keys().next()
-      if (oldest.done === true) {
-        break
-      }
-      claims.delete(oldest.value)
-    }
-  }
-
-  const dropClaimsForView = (viewId: string): void => {
-    for (const [claimId, record] of claims) {
-      if (record.viewId === viewId) {
-        claims.delete(claimId)
-      }
-    }
-  }
-
   const releaseStream = (stream: ActiveStream): void => {
     if (stream.released) {
       return
@@ -565,381 +452,22 @@ export async function createIdeService(
     }
   }
 
-  const rollbackOpen = (view: ViewRecord): void => {
-    if (views.get(view.viewId) !== view || view.cleanupFailed) {
-      return
-    }
-    view.state = 'OPEN'
-    // A cancellation or lost control connection must not immediately trigger expired cleanup.
-    scheduleExpiry(view, scheduler.now() + IDE_VIEW_EXPIRY_MILLIS)
-  }
-
-  const performClose = (view: ViewRecord, mode: ManagedViewCloseMode): Promise<IdeReply> => {
-    if (view.closePromise !== undefined) {
-      return view.closePromise
-    }
-    const operation = (async (): Promise<IdeReply> => {
-      const viewId = view.viewId
-      const epoch = view.bindingEpoch
-      try {
-        // Normal close reaches here only after the native confirmation succeeded.
-        await waitForViewStreams(view)
-        if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
-          return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
-        }
-        if (mode !== 'normal' && bridge.isConnected(viewId, epoch)) {
-          const bridgeResult = await bridge.request(
-            viewId, { op: 'closeView', discard: true }, lifetime.signal, { expectedEpoch: epoch },
-          )
-          if (!bridgeResult.ok) {
-            throw new IdeError(bridgeResult.message ?? 'ide window did not confirm close', 'CLEANUP_FAILED')
-          }
-        }
-        if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
-          return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
-        }
-        const serverMode: ManagedViewCloseMode = mode === 'normal' ? 'discard' : mode
-        const result = await manager.closeView(viewId, epoch, serverMode, lifetime.signal)
-        if (result.cleanup.complete !== true || result.state !== 'CLOSED') {
-          throw new IdeError('managed view resources did not report exit', 'CLEANUP_FAILED')
-        }
-        if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
-          return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
-        }
-        clearTimer(view)
-        bridge.revoke(viewId, epoch)
-        dropClaimsForView(viewId)
-        if (view.workspaceOwned) {
-          await rm(view.workspacePath, { force: true })
-        }
-        views.delete(viewId)
-        scheduleIdleStop()
-        return { ok: true, viewId }
-      } catch (error) {
-        if (views.get(viewId) === view && view.bindingEpoch === epoch) {
-          view.cleanupFailed = true
-          view.state = 'CLOSING'
-          clearTimer(view)
-          emit({
-            kind: 'cleanup-failed',
-            viewId,
-            message: error instanceof IdeError ? error.message : 'view cleanup failed',
-          })
-        }
-        return failureReply(
-          error instanceof IdeError
-            ? error
-            : new IdeError('view cleanup failed', 'CLEANUP_FAILED'),
-        )
-      }
-    })()
-    let tracked: Promise<IdeReply>
-    tracked = operation.finally(() => {
-      if (view.closePromise === tracked) {
-        view.closePromise = undefined
-      }
-    })
-    view.closePromise = tracked
-    return tracked
-  }
-
-  const snapshotForClose = async (view: ViewRecord): Promise<void> => {
-    if (!bridge.isConnected(view.viewId, view.bindingEpoch)) {
-      emit({ kind: 'backup-failed', viewId: view.viewId, message: 'recovery bridge is not connected' })
-      return
-    }
-    try {
-      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDE_CLOSE_BUDGET_MILLIS)])
-      const result = await bridge.request(
-        view.viewId,
-        { op: 'snapshot', maxBytes: Math.min(recoveryQuotaBytes, 4 * 1024 * 1024) },
-        signal,
-        { expectedEpoch: view.bindingEpoch },
-      )
-      if (!result.ok) {
-        emit({
-          kind: 'backup-failed',
-          viewId: view.viewId,
-          message: result.message ?? 'dirty text snapshot failed',
-        })
-        return
-      }
-      const documents: BridgeDocument[] = result.documents ?? []
-      const complete = result.complete !== false && (result.omitted ?? 0) === 0
-      const backup: RecoveryBackup = {
-        viewId: view.viewId,
-        bindingEpoch: view.bindingEpoch,
-        directory: view.directory,
-        createdAt: new Date().toISOString(),
-        complete,
-        documents,
-      }
-      await writeRecoveryBackup(config, backup, recoveryQuotaBytes)
-      if (!complete) {
-        emit({ kind: 'backup-incomplete', viewId: view.viewId, message: 'dirty text snapshot was incomplete' })
-      }
-    } catch (error) {
-      emit({
-        kind: 'backup-failed',
-        viewId: view.viewId,
-        message:
-          error instanceof IdeError || error instanceof RecoveryQuotaError
-            ? error.message
-            : 'dirty text snapshot failed',
-      })
-    }
-  }
-
   const mergeSummary = (view: ViewRecord): IdeViewSummary => summary(view)
 
-  const requireBoundView = (
-    command: IdeCommand,
-    options: { requireOpen: boolean },
-  ): ViewRecord => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    const view = views.get(viewId)
-    if (view === undefined) {
-      throw new IdeError('view is not open', 'VIEW_GONE')
-    }
-    const documentId = validateUuid(required(command.documentId, 'documentId'), 'documentId')
-    const bindingEpoch = validateBindingEpoch(required(command.bindingEpoch, 'bindingEpoch'))
-    if (view.viewId !== viewId || view.documentId !== documentId || view.bindingEpoch !== bindingEpoch) {
-      throw new IdeError('view binding changed', 'VIEW_GONE')
-    }
-    if (options.requireOpen && view.state !== 'OPEN') {
-      throw new IdeError('view is closing', 'BUSY')
-    }
-    return view
-  }
+  const { openView, requireBoundView, dropClaimsForView } = createViewRegistry({
+    paths, views, reservations, claims, scheduler, bridge, manager, maxViews,
+    proofExclusivityMillis: IDE_PROOF_EXCLUSIVITY_MILLIS, closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS,
+    getCrashEpoch: () => crashEpoch, emit, withViewLock, withClaimLock, scheduleExpiry, scheduleIdleStop,
+    cancelIdle, allocateEpoch, awaitCrashRecovery, awaitManagerStopped, convergeAfterCrash, abortViewStreams,
+    required, boundedText,
+  })
 
-  const createView = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    const documentId = validateUuid(required(command.documentId, 'documentId'), 'documentId')
-    const eventNodeId = validateUuid(required(command.eventNodeId, 'eventNodeId'), 'eventNodeId')
-    const connectionId = validateUuid(required(command.connectionId, 'connectionId'), 'connectionId')
-    const claimId = validateUuid(required(command.claimId, 'claimId'), 'claimId')
-    const mode = required(command.mode, 'mode')
-    if (mode !== 'create') {
-      throw new IdeError('view is gone', 'VIEW_GONE')
-    }
-    await awaitCrashRecovery(signal)
-    await awaitManagerStopped(signal)
-    await convergeAfterCrash()
-    if (views.size + reservations.size >= maxViews) {
-      throw new IdeError('IDE view limit reached', 'BUSY')
-    }
-    reservations.add(viewId)
-    cancelIdle()
-    const crashAtStart = crashEpoch
-    let workspacePath: string | undefined
-    let epoch: string | undefined
-    let sessionGeneration: number | undefined
-    try {
-      const directory = await canonicalDirectory(command.directory ?? hostHome())
-      await ensurePrivateDirectory(paths.viewsDir)
-      const workspaceFile = join(paths.viewsDir, `${viewId}.code-workspace`)
-      workspacePath = workspaceFile
-      await writePrivateFile(workspaceFile, workspaceFileContent(directory))
-      // code-server canonicalises the workspace path at registration; bind the bridge to the
-      // same canonical file so a symlinked data directory cannot produce two identities.
-      workspacePath = await realpath(workspaceFile)
-      epoch = allocateEpoch()
-      bridge.assign(viewId, workspacePath, epoch, directory)
-      const session = await manager.ensureStarted(signal)
-      sessionGeneration = session.generation
-      if (crashEpoch !== crashAtStart) {
-        throw new IdeError('code-server process changed during view creation', 'BUSY')
-      }
-      const registered = await manager.registerView(viewId, epoch, workspacePath, signal)
-      if (registered.state !== 'OPEN') {
-        throw new IdeError('managed view did not become open', 'CLEANUP_FAILED')
-      }
-      if (registered.bindingEpoch !== epoch || registered.workspacePath !== workspacePath) {
-        throw new IdeError('managed view registration drifted', 'CLEANUP_FAILED')
-      }
-      if (crashEpoch !== crashAtStart || manager.session()?.generation !== session.generation) {
-        throw new IdeError('code-server process changed during view creation', 'BUSY')
-      }
-      const view: ViewRecord = {
-        viewId,
-        documentId,
-        eventNodeId,
-        connectionId,
-        claimId,
-        bindingEpoch: epoch,
-        directory,
-        workspacePath,
-        workspaceOwned: true,
-        state: 'OPEN',
-        cleanupFailed: false,
-        createdAt: scheduler.now(),
-        lastProofAt: null,
-        detachedAt: null,
-        expiresAt: 0,
-        streams: new Set(),
-        sessionGeneration: session.generation,
-      }
-      views.set(viewId, view)
-      scheduleExpiry(view)
-      const reply = openReply(view)
-      rememberClaim(claimId, { shape: openCommandShape(command), reply, viewId, bindingEpoch: epoch })
-      return reply
-    } catch (error) {
-      if (workspacePath !== undefined && epoch !== undefined) {
-        bridge.revoke(viewId, epoch)
-        // Registration may have become visible in code-server even though the command failed.
-        // Converge it; if cleanup cannot be proven, retain a counted CLOSING record. A process
-        // crash already invalidated its whole scope, so there is nothing left to converge.
-        let cleanupFailed = false
-        if (crashEpoch === crashAtStart && sessionGeneration !== undefined) {
-          if (manager.session()?.generation === sessionGeneration) {
-            try {
-              await manager.closeView(viewId, epoch, 'discard', AbortSignal.timeout(IDE_CLOSE_BUDGET_MILLIS))
-            } catch {
-              cleanupFailed = true
-            }
-          } else {
-            cleanupFailed = true
-          }
-        }
-        if (cleanupFailed) {
-          views.set(viewId, {
-            viewId,
-            documentId,
-            eventNodeId,
-            connectionId,
-            claimId,
-            bindingEpoch: epoch,
-            directory: command.directory ?? 'unavailable',
-            workspacePath,
-            workspaceOwned: true,
-            state: 'CLOSING',
-            cleanupFailed: true,
-            createdAt: scheduler.now(),
-            lastProofAt: null,
-            detachedAt: null,
-            expiresAt: 0,
-            streams: new Set(),
-            sessionGeneration: sessionGeneration ?? 0,
-          })
-          emit({ kind: 'cleanup-failed', viewId, message: 'failed view registration could not be cleaned up' })
-        } else {
-          await rm(workspacePath, { force: true })
-        }
-      }
-      throw error
-    } finally {
-      reservations.delete(viewId)
-      scheduleIdleStop()
-    }
-  }
-
-  const resumeView = async (command: IdeCommand, view: ViewRecord, signal: AbortSignal): Promise<IdeReply> => {
-    if (view.state !== 'OPEN') {
-      throw new IdeError('view is closing', 'BUSY')
-    }
-    if (view.cleanupFailed) {
-      throw new IdeError('view cleanup is incomplete', 'CLEANUP_FAILED')
-    }
-    const mode = required(command.mode, 'mode')
-    if (mode !== 'resume') {
-      throw new IdeError('mode is invalid')
-    }
-    const documentId = validateUuid(required(command.documentId, 'documentId'), 'documentId')
-    const eventNodeId = validateUuid(required(command.eventNodeId, 'eventNodeId'), 'eventNodeId')
-    const connectionId = validateUuid(required(command.connectionId, 'connectionId'), 'connectionId')
-    const claimId = validateUuid(required(command.claimId, 'claimId'), 'claimId')
-    const requestedDirectory = command.directory === undefined ? undefined : await canonicalDirectory(command.directory)
-    if (requestedDirectory !== undefined && requestedDirectory !== view.directory) {
-      throw new IdeError('resume must not change the workspace directory', 'VIEW_IN_USE')
-    }
-    if (view.documentId !== documentId) {
-      const occupiedUntil = (view.detachedAt ?? view.lastProofAt ?? view.createdAt) + IDE_PROOF_EXCLUSIVITY_MILLIS
-      if (view.detachedAt === null && scheduler.now() < occupiedUntil) {
-        throw new IdeError('view is in use by another document', 'VIEW_IN_USE')
-      }
-    }
-    await awaitCrashRecovery(signal)
-    await awaitManagerStopped(signal)
-    cancelIdle()
-    const crashAtStart = crashEpoch
-    const sessionGeneration = manager.session()?.generation
-    if (sessionGeneration === undefined) {
-      throw new IdeError('code-server is not running', 'UNAVAILABLE')
-    }
-    const epoch = allocateEpoch()
-    abortViewStreams(view)
-    const registered = await manager.registerView(view.viewId, epoch, view.workspacePath, signal)
-    if (registered.state !== 'OPEN' || registered.bindingEpoch !== epoch) {
-      throw new IdeError('managed view did not accept the new binding epoch', 'CLEANUP_FAILED')
-    }
-    if (crashEpoch !== crashAtStart || manager.session()?.generation !== sessionGeneration) {
-      throw new IdeError('code-server process changed during view resume', 'BUSY')
-    }
-    view.bindingEpoch = epoch
-    view.documentId = documentId
-    view.eventNodeId = eventNodeId
-    view.connectionId = connectionId
-    view.claimId = claimId
-    view.state = 'OPEN'
-    view.cleanupFailed = false
-    view.forceAllowed = false
-    view.lastProofAt = null
-    view.detachedAt = null
-    view.createdAt = scheduler.now()
-    view.sessionGeneration = sessionGeneration
-    dropClaimsForView(view.viewId)
-    bridge.assign(view.viewId, view.workspacePath, epoch, view.directory)
-    scheduleExpiry(view)
-    const reply = openReply(view)
-    rememberClaim(claimId, {
-      shape: openCommandShape(command),
-      reply,
-      viewId: view.viewId,
-      bindingEpoch: epoch,
-    })
-    return reply
-  }
-
-  const openView = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    const claimId = validateUuid(required(command.claimId, 'claimId'), 'claimId')
-    const shape = openCommandShape(command)
-    const cached = claims.get(claimId)
-    if (cached !== undefined) {
-      if (cached.shape !== shape) {
-        throw new IdeError('claimId was reused with different request fields', 'CLAIM_CONFLICT')
-      }
-      const current = views.get(viewId)
-      if (current !== undefined && current.bindingEpoch === cached.bindingEpoch) {
-        return Promise.resolve(cached.reply)
-      }
-      claims.delete(claimId)
-    }
-    return withClaimLock(claimId, () =>
-      withViewLock(viewId, async () => {
-        const replay = claims.get(claimId)
-        if (replay !== undefined) {
-          if (replay.shape !== shape) {
-            throw new IdeError('claimId was reused with different request fields', 'CLAIM_CONFLICT')
-          }
-          const current = views.get(viewId)
-          if (current !== undefined && current.bindingEpoch === replay.bindingEpoch) {
-            return replay.reply
-          }
-          claims.delete(claimId)
-        }
-        const existing = views.get(viewId)
-        if (existing !== undefined) {
-          if (command.mode === 'resume') {
-            return resumeView(command, existing, signal)
-          }
-          throw new IdeError('view is already open', 'VIEW_IN_USE')
-        }
-        return createView(command, signal)
-      }),
-    )
-  }
+  const { closeView, expireView } = createClosePath({
+    config, views, scheduler, bridge, manager, lifetime, recoveryQuotaBytes,
+    closeBudgetMillis: IDE_CLOSE_BUDGET_MILLIS, expiryMillis: IDE_VIEW_EXPIRY_MILLIS,
+    emit, withViewLock, clearTimer, scheduleExpiry, dropClaimsForView, scheduleIdleStop,
+    waitForViewStreams, waitWithSignal, required, requireBoundView,
+  })
 
   const changeDirectory = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
     const viewId = validateViewId(required(command.viewId, 'viewId'))
@@ -1025,200 +553,15 @@ export async function createIdeService(
     })
   }
 
-  const closeView = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    if (typeof command.discard !== 'boolean') {
-      return Promise.resolve(failureReply(new IdeError('discard is required')))
-    }
-    return withViewLock(viewId, async () => {
-      const view = requireBoundView(command, { requireOpen: false })
-      if (view.state === 'CLOSING') {
-        if (view.closePromise !== undefined) {
-          return view.closePromise
-        }
-        if (!view.cleanupFailed) {
-          throw new IdeError('view is closing', 'BUSY')
-        }
-        return performClose(view, command.discard === true ? 'discard' : 'normal')
-      }
-      const mode: ManagedViewCloseMode = command.discard === true ? 'discard' : 'normal'
-      const epoch = view.bindingEpoch
-      const documentId = view.documentId
-      if (mode === 'discard' && bridge.isConnected(viewId, epoch) && !view.forceAllowed) {
-        throw new IdeError('force close is only available when the window state is unknown', 'BUSY')
-      }
-      // Keep the data plane available while the native dialog awaits the user.
-      view.nativeClosePending = mode === 'normal'
-      if (mode !== 'normal') {
-        view.state = 'CLOSING'
-      }
-      clearTimer(view)
-      if (mode === 'normal') {
-        if (!bridge.isConnected(view.viewId, epoch)) {
-          view.forceAllowed = true
-          view.nativeClosePending = false
-          rollbackOpen(view)
-          throw new IdeError('IDE window is not connected; close outcome is unknown', 'UNAVAILABLE')
-        }
-        let result: BridgeResult
-        try {
-          const closeSignal = AbortSignal.any([signal, lifetime.signal])
-          result = await waitWithSignal(
-            bridge.request(view.viewId, { op: 'closeView' }, closeSignal, { expectedEpoch: epoch }),
-            closeSignal,
-          )
-        } catch (error) {
-          if (views.get(view.viewId) === view && view.bindingEpoch === epoch) {
-            view.forceAllowed = true
-            view.nativeClosePending = false
-            rollbackOpen(view)
-          }
-          throw error
-        }
-        if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.documentId !== documentId) {
-          throw new IdeError('view binding changed', 'VIEW_GONE')
-        }
-        if (signal.aborted || lifetime.signal.aborted || !bridge.isConnected(viewId, epoch)) {
-          view.forceAllowed = true
-          view.nativeClosePending = false
-          rollbackOpen(view)
-          throw new IdeError('IDE close outcome is unknown', 'UNAVAILABLE')
-        }
-        if (!result.ok) {
-          view.forceAllowed = result.code !== 'CANCELLED'
-          view.nativeClosePending = false
-          rollbackOpen(view)
-          throw new IdeError(
-            result.message ?? 'IDE close outcome is unknown',
-            result.code === 'CANCELLED' ? 'CANCELLED' : 'UNAVAILABLE',
-          )
-        }
-        view.forceAllowed = false
-        view.nativeClosePending = false
-        view.state = 'CLOSING'
-      } else {
-        await snapshotForClose(view)
-      }
-      if (views.get(view.viewId) !== view || view.bindingEpoch !== epoch || view.documentId !== documentId) {
-        throw new IdeError('view binding changed', 'VIEW_GONE')
-      }
-      return performClose(view, mode)
-    })
-  }
-
-  const detachView = (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    const viewId = validateViewId(required(command.viewId, 'viewId'))
-    return withViewLock(viewId, async () => {
-      const view = requireBoundView(command, { requireOpen: true })
-      if (view.detachedAt !== null && view.bindingEpoch === command.bindingEpoch) {
-        return { ok: true, viewId: view.viewId }
-      }
-      view.detachedAt = scheduler.now()
-      scheduleExpiry(view)
-      return { ok: true, viewId: view.viewId }
-    })
-  }
-
   const listViews = (): IdeReply => {
     const values = [...views.values()].map(mergeSummary)
     return { ok: true, views: values }
   }
 
-  const expireView = (viewId: string, epoch: string): Promise<void> => {
-    return withViewLock(viewId, async () => {
-      const view = views.get(viewId)
-      if (view === undefined || view.bindingEpoch !== epoch || view.state !== 'OPEN') {
-        return
-      }
-      view.state = 'CLOSING'
-      clearTimer(view)
-      // An expired lease is not permission to discard a dirty or unobservable editor.
-      // Keep the view for an explicit user decision when the window cannot prove it is clean.
-      let confirmed = false
-      try {
-        if (bridge.isConnected(viewId, epoch)) {
-          const timeout = AbortSignal.any([lifetime.signal, AbortSignal.timeout(IDE_CLOSE_BUDGET_MILLIS)])
-          const inspection = await bridge.request(viewId, { op: 'inspect' }, timeout, { expectedEpoch: epoch })
-          if (inspection.ok && inspection.clean === true && bridge.isConnected(viewId, epoch)) {
-            const result = await bridge.request(viewId, { op: 'closeView' }, timeout, { expectedEpoch: epoch })
-            confirmed = result.ok && bridge.isConnected(viewId, epoch) && !timeout.aborted
-          }
-        }
-      } catch {
-        // No confirmation: retain the view rather than guessing that its content is disposable.
-      }
-      if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
-        return
-      }
-      if (!confirmed) {
-        view.state = 'OPEN'
-        view.forceAllowed = !bridge.isConnected(viewId, epoch)
-        emit({ kind: 'expiry-deferred', viewId, message: 'view expiry requires an explicit close' })
-        return
-      }
-      await performClose(view, 'normal')
-    }).then(
-      () => undefined,
-      () => undefined,
-    )
-  }
-
-  const handle = async (command: IdeCommand, signal: AbortSignal): Promise<IdeReply> => {
-    if (closed) {
-      return failureReply(new IdeError('IDE service is closed'))
-    }
-    try {
-      await awaitCrashRecovery(signal)
-      switch (command.action) {
-        case 'OPEN_VIEW':
-          return await openView(command, signal)
-        case 'CHANGE_DIRECTORY':
-          return await changeDirectory(command, signal)
-        case 'FOCUS_TERMINAL':
-          return await focusTerminal(command, signal)
-        case 'CLOSE_VIEW':
-          return await closeView(command, signal)
-        case 'DETACH_VIEW':
-          return await detachView(command, signal)
-        case 'LIST_VIEWS':
-          return listViews()
-        case 'LIST_DIRECTORIES':
-          return { ok: true, directoryListing: await listDirectories(boundedText(command.directory, 'directory') ?? hostHome()) }
-        case 'COLLAPSE_MOBILE':
-          return await collapseMobile(command, signal)
-        default:
-          throw new IdeError('unknown ide action')
-      }
-    } catch (error) {
-      return failureReply(error)
-    }
-  }
-
-  const applyLease = (lease: IdeLease, roundStartedAt: number): void => {
-    if (closed || !Number.isFinite(roundStartedAt)) {
-      return
-    }
-    for (const binding of lease.bindings) {
-      const view = views.get(binding.viewId!)
-      if (
-        view === undefined ||
-        view.state !== 'OPEN' ||
-        view.detachedAt !== null ||
-        view.documentId !== binding.documentId ||
-        view.bindingEpoch !== binding.bindingEpoch!.toString()
-      ) {
-        continue
-      }
-      if (roundStartedAt < view.createdAt) {
-        continue
-      }
-      if (view.lastProofAt !== null && roundStartedAt <= view.lastProofAt) {
-        continue
-      }
-      view.lastProofAt = roundStartedAt
-      scheduleExpiry(view)
-    }
-  }
+  const handle = createCommandHandler({
+    isClosed: () => closed, awaitCrashRecovery, openView, changeDirectory, focusTerminal, closeView,
+    collapseMobile, listViews, boundedText,
+  })
 
   const getViewState = (viewId: string): IdeViewSummary | null => {
     let normalized: string
@@ -1386,8 +729,8 @@ export async function createIdeService(
     hasActiveViews() {
       return views.size > 0 || reservations.size > 0
     },
-    apply(lease, roundStartedAt) {
-      applyLease(lease, roundStartedAt)
+    apply(leaseValue, roundStartedAt) {
+      lease.apply(leaseValue, roundStartedAt)
     },
     getViewState,
     activeStreamCount() {

@@ -3174,7 +3174,7 @@ div.is-error {
 
 /* --- Environment Management Modal & Sections --- */
 
-.env-management-modal-card {
+.modal-card.env-management-modal-card {
   width: min(860px, 100%);
   max-height: calc(100vh - 48px);
   display: flex;
@@ -3185,10 +3185,6 @@ div.is-error {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 20px;
 }
 
 .env-mgmt-section {
