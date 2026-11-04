@@ -502,6 +502,10 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 `session_file` 行随既有的关系删除回调清理。每会话 2000 个文件、单文件 8 MiB、总计 64 MiB。
 `edit` 用读到的 revision 做条件更新，冲突是确定失败而不是不确定执行。
 
+[`SessionFileQueryService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/vfs/SessionFileQueryService.java)
+为会话文件面板提供只读查询：列会话目录、读取有界文本窗口与下载完整字节，全部先按产品 owner 校验 Session 归属；
+HTTP 契约见 [Web](web.md)。
+
 ## Environment
 
 Card 的 name 不可变，UUID 用于路由；`environment_connection` 以

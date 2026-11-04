@@ -1264,6 +1264,33 @@ export interface HarnessSessionEntryDTO {
   usageCost: HarnessUsageCostDTO | null
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileContentDTO */
+export interface HarnessSessionFileContentDTO {
+  sessionId: string
+  path: string
+  sizeBytes: string
+  revision: number
+  updatedAt: string
+  text: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileEntryDTO */
+export interface HarnessSessionFileEntryDTO {
+  name: string
+  path: string
+  directory: boolean
+  sizeBytes?: string | null
+  revision?: number | null
+  updatedAt?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileListDTO */
+export interface HarnessSessionFileListDTO {
+  sessionId: string
+  path: string
+  entries: HarnessSessionFileEntryDTO[]
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO */
 export interface HarnessSessionSummaryDTO {
   sessionId: string

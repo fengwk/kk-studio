@@ -75,6 +75,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Chat | `/api/chats` | CRUD 与归属 Session |
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
+| Session files | `/api/sessions/{sessionId}/files` | 只读会话文件面板：列目录、文本窗口（`/content`）、下载（`/download`）；按 `ownerKind` + `ownerId` 校验归属 |
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、流式追帧（`stream-catchup`）、compact、yolo、stop、tool approval |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
@@ -98,6 +99,11 @@ Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。�
 携带时必须为已存在的 Environment 名；响应中的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为 null）。
 `PUT /api/chats/{chatId}` 省略 `environmentName` 保留当前默认环境、显式 null 清空，
 未知或非 canonical Environment 名 400 且当前值/version 不变。
+
+会话文件面板是只读 HTTP：`GET /api/sessions/{sessionId}/files?ownerKind&ownerId&path` 列目录、
+`GET .../files/content?path&offset&limit&columnOffset` 返回有界文本窗口与 revision、大小、更新时间，
+`GET .../files/download?path` 返回完整字节并带附件文件名。`path` 使用 `vfs:/sessions/<sessionId>/...` 坐标且必须属于该 Session；
+未知 owner、越权与不存在的文件都返回 404，二进制或不可作为文本返回的内容返回 422。写操作只由文件工具发起，不在此开放。
 
 Session 的 `GET /api/sessions/{sessionId}/threads` 返回全部 Thread 摘要，包含执行根和子 Thread，不按名称去重。每项 `parentThreadId` 必须存在：根为 null，子为执行父 Thread 的 canonical UUID string；根与子同名时仍是独立摘要。
 
