@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -21,12 +24,9 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
 import java.time.Duration;

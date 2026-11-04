@@ -6,14 +6,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { decodePluginList } from '@/shared/api/ai-plugin-codec'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/plugins-service', () => ({
+vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },
 }))
 
@@ -33,7 +32,7 @@ function comfyuiHttpGolden(): PluginDTO {
   if (envelope === null || typeof envelope !== 'object' || !('data' in envelope)) {
     throw new Error('HTTP wire golden must contain a data envelope')
   }
-  const decoded = decodePluginList([envelope.data])
+  const decoded = [envelope.data] as PluginDTO[]
   expect(decoded).toHaveLength(1)
   return decoded[0]
 }

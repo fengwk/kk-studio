@@ -23,8 +23,7 @@ export interface AgentDefinitionConfigDTO {
 export interface AgentDefinitionCreateDTO {
   description?: string | null
   systemPrompt?: string | null
-  model?: string | null
-  variant?: string | null
+  execution?: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   name: string
 }
@@ -35,8 +34,7 @@ export interface AgentDefinitionDTO {
   type: AgentDefinitionType
   description?: string | null
   systemPrompt?: string | null
-  model: string | null
-  variant?: string | null
+  execution: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   version: string
   createTime: number
@@ -57,8 +55,7 @@ export const AGENT_DEFINITION_TYPE_VALUES: readonly AgentDefinitionType[] = [
 export interface AgentDefinitionUpdateDTO {
   description?: string | null
   systemPrompt?: string | null
-  model?: string | null
-  variant?: string | null
+  execution?: HarnessExecutionSelectionDTO | null
   config: AgentDefinitionConfigDTO
   expectedVersion: string
 }
@@ -1863,13 +1860,6 @@ export interface ResetStageBudgetRequestDTO {
   requestKey: string
   state: string
   maxRuns: number
-}
-
-/** Java：fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO */
-export interface ResolveUnknownIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  verification: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO */

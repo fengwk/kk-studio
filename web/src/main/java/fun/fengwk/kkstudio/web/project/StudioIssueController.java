@@ -41,7 +41,6 @@ import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
-import fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
@@ -221,20 +220,6 @@ public class StudioIssueController {
         issueLifecycleService.stopIssue(
             issueId, expectedVersion, request.getRequestKey(), request.getDetail());
     return ApiResponse.ok(mapper.toDto(stopped));
-  }
-
-  @PostMapping("/api/issues/{issueId}/resolve-unknown")
-  public ApiResponse<IssueDTO> resolveUnknown(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestBody ResolveUnknownIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = Uuids.parseCanonical(issueIdStr, "issueId");
-    long expectedVersion =
-        DecimalLongs.parseNonNegative(request.getExpectedVersion(), "expectedVersion");
-    Issue resolved =
-        issueLifecycleService.resolveUnknown(
-            issueId, expectedVersion, request.getRequestKey(), request.getVerification());
-    return ApiResponse.ok(mapper.toDto(resolved));
   }
 
   @DeleteMapping("/api/issues/{issueId}")

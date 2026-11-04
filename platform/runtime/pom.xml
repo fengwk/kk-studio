@@ -81,6 +81,7 @@
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-common</artifactId>
         </dependency>
+        <!-- JGit：Git Skill Package 的仓库访问，以及 tool/permission 的 gitignore pattern 语义。 -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit</artifactId>
@@ -212,6 +213,7 @@
                                         <include>fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService</include>
                                         <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
+                                        <include>fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut</include>
                                         <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseAgentTurnContextResolver</include>
@@ -245,20 +247,6 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.configsync.ConfigSync*</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                                <rule>
-                                    <!-- 各产品 Hub 共享的订阅容器：注册/注销原子性与消费者隔离由本模块测试保证。 -->
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.events.SubscriptionFanOut</include>
                                     </includes>
                                     <limits>
                                         <limit>

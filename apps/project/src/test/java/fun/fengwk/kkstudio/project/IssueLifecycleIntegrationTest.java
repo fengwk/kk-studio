@@ -2,22 +2,25 @@ package fun.fengwk.kkstudio.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
@@ -35,6 +38,7 @@ import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -47,13 +51,10 @@ import java.util.UUID;
  * <ul>
  *   <li><b>Stop 收尾</b>：空闲 Issue 停止直接落 USER 暂停门禁；活动 Run 经安全停止收尾为 CANCELLED 并落 USER 暂停门禁，轮询调谐绝不立即启动新
  *       Run；
- *   <li><b>在途副作用不明进入 UNKNOWN</b>：在途工具/模型调用不明时收尾为 UNKNOWN 并落 UNKNOWN 门禁；
- *   <li><b>UNKNOWN 门禁 Fail-Closed</b>：未核查的 UNKNOWN 严格拒绝 resume / transition / reopen / archive /
- *       deep delete 等所有推进；
- *   <li><b>强制人工核查依据</b>：resolveUnknown 必须提交非空白核查依据，留痕 RESOLVE_UNKNOWN 控制活动，将门禁转为 USER 暂停门禁，允许显式
- *       resume，且历史 Run 保持 UNKNOWN 事实；
- *   <li><b>Issue 深删除</b>：严格拒绝存在活动 Run 或 UNKNOWN 门禁；合法时在单个事务内按锁序与外键约束清理全部事实，最后删除 Issue 行；
- *   <li><b>Project 深删除</b>：严格拒绝项目下任何 Issue 处于活动或 UNKNOWN 状态；合法时深删除全部 Issue 并删除 Project 行，无孤儿数据。
+ *   <li><b>在途副作用不明按失败收尾</b>：在途工具/模型调用不明时按 FAILED 收尾，原因声明结果未知，并落 ERROR 暂停；
+ *   <li><b>结果未知的 ERROR 门禁</b>：门禁只阻止新派发与流转，不自动重试不明副作用，必须由显式 resumeIssue 解除；
+ *   <li><b>Issue 深删除</b>：严格拒绝存在活动 Run；合法时在单个事务内按锁序与外键约束清理全部事实，最后删除 Issue 行；
+ *   <li><b>Project 深删除</b>：严格拒绝项目下任何 Issue 处于活动状态；合法时深删除全部 Issue 并删除 Project 行，无孤儿数据。
  * </ul>
  */
 class IssueLifecycleIntegrationTest extends ProjectTestSupport {
@@ -64,6 +65,28 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
   @Autowired private StorageUploadService uploadService;
   @Autowired private StorageBlobManager blobManager;
   @Autowired private HarnessRuntime runtime;
+
+  /** 运行时不可用时不允许把活动 Run 当作空闲收尾，事务不产生 STOP 回执。 */
+  @Test
+  void stopActiveRunFailsClosedWhenRuntimeUnavailable() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("StopUnavailable", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    Issue before = issueEditingService.getIssue(issue.getId());
+    long activities = activityCount(issue.getId());
+    when(runtime.getThreadSnapshot(run.getThreadId()))
+        .thenThrow(new IllegalStateException("runtime unavailable"));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            issueLifecycleService.stopIssue(issue.getId(), before.getVersion(), key("stop"), null));
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(before.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
+    assertEquals(activities, activityCount(issue.getId()));
+  }
 
   /** 测试意图：验证空闲 Issue 调用 stopIssue 设置 USER 暂停门禁，Reconciler 调谐判定门禁关闭而不启动新 Run。 */
   @Test
@@ -107,16 +130,39 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
     assertEquals(IssueRunStatus.RUNNING, activeRun.getStatus());
+    UUID beforeHead = headEntry(activeRun.getThreadId());
 
     Issue fresh = issueEditingService.getIssue(issue.getId());
+    String stopKey = key("stop");
     Issue stopped =
         issueLifecycleService.stopIssue(
-            fresh.getId(), fresh.getVersion(), key("stop"), "Stop the current run");
+            fresh.getId(), fresh.getVersion(), stopKey, "Stop the current run");
     assertEquals(PauseReason.USER.name(), stopped.getPauseReason());
 
     IssueRun cancelledRun = issueRunService.getRun(activeRun.getId());
     assertEquals(IssueRunStatus.CANCELLED, cancelledRun.getStatus());
     assertNotNull(cancelledRun.getEndedAt());
+    assertNotEquals(beforeHead, cancelledRun.getEndEntryId());
+    assertEquals(headEntry(activeRun.getThreadId()), cancelledRun.getEndEntryId());
+    long activityCount = activityCount(issue.getId());
+
+    // 同键同指纹重复请求：STOP receipt 已在收尾事务内落库，精确回放且不再收尾 Run、不重复记活动。
+    Issue replayed =
+        issueLifecycleService.stopIssue(
+            fresh.getId(), fresh.getVersion(), stopKey, "Stop the current run");
+    assertEquals(PauseReason.USER.name(), replayed.getPauseReason());
+    assertEquals(stopped.getVersion(), replayed.getVersion());
+    assertEquals(activityCount, activityCount(issue.getId()));
+    assertEquals(IssueRunStatus.CANCELLED, issueRunService.getRun(activeRun.getId()).getStatus());
+    UUID expectedStopId =
+        UUID.nameUUIDFromBytes(
+            ("issue-run-user-stop:" + activeRun.getId()).getBytes(StandardCharsets.UTF_8));
+    verify(runtime)
+        .stop(
+            argThat(
+                command ->
+                    command.threadId().equals(activeRun.getThreadId())
+                        && command.stopRequestId().equals(expectedStopId)));
 
     issueWorkQueue.request(issue.getId(), Duration.ZERO);
     WorkClaim claim = claimWork();
@@ -127,51 +173,60 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
-  /** 测试意图：验证当 Thread 处于在途工具处理等不明状态时，stopIssue 将 Run 收敛为 UNKNOWN，并设置 UNKNOWN 暂停门禁。 */
+  /** 测试意图：验证当 Thread 处于在途工具处理等不明状态时，stopIssue 按 FAILED 收尾并声明结果未知，落 ERROR 暂停门禁。 */
   @Test
-  void stopIssueOnInFlightUndeterminedRunConvergesToUnknownWithUnknownPauseGate() {
+  void stopIssueOnInFlightUndeterminedRunFailsWithOutcomeUnknownAndErrorPause() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("StopUnknownProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
-
-    // 受控 Harness 假件在投影边界模拟「仍在途」执行事实：RUNNING 工具 → hasWork；真实分类契约由 Runtime 测试覆盖。
-    ThreadState threadState = mock(ThreadState.class);
-    when(threadState.headEntryId()).thenReturn(headEntry(activeRun.getThreadId()));
-    when(threadState.sessionId()).thenReturn(activeRun.getSessionId());
-    // 收尾闭合 scope 会用同一 Thread 的 next_command_sequence 接受纯 SET_CONTRIBUTOR_STATE 批次，必须为正。
-    when(threadState.nextCommandSequence()).thenReturn(1L);
-    // 收尾区间校验会读取当前 root-to-head 条目，head 必须是真实存在的 Entry id。
-    EntryPath entryPath = mock(EntryPath.class);
-    Entry rootEntry = mock(Entry.class);
-    when(rootEntry.id()).thenReturn(activeRun.getStartEntryId());
-    when(entryPath.entries()).thenReturn(List.of(rootEntry));
-    when(entryPath.head()).thenReturn(rootEntry);
-
-    ThreadSnapshot inFlightSnapshot = mock(ThreadSnapshot.class);
-    when(inFlightSnapshot.thread()).thenReturn(threadState);
-    when(inFlightSnapshot.requireFullPath()).thenReturn(entryPath);
-    when(inFlightSnapshot.executionFacts())
-        .thenReturn(new ThreadExecutionFacts(true, false, false));
-    when(runtime.getThreadSnapshot(activeRun.getThreadId())).thenReturn(inFlightSnapshot);
+    stubInFlightThread(activeRun);
 
     Issue fresh = issueEditingService.getIssue(issue.getId());
+    String stopKey = key("stop");
     Issue stopped =
         issueLifecycleService.stopIssue(
-            fresh.getId(), fresh.getVersion(), key("stop"), "Network timeout while executing tool");
-    assertEquals(PauseReason.UNKNOWN.name(), stopped.getPauseReason());
-    assertTrue(stopped.getPauseDetail().contains("Network timeout"));
+            fresh.getId(), fresh.getVersion(), stopKey, "Network timeout while executing tool");
+    // 结果未知按失败暂停，原因明确说明结果未知，而不是伪装成已确认的失败原因或人工核查门禁。
+    assertEquals(PauseReason.ERROR.name(), stopped.getPauseReason());
+    assertTrue(stopped.getPauseDetail().contains("outcome unknown"), stopped.getPauseDetail());
 
-    IssueRun unknownRun = issueRunService.getRun(activeRun.getId());
-    assertEquals(IssueRunStatus.UNKNOWN, unknownRun.getStatus());
-    assertNotNull(unknownRun.getEndedAt());
+    IssueRun failedRun = issueRunService.getRun(activeRun.getId());
+    assertEquals(IssueRunStatus.FAILED, failedRun.getStatus());
+    assertTrue(failedRun.getError().contains("outcome unknown"), failedRun.getError());
+    assertNotNull(failedRun.getEndedAt());
+    assertEquals(headEntry(activeRun.getThreadId()), failedRun.getEndEntryId());
+    verify(runtime).stop(argThat(command -> command.threadId().equals(activeRun.getThreadId())));
+    long activityCount = activityCount(issue.getId());
+
+    // STOP 事实在收尾事务内落库：活动 Run 路径同样有 receipt，且原因与最终 ERROR 暂停一致。
+    IssueActivity stopFact =
+        issueEditingService.listActivities(issue.getId(), 0, 20).stream()
+            .filter(
+                activity ->
+                    activity.getKind() == IssueActivityKind.CONTROL
+                        && activity.getData().contains("STOP"))
+            .findFirst()
+            .orElse(null);
+    assertNotNull(stopFact, "active-run stop must persist its STOP receipt");
+    assertTrue(stopFact.getData().contains("ERROR"), stopFact.getData());
+
+    // 丢响应后的同键同指纹重试：STOP receipt 精确回放，保留结果未知的 ERROR 暂停，不把门禁改写成 USER。
+    Issue replayed =
+        issueLifecycleService.stopIssue(
+            fresh.getId(), fresh.getVersion(), stopKey, "Network timeout while executing tool");
+    assertEquals(PauseReason.ERROR.name(), replayed.getPauseReason());
+    assertEquals(stopped.getPauseDetail(), replayed.getPauseDetail());
+    assertEquals(stopped.getVersion(), replayed.getVersion());
+    assertEquals(activityCount, activityCount(issue.getId()));
+    assertEquals(IssueRunStatus.FAILED, issueRunService.getRun(activeRun.getId()).getStatus());
   }
 
-  /** 测试意图：验证 UNKNOWN 门禁存在时，所有推进与删除操作均 Fail-Closed。 */
+  /** 测试意图：验证结果未知的 ERROR 暂停只阻止新派发与流转，不自动重试，显式 resume 后才允许接受新 Run。 */
   @Test
-  void unknownGatingFailsClosedOnAllProgressionAndDeletion() {
+  void outcomeUnknownErrorPauseRequiresExplicitResumeAndBlocksDispatch() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("UnknownGatingProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
@@ -179,118 +234,49 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
-    issueRunService.markUnknown(
+    issueRunService.failRun(
         activeRun.getId(),
         activeRun.getVersion(),
         key("unknown"),
         headEntry(activeRun.getThreadId()),
-        "Undetermined state");
-    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
-    assertEquals(PauseReason.UNKNOWN.name(), unknownIssue.getPauseReason());
+        "Run stopped with in-flight side effects; outcome unknown");
+    Issue failedIssue = issueEditingService.getIssue(issue.getId());
+    assertEquals(PauseReason.ERROR.name(), failedIssue.getPauseReason());
 
-    // 1. resumeIssue 拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            issueLifecycleService.resumeIssue(
-                unknownIssue.getId(), unknownIssue.getVersion(), key("r")));
+    // 新的 STOP 不能替代显式 RESUME，也不能覆盖失败详情。
+    Issue stoppedAgain =
+        issueLifecycleService.stopIssue(
+            failedIssue.getId(), failedIssue.getVersion(), key("stop-again"), "new detail");
+    assertEquals(PauseReason.ERROR.name(), stoppedAgain.getPauseReason());
+    assertEquals(failedIssue.getPauseDetail(), stoppedAgain.getPauseDetail());
 
-    // 2. transition 拒绝
+    // 1. transition 拒绝：暂停门禁未解除
     assertThrows(
         ProjectValidationException.class,
         () ->
             issueLifecycleService.transition(
-                unknownIssue.getId(), unknownIssue.getVersion(), key("t"), "REVIEW"));
+                stoppedAgain.getId(), stoppedAgain.getVersion(), key("t"), "REVIEW"));
 
-    // 3. reopen 拒绝
+    // 2. acceptRun 拒绝：门禁关闭不做自动重试
     assertThrows(
         ProjectValidationException.class,
-        () ->
-            issueLifecycleService.reopen(
-                unknownIssue.getId(), unknownIssue.getVersion(), key("ro")));
+        () -> issueRunService.acceptRun(failedIssue.getId(), key("a")));
 
-    // 4. archive 拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueLifecycleService.archiveIssue(unknownIssue.getId(), unknownIssue.getVersion()));
-
-    // 5. deleteIssue 拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueLifecycleService.deleteIssue(unknownIssue.getId(), unknownIssue.getVersion()));
-
-    // 6. deleteProject 拒绝
-    Project project = projectService.getProject(projectId);
-    assertThrows(
-        ProjectValidationException.class,
-        () -> projectService.deleteProject(projectId, project.getVersion()));
-
-    // 7. acceptRun 拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () -> issueRunService.acceptRun(unknownIssue.getId(), key("a")));
-  }
-
-  /**
-   * 测试意图：验证 resolveUnknown 必须提交非空白核查说明，持久化 RESOLVE_UNKNOWN 控制事实，将门禁转为 USER 暂停，允许后续显式 resume，Run 保持
-   * UNKNOWN。
-   */
-  @Test
-  void resolveUnknownMandatoryHumanVerificationAllowsExplicitResumeAndPreservesUnknownRun() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("ResolveUnknownProj", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueEditingService.getIssue(issue.getId());
-    IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
-    issueRunService.markUnknown(
-        activeRun.getId(),
-        activeRun.getVersion(),
-        key("unk"),
-        headEntry(activeRun.getThreadId()),
-        "Side effects unclear");
-    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
-
-    // 空白说明拒绝
-    assertThrows(
-        ProjectValidationException.class,
-        () ->
-            issueLifecycleService.resolveUnknown(
-                unknownIssue.getId(), unknownIssue.getVersion(), key("res"), "   "));
-
-    // 提交有效人工核查说明
-    Issue resolved =
-        issueLifecycleService.resolveUnknown(
-            unknownIssue.getId(),
-            unknownIssue.getVersion(),
-            key("res"),
-            "Checked third-party provider logs: no side effect occurred.");
-    assertEquals(PauseReason.USER.name(), resolved.getPauseReason());
+    // 3. Reconciler 即使被唤醒也收敛而不新建 Run
+    issueWorkQueue.request(issue.getId(), Duration.ZERO);
+    WorkClaim claim = claimWork();
+    assertNotNull(claim);
+    assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, reconciler.reconcile(claim));
     assertEquals(
-        "Checked third-party provider logs: no side effect occurred.", resolved.getPauseDetail());
+        1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
 
-    // 校验活动留痕
-    List<IssueActivity> activities = issueEditingService.listActivities(issue.getId(), 0, 10);
-    IssueActivity resolveActivity =
-        activities.stream()
-            .filter(
-                a ->
-                    a.getKind() == IssueActivityKind.CONTROL
-                        && a.getData().contains("RESOLVE_UNKNOWN"))
-            .findFirst()
-            .orElse(null);
-    assertNotNull(resolveActivity);
-    assertTrue(resolveActivity.getData().contains("third-party provider logs"));
-
-    // 历史 Run 仍为 UNKNOWN 事实，不捏造成功或取消
-    IssueRun runFact = issueRunService.getRun(activeRun.getId());
-    assertEquals(IssueRunStatus.UNKNOWN, runFact.getStatus());
-
-    // 现在可以显式 resumeIssue 解除 USER 门禁
+    // 4. 显式恢复后门禁解除，才允许接受新 Run
     Issue resumed =
-        issueLifecycleService.resumeIssue(resolved.getId(), resolved.getVersion(), key("resume"));
+        issueLifecycleService.resumeIssue(
+            stoppedAgain.getId(), stoppedAgain.getVersion(), key("r"));
     assertNull(resumed.getPauseReason());
-    assertNull(resumed.getPauseDetail());
+    IssueRun next = issueRunService.acceptRun(resumed.getId(), key("accept-2"));
+    assertEquals(IssueRunStatus.RUNNING, next.getStatus());
   }
 
   /** 测试意图：验证 Issue 深删除在合法状态下按规范顺序清理证据、活动、Work、预算、Run、AgentThread 及 Harness Session，最后删除 Issue 行。 */
@@ -368,7 +354,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertNotNull(projectService.getProject(projectId));
   }
 
-  /** 测试意图：验证 Project 深删除包含多个 Issue 时，若任一 Issue 处于活动或 UNKNOWN 则整体拒绝；合法时深删除全部 Issue 与 Project。 */
+  /** 测试意图：验证 Project 深删除包含多个 Issue 时，若任一 Issue 仍处于活动 Run 则整体拒绝；合法时深删除全部 Issue 与 Project。 */
   @Test
   void projectDeepDeleteWithMultipleIssuesAndStrictRejection() {
     String agent = createAgent();
@@ -400,26 +386,15 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         ProjectValidationException.class,
         () -> projectService.deleteProject(projectId, project.getVersion()));
 
-    // 2. 将 Issue 2 置为 UNKNOWN 门禁
-    issueRunService.markUnknown(
+    // 2. 将 Issue 2 的结果不明收尾为 FAILED + ERROR 暂停
+    issueRunService.failRun(
         run2.getId(),
         run2.getVersion(),
         key("unk2"),
         headEntry(run2.getThreadId()),
-        "Unknown network failure");
+        "Run stopped with in-flight side effects; outcome unknown");
 
-    // 项目删除依然拒绝（Issue 2 有 UNKNOWN 门禁）
-    Project projectAfterUnknown = projectService.getProject(projectId);
-    assertThrows(
-        ProjectValidationException.class,
-        () -> projectService.deleteProject(projectId, projectAfterUnknown.getVersion()));
-
-    // 3. 人工核查 Issue 2 并 resolveUnknown -> 转换为 USER 暂停门禁
-    Issue unkIssue2 = issueEditingService.getIssue(issue2.getId());
-    issueLifecycleService.resolveUnknown(
-        unkIssue2.getId(), unkIssue2.getVersion(), key("res2"), "Residuals cleaned up");
-
-    // 4. 现在项目深删除应当成功执行
+    // 3. 无活动 Run 后项目深删除直接成功：暂停只阻止新派发，不是删除门禁
     Project projectReady = projectService.getProject(projectId);
     projectService.deleteProject(projectId, projectReady.getVersion());
 
@@ -428,9 +403,9 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(0L, count("select count(*) from project where id = ?", projectId));
   }
 
-  /** 测试意图：验证 stopIssue 与 resolveUnknown 精确重试幂等回放，异指纹冲突。 */
+  /** 测试意图：验证 stopIssue 精确重试幂等回放，异指纹冲突，恢复后门禁解除。 */
   @Test
-  void stopIssueAndResolveUnknownIdempotentReplay() {
+  void stopIssueIdempotentReplay() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("ReplayProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
@@ -454,34 +429,13 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
             issueLifecycleService.stopIssue(
                 inDesign.getId(), inDesign.getVersion(), stopKey, "Different Detail"));
 
-    // 恢复暂停后接受 Run 并转为 UNKNOWN 状态
-    issueLifecycleService.resumeIssue(inDesign.getId(), stopped1.getVersion(), key("res1"));
-    Issue resumed = issueEditingService.getIssue(issue.getId());
-    issueRunService.acceptRun(resumed.getId(), key("accept"));
-    Issue fresh = issueEditingService.getIssue(issue.getId());
-    IssueRun activeRun = issueRunService.getActiveRun(issue.getId());
-    issueRunService.markUnknown(
-        activeRun.getId(),
-        activeRun.getVersion(),
-        key("u"),
-        headEntry(activeRun.getThreadId()),
-        "fail");
-    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
-
-    String resolveKey = key("res");
-    Issue resolved1 =
-        issueLifecycleService.resolveUnknown(
-            unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Proof 1");
-    Issue resolved2 =
-        issueLifecycleService.resolveUnknown(
-            unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Proof 1");
-    assertEquals(resolved1.getId(), resolved2.getId());
-
-    assertThrows(
-        Exception.class,
-        () ->
-            issueLifecycleService.resolveUnknown(
-                unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Different Proof"));
+    // 显式恢复后 USER 暂停门禁解除，可以接受新 Run
+    Issue resumed =
+        issueLifecycleService.resumeIssue(inDesign.getId(), stopped1.getVersion(), key("res1"));
+    assertNull(resumed.getPauseReason());
+    assertEquals(
+        IssueRunStatus.RUNNING,
+        issueRunService.acceptRun(resumed.getId(), key("accept")).getStatus());
   }
 
   /** 测试意图：验证阶段预算授权、重置、获取、AgentThread 列举与需求事实编辑。 */
@@ -666,6 +620,37 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
   private WorkClaim claimWork() {
     String leaseToken = UUID.randomUUID().toString();
     return issueWorkQueue.claimNext(leaseToken, Duration.ofMinutes(1)).orElse(null);
+  }
+
+  /**
+   * 受控 Harness 假件在投影边界模拟「仍在途」执行事实：RUNNING 工具 → hasWork；真实分类契约由 Runtime 测试覆盖。
+   *
+   * <p>首次读取模拟在途事实，收尾校验重新读取假件持久化的 Stop 边界。
+   */
+  private void stubInFlightThread(IssueRun run) {
+    ThreadState threadState = mock(ThreadState.class);
+    when(threadState.headEntryId()).thenReturn(headEntry(run.getThreadId()));
+    when(threadState.sessionId()).thenReturn(run.getSessionId());
+    when(threadState.nextCommandSequence()).thenReturn(1L);
+    EntryPath entryPath = mock(EntryPath.class);
+    Entry rootEntry = mock(Entry.class);
+    when(rootEntry.id()).thenReturn(run.getStartEntryId());
+    when(entryPath.entries()).thenReturn(List.of(rootEntry));
+    when(entryPath.head()).thenReturn(rootEntry);
+
+    ThreadSnapshot inFlightSnapshot = mock(ThreadSnapshot.class);
+    when(inFlightSnapshot.thread()).thenReturn(threadState);
+    when(inFlightSnapshot.requireFullPath()).thenReturn(entryPath);
+    when(inFlightSnapshot.executionFacts())
+        .thenReturn(new ThreadExecutionFacts(true, false, false));
+    when(runtime.getThreadSnapshot(run.getThreadId()))
+        .thenReturn(inFlightSnapshot)
+        .thenAnswer(
+            invocation -> HarnessRuntimeTestConfiguration.snapshot(jdbc, run.getThreadId()));
+  }
+
+  private long activityCount(UUID issueId) {
+    return count("select count(*) from project_issue_activity where issue_id = ?", issueId);
   }
 
   private void insertStorageBlob(UUID blobId) {

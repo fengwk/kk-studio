@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
@@ -49,6 +51,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -69,6 +72,11 @@ import java.util.concurrent.TimeUnit;
 class MiniMaxMavisToolFailureTest {
 
   private static final String IDENTIFIABLE_SECRET_TOKEN = "super-secret-mavis-token-xyz-98765";
+  private static final UUID SESSION_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
+  private static final UUID ROOT_THREAD_ID =
+      UUID.fromString("22222222-3333-4444-5555-666666666666");
+  private static final UUID ROOT_SESSION_ID =
+      UUID.fromString("33333333-4444-5555-6666-777777777777");
   private static final String CLIENT_UUID = "11111111-2222-3333-4444-555555555555";
   private static final String VALID_BLOB_UUID = "11111111-2222-3333-4444-555555555555";
 
@@ -309,12 +317,12 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 正确传递 threadId： 验证 Tool 会将 ToolExecutionContext 中的 threadId 显式传递给
-   * PluginResourceGateway.resolveSessionResource； 假网关记录收到的 threadId，断言其严格等于构造的固定 UUID（非 null、非其它
-   * id），且收到的 resourceUri 严格匹配。
+   * 正确传递 sessionId： 验证 Tool 会将 ToolExecutionContext 中冻结的 sessionId 显式传递给
+   * PluginResourceGateway.resolveSessionResource； 假网关记录收到的会话 id，断言其严格等于上下文的 sessionId（非 null、非
+   * threadId），且收到的 resourceUri 严格匹配。
    */
   @Test
-  void sessionResourceExplicitlyPassesThreadIdToResourceGateway() {
+  void sessionResourceExplicitlyPassesSessionIdToResourceGateway() {
     PluginCredentialAccess credentialAccess = validCredentialAccess();
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
@@ -346,9 +354,13 @@ class MiniMaxMavisToolFailureTest {
 
     assertEquals(1, gateway.resolveCallCount(), "Gateway must be called exactly once");
     assertEquals(
+        SESSION_ID,
+        gateway.lastResolvedSessionId(),
+        "Gateway must receive the exact sessionId from ToolExecutionContext");
+    assertNotEquals(
         expectedThreadId,
-        gateway.lastResolvedThreadId(),
-        "Gateway must receive the exact threadId from ToolExecutionContext");
+        gateway.lastResolvedSessionId(),
+        "Gateway must authorize the session, not the thread");
     assertEquals(
         resourceUri,
         gateway.lastResolvedUri(),
@@ -394,8 +406,8 @@ class MiniMaxMavisToolFailureTest {
         text.startsWith("MAVIS_RESOURCE_UNAVAILABLE"),
         () -> "Error message must start with MAVIS_RESOURCE_UNAVAILABLE, actual: " + text);
     assertTrue(
-        text.contains("session resource access requires an invocation thread id"),
-        () -> "Error message should convey that thread id is required, actual: " + text);
+        text.contains("session resource access requires an invocation session id"),
+        () -> "Error message should convey that session id is required, actual: " + text);
 
     assertEquals(
         0,
@@ -1103,7 +1115,16 @@ class MiniMaxMavisToolFailureTest {
 
   private static ToolExecutionContext createContext(UUID threadId) {
     return new ToolExecutionContext(
-        UUID.randomUUID(), threadId, Instant.now(), mock(BranchView.class));
+        UUID.randomUUID(),
+        threadId,
+        SESSION_ID,
+        ROOT_THREAD_ID,
+        ROOT_SESSION_ID,
+        UUID.randomUUID(),
+        Instant.now(),
+        TurnMediaCapabilities.NONE,
+        mock(BranchView.class),
+        Optional.empty());
   }
 
   private PluginCredentialAccess validCredentialAccess() {
@@ -1235,7 +1256,7 @@ class MiniMaxMavisToolFailureTest {
     }
 
     @Override
-    public URI resolveSessionResource(UUID threadId, String resourceUri) {
+    public URI resolveSessionResource(UUID sessionId, String resourceUri) {
       return URI.create("https://stage.local/download/mock-file");
     }
 
@@ -1250,7 +1271,7 @@ class MiniMaxMavisToolFailureTest {
   static final class HttpDownloadGateway implements PluginResourceGateway {
 
     @Override
-    public URI resolveSessionResource(UUID threadId, String resourceUri) {
+    public URI resolveSessionResource(UUID sessionId, String resourceUri) {
       return URI.create("http://insecure.local/download/mock-file");
     }
 
@@ -1310,15 +1331,15 @@ class MiniMaxMavisToolFailureTest {
 
   /** 假资源网关。 */
   static final class FakeGateway implements PluginResourceGateway {
-    private final List<UUID> resolvedThreadIds = Collections.synchronizedList(new ArrayList<>());
+    private final List<UUID> resolvedSessionIds = Collections.synchronizedList(new ArrayList<>());
     private final List<String> resolvedUris = Collections.synchronizedList(new ArrayList<>());
     private final List<Runnable> stagedBeforeRequests =
         Collections.synchronizedList(new ArrayList<>());
     private final List<String> stagedRemoteUris = Collections.synchronizedList(new ArrayList<>());
 
     @Override
-    public URI resolveSessionResource(UUID threadId, String resourceUri) {
-      resolvedThreadIds.add(threadId);
+    public URI resolveSessionResource(UUID sessionId, String resourceUri) {
+      resolvedSessionIds.add(sessionId);
       resolvedUris.add(resourceUri);
       String id = resourceUri.substring("kkstudio:/resources/".length());
       return URI.create("https://resolved.files.local/" + id);
@@ -1348,8 +1369,8 @@ class MiniMaxMavisToolFailureTest {
       return List.copyOf(stagedRemoteUris);
     }
 
-    public List<UUID> resolvedThreadIds() {
-      return Collections.unmodifiableList(resolvedThreadIds);
+    public List<UUID> resolvedSessionIds() {
+      return Collections.unmodifiableList(resolvedSessionIds);
     }
 
     public List<String> resolvedUris() {
@@ -1360,11 +1381,11 @@ class MiniMaxMavisToolFailureTest {
       return resolvedUris.size();
     }
 
-    public UUID lastResolvedThreadId() {
-      if (resolvedThreadIds.isEmpty()) {
+    public UUID lastResolvedSessionId() {
+      if (resolvedSessionIds.isEmpty()) {
         return null;
       }
-      return resolvedThreadIds.get(resolvedThreadIds.size() - 1);
+      return resolvedSessionIds.get(resolvedSessionIds.size() - 1);
     }
 
     public String lastResolvedUri() {

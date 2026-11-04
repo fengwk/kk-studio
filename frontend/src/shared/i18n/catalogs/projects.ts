@@ -77,10 +77,6 @@ export const projectsCatalog = {
     'zh-CN': '终止运行',
     'en-US': 'Stop Execution',
   },
-  'projects.issue.resolveUnknown': {
-    'zh-CN': '人工核查并解除 UNKNOWN',
-    'en-US': 'Verify & Resolve UNKNOWN',
-  },
   'projects.issue.reopen': {
     'zh-CN': '重新打开',
     'en-US': 'Reopen',
@@ -126,8 +122,8 @@ export const projectsCatalog = {
     'en-US': 'Close',
   },
   'projects.issue.unknownPending': {
-    'zh-CN': '检测到未确认结果的写操作（可能已在服务端生效）',
-    'en-US': 'Unconfirmed write request detected (may have taken effect on server)',
+    'zh-CN': '检测到未确认结果的写操作，可能已在服务端生效',
+    'en-US': 'Unconfirmed write request detected; it may have taken effect on the server',
   },
   'projects.issue.discardPending': {
     'zh-CN': '放弃未决操作',
@@ -210,8 +206,8 @@ export const projectsCatalog = {
     'en-US': 'Next issue number',
   },
   'projects.noDescription': {
-    'zh-CN': '（无项目描述）',
-    'en-US': '(no description)',
+    'zh-CN': '无项目描述',
+    'en-US': 'No description',
   },
   'projects.empty.noMatch': {
     'zh-CN': '暂无匹配项目',
@@ -309,10 +305,6 @@ export const projectsCatalog = {
     'zh-CN': '未说明',
     'en-US': 'unspecified',
   },
-  'projects.issue.unknownBadgeTitle': {
-    'zh-CN': '需人工核查，暂不能继续',
-    'en-US': 'Needs manual verification before continuing',
-  },
   'projects.issue.pausedBadgeTitle': {
     'zh-CN': '已人工暂停',
     'en-US': 'Paused manually',
@@ -332,14 +324,6 @@ export const projectsCatalog = {
   'projects.issue.blockReasonPrefix': {
     'zh-CN': '原因: {{reason}}',
     'en-US': 'Reason: {{reason}}',
-  },
-  'projects.issue.actionVerify': {
-    'zh-CN': '人工核查',
-    'en-US': 'Verify',
-  },
-  'projects.issue.actionVerifyTitle': {
-    'zh-CN': '核查外部副作用，解除 UNKNOWN',
-    'en-US': 'Verify external side effects and resolve UNKNOWN',
   },
   'projects.issue.actionRecover': {
     'zh-CN': '恢复',
@@ -406,8 +390,12 @@ export const projectsCatalog = {
     'en-US': 'YOLO execution mode',
   },
   'projects.edit.yoloToggle': {
-    'zh-CN': '启用 YOLO 执行策略 (自主执行，跳过人工交互门禁)',
-    'en-US': 'Enable YOLO execution (autonomous, skips manual gates)',
+    'zh-CN': '启用 YOLO 执行策略',
+    'en-US': 'Enable YOLO execution',
+  },
+  'projects.edit.yoloHelp': {
+    'zh-CN': '自主执行，跳过人工交互门禁。',
+    'en-US': 'Runs autonomously and skips manual interaction gates.',
   },
   'projects.edit.saving': {
     'zh-CN': '保存中...',
@@ -438,8 +426,8 @@ export const projectsCatalog = {
     'en-US': 'Failed to update the workflow',
   },
   'projects.edit.unconfirmed': {
-    'zh-CN': '{{label}}未确认写入结果（冲突或网络异常）。草稿与当前版本基线保持不变，请选择加载最新数据的方式后重试。',
-    'en-US': '{{label}}: the write result is unconfirmed (conflict or network error). Your draft and version baseline are unchanged; load the latest data explicitly and retry.',
+    'zh-CN': '{{label}}未确认写入结果，可能因冲突或网络异常。草稿与当前版本基线保持不变，请选择加载最新数据的方式后重试。',
+    'en-US': '{{label}}: the write result is unconfirmed because of a conflict or network error. Your draft and version baseline are unchanged; load the latest data explicitly and retry.',
   },
   'projects.edit.reloadKeepDraft': {
     'zh-CN': '加载最新并保留草稿',
@@ -478,8 +466,8 @@ export const projectsCatalog = {
     'en-US': 'Add stage',
   },
   'projects.edit.untitledStage': {
-    'zh-CN': '（未命名阶段）',
-    'en-US': '(untitled stage)',
+    'zh-CN': '未命名阶段',
+    'en-US': 'Untitled stage',
   },
   'projects.edit.stageLabel': {
     'zh-CN': '{{name}}（{{state}}）',
@@ -566,8 +554,8 @@ export const projectsCatalog = {
     'en-US': 'Unspecified',
   },
   'projects.edit.maxRuns': {
-    'zh-CN': 'Run 额度（maxRuns）',
-    'en-US': 'Run budget (maxRuns)',
+    'zh-CN': 'Run 额度',
+    'en-US': 'Run budget',
   },
   'projects.edit.maxRunsInvalid': {
     'zh-CN': 'Run 额度必须是 1 到 {{max}} 之间的整数',
@@ -582,8 +570,12 @@ export const projectsCatalog = {
     'en-US': 'Enable this stage',
   },
   'projects.edit.nextStates': {
-    'zh-CN': '后续阶段（正常转移白名单）',
-    'en-US': 'Next stages (normal transition allowlist)',
+    'zh-CN': '后续阶段',
+    'en-US': 'Next stages',
+  },
+  'projects.edit.nextStatesHelp': {
+    'zh-CN': '仅这些阶段可通过正常流转到达。',
+    'en-US': 'Only these stages can be reached through normal transitions.',
   },
   'projects.edit.reservedNoEdges': {
     'zh-CN': '保留状态不能声明普通转移边。',
@@ -798,10 +790,6 @@ export const projectsCatalog = {
     'zh-CN': '存在未确认结果的阻塞请求，不能直接修改输入。请先重试原操作或明确放弃。',
     'en-US': 'A pending block request exists. Retry or discard it before editing the input.',
   },
-  'projects.issue.pendingResolveUnknownModifyBlocked': {
-    'zh-CN': '存在未确认结果的人工核查请求，不能直接修改输入。请先重试原操作或明确放弃。',
-    'en-US': 'A pending verification request exists. Retry or discard it before editing the input.',
-  },
   'projects.issue.pendingStopModifyBlocked': {
     'zh-CN': '存在未确认结果的终止请求，不能直接修改输入。请先重试原操作或明确放弃。',
     'en-US': 'A pending stop request exists. Retry or discard it before editing the input.',
@@ -827,16 +815,16 @@ export const projectsCatalog = {
     'en-US': 'An unconfirmed or corrupted action record exists; evidence cannot be uploaded yet',
   },
   'projects.issue.actionConflictNotice': {
-    'zh-CN': '操作遇到版本冲突 (409)。已为您保留编辑草稿，请刷新版本后重试。',
-    'en-US': 'The action hit a version conflict (409). Your draft was kept; refresh the version and retry.',
+    'zh-CN': '操作遇到 409 版本冲突。已为您保留编辑草稿，请刷新版本后重试。',
+    'en-US': 'The action hit a 409 version conflict. Your draft was kept; refresh the version and retry.',
   },
   'projects.issue.specConflictNotice': {
-    'zh-CN': 'Issue 已被其他操作更新 (409 冲突)。已保留编辑草稿，请刷新版本后重试。',
-    'en-US': 'The issue was updated by another action (409 conflict). Your draft was kept; refresh the version and retry.',
+    'zh-CN': 'Issue 已被其他操作更新，发生 409 冲突。已保留编辑草稿，请刷新版本后重试。',
+    'en-US': 'The issue was updated by another action in a 409 conflict. Your draft was kept; refresh the version and retry.',
   },
   'projects.issue.retryConflictNotice': {
-    'zh-CN': '重试操作遇到版本冲突 (409)，请刷新数据后重试。',
-    'en-US': 'The retry hit a version conflict (409); refresh the data and retry.',
+    'zh-CN': '重试操作遇到 409 版本冲突，请刷新数据后重试。',
+    'en-US': 'The retry hit a 409 version conflict; refresh the data and retry.',
   },
   'projects.issue.actionFailed': {
     'zh-CN': '操作失败',
@@ -866,10 +854,6 @@ export const projectsCatalog = {
     'zh-CN': '阻塞原因不能为空',
     'en-US': 'A blocked reason is required',
   },
-  'projects.issue.verificationRequired': {
-    'zh-CN': '人工核查说明不能为空',
-    'en-US': 'A verification note is required',
-  },
   'projects.issue.resetBudgetStateRequired': {
     'zh-CN': '请选择要重置预算的工作阶段',
     'en-US': 'Select the work stage whose budget you want to reset',
@@ -887,8 +871,8 @@ export const projectsCatalog = {
     'en-US': 'Failed to upload the evidence',
   },
   'projects.issue.versionConflictNotice': {
-    'zh-CN': '服务端版本已更新为 v{{freshVersion}}（当前草稿基于 v{{specVersion}}）。已保留草稿；如确认使用最新版本覆盖，请显式确认，或取消编辑重新载入。',
-    'en-US': 'The server version is now v{{freshVersion}} (your draft is based on v{{specVersion}}). The draft was kept; confirm explicitly to overwrite with the latest version, or cancel editing to reload.',
+    'zh-CN': '服务端版本已更新为 v{{freshVersion}}；当前草稿基于 v{{specVersion}}。已保留草稿；如确认使用最新版本覆盖，请显式确认，或取消编辑重新载入。',
+    'en-US': 'The server version is now v{{freshVersion}}; your draft is based on v{{specVersion}}. The draft was kept; confirm explicitly to overwrite with the latest version, or cancel editing to reload.',
   },
   'projects.issue.loadingDetail': {
     'zh-CN': '加载 Issue 详情中...',
@@ -907,8 +891,8 @@ export const projectsCatalog = {
     'en-US': 'Requirements and acceptance criteria',
   },
   'projects.issue.noSpecDesc': {
-    'zh-CN': '（暂无需求描述）',
-    'en-US': '(no requirements description)',
+    'zh-CN': '暂无需求描述',
+    'en-US': 'No requirements description',
   },
   'projects.issue.saving': {
     'zh-CN': '保存中...',
@@ -951,11 +935,11 @@ export const projectsCatalog = {
     'en-US': 'Activity type',
   },
   'projects.issue.activityCommentOption': {
-    'zh-CN': '普通评论 (Comment)',
+    'zh-CN': '普通评论',
     'en-US': 'Comment',
   },
   'projects.issue.activityInstructionOption': {
-    'zh-CN': '下达指令 (Instruction)',
+    'zh-CN': '下达指令',
     'en-US': 'Instruction',
   },
   'projects.issue.deliverToActiveRun': {
@@ -1094,10 +1078,6 @@ export const projectsCatalog = {
     'zh-CN': '公开证据 ({{count}})',
     'en-US': 'Public evidence ({{count}})',
   },
-  'projects.issue.pendingVerifyExternalSideEffects': {
-    'zh-CN': '待人工核查外部副作用',
-    'en-US': 'External side effects need manual verification',
-  },
   'projects.issue.transitionStateTo': {
     'zh-CN': '流转状态至 {{state}}',
     'en-US': 'Transition to {{state}}',
@@ -1105,10 +1085,6 @@ export const projectsCatalog = {
   'projects.issue.transitionToState': {
     'zh-CN': '流转至 {{state}}',
     'en-US': 'Move to {{state}}',
-  },
-  'projects.issue.resolveUnknownActionTitle': {
-    'zh-CN': '核查外部副作用并解除 UNKNOWN',
-    'en-US': 'Verify external side effects and resolve UNKNOWN',
   },
   'projects.issue.recoverActionTitle': {
     'zh-CN': '解除阻塞并恢复至原工作阶段',
@@ -1127,7 +1103,7 @@ export const projectsCatalog = {
     'en-US': 'Stop the active run and pause the issue',
   },
   'projects.issue.stopAction': {
-    'zh-CN': '终止 (Stop)',
+    'zh-CN': '终止',
     'en-US': 'Stop',
   },
   'projects.issue.storageLoadError': {
@@ -1135,8 +1111,8 @@ export const projectsCatalog = {
     'en-US': 'Local storage failed; writes for this issue are locked: {{error}}',
   },
   'projects.issue.corruptActionTitle': {
-    'zh-CN': '检测到损坏的本地未决操作记录（可能包含未确认副作用）',
-    'en-US': 'A corrupted local pending record was detected (it may hide unconfirmed side effects)',
+    'zh-CN': '检测到损坏的本地未决操作记录，可能包含未确认副作用',
+    'en-US': 'A corrupted local pending record was detected; it may hide unconfirmed side effects',
   },
   'projects.issue.corruptActionDetail': {
     'zh-CN': '解析错误: {{error}}。为避免覆盖外部在途操作，写操作已锁定。',
@@ -1187,8 +1163,8 @@ export const projectsCatalog = {
     'en-US': 'Refresh and keep draft',
   },
   'projects.issue.blockDialogTitle': {
-    'zh-CN': '标记业务阻塞 (BLOCKED)',
-    'en-US': 'Mark as blocked (BLOCKED)',
+    'zh-CN': '标记业务阻塞',
+    'en-US': 'Mark as blocked',
   },
   'projects.issue.blockReasonFieldLabel': {
     'zh-CN': '阻塞原因',
@@ -1206,37 +1182,13 @@ export const projectsCatalog = {
     'zh-CN': '确认阻塞',
     'en-US': 'Mark as blocked',
   },
-  'projects.issue.resolveUnknownDialogTitle': {
-    'zh-CN': '解除 UNKNOWN（人工核查）',
-    'en-US': 'Resolve UNKNOWN (manual verification)',
-  },
-  'projects.issue.resolveUnknownDesc': {
-    'zh-CN': '* 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除 UNKNOWN 暂停。',
-    'en-US': '* The run crashed or timed out, leaving its in-flight side effects unknown. Check the leftover model/tool calls and external side effects, then record your basis for resolving the UNKNOWN pause.',
-  },
-  'projects.issue.verificationFieldLabel': {
-    'zh-CN': '核查结论与说明',
-    'en-US': 'Verification result and notes',
-  },
-  'projects.issue.verificationPlaceholder': {
-    'zh-CN': '说明已核实的内容与外部状态一致性保证...',
-    'en-US': 'Describe what you verified and how you confirmed the external state is consistent…',
-  },
-  'projects.issue.resolving': {
-    'zh-CN': '解除中...',
-    'en-US': 'Resolving…',
-  },
-  'projects.issue.confirmResolveUnknown': {
-    'zh-CN': '确认解除 UNKNOWN',
-    'en-US': 'Resolve UNKNOWN',
-  },
   'projects.issue.stopDialogTitle': {
-    'zh-CN': '终止当前运行 (Stop)',
+    'zh-CN': '终止当前运行',
     'en-US': 'Stop the active run',
   },
   'projects.issue.stopDetailFieldLabel': {
-    'zh-CN': '终止原因 (可选)',
-    'en-US': 'Stop reason (optional)',
+    'zh-CN': '终止原因',
+    'en-US': 'Stop reason',
   },
   'projects.issue.stopDetailPlaceholder': {
     'zh-CN': '说明人工中止执行的原因...',

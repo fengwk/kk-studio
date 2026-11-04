@@ -1,0 +1,33 @@
+name: Set up PostgreSQL client
+description: Install and select the fixture PostgreSQL client
+runs:
+  using: composite
+  steps:
+    - name: Set up PostgreSQL client tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo install -d /usr/share/postgresql-common/pgdg
+        sudo curl --fail --silent --show-error --retry 3 \
+          -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        . /etc/os-release
+        printf '%s\n' \
+          'Types: deb' \
+          'URIs: https://apt.postgresql.org/pub/repos/apt' \
+          "Suites: ${VERSION_CODENAME}-pgdg" \
+          "Architectures: $(dpkg --print-architecture)" \
+          'Components: main' \
+          'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+          | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+        echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
+    - name: Verify PostgreSQL client selection
+      shell: bash
+      run: |
+        set -euo pipefail
+        for tool in psql pg_dump pg_restore createdb pg_isready; do
+          test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"
+          "${tool}" --version
+        done

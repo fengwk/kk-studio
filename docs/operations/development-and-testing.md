@@ -328,9 +328,9 @@ inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` �
 
 ```bash
 docker compose -f deploy/local/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml config --quiet
-docker compose -f deploy/test/compose.yaml --profile app config --quiet
-docker compose -f deploy/reliability/compose.yaml config --quiet
+COMPOSE_PROFILES=canvas-test docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml config --quiet
+COMPOSE_PROFILES=reliability docker compose -p kk-studio-reliability -f deploy/test/compose.yaml config --quiet
 ./scripts/dev/verify/e2e/distributed.sh verify
 ```
 
@@ -397,6 +397,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
+
+Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
+`{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；这些 case
+不调用真实模型。更改执行选择契约时同步 case、fixture 与生成的前端契约。
 
 Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
 返回 400，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，版本必须是无前导零的非负十进制 long。
@@ -1088,7 +1092,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 先确认监听者归属；换端口或设 `DEV_KILL_PORTS=false`，不要默认强杀不属于本次开发的服务 |
 | 本机 preview 启动即失败 | `./scripts/dev/shared-preview.sh status`；核对 `SHARED_PREVIEW_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
-| Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
+| Canvas test 健康失败 | `COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml ps`；同参数执行 `logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |

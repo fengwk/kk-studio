@@ -21,7 +21,7 @@ amd64 模拟能力，不代表 server 支持原生多架构。这些依赖仅用
 
 `kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z` 使用此目录构建。
 运行层为带 `/bin/sh` 的 Alpine 3.22（多架构 index digest 固定在 Dockerfile 中），
-仅保留 mc、CA 和许可文件；curl 只安装在下载阶段。支持 `TARGETARCH=amd64/arm64`，
+仅保留 mc、共享桶初始化脚本、CA 和许可文件；curl 只安装在下载阶段。支持 `TARGETARCH=amd64/arm64`，
 其他架构明确拒绝。mc 下载自
 [官方 GitHub Release](https://github.com/minio/mc/releases/tag/RELEASE.2025-04-16T18-13-26Z)，
 资产路径为 `mc.linux-<arch>.RELEASE.2025-04-16T18-13-26Z`。
@@ -37,7 +37,8 @@ amd64 模拟能力，不代表 server 支持原生多架构。这些依赖仅用
 （固定四套栈的 server digest、本地 client 构建与 mc 版本/校验和/许可）。
 然后在本目录执行 `docker build --pull --platform linux/amd64 -t kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z .`，
 arm64 镜像改用 `--platform linux/arm64` 另行构建验证。
-bucket 私有性由 `minio-init` 的 `mc anonymous set none` 设置，并由上述契约测试固定该初始化命令；
+bucket 私有性由镜像内的 [init-bucket.sh](init-bucket.sh) 调用 `mc anonymous set none` 设置，
+其顺序和失败行为由 [minio-init-bucket.test.mjs](../../../scripts/dev/verify/repository/tests/minio-init-bucket.test.mjs) 验证；
 仓库当前不自动发起匿名访问来断言访问被拒。
 
 mc 使用 GNU AGPL v3 或后续版本，不需要 AIStor 许可。对应源码：

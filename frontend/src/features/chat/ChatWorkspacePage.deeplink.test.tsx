@@ -11,8 +11,8 @@ import {
   createDefaultChatPaneState,
 } from './chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { chatService } from '@/features/chat/chat-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { setLocale } from '@/shared/i18n'
 
 const CHAT_ID = 'chat-1'
@@ -21,10 +21,10 @@ const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listAgents: vi.fn() },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: { getChat: vi.fn() },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),

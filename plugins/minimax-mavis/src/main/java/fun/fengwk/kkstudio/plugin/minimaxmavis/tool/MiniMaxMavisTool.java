@@ -216,7 +216,7 @@ public final class MiniMaxMavisTool implements Tool {
             "this deployment cannot stage MiniMax Mavis media output");
       }
       // 资源鉴权身份只来自本次 invocation context：没有它就绝不发送引用会话资源的请求。
-      arguments = resourceAccess.resolveInputs(threadId(request), arguments);
+      arguments = resourceAccess.resolveInputs(sessionId(request), arguments);
     } catch (PluginResourceUnavailableException error) {
       return failed(toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
     } catch (JacksonException | IllegalArgumentException error) {
@@ -254,10 +254,10 @@ public final class MiniMaxMavisTool implements Tool {
     }
   }
 
-  /** 调用上下文里的 Harness Thread id；框架直调（无 context）时为空。 */
-  private static UUID threadId(ToolExecutionRequest request) {
+  /** 调用上下文里冻结的会话 id；框架直调（无 context）时为空。 */
+  private static UUID sessionId(ToolExecutionRequest request) {
     ToolExecutionContext context = request.context();
-    return context == null ? null : context.threadId();
+    return context == null ? null : context.sessionId();
   }
 
   private ToolResult invoke(JsonNode arguments, String toolCallId) {

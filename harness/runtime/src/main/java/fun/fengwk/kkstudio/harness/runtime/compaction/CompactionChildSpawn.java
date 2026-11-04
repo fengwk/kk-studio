@@ -1,19 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;
 import java.util.Objects;
@@ -67,7 +70,6 @@ public final class CompactionChildSpawn {
             sessionId,
             childSettings,
             List.of(command),
-            AcceptancePreflight.IDENTITY,
             parentThread.id(),
             null,
             null,
@@ -77,7 +79,8 @@ public final class CompactionChildSpawn {
             JoinDelivery.SETTLE_OWNER_TURN,
             SpawnRequest.Budget.unlimited(),
             ticketId,
-            requestHash));
+            requestHash),
+        AcceptancePreflight.IDENTITY);
 
     return new CompactionStart(
         preparation.phase(),

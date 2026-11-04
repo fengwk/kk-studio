@@ -15,7 +15,6 @@ export interface IssueBoardProps {
   onBlockIssue: (issueId: string, expectedVersion: string) => void
   onRecoverIssue: (issueId: string, expectedVersion: string) => void
   onReopenIssue: (issueId: string, expectedVersion: string) => void
-  onResolveUnknownIssue: (issueId: string, expectedVersion: string) => void
 }
 
 export function IssueBoard({
@@ -28,7 +27,6 @@ export function IssueBoard({
   onBlockIssue,
   onRecoverIssue,
   onReopenIssue,
-  onResolveUnknownIssue,
 }: IssueBoardProps) {
   const { t } = useI18n()
   const states = useMemo(
@@ -121,9 +119,6 @@ export function IssueBoard({
                       onBlock={() => onBlockIssue(item.issue.id, item.issue.version)}
                       onRecover={() => onRecoverIssue(item.issue.id, item.issue.version)}
                       onReopen={() => onReopenIssue(item.issue.id, item.issue.version)}
-                      onResolveUnknown={() =>
-                        onResolveUnknownIssue(item.issue.id, item.issue.version)
-                      }
                     />
                   ))
                 )}

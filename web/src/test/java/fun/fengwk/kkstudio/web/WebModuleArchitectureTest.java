@@ -26,6 +26,9 @@ import java.util.stream.Stream;
 class WebModuleArchitectureTest {
 
   private static final String HARNESS_RUNTIME_PREFIX = "fun.fengwk.kkstudio.harness.runtime.";
+  private static final String HARNESS_API_PREFIX = "fun.fengwk.kkstudio.harness.api.";
+  private static final String HARNESS_SPI_PREFIX = "fun.fengwk.kkstudio.harness.spi.";
+  private static final String HARNESS_CODEC_PREFIX = "fun.fengwk.kkstudio.harness.codec.";
   private static final String HARNESS_RUNTIME_PROCESSOR_PREFIX =
       "fun.fengwk.kkstudio.harness.runtime.processor.";
   private static final String HARNESS_CONTRIBUTOR_API_PREFIX =
@@ -37,8 +40,15 @@ class WebModuleArchitectureTest {
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
   private static final String PROJECT_REPO_PREFIX = "fun.fengwk.kkstudio.project.repo.";
+
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
-      List.of(HARNESS_RUNTIME_PREFIX, HARNESS_CONTRIBUTOR_API_PREFIX, HARNESS_ENVIRONMENT_PREFIX);
+      List.of(
+          HARNESS_RUNTIME_PREFIX,
+          HARNESS_API_PREFIX,
+          HARNESS_SPI_PREFIX,
+          HARNESS_CODEC_PREFIX,
+          HARNESS_CONTRIBUTOR_API_PREFIX,
+          HARNESS_ENVIRONMENT_PREFIX);
 
   /** Web DTO 适配直接使用的公共值类型，不包含 Model/Driver 的私有执行实现。 */
   private static final List<String> ALLOWED_HARNESS_VALUE_IMPORTS =
@@ -111,7 +121,8 @@ class WebModuleArchitectureTest {
         pomViolations.add(
             "direct dependency declared (forbidden in any scope): "
                 + artifactId
-                + " (nearer dependency shadows platform compile-scope dependency and omits jar from Fat JAR)");
+                + " (nearer dependency shadows platform compile-scope dependency and omits jar from"
+                + " Fat JAR)");
       }
     }
     for (String artifactId : REQUIRED_POM_ARTIFACTS) {
@@ -265,7 +276,8 @@ class WebModuleArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () ->
-            "web controller boundary violations (controllers must not depend on harness runtime processor):\n"
+            "web controller boundary violations (controllers must not depend on harness runtime"
+                + " processor):\n"
                 + String.join("\n", violations));
   }
 

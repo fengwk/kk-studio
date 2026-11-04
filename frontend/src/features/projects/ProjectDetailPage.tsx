@@ -19,9 +19,9 @@ import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
 import { IssueBoard } from './components/IssueBoard'
 import { IssueDetailModal } from './components/IssueDetailModal'
-import { AgentPane } from '@/features/chat/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { IconButton } from '@/shared/ui/controls/IconButton'
@@ -330,10 +330,6 @@ export function ProjectDetailPage({
     )
   }
 
-  const handleResolveUnknownIssue = async (issueId: string, _expectedVersion: string) => {
-    handleSelectIssue(issueId)
-  }
-
   // 项目归档 / 取消归档
   const handleProjectArchiveToggle = async () => {
     if (!snapshot) {
@@ -463,7 +459,6 @@ export function ProjectDetailPage({
           onBlockIssue={handleBlockIssue}
           onRecoverIssue={handleRecoverIssue}
           onReopenIssue={handleReopenIssue}
-          onResolveUnknownIssue={handleResolveUnknownIssue}
         />
 
         {queryThreadId && (

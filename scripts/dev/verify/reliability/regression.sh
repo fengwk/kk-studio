@@ -7,20 +7,8 @@
 set -u -o pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
+source "$SCRIPT_DIR/../../lib/repo-root.sh" || exit 1
+resolve_repo_root "$SCRIPT_DIR" || exit 1
 
 ITERATIONS=3
 REPORT_ROOT="$REPO_ROOT/reports/reliability"
@@ -44,25 +32,25 @@ CURRENT_ITERATION_SIGNAL=
 TARGET_MODULES=(
   web
   apps/canvas/runtime
-  harness/infra
+  platform/daemon-server
   platform/runtime
 )
 
 TARGET_FQCNS=(
   fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoopTest
   fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoopPostgresqlIntegrationTest
-  fun.fengwk.kkstudio.web.environment.DaemonOutboundSenderTest
+  fun.fengwk.kkstudio.platform.daemon.transport.DaemonControlStreamTest
   fun.fengwk.kkstudio.web.events.ApplicationEventHubTest
   fun.fengwk.kkstudio.web.events.ApplicationEventWebSocketHandlerTest
   fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStoreIntegrationTest
   fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeConfigurationTest
   fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionExecutionContextImplTest
   fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorkerHeartbeatTest
-  fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherHandoffTest
-  fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherLifecycleTest
-  fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlWorkTest
-  fun.fengwk.kkstudio.harness.runtime.store.testing.PostgresqlWorkNotificationTest
-  fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourceConcurrencyTest
+  fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherHandoffTest
+  fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherLifecycleTest
+  fun.fengwk.kkstudio.platform.harness.store.PostgresqlWorkTest
+  fun.fengwk.kkstudio.platform.harness.store.PostgresqlWorkNotificationTest
+  fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSourceConcurrencyTest
   fun.fengwk.kkstudio.platform.storage.StorageUploadCleanupLeaseIntegrationTest
   fun.fengwk.kkstudio.platform.storage.StorageMaintenanceTest
   fun.fengwk.kkstudio.platform.storage.StorageUploadServiceIntegrationTest
@@ -127,8 +115,8 @@ target_module() {
     fun.fengwk.kkstudio.canvas.*)
       printf 'apps/canvas/runtime\n'
       ;;
-    fun.fengwk.kkstudio.harness.*)
-      printf 'harness/infra\n'
+    fun.fengwk.kkstudio.platform.daemon.*)
+      printf 'platform/daemon-server\n'
       ;;
     fun.fengwk.kkstudio.platform.*)
       printf 'platform/runtime\n'
@@ -147,11 +135,11 @@ target_area() {
     apps/canvas/runtime)
       printf 'Canvas\n'
       ;;
-    harness/infra)
-      printf 'Harness Infra\n'
+    platform/daemon-server)
+      printf 'Daemon Server\n'
       ;;
     platform/runtime)
-      printf 'Platform Storage\n'
+      printf 'Platform Runtime\n'
       ;;
     *)
       return 1
@@ -895,7 +883,7 @@ MAVEN_TEST_FILTER=$(IFS=,; printf '%s' "${TARGET_FQCNS[*]}")
 MAVEN_ARGS=(
   --batch-mode
   -pl
-  web,apps/canvas/runtime,harness/infra,platform/runtime
+  "$(IFS=,; printf '%s' "${TARGET_MODULES[*]}")"
   -am
   "-Dtest=$MAVEN_TEST_FILTER"
   -Dsurefire.failIfNoSpecifiedTests=false

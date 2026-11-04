@@ -5,7 +5,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { AgentPane } from '@/features/chat/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/AgentPane'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
@@ -43,8 +43,7 @@ const router = createMemoryRouter([{
             description: '通用助手',
             systemPrompt: 'You are a precise coding assistant.',
             type: 'BUILTIN',
-            model: 'minimax-m2.7',
-            variant: 'default',
+            execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
             config: {
               inheritParentEnvironment: true,
               tools: ['read', 'bash'],
@@ -60,8 +59,7 @@ const router = createMemoryRouter([{
             description: name,
             systemPrompt: null,
             type: 'USER',
-            model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
-            variant: 'fast',
+            execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'anthropic/Claude' : 'missing/model', variant: 'fast' } },
             config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
             version: '1',
             createTime: 1790812800,

@@ -3,12 +3,12 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { PluginConnectionCheckDTO, PluginDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/plugins-service', () => ({
+vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: {
     listPlugins: vi.fn(),
     getPlugin: vi.fn(),
@@ -611,7 +611,7 @@ describe('PluginsTab', () => {
     })
     expect(within(dialog).getByTestId('plugin-check-authentication')).toHaveTextContent('凭据已接受')
     expect(within(dialog).getByTestId('plugin-check-browser-session')).toHaveTextContent(
-      '未知（本检查不核验浏览器登录态）',
+      '未知；本检查不核验浏览器登录态',
     )
     expect(within(dialog).getByTestId('plugin-check-checked-at')).toHaveTextContent(
       new Date(1772366400 * 1000).toLocaleString('zh-CN'),

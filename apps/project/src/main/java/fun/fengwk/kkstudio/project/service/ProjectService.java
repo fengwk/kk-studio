@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
@@ -213,11 +212,6 @@ public class ProjectService {
         throw new ProjectValidationException(
             "project",
             "Cannot delete a project while an issue has an active run; stop or settle it first");
-      }
-      if (PauseReason.UNKNOWN.name().equals(issue.getPauseReason())) {
-        throw new ProjectValidationException(
-            "project",
-            "Cannot delete a project while an issue has an unresolved UNKNOWN gate; resolve unknown verification first");
       }
     }
     for (Issue issue : issues) {

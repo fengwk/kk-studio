@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.number.DecimalLongs;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
-import fun.fengwk.kkstudio.platform.events.SubscriptionFanOut;
+import fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut;
 
 import java.util.Objects;
 import java.util.UUID;

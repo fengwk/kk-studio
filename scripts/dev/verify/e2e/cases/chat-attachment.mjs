@@ -19,7 +19,12 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { getCase, registerCase } from '../lib/registry.mjs'
+import { createCaseAdder, findCase } from '../lib/registry.mjs'
+import { cases as seedCases } from './seed-and-harness.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
+const getCase = (id) => findCase(seedCases, id)
 
 /**
  * USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约（L1，需 backend 启用 S3）。
@@ -312,8 +317,7 @@ registerCase({
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
-            model: model.name,
-            variant: 'default',
+            execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
             config: {
               tools: ['get_goal'],
               skills: [],
@@ -342,8 +346,7 @@ registerCase({
         rootSettings: branchSettingsOf(
           agent,
           {
-            modelName: model.name,
-            variant: 'default',
+            ...agent.execution.settings,
           },
         ),
         yoloEnabled: false,
@@ -382,8 +385,7 @@ registerCase({
           await ctx.call('PUT', `/api/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
-            model: agent.model,
-            variant: 'default',
+            execution: agent.execution,
             config: {
               tools: ['get_goal', 'update_goal'],
               skills: [],

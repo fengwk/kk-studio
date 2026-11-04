@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 /**
  * 启动期以 add-if-missing 方式初始化系统内置 Agent。
  *
- * <p>已存在的同名行是权威事实，绝不覆盖用户对 prompt/model/tools/skills 的编辑；未配置模型的内置 Agent 两列与 variant 同为 null。多实例
- * 并发启动时依赖 PostgreSQL 主键冲突收敛：冲突即视为其它实例已完成初始化，既有行仍是权威事实。
+ * <p>已存在的同名行是权威事实，绝不覆盖用户对 prompt/execution/tools/skills 的编辑；初始 execution 为 null。多实例并发启动时依赖
+ * PostgreSQL 主键冲突收敛：冲突即视为其它实例已完成初始化，既有行仍是权威事实。
  */
 @Component
 @AllArgsConstructor
@@ -34,6 +34,7 @@ public class BuiltinAgentInitializer implements InitializingBean {
               .name(definition.name())
               .type(AgentDefinitionType.BUILTIN)
               .systemPrompt(definition.systemPrompt())
+              .execution(null)
               .configJson(configCodec.encode(definition.config()))
               .build();
       try {

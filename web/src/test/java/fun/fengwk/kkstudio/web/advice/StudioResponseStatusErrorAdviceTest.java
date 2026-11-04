@@ -19,7 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.http.CanvasController;
 import fun.fengwk.kkstudio.canvas.http.CanvasFunctionController;
 import fun.fengwk.kkstudio.canvas.http.CanvasResourceController;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.http.ApiResponse;

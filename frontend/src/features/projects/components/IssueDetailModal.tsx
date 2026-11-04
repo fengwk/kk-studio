@@ -11,13 +11,12 @@ import {
   Paperclip,
   RotateCcw,
   Send,
-  ShieldAlert,
   Square,
   Trash2,
   Upload,
   X,
 } from 'lucide-react'
-import { validateUploadFile, type HashFile } from '@/features/chat/composer'
+import { validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
 import { isConflictError } from '@/shared/api/client'
 import {
   storageService as defaultStorageService,
@@ -74,7 +73,7 @@ export interface IssueDetailModalProps {
 type TabKey = 'spec' | 'activities' | 'runs' | 'stageBudgets' | 'agentThreads' | 'evidence'
 
 /**
- * Issue 详情：Spec 编辑、活动、Run、阶段预算、Agent 线程与证据六个 tab，以及流转、阻塞/恢复、终止、重开、人工核查、预算重置与删除等写操作。
+ * Issue 详情：Spec 编辑、活动、Run、阶段预算、Agent 线程与证据六个 tab，以及流转、阻塞/恢复、终止、重开、预算重置与删除等写操作。
  * 带幂等身份的写操作统一经 {@link useIssueActionRunner} 执行。
  */
 export function IssueDetailModal({
@@ -131,9 +130,6 @@ export function IssueDetailModal({
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
   const [blockReason, setBlockReason] = useState('')
   const blockRequest = useKeyedRequest<{ reason: string }>()
-  const [isResolveUnknownOpen, setIsResolveUnknownOpen] = useState(false)
-  const [verificationInput, setVerificationInput] = useState('')
-  const resolveUnknownRequest = useKeyedRequest<{ verification: string }>()
   const [isResetBudgetOpen, setIsResetBudgetOpen] = useState(false)
   const [resetBudgetState, setResetBudgetState] = useState('')
   const [resetBudgetMaxRuns, setResetBudgetMaxRuns] = useState<number>(3)
@@ -156,11 +152,6 @@ export function IssueDetailModal({
     setIsBlockModalOpen(false)
     setBlockReason('')
     blockRequest.reset()
-  }
-  const resetResolveUnknownForm = () => {
-    setIsResolveUnknownOpen(false)
-    setVerificationInput('')
-    resolveUnknownRequest.reset()
   }
   const resetStopForm = () => {
     setIsStopModalOpen(false)
@@ -187,8 +178,6 @@ export function IssueDetailModal({
     onRetrySucceeded: (kind) => {
       if (kind === 'BLOCK') {
         resetBlockForm()
-      } else if (kind === 'RESOLVE_UNKNOWN') {
-        resetResolveUnknownForm()
       } else if (kind === 'STOP') {
         resetStopForm()
       } else if (kind === 'RESET_BUDGET') {
@@ -228,7 +217,6 @@ export function IssueDetailModal({
     if (!isOpen) {
       setIsEditingSpec(false)
       setIsBlockModalOpen(false)
-      setIsResolveUnknownOpen(false)
       setIsResetBudgetOpen(false)
       setIsStopModalOpen(false)
       setIsDeleteModalOpen(false)
@@ -236,12 +224,10 @@ export function IssueDetailModal({
       setDraftDescription('')
       setActivityBody('')
       setBlockReason('')
-      setVerificationInput('')
       setStopDetail('')
       setLocalEvidences([])
       activityRequest.reset()
       blockRequest.reset()
-      resolveUnknownRequest.reset()
       stopRequest.reset()
       budgetRequest.reset()
     }
@@ -270,10 +256,6 @@ export function IssueDetailModal({
     setBlockReason(value)
     blockRequest.invalidateIfChanged((frozen) => frozen.reason === value)
   })
-  const handleVerificationInputChange = (value: string) => guardedChange('RESOLVE_UNKNOWN', 'projects.issue.pendingResolveUnknownModifyBlocked', () => {
-    setVerificationInput(value)
-    resolveUnknownRequest.invalidateIfChanged((frozen) => frozen.verification === value)
-  })
   const handleStopDetailChange = (value: string) => guardedChange('STOP', 'projects.issue.pendingStopModifyBlocked', () => {
     setStopDetail(value)
     stopRequest.invalidateIfChanged((frozen) => frozen.detail === (value.trim() || null))
@@ -293,7 +275,6 @@ export function IssueDetailModal({
 
   const issue = detail?.issue
   const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
-  const isUnknown = issue?.state === 'UNKNOWN' || issue?.pauseReason === 'UNKNOWN'
   const isDone = issue?.state === 'DONE'
 
   // 从传入的 workflow 找到可转移的 next 列表
@@ -413,25 +394,6 @@ export function IssueDetailModal({
       { reason },
       (expectedVersion) => api.blockIssue(issue.id, { expectedVersion, requestKey, reason }),
       resetBlockForm,
-    )
-  }
-
-  const handleResolveUnknownSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!issue) return
-    const verification = verificationInput.trim()
-    if (!verification) {
-      setActionError(t('projects.issue.verificationRequired'))
-      return
-    }
-    const requestKey = resolveUnknownRequest.requestKey
-    resolveUnknownRequest.freeze({ verification })
-    await executeIssueAction(
-      'RESOLVE_UNKNOWN',
-      requestKey,
-      { verification },
-      (expectedVersion) => api.resolveUnknown(issue.id, { expectedVersion, requestKey, verification }),
-      resetResolveUnknownForm,
     )
   }
 
@@ -582,12 +544,6 @@ export function IssueDetailModal({
                 BLOCKED
               </Badge>
             )}
-            {isUnknown && (
-              <Badge tone="info" title={t('projects.issue.pendingVerifyExternalSideEffects')}>
-                <ShieldAlert size={12} aria-hidden="true" />
-                UNKNOWN
-              </Badge>
-            )}
             {issue?.pauseReason === 'USER' && (
               <Badge tone="warning">PAUSED</Badge>
             )}
@@ -631,21 +587,6 @@ export function IssueDetailModal({
                 <ArrowRight size={12} aria-hidden="true" />
               </Button>
             ))}
-
-            {/* UNKNOWN 人工核查 */}
-            {isUnknown && (
-              <Button
-                size="compact"
-                variant="ghost"
-                danger
-                disabled={isWriteBlocked}
-                onClick={() => setIsResolveUnknownOpen(true)}
-                title={t('projects.issue.resolveUnknownActionTitle')}
-              >
-                <ShieldAlert size={13} aria-hidden="true" />
-                <span>{t('projects.issue.actionVerify')}</span>
-              </Button>
-            )}
 
             {/* 阻塞与恢复 */}
             {isBlocked ? (
@@ -1014,27 +955,6 @@ export function IssueDetailModal({
             isBlocked={isWriteBlocked}
             onSubmit={handleBlockSubmit}
             onClose={() => setIsBlockModalOpen(false)}
-          />
-        )}
-
-        {isResolveUnknownOpen && (
-          <TextActionDialog
-            title={t('projects.issue.resolveUnknownDialogTitle')}
-            headerIcon={<ShieldAlert size={16} className="text-danger" aria-hidden="true" />}
-            description={t('projects.issue.resolveUnknownDesc')}
-            fieldId="issue-verification"
-            fieldLabel={t('projects.issue.verificationFieldLabel')}
-            required
-            rows={4}
-            value={verificationInput}
-            placeholder={t('projects.issue.verificationPlaceholder')}
-            onChange={handleVerificationInputChange}
-            submitLabel={t('projects.issue.confirmResolveUnknown')}
-            pendingLabel={t('projects.issue.resolving')}
-            isPending={isActionPending}
-            isBlocked={isWriteBlocked}
-            onSubmit={handleResolveUnknownSubmit}
-            onClose={() => setIsResolveUnknownOpen(false)}
           />
         )}
 

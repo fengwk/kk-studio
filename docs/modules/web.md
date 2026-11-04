@@ -33,7 +33,8 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 是 Harness 组合根：把 datasource/transaction manager 接入 PostgresqlBuiltinHarnessStore，
 装配唯一的 Builtin Driver、资源工具目录、PluginResourceGateway、HarnessRuntime、
-请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
+Harness 变更订阅源（`ThreadVersionHub` 同时充当内部观察者的纯 wake 源）与
+`HarnessChangeNotifications`、请求诊断/预览，以及 Work dispatcher 和它的 drain/worker/poll 执行器与生命周期。
 Processor、realtime 与 Environment 会话由它显式导入，不在核心类里再声明一遍。
 
 [`HarnessProcessorConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessProcessorConfiguration.java)
@@ -79,9 +80,14 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | 创建、列表、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
+
+Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
+内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。旧的顶层
+`model` / `variant` 不属于请求契约。Driver、模型与 Variant 的校验和引用事务见
+[Platform Catalog](platform.md#catalog)。
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
-| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、重开、归档 |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停(USER/ERROR)/继续、stop、额度重置、重开、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
@@ -130,7 +136,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 
 ### 请求诊断与预览
 
-`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`modelName` / 可空 `variant`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`execution`（`driver` / `settings`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount`、`updateTime` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 `POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
@@ -157,7 +163,8 @@ Snapshot 不携带手动压缩可用性：`GET /api/threads/{threadId}/compactio
 规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
 Canvas commands 返回 patch，Function start 返回 202。
-UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
+UNKNOWN resolve 要求 resolution 与非空 verification。Issue 没有 UNKNOWN 终态/暂停原因：结果未定的停止按 FAILED 收尾并以
+ERROR 暂停，`error`/`pauseDetail` 明确说明结果未知，只能由显式 resume 继续。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
 ## 同源 IDE 网关
@@ -215,6 +222,13 @@ Thread version、Canvas revision、Project changed、Settings、realtime、Skill
 通道与进程内 fan-out 归各自模块所有：Thread 由本模块的 `ThreadVersionHub` 承担；Canvas 的
 `CanvasVersionHub` 与其他 revision 通知语义属于 [Canvas](canvas.md#revision-通知)，Web 只把它的 channel
 登记到 LISTEN 连接并把通知与 resync 转交，再把 revision 事件转发给浏览器。
+
+Harness 的 Thread version、执行树与交互失效不在这里定义协议：组合根只取平台
+[`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
+给出的 channel 与回调绑定，消费侧
+[`ApplicationEventHub`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventHub.java)
+只依赖公开契约 `harness.api.HarnessChangeSubscriptions`。`environment_changed` 是 web 自有的环境失效：
+payload 是 Environment ID，只驱动环境回读，并在同一 handler 内要求交互失效源全量 resync。
 
 `POST /api/threads/{threadId}/stream-catchup` 是浏览器追帧入口，body 为
 `{invocationId: canonical UUID, attempt: 正整数}`。服务端先用目标 Thread 的 durable 快照确认

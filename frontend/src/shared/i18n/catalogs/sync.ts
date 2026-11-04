@@ -91,8 +91,8 @@ export const syncCatalog = {
     'zh-CN': '请至少选择一项。',
   },
   'settings.sync.export.scopeSummary': {
-    'en-US': '{{kinds}} kinds · {{items}} items (including dependencies)',
-    'zh-CN': '共 {{kinds}} 类 · {{items}} 项（含依赖）',
+    'en-US': '{{kinds}} kinds · {{items}} items including dependencies',
+    'zh-CN': '共 {{kinds}} 类 · {{items}} 项，含依赖',
   },
   'settings.sync.export.kindCount': {
     'en-US': '{{kind}} × {{count}}',

@@ -29,7 +29,6 @@ flowchart LR
     Plugins["Plugins<br/>tools / functions"]
     PlatformApi["platform-plugin-api<br/>plugin SPI contracts"]
     PlatformRuntime["platform-runtime<br/>catalog / chat / storage / environment / gateways"]
-    Infra["Harness Infra<br/>Store / Work / Realtime"]
     Harness["Harness kernel<br/>Runtime / Provider / Environment"]
     Common["common<br/>value contracts"]
     PG[("PostgreSQL<br/>durable facts")]
@@ -40,19 +39,16 @@ flowchart LR
     Browser -->|REST + events| Web
     Web --> Apps
     Web --> PlatformRuntime
-    Web --> Infra
     Web -->|runtime| Plugins
     Apps --> PlatformRuntime
     Plugins --> PlatformApi
     PlatformRuntime --> PlatformApi
     PlatformApi --> Harness
     PlatformRuntime --> Harness
-    Infra --> Harness
     Harness --> Common
     Apps --> PG
     PlatformRuntime --> PG
     PlatformRuntime --> S3
-    Infra --> PG
     Harness --> Provider
     Web <-->|单条 WSS 上的 HTTP/2| Daemon
     Daemon -->|presigned PUT| S3
@@ -67,7 +63,7 @@ Agent 执行经 Harness Runtime 的 [Agent Driver](modules/harness-runtime.md#ag
 
 ```text
 frontend -> web
-web -> 应用：canvas-infra -> canvas-core、project、ide
+web -> 应用：canvas-runtime -> canvas-spi、project、ide
 应用 -> platform-runtime -> platform-plugin-api
 web -(runtime)-> 选定插件 -> platform-plugin-api
 platform-plugin-api -> harness-runtime（Tool / Contributor 契约）
@@ -75,10 +71,8 @@ platform-runtime -> harness-runtime -> harness-model
 platform-runtime -> harness-agent-builtin -> harness-runtime / harness-model
 platform-runtime -> harness-model
 harness-runtime -> harness-environment -> common
-web -> harness-infra -> harness-runtime
-harness-infra -> harness-model
-harness-infra -> harness-agent-builtin
-canvas-infra / project / harness-infra -> work（共享调度邮箱）
+platform-runtime -> work（存储、调度与通知实现）
+canvas-runtime / project -> work（共享调度邮箱）
 daemon -> harness-environment（通过 wire 协议消费共享契约）
 ```
 
@@ -96,7 +90,7 @@ Catalog 把连接、模型能力与行为定义分开：
 | --- | --- |
 | Provider | 上游协议、连接、凭据与超时 |
 | Model | 单个 MODEL 的上游 wire 模型 ID、能力、Variant 与价格；GROUP 的有序 Fill First 成员、降级状态码与冷却 |
-| Agent | System Prompt、默认 Model、Tools、Skills 与可委派的 Agent |
+| Agent | System Prompt、Driver 与 settings、Tools、Skills 与可委派的 Agent |
 | Environment | 主机身份、Daemon 连接与能力 |
 | BranchSettings | 当前分支选择的 Agent、执行方式（Driver 与其设置）、Environment 与用户 Goal |
 
@@ -135,11 +129,10 @@ YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的�
 已等待的审批仍需人工处理，`ask_user` 始终等待回答。控制与投影规则见
 [Harness Runtime](modules/harness-runtime.md) 与 [Frontend](modules/frontend.md)。
 
-Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
-Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` /
-`SET_CONTRIBUTOR_STATE`），并冻结本次 Run 的 `ProjectRunScope`。每个 live turn 只按该分支设置规划；
-`issue_transition` 等业务工具从冻结 scope 取得 runId，在业务锁内复核 Run/Issue/阶段/版本与调用
-Thread 身份。产品行为见 [Project](modules/project.md)，规划适配见
+Project Run 接受时以显式命令提交 Agent、execution 与阶段 Environment，并以可信 Markdown
+任务消息提供 Issue 事实与阶段指令；不写产品专属 Harness 状态。
+`issue_transition` 根据真实调用 Thread、assistant 所属回合与 Project 的活动 Run，
+在业务锁内复核身份、阶段、版本及合法交接边。产品行为见 [Project](modules/project.md)，规划适配见
 [Platform](modules/platform.md)。
 
 ### Tools、Skills 与委派
@@ -271,12 +264,12 @@ Canvas 编辑接受 typed commands、语义组前置条件与 idempotency key，
 完整输出。Canvas revision 用于同步排序，编辑冲突按名称、资源、Function 或布局各自判断。
 
 Project 的 `(Issue, Agent)` 绑定稳定 Thread，`(Issue, state)` 持有阶段预算。Run 接受
-原子完成额度检查、Thread 选择或创建、历史起点冻结、`ProjectRunScope`（含显式
-Agent/Model/Environment 与业务工具）提交、Run/Activity 写入、Harness 命令与 Work 登记。
+原子完成额度检查、Thread 选择或创建、历史起点冻结、通用设置与任务消息提交、
+Run/Activity 写入、Harness 命令与 Work 登记。
 Issue Reconciler 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
 `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
-交接提交时复验 Run 身份、版本、合法边与门禁，并在同一业务锁内写入 `active=false` 快照。
-Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas](modules/canvas.md)、[Project](modules/project.md) 与 [Schema](modules/schema.md)。
+交接提交时复验 Run 身份、版本、合法边与门禁。结果不明的 Issue Run 以 FAILED 和 ERROR 暂停收尾，明确标注结果未知。
+Canvas 与 Project 的使用和数据关系见 [Canvas](modules/canvas.md)、[Project](modules/project.md) 与 [Schema](modules/schema.md)。
 
 ### 附件与媒体
 
@@ -314,7 +307,7 @@ Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provid
 多 App 节点共享 PostgreSQL 与 Blob Storage，route、mailbox、Work 与通知经数据库
 协调。数据库不可达时停止依赖 ownership 的准入与写回。租约围栏保护内部状态；
 外部执行结果须由确定响应、查询或人工核实确认。实现见
-[Harness Infra](modules/harness-infra.md)、[Canvas](modules/canvas.md)
+[Platform](modules/platform.md)、[Canvas](modules/canvas.md)
 与 [Project](modules/project.md)。
 
 ## 浏览器读取与主机数据路径

@@ -7,8 +7,8 @@ import java.util.Objects;
  *
  * <p>额度只由授权事实 {@code maxRuns} 与重置高水位 {@code budgetAfterOrdinal} 构成：消耗由持久化按 {@code COUNT(Run WHERE
  * issue_id = ? AND state = ? AND ordinal > budgetAfterOrdinal)} 计算，不按 Agent、Thread、Session 或 Run
- * 状态过滤，因此更换 Agent、返工与重开都不重置额度，新 Run 的失败、取消与 UNKNOWN 仍消耗一次。{@code budgetAfterOrdinal} 是重置高水位，服务端取
- * {@code nextRunOrdinal - 1}，只能前进。
+ * 状态过滤，因此更换 Agent、返工与重开都不重置额度，新 Run 的失败与取消仍消耗一次。{@code budgetAfterOrdinal} 是重置高水位，服务端取 {@code
+ * nextRunOrdinal - 1}，只能前进。
  */
 public record IssueStageBudget(ProjectStateCode state, int maxRuns, long budgetAfterOrdinal) {
 

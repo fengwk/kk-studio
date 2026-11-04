@@ -1,7 +1,7 @@
 import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
 import type { ChatLayout, ChatPaneState, ChatTabSnapshot } from '@/features/chat/chat-pane-state'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane/pane-target'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
@@ -223,8 +223,8 @@ async function installChatApi(
               name: 'assistant',
               description: '通用助手',
               systemPrompt: null,
-              model: 'MiniMax',
-              variant: 'default',
+              type: 'USER',
+              execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
               config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
               version: '1',
               createTime: null,

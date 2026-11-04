@@ -33,8 +33,12 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
 | [harness/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
+| [harness/tool/permission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission) | Tool permission 的规则模型与有序求值、Bash 静态 surface 分析，以及部署范围 permission 快照的现读端口 `ToolSettingsProvider`；只产出策略候选 |
+| [harness/admission](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission) | Model 与 Tool 网关共用的进程内并发槽位 `ConcurrencyAdmission`：无等待队列、幂等释放，不持久化、不跨进程协调 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseAgentTurnContextResolver` 解析与模型无关的 Agent 目录快照；`DatabaseTurnResolver` 在其上规划模型、压缩与预算，不反查 Thread 归属 |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
+| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、payload 解析、进程内定点分发与 resync |
+| [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅 fan-out 容器与 NOTIFY 失效分发基座，供 Harness 源与 web 的画布、环境失效共用 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
 | [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止；外部任务由外部字段规范计算指纹，settings 不参与重放判定，既有票据重放不触发物化 |
@@ -57,6 +61,23 @@ Platform 将 Runtime 的 Entry、命令、Invocation 与 Work 端口适配到 Po
 [`dispatch`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/) 负责领取与派发，
 [`realtime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime/) 提供实时事件传输。
 表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
+
+### 变更订阅
+
+[`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
+实现 Harness 公开契约 `harness.api.HarnessChangeSubscriptions`：Thread version、执行树与待处理交互三个源。
+channel 名只在
+[`HarnessNotificationChannel`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessNotificationChannel.java)
+定义一次，写事务按它投递，订阅源按同一常量监听；组合根只按
+[`HarnessNotificationBinding`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessNotificationBinding.java)
+的 channel 与回调装配统一 LISTEN 连接，不需要知道 payload 协议。
+[`ThreadVersionHub`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/ThreadVersionHub.java)
+先注册订阅再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor，畸形 payload 与重连退化为 resync，未知 Thread 失败且不留注册。
+执行树与交互共用
+[`HarnessInvalidationSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessInvalidationSource.java)：
+按真实执行根定点失效，空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
+`platform.notification` 的 `SubscriptionFanOut` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和分发语义，
+Canvas 与 Environment 的失效 hub 也复用它，不经过 Harness 契约。
 
 ### 事务边界与锁序
 
@@ -253,7 +274,7 @@ Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全�
 PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
 路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
 引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
-删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+删除 GROUP 前校验 Agent 入边；Builtin Agent 引用由应用在持有模型行锁的同一事务中校验和更新。
 
 GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
 禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
@@ -285,10 +306,16 @@ TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账�
 非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
 其他模型信息，但保留已有价格，不用零价覆盖。
 
-Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
-（默认 true）；工具候选和 Skill 引用在写入时校验。
+Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 Thread 的
+`ExecutionSelection` 相同。写入和导入预检先根据实际注册的 Driver 校验 settings；
+当前提供 `builtin`，其 settings 精确为 `{modelName, variant}`，`variant: null` 表示
+使用单 MODEL 的默认 Variant，GROUP 不允许指定组级 Variant。Builtin 适配在写事务中
+锁定并校验模型和显式 Variant；模型改名仅更新指向它的 Builtin Agent 并推进其版本，
+模型或 Variant 被引用时阻止删除，不解释其他 Driver 的 settings。
+Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)`、subagents 与
+`inheritParentEnvironment`（默认 true）；工具候选和 Skill 引用在写入时校验。
 
-Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、model、tools、skills 与普通执行配置，但不能删除或改名；内置定义允许显式未配置模型（独立选择，不继承调用 Thread 的模型，也不静默 fallback），用户创建的 Agent 仍要求模型。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
+Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
 
 ### Git Skill Package
 
@@ -360,12 +387,12 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
-在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。接受使用 owner KEY SHARE，深删除使用排他锁并按 Owner → Session → Thread 清理 Harness 与 Blob 引用。
+在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。新 fork 的事务内 preflight 接收实际复制的历史条目，以便为新 Session 保留资源引用，不暴露存储句柄。接受使用 owner KEY SHARE；深删除使用 owner 排他锁，再由 Harness 按 Tree → Session → Thread 锁定删除闭包并复核，平台在同一物理事务中删除归属行、释放 Blob 引用。
 
 平台对 Issue Agent 的全部感知收敛在 [`IssueAgentOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/IssueAgentOwnership.java) SPI：
 Project 应用实现它，负责在调用方事务内锁定 Project → Issue 层级、读写 `(issueId, agentName) -> threadId` 绑定，并按执行根解析 Issue 归属。
 显式的 Issue Agent 操作在没有实现时失败关闭；按执行根发现交互时视为没有 Issue 根。
-Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT`、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
+Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 `SET_AGENT` / `SET_EXECUTION` / `SET_ENVIRONMENT` 与末尾任务输入，不写 Project contributor state。`issue_transition` 根据调用 Thread 的稳定绑定定位活动 Run，在业务锁内校验阶段与身份，并验证当前路径上 assistant 所属的 Turn 起点严格晚于 Run 起点。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
 Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
@@ -381,12 +408,17 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
+输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
+作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的
 [`prompts/messages`](../../platform/runtime/src/main/resources/fun/fengwk/kkstudio/platform/prompts/messages/)；
 文本预览作为原文插入，不执行模板语法。
 
-Tool 网关先做资源解析与无等待 admission（纯本地：并发租约、目录租用与分支视图），返回
-`Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。Runtime 持久化 RUNNING 后在
+Tool 网关先做资源解析与无等待 admission（纯本地：并发租约与目录租用；分支视图由执行上下文提供），返回
+`Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。并发槽位由本模块的
+[`admission`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/admission/) 提供，Model 与 Tool 各自持有独立实例；
+权限判定与配置现读由 [`tool/permission`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/permission/) 提供，
+内核只声明 `ToolGateway` 端口。Runtime 持久化 RUNNING 后在
 独占的虚拟线程上阻塞执行 `run`，工具异常由网关分类为失败、取消或 UNKNOWN（远程发送不确定时绝不重放）。
 Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；有效超时仅经 `Tool.resolveTimeout`
 解析一次并原样传递。具体状态转换见 [Harness Runtime](harness-runtime.md)。
@@ -404,13 +436,16 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 类型与字节不符直接失败。媒体模态在 TOOL 与 USER 位置都不支持时对全部模态显式失败；仅 USER 普通内容位置的非图片保留说明文本回退。
 原生推理回放与协议请求上限见 [Harness Model](harness-model.md)。
 
-统一 `read` 按 path 路由。受管 Blob 必须由本次 Thread 所属 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用本次调用冻结的模型模态声明、adapter 合法位置与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
+统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。请求预览有三个只读入口（既有 Thread 续写、本地分支草稿、历史模型输出），
 都在同一条正式规划、物化与编码路径上生成点击瞬间的请求体（可能含内联媒体），
 以只读方式检查附件，不写任何内部事实、不消费附件、不调用 transport；
 历史入口按该输出记录的显式时间重建普通模型输出；父 COMPACTION 输出按冻结 child Thread / join 的 `finalAnswerEntryId` 定位压缩子最后一次调用并重建其前缀，结果仍是历史重建、不等于原始发送字节。
+预览与 Turn 规划读取的规划事实都来自 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 门面：
+未落库命令 batch 的 candidate 路径、按结果 Entry 定位的压缩 turn 冻结元数据与请求输入 token 估算，
+因此 platform 不复制规划算法，也不直接依赖 `runtime.*` 实现类。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
 用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt` 与 Provider 报告的 `responseServiceTier`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
@@ -547,7 +582,7 @@ lease 只保证互斥，无法证明外部 exactly-once；不确定 renewal 保�
 
 ### Plugin 资源端口
 
-`PluginResourceGateway.resolveSessionResource` 从 invocation threadId 解析 Session 引用，
+`PluginResourceGateway.resolveSessionResource` 使用执行上下文的 sessionId 直接校验 Session 引用，不查询 Harness 存储，
 授权成功后签发短期 HTTPS 下载地址，缺上下文或引用直接失败。
 `stageRemoteMedia` 只接纳 HTTPS 公网地址，检查所有 DNS 结果并钉扎连接地址，
 保持原 Host/SNI/证书校验；拒绝重定向和自动重试。有界流式落盘计算摘要并嗅探类型，
@@ -595,7 +630,9 @@ YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过；条目省略该键表示清空现有安装设置。
-Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
+Agent 使用 `execution: {driver, settings}` 往返，不接受旧的顶层 `model` / `variant`。
+Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
+优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`

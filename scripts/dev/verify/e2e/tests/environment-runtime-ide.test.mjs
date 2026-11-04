@@ -3,10 +3,7 @@ import test from 'node:test'
 
 import { HttpError } from '../lib/http.mjs'
 import { createEnvironmentFixture, deleteEnvironmentFixture } from '../lib/fixtures.mjs'
-import { ALL_CASES, getCase } from '../lib/registry.mjs'
-
-// 注册副作用：新 case 模块必须被 import 才会进入 inventory。
-import '../cases/environment-runtime-ide.mjs'
+import { ALL_CASES, getCase } from '../run-matrix.mjs'
 
 const RUNTIME_CASE_ID = 'environment.runtime_absent_unavailable'
 const IDE_CASE_ID = 'environment.ide_view_no_ready_owner_rejected'

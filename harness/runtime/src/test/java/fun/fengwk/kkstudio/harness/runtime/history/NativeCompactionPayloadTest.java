@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
+import fun.fengwk.kkstudio.harness.api.history.NativeCompactionPayload;
+import fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec;
+
 class NativeCompactionPayloadTest {
   private final HistoryEntryPayloadJsonCodec codec = new HistoryEntryPayloadJsonCodec();
 
