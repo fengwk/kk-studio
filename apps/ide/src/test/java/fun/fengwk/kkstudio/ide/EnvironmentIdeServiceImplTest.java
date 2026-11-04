@@ -40,8 +40,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的
- * detach/close 立即冻结本地授权且不重放不确定结果。
+ * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的 close
+ * 立即冻结本地授权且不重放不确定结果。
  */
 class EnvironmentIdeServiceImplTest {
 
@@ -189,7 +189,7 @@ class EnvironmentIdeServiceImplTest {
   }
 
   @Test
-  void allBoundCommandsCarryDocumentAndEpochAndDetachFreezesTheEpoch() {
+  void boundCommandsCarryDocumentAndEpochAndCloseRevokesTheBinding() {
     open();
 
     EnvironmentIdeViewBindingDTO binding = binding(7L);
@@ -200,12 +200,16 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(DOCUMENT.toString(), focus.getDocumentId());
     assertEquals(7L, focus.getBindingEpoch());
 
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+    close.setDocumentId(DOCUMENT.toString());
+    close.setBindingEpoch("7");
+    close.setDiscard(true);
     transport.replies.add(success(VIEW));
-    service.detachView(ENV, VIEW.toString(), binding);
-    IdeCommand detach = transport.commands.getLast();
-    assertEquals(IdeAction.DETACH_VIEW, detach.getAction());
-    assertEquals(DOCUMENT.toString(), detach.getDocumentId());
-    assertEquals(7L, detach.getBindingEpoch());
+    service.closeView(ENV, VIEW.toString(), close);
+    IdeCommand command = transport.commands.getLast();
+    assertEquals(IdeAction.CLOSE_VIEW, command.getAction());
+    assertEquals(DOCUMENT.toString(), command.getDocumentId());
+    assertEquals(7L, command.getBindingEpoch());
     assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
 
     int before = transport.commands.size();

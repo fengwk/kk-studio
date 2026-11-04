@@ -145,8 +145,6 @@ function toIdeAction(action: ProtoIdeAction): IdeCommand['action'] {
       return 'FOCUS_TERMINAL'
     case ProtoIdeAction.CLOSE_VIEW:
       return 'CLOSE_VIEW'
-    case ProtoIdeAction.DETACH_VIEW:
-      return 'DETACH_VIEW'
     case ProtoIdeAction.LIST_VIEWS:
       return 'LIST_VIEWS'
     case ProtoIdeAction.LIST_DIRECTORIES:

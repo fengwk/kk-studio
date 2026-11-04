@@ -122,7 +122,6 @@ export type IdeAction =
   | 'CHANGE_DIRECTORY'
   | 'FOCUS_TERMINAL'
   | 'CLOSE_VIEW'
-  | 'DETACH_VIEW'
   | 'LIST_VIEWS'
   | 'LIST_DIRECTORIES'
   | 'COLLAPSE_MOBILE'

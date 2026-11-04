@@ -116,20 +116,6 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   }
 
   @Override
-  public void detachView(
-      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(request, "request");
-    String parsedViewId = parseViewId(viewId);
-    ClusterOwnerRoute route = requireRoute(environmentId);
-    if (route.local()) {
-      local.detachView(environmentId, parsedViewId, request);
-      return;
-    }
-    client.detachView(environmentId, route, parsedViewId, request);
-  }
-
-  @Override
   public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     ClusterOwnerRoute route = requireRoute(environmentId);

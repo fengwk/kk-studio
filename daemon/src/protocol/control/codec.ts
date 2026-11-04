@@ -618,7 +618,6 @@ function validateIdeCommand(command: IdeCommand): void {
       rejectOpenFields(command)
       return
     case IdeAction.FOCUS_TERMINAL:
-    case IdeAction.DETACH_VIEW:
     case IdeAction.COLLAPSE_MOBILE:
       requireBoundView(command, false)
       if (command.directory !== undefined) {

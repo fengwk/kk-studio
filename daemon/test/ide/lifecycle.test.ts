@@ -861,21 +861,6 @@ describe('managed IDE claim and tenant lifecycle', () => {
     await service.handle(open(viewId, documentA, randomUUID(), undefined, 'resume'), signal())
   })
 
-  it('rejects the retired detach action without altering the view or its lease', async () => {
-    const { service, scheduler, project } = await setup()
-    const viewId = randomUUID()
-    const documentId = randomUUID()
-    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
-    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-    expect(await service.handle({ action: 'DETACH_VIEW', ...state }, signal())).toMatchObject({
-      ok: false, code: 'UNAVAILABLE', message: 'unknown ide action',
-    })
-    await scheduler.advance(1_000)
-    service.apply({ round: '9', bindings: [state] }, scheduler.now())
-    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS - 1_000)
-    expect(service.getViewState(viewId)?.state).toBe('OPEN')
-  })
-
   it('retains CLOSING and quota after cleanup failure, then permits an explicit retry', async () => {
     const { service, manager, project } = await setup()
     const viewId = randomUUID()

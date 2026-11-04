@@ -11,13 +11,13 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 使用证明：  Server -> IDE_LEASE（随心跳轮次批量下发的浏览器持有列表）
 ```
 
-元数据命令打开、切换目录、聚焦终端、列举目录、调整移动布局、分离或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节不经过控制命令（stream 1），而是在同一物理连接的独立 HTTP/2 流上多路复用。
+元数据命令打开、切换目录、聚焦终端、列举目录、调整移动布局或关闭视图，走既有 Daemon 连接上的 `IDE_COMMAND` / `IDE_RESULT` 消息；HTTP 请求与 WebSocket 字节不经过控制命令（stream 1），而是在同一物理连接的独立 HTTP/2 流上多路复用。
 
 ## 命令通道
 
 [`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java) 的 `requestIde` 只做三件事：沿用 Agent 调用的准入（本节点持有 READY 连接、无更新在途、锁内复核数据库 READY 租约），登记一条在途调用，并把匹配 `invocationId` 的 `IDE_RESULT` 载荷原样交回。IDE 调用不进入 Agent journal，也不重放：命令未进入传输时以 BUSY/UNAVAILABLE 失败，递交过程中传输失败或连接代际关闭时以结果不确定终结，调用方超时后 `abandonIde`，迟到的回执被安静忽略。
 
-载荷属于 IDE 应用：[`DaemonIdeCommandTransport`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/DaemonIdeCommandTransport.java) 直接使用 Protobuf 生成的 [`IdeCommand`](../../platform/daemon-server/src/main/protocol/control.proto) 与 [`IdeResult`](../../platform/daemon-server/src/main/protocol/control.proto)。控制命令只承载视图的创建、恢复、切换目录、聚焦终端、分离与关闭等元数据；数据流不经过控制命令。回执载荷不合法只让这一条 IDE 调用失败，不影响同一连接上的 Agent 能力调用。
+载荷属于 IDE 应用：[`DaemonIdeCommandTransport`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/DaemonIdeCommandTransport.java) 直接使用 Protobuf 生成的 [`IdeCommand`](../../platform/daemon-server/src/main/protocol/control.proto) 与 [`IdeResult`](../../platform/daemon-server/src/main/protocol/control.proto)。控制命令只承载视图的创建、恢复、切换目录、聚焦终端与关闭等元数据；数据流不经过控制命令。回执载荷不合法只让这一条 IDE 调用失败，不影响同一连接上的 Agent 能力调用。
 
 命令与回执都是严格形状，字段多余或缺失都是协议错误。下表成功回执均包含 `ok:true`：
 
@@ -28,7 +28,6 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `FOCUS_TERMINAL` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `COLLAPSE_MOBILE` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `CLOSE_VIEW` | `viewId`、`documentId`、`bindingEpoch`、`discard` | `viewId` |
-| `DETACH_VIEW` | `viewId`、`documentId`、`bindingEpoch` | `viewId` |
 | `LIST_VIEWS` | 无 | `views[]`：`viewId`、`documentId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`state(OPEN/CLOSING)` |
 | `LIST_DIRECTORIES` | 可选 `directory`，省略时为宿主主目录 | `directoryListing`：规范 `path`、可选 `parentPath`、`children[]`、`truncated` |
 
@@ -67,7 +66,7 @@ iframe 使用同源视图作用域路径 `/environment-ide/{environmentId}/{view
 - 绑定身份缓存由 [`IdeViewBindingRegistry`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewBindingRegistry.java) 持有：缓存缺失或漂移时先用 `LIST_VIEWS` 重建再判定，旧 epoch 的关闭、目录与终端请求不作用于新绑定。
 - `openView` 额外铸造一次性 bootstrap 票据（[`IdeBootstrapTicketService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeBootstrapTicketService.java)）：票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管工作区路径，短时、消费即删除。
 - [`IdeViewAuthorizationListener`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeViewAuthorizationListener.java) 让数据面按 Daemon 代际维护受管工作区授权：视图创建即授权、关闭即撤销、代际结束即清空，不用空闲超时之类的时间推断代替真实关闭事件。
-- HTTP 与 WS 网关必需装配 `SessionIdeDataViewAuthorizer`：只从配置名匹配的 IDE cookie 查询真实 `IdeBrowserSessionRegistry`，使用会话中确认的实例、epoch 与 workspace。关闭、分离、重绑、过期与实例替换使入口失效；同实例暂断保留会话，由数据注册表返回不可用，不新增授权或续租。
+- HTTP 与 WS 网关必需装配 `SessionIdeDataViewAuthorizer`：只从配置名匹配的 IDE cookie 查询真实 `IdeBrowserSessionRegistry`，使用会话中确认的实例、epoch 与 workspace。关闭、重绑、过期与实例替换使入口失效；同实例暂断保留会话，由数据注册表返回不可用，不新增授权或续租。
 
 ## 使用证明
 

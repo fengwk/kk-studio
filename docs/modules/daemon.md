@@ -85,7 +85,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ### 受管 IDE 与数据通道
 
-Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` 处理视图创建、恢复、切换目录、聚焦终端、分离与关闭等动作，并回复 `IDE_RESULT`。
+Daemon 受管运行内置的 code-server，响应控制通道的 `IDE_COMMAND` 处理视图创建、恢复、切换目录、聚焦终端与关闭等动作，并回复 `IDE_RESULT`。
 数据通道与控制通道在单一物理连接上通过 HTTP/2 多路复用（[`daemon-transport.ts`](../../daemon/src/transport/daemon-transport.ts) 与 [`ide-tunnel.ts`](../../daemon/src/transport/ide-tunnel.ts)）：
 - 普通 HTTP 请求（静态资产、页面和 REST API）作为标准 HTTP/2 数据流透传至本地 code-server；
 - WebSocket 连接通过 RFC 8441 Extended CONNECT 隧道建立，双向数据流直接穿透映射至本地 code-server 的 WebSocket 端口；
@@ -97,8 +97,7 @@ OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件�
 `mode=create` 未指定目录时使用宿主 HOME，`mode=resume` 不隐式创建视图也不改目录；相同 `claimId` 的完全相同请求返回同一绑定，
 参数漂移被拒绝。失败回执只携带安全大写 code 与去敏 message（如 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`）。
 
-使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查；
-`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
+使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期检查。到期时只有桥接可证明编辑器干净且原生关闭成功才释放视图；dirty 或状态未知时保留视图等待显式操作，期间继续占用视图配额。
 正常关闭不预拒绝 dirty，直接等待 IDE 原生保存、不保存或取消，不设交互超时。取消、控制连接断开或关闭结果未知均保留视图与终端，不采用迟到回执；只有状态未知或桥接不可达时才允许显式强制关闭。原生关闭成功后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server。
 强制关闭前尝试将普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。

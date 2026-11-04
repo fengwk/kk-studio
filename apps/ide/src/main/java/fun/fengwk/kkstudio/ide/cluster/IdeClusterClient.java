@@ -173,14 +173,6 @@ public class IdeClusterClient {
         !Boolean.FALSE.equals(request.getDiscard()));
   }
 
-  public void detachView(
-      EnvironmentId environmentId,
-      ClusterOwnerRoute owner,
-      String viewId,
-      EnvironmentIdeViewBindingDTO request) {
-    exchange("POST", IdeInternalPaths.detachPath(environmentId, viewId), owner, request, null);
-  }
-
   private <T> T exchange(
       String method, String path, ClusterOwnerRoute owner, Object body, Class<T> type) {
     return exchange(method, path, owner, body, type, true);

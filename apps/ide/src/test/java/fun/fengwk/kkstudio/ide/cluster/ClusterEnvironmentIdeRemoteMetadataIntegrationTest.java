@@ -511,13 +511,6 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         respond(exchange, 204, "");
         return;
       }
-      if ("POST".equals(method) && segments.length == 7 && "detach".equals(segments[6])) {
-        EnvironmentIdeViewBindingDTO request =
-            objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeViewBindingDTO.class);
-        nodeBLocal.detachView(environmentId, segments[5], request);
-        respond(exchange, 204, "");
-        return;
-      }
       if ("DELETE".equals(method) && segments.length == 6) {
         EnvironmentIdeCloseViewDTO request =
             objectMapper.readValue(exchange.getRequestBody(), EnvironmentIdeCloseViewDTO.class);

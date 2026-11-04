@@ -1153,7 +1153,7 @@ describe('control binary codec', () => {
     const focusDecoded = decodeBinary(encodeBinary(focusCmd))
     expect(focusDecoded.payload.case).toBe('ideCommand')
 
-    // DETACH_VIEW
+    // DETACH_VIEW 已退役：raw enum value 5 不能再通过出站校验
     const detachCmd = create(EnvelopeSchema, {
       messageType: MessageType.IDE_COMMAND,
       environmentId: ENVIRONMENT_ID,
@@ -1161,14 +1161,14 @@ describe('control binary codec', () => {
       payload: {
         case: 'ideCommand',
         value: create(IdeCommandSchema, {
-          action: IdeAction.DETACH_VIEW,
+          action: 5 as IdeAction,
           viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           bindingEpoch: 1n,
         }),
       },
     })
-    expect(decodeBinary(encodeBinary(detachCmd)).payload.case).toBe('ideCommand')
+    expect(() => encodeBinary(detachCmd)).toThrow(/ideCommand.action is required/)
 
     // LIST_VIEWS
     const listCmd = create(EnvelopeSchema, {

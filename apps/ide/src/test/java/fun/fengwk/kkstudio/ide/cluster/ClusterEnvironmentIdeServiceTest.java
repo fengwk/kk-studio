@@ -141,12 +141,12 @@ class ClusterEnvironmentIdeServiceTest {
 
     service.changeDirectory(ENV, VIEW, directory);
     service.focusTerminal(ENV, VIEW, binding);
-    service.detachView(ENV, VIEW, binding);
+    service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
     service.listViews(ENV);
 
     assertEquals(
-        List.of("changeDirectory", "focusTerminal", "detachView", "closeView", "listViews"),
+        List.of("changeDirectory", "focusTerminal", "collapseMobile", "closeView", "listViews"),
         client.calls);
   }
 
@@ -231,12 +231,12 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     @Override
-    public void detachView(
+    public void collapseMobile(
         EnvironmentId environmentId,
         ClusterOwnerRoute owner,
         String viewId,
         EnvironmentIdeViewBindingDTO request) {
-      calls.add("detachView");
+      calls.add("collapseMobile");
     }
 
     @Override

@@ -363,15 +363,19 @@ class ControlProtocolCodecTest {
                     .setDocumentId(open.getDocumentId())
                     .setBindingEpoch(1))
             .build());
-    ControlProtocolCodec.encodeBinary(
-        command.toBuilder()
-            .setIdeCommand(
-                IdeCommand.newBuilder()
-                    .setAction(IdeAction.DETACH_VIEW)
-                    .setViewId(open.getViewId())
-                    .setDocumentId(open.getDocumentId())
-                    .setBindingEpoch(1))
-            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        IdeCommand.newBuilder()
+                            .setActionValue(5)
+                            .setViewId(open.getViewId())
+                            .setDocumentId(open.getDocumentId())
+                            .setBindingEpoch(1))
+                    .build()),
+        "DETACH_VIEW is retired; raw value 5 must be rejected");
     ControlProtocolCodec.encodeBinary(
         command.toBuilder()
             .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))

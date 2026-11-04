@@ -143,11 +143,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk());
-    String detach = IdeInternalPaths.detachPath(ENV, VIEW);
+    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/mobile-layout";
     mockMvc
         .perform(
-            post(detach)
-                .headers(mockHeaders(authentication.sign("POST", detach, NODE_B)))
+            post(mobile)
+                .headers(mockHeaders(authentication.sign("POST", mobile, NODE_B)))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isOk());
@@ -160,7 +160,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
     verify(localEnvironmentIdeService)
         .focusTerminal(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
     verify(localEnvironmentIdeService)
-        .detachView(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
+        .collapseMobile(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
   }
 
   /** 客户端通过 HTTP 收到真实 controller 的错误 JSON，只允许已知取消资源穿透。 */

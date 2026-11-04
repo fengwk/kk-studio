@@ -73,7 +73,8 @@ enum IdeAction {
   CHANGE_DIRECTORY = 2;
   FOCUS_TERMINAL = 3;
   CLOSE_VIEW = 4;
-  DETACH_VIEW = 5;
+  reserved 5;
+  reserved "DETACH_VIEW";
   LIST_VIEWS = 6;
   LIST_DIRECTORIES = 7;
   COLLAPSE_MOBILE = 8;
