@@ -81,16 +81,12 @@ describe('ProjectsPage', () => {
     blockIssue: vi.fn(),
     recoverIssue: vi.fn(),
     reopenIssue: vi.fn(),
-    pauseIssue: vi.fn(),
-    resumeIssue: vi.fn(),
     stopIssue: vi.fn(),
     resetStageBudget: vi.fn(),
     appendIssueActivity: vi.fn(),
     addIssueEvidence: vi.fn(),
     listIssueEvidence: vi.fn().mockResolvedValue([]),
     deleteIssue: vi.fn(),
-    archiveIssue: vi.fn(),
-    unarchiveIssue: vi.fn(),
     ...overrides,
   })
 

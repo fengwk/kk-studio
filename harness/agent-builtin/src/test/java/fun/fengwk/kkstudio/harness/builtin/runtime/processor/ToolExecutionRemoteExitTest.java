@@ -8,21 +8,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolExecution;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;

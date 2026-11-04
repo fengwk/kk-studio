@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.retry;
 
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+
 import java.time.Duration;
 import java.util.Objects;
 

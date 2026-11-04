@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+
 /** {@link ThreadJoinOutcome} 终态枚举与 wireName 契约测试。 */
 class ThreadJoinOutcomeTest {
 

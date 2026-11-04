@@ -154,7 +154,10 @@ function fakeChat() {
 }
 
 function fakeAgent() {
-  return { name: 'reliability-probe' }
+  return {
+    name: 'reliability-probe',
+    execution: { driver: 'builtin', settings: { modelName: fakeModel().modelName, variant: VARIANT } },
+  }
 }
 
 function fakeModel() {

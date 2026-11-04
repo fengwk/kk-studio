@@ -10,37 +10,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
-import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -103,8 +111,8 @@ class CompactionPlannerTest {
                     null)),
             BASE);
 
-    assertEquals(1_200L, CompactionPlanner.estimateTokens(video));
-    assertEquals(1_200L, CompactionPlanner.estimateTokens(nestedVideo));
+    assertEquals(1_200L, TokenEstimator.estimateTokens(video));
+    assertEquals(1_200L, TokenEstimator.estimateTokens(nestedVideo));
   }
 
   /** 所有可持久化内容类型都必须进入同一个确定性 token 估算公式。 */
@@ -172,8 +180,8 @@ class CompactionPlannerTest {
                     null)),
             BASE);
 
-    assertEquals(4_806L, CompactionPlanner.estimateTokens(assistant));
-    assertEquals(4_803L, CompactionPlanner.estimateTokens(tool));
+    assertEquals(4_806L, TokenEstimator.estimateTokens(assistant));
+    assertEquals(4_803L, TokenEstimator.estimateTokens(tool));
   }
 
   @Test
@@ -185,10 +193,83 @@ class CompactionPlannerTest {
     path.toolResult(id(4L), "call-1");
     path.closeTurn(true);
 
-    assertEquals(1L, CompactionPlanner.estimateVisibleTokensAfter(path.path(), id(4L)));
+    assertEquals(1L, TokenEstimator.estimateVisibleTokensAfter(path.path(), id(4L)));
     assertThrows(
         IllegalStateException.class,
-        () -> CompactionPlanner.estimateVisibleTokensAfter(path.path(), id(999L)));
+        () -> TokenEstimator.estimateVisibleTokensAfter(path.path(), id(999L)));
+  }
+
+  /** 无 complete 压缩时请求估算 = system instruction + 当前投影，投影即全部可见消息之和。 */
+  @Test
+  void requestEstimateAddsSystemInstructionToTheWholeVisibleProjection() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("user message"); // USER 25
+    path.assistant("assistant reply"); // ASSISTANT 25
+
+    // 13 字符 instruction -> ceil(13 / 4) = 4；投影 25 + 25 = 50，控制条目（ROOT / TURN_START）计 0。
+    assertEquals(54L, TokenEstimator.estimateRequestTokens(path.path(), "system prompt"));
+  }
+
+  /** no-gain 判定的 after 侧口径：新 summary wrapper + 从 cut 起（含 cut）的保留段，cut 之前被完全替换。 */
+  @Test
+  void projectionAfterReplacesPreCutEntriesWithTheNewSummaryWrapper() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("first user"); // USER 25
+    path.assistant("first reply"); // ASSISTANT 25
+    path.closeTurn();
+    path.turn("second user"); // USER 25，cut 落在它上面
+    String summary = "merged context";
+    long wrapperTokens =
+        TokenEstimator.estimateTextTokens(CompactionPrompts.compactedContext(summary));
+
+    assertEquals(75L, TokenEstimator.estimateProjectionTokens(path.path()));
+    // cut=USER(7)：前两条消息被 wrapper 取代，只保留 cut 及其后的可见条目（TURN_END 计 0）。
+    assertEquals(
+        wrapperTokens + 25L,
+        TokenEstimator.estimateProjectionTokensAfter(path.path(), summary, id(7L)));
+    // cut 必须落在当前 path 上，否则估算分支损坏：fail closed，绝不静默低估上下文。
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> TokenEstimator.estimateProjectionTokensAfter(path.path(), summary, id(999L)));
+    assertTrue(error.getMessage().contains("cutEntryId"), error.getMessage());
+  }
+
+  /** CUSTOM_MESSAGE / NOTIFICATION 同为 provider 可见对话消息，其内容必须进入同一估算公式。 */
+  @Test
+  void estimatesCustomMessageAndNotificationContents() {
+    Entry custom =
+        new Entry(
+            id(2L),
+            id(100L),
+            id(1L),
+            new CustomMessagePayload(
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("abcd"))),
+                CustomMessagePayload.CORE_DETAILS_JSON),
+            BASE);
+    Entry notification =
+        new Entry(
+            id(3L),
+            id(100L),
+            id(2L),
+            new NotificationPayload(
+                id(9001L),
+                NotificationKind.SUBAGENT_RESULT,
+                OWNER_THREAD_ID,
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent("abcdefgh")))),
+            BASE);
+
+    assertEquals(1L, TokenEstimator.estimateTokens(custom));
+    assertEquals(2L, TokenEstimator.estimateTokens(notification));
+    // 两者同为对话消息：摘要范围在此停止，重绕不会穿越它们。
+    assertTrue(TokenEstimator.isConversationMessage(custom));
+    assertTrue(TokenEstimator.isConversationMessage(notification));
   }
 
   @Test
@@ -442,6 +523,12 @@ class CompactionPlannerTest {
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> plan(path, 100_000L));
     assertTrue(error.getMessage().contains("cutEntryId"), error.getMessage());
+    // 同一损坏事实进入投影估算同样 fail closed：绝不把缺失 cut 当成「整段保留」而静默低估上下文。
+    IllegalStateException estimateError =
+        assertThrows(
+            IllegalStateException.class,
+            () -> TokenEstimator.estimateProjectionTokens(path.path()));
+    assertTrue(estimateError.getMessage().contains("cutEntryId"), estimateError.getMessage());
   }
 
   @Test
@@ -618,8 +705,8 @@ class CompactionPlannerTest {
                 metadata),
             BASE);
 
-    long plainTokens = CompactionPlanner.estimateTokens(plainEntry);
-    long editTokens = CompactionPlanner.estimateTokens(editEntry);
+    long plainTokens = TokenEstimator.estimateTokens(plainEntry);
+    long editTokens = TokenEstimator.estimateTokens(editEntry);
 
     assertEquals(1L, plainTokens);
     assertEquals(12L, editTokens);
@@ -808,9 +895,8 @@ class CompactionPlannerTest {
             .anyMatch(message -> message.role() == AgentMessageRole.TOOL));
     // 模型预算同样只计算摘要与 cut 后两条 USER，不重复计入已被摘要替代的 tool batch。
     long summaryTokens =
-        CompactionPlanner.estimateTextTokens(
-            CompactionPrompts.compactedContext("previous context"));
-    assertEquals(summaryTokens + 50L, CompactionPlanner.estimateProjectionTokens(path.path()));
+        TokenEstimator.estimateTextTokens(CompactionPrompts.compactedContext("previous context"));
+    assertEquals(summaryTokens + 50L, TokenEstimator.estimateProjectionTokens(path.path()));
   }
 
   private static PathBuilder closedTurnPath() {

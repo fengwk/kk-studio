@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.api.CancelledThreadInput;
+import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 
 import java.util.List;
 import java.util.UUID;

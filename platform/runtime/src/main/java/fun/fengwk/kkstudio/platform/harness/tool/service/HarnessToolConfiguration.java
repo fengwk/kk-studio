@@ -4,11 +4,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.harness.tool.configuration.SystemSettingsToolSettingsProvider;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsCodec;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsProvider;
 
 /** Tool settings 与 permission evaluator 的生产装配。 */

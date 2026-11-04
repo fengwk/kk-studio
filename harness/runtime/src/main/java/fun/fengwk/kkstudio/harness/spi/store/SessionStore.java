@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi.store;
 
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.Session;
 
 import java.util.Optional;
 import java.util.UUID;

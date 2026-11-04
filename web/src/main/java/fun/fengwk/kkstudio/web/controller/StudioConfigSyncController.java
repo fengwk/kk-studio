@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
@@ -15,7 +16,6 @@ import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncInventoryDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /** 配置同步 HTTP 边界；响应缓存由 ConfigSyncNoStoreFilter 统一禁止。 */
 @AllArgsConstructor

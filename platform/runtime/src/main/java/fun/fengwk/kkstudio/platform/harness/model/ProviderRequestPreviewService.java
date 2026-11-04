@@ -1,5 +1,27 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryType;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
@@ -8,32 +30,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -64,7 +62,7 @@ import java.util.UUID;
  * Entry，草稿尚未落库为 Thread，因此 candidate Thread/Entry id 都只是本次内存 UUID；历史模型输出以 ROOT 到其 parent 为请求前缀，并把该
  * 输出的记录时间显式交给规划，绝不用当前时间冒充。
  *
- * <p>预览与正式发送同源：candidate 历史由同一 {@link TurnPlanPreview} 构造，冻结请求来自同一 {@link
+ * <p>预览与正式发送同源：candidate 历史由同一 {@link HarnessRuntime#previewInputCandidatePath} 构造，冻结请求来自同一 {@link
  * DatabaseTurnResolver#planLive(UUID, EntryPath, Instant)}（历史模型输出走 {@link
  * DatabaseTurnResolver#planHistorical(UUID, EntryPath, Instant)}），有效请求来自同一 {@link
  * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link
@@ -133,7 +131,7 @@ public final class ProviderRequestPreviewService {
         contentPreparer.prepare(snapshot.thread().sessionId(), command.commands());
     Instant now = clock.instant();
     EntryPath candidatePath =
-        TurnPlanPreview.inputCandidatePath(
+        runtime.previewInputCandidatePath(
             threadId,
             snapshot.requireFullPath(),
             snapshot.thread().nextCommandSequence(),
@@ -174,7 +172,7 @@ public final class ProviderRequestPreviewService {
     Instant now = clock.instant();
     UUID candidateThreadId = UUID.randomUUID();
     EntryPath candidatePath =
-        TurnPlanPreview.inputCandidatePath(
+        runtime.previewInputCandidatePath(
             candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now);
     if (!BuiltinExecution.DRIVER.equals(candidatePath.baseSettings().execution().driver())) {
       throw new ProviderRequestPreviewUnavailableException(
@@ -242,9 +240,9 @@ public final class ProviderRequestPreviewService {
   private HarnessProviderRequestPreviewDTO previewCompactionChild(
       UUID parentSessionId, Map<UUID, Entry> parentEntries, Entry output) {
     EntryPath outputPath = entryPath(parentEntries, output.id());
-    Entry turnEnd = requireCompactionTurnEnd(parentEntries, output);
+    CompactionTurnClosure closure = requireCompactionTurnEnd(parentEntries, output);
     List<Entry> closedEntries = new ArrayList<>(outputPath.entries());
-    closedEntries.add(turnEnd);
+    closedEntries.add(closure.turnEnd());
     EntryPath closedPath;
     try {
       closedPath = new EntryPath(closedEntries);
@@ -252,18 +250,17 @@ public final class ProviderRequestPreviewService {
       throw frozenCompactionUnavailable(
           "compaction turn end does not belong to the result path", error);
     }
-    CompactionTurns.CompactionTurn turn;
+    CompactionStart frozen;
     try {
-      turn = CompactionTurns.ofResult(closedPath, output.id());
+      frozen = runtime.findCompactionTurnStart(closedPath, output.id());
     } catch (IllegalStateException error) {
       throw frozenCompactionUnavailable(
           "compaction result has no enclosing COMPACTION turn", error);
     }
-    CompactionStart frozen = turn.freezing();
     if (!BuiltinExecution.DRIVER.equals(frozen.execution().driver())) {
       throw frozenCompactionUnavailable("compaction execution driver is not builtin");
     }
-    UUID ownerThreadId = turn.start().ownerThreadId();
+    UUID ownerThreadId = closure.turnStart().ownerThreadId();
     if (frozen.childThreadId() == null || frozen.joinInvocationId() == null) {
       // pending 压缩 TURN_START 尚未创建子执行，没有可预览的真实调用。
       throw frozenCompactionUnavailable("compaction child execution is not frozen");
@@ -337,8 +334,11 @@ public final class ProviderRequestPreviewService {
   /**
    * 压缩结果与其 TURN_END 在同一提交中落库；结果 Entry 的直接子 TURN_END 指向 enclosing COMPACTION TURN_START 时才构成闭合事实。
    * 缺失说明回合未完成或关联损坏，不能把它当成可预览的完成压缩。
+   *
+   * <p>返回的 TURN_START 就是该结果的 durable 归属事实：owner Thread 与冻结元数据都由它派生，调用方不再另找来源。
    */
-  private static Entry requireCompactionTurnEnd(Map<UUID, Entry> entries, Entry output) {
+  private static CompactionTurnClosure requireCompactionTurnEnd(
+      Map<UUID, Entry> entries, Entry output) {
     for (Entry candidate : entries.values()) {
       if (!output.id().equals(candidate.parentEntryId())
           || !(candidate.payload() instanceof TurnEndPayload end)) {
@@ -349,11 +349,16 @@ public final class ProviderRequestPreviewService {
           && startEntry.payload() instanceof TurnStartPayload start
           && start.reason() == TurnStartReason.COMPACTION
           && start.compaction() != null) {
-        return candidate;
+        return new CompactionTurnClosure(candidate, start);
       }
     }
     throw frozenCompactionUnavailable("compaction turn is not closed");
   }
+
+  /**
+   * 已闭合 COMPACTION turn 的两个 durable 端点：结果 Entry 的直接子 TURN_END 与其 enclosing COMPACTION TURN_START。
+   */
+  private record CompactionTurnClosure(Entry turnEnd, TurnStartPayload turnStart) {}
 
   /** join 必须就是父 TURN_START 冻结的同一子执行，且已以最终答复结束。 */
   private static void requireFrozenCompactionJoin(

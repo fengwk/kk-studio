@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  ApprovalInteractionDTO,
-  EnvironmentWaitInteractionDTO,
-  InputInteractionDTO,
-} from '@/shared/api/contracts/ai-interaction'
+import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
 
 const owner = {
@@ -16,7 +12,7 @@ const owner = {
   rootThreadName: null,
 }
 
-const input: InputInteractionDTO = {
+const input: InteractionDTO = {
   type: 'INPUT',
   interactionId: 'inv-1',
   status: 'WAITING_INPUT',
@@ -34,14 +30,14 @@ const input: InputInteractionDTO = {
   createTime: 1790503200,
 }
 
-const approval: ApprovalInteractionDTO = {
+const approval: InteractionDTO = {
   ...input,
   type: 'APPROVAL',
   status: 'WAITING_APPROVAL',
   approvalJson: '{}',
 }
 
-const environmentWait = (rootThreadId: string, environmentId: string): EnvironmentWaitInteractionDTO => ({
+const environmentWait = (rootThreadId: string, environmentId: string): InteractionDTO => ({
   type: 'ENVIRONMENT_WAIT',
   rootThreadId,
   owner,

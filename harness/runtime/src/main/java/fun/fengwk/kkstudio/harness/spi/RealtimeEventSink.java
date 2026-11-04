@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 
 import java.util.List;
 import java.util.Objects;

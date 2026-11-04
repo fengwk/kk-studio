@@ -20,8 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 
 import javax.sql.DataSource;
 

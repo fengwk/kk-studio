@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 
 import java.util.Objects;

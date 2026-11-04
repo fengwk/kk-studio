@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { ApiError } from '@/shared/api/client'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
@@ -14,7 +14,7 @@ import type {
   EnvironmentUpdateProgressDTO,
 } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironment: vi.fn(),
@@ -354,7 +354,7 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull())
     await waitFor(() => expect(environmentService.listEnvironments).toHaveBeenCalledTimes(2))
     expect(
-      await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B（总大小未知）'),
+      await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B · 总大小未知'),
     ).toBeInTheDocument()
     expect(queryClient.getQueryData(queryKeys.environments.runtime('env-1'))).toEqual(started)
   })
@@ -413,7 +413,7 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     const progress = await screen.findByText(
-      '正在更新至 1.3.0 · 已下载 8 MB（总大小未知）',
+      '正在更新至 1.3.0 · 已下载 8 MB · 总大小未知',
     )
     expect(progress).not.toHaveTextContent('%')
   })

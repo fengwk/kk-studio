@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi.store;
 
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 
 import java.util.List;
 import java.util.Optional;

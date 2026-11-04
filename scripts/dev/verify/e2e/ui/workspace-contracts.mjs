@@ -816,8 +816,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       name: `e2e-ui-usage-agent-${suffix}`,
       description: 'Local completion agent for free Footer usage tests.',
       systemPrompt: 'Return the deterministic local response.',
-      model: state.model.name,
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
@@ -837,10 +836,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       threadId,
       rootSettings: branchSettingsOf(
         state.agent,
-        {
-          modelName: state.model.name,
-          variant: 'default',
-        },
+        state.agent.execution.settings,
         state.environment.name,
       ),
       yoloEnabled: false,
@@ -865,8 +861,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       name: `e2e-ui-usage-alt-agent-${suffix}`,
       description: 'Second environment-bound agent for Footer projection tests.',
       systemPrompt: 'Return the deterministic local response.',
-      model: state.model.name,
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
     assert(
@@ -885,10 +880,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       commands: [
         setAgentCommand(state.otherAgent.name, cid()),
         setExecutionCommand(
-          {
-            modelName: state.model.name,
-            variant: 'default',
-          },
+          state.otherAgent.execution.settings,
           cid(),
         ),
         setEnvironmentCommand(state.otherEnvironment.name, cid()),
@@ -1044,8 +1036,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       name: childName,
       description: 'Held child used by the TaskStatus browser fixture.',
       systemPrompt: 'Stay in the deterministic local model call.',
-      model: state.model.name,
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
@@ -1055,8 +1046,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       name: `e2e-ui-task-parent-${suffix}`,
       description: 'Parent used by the TaskStatus browser fixture.',
       systemPrompt: 'Call the configured task subagent exactly once.',
-      model: state.model.name,
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
       config: {
         tools: [],
         skills: [],
@@ -1110,10 +1100,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
           commands: [
             setAgentCommand(state.parentAgent.name, cid()),
             setExecutionCommand(
-              {
-                modelName: state.model.name,
-                variant: 'default',
-              },
+              state.parentAgent.execution.settings,
               cid(),
             ),
             userMessageCommand(parentMarker, cid()),
@@ -1210,8 +1197,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       name: `e2e-ui-tool-card-agent-${suffix}`,
       description: 'Agent used by deterministic Tool card browser contracts.',
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
-      model: state.model.name,
-      variant: 'default',
+      execution: { driver: 'builtin', settings: { modelName: state.model.name, variant: 'default' } },
       config: {
         tools: ['write', 'edit', 'bash'],
         skills: [],
@@ -1267,10 +1253,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           commands: [
             setAgentCommand(state.agent.name, cid()),
             setExecutionCommand(
-              {
-                modelName: state.model.name,
-                variant: 'default',
-              },
+              state.agent.execution.settings,
               cid(),
             ),
             userMessageCommand(markers[toolName], cid()),

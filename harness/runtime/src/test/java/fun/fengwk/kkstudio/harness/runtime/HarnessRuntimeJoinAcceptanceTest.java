@@ -17,32 +17,40 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -862,7 +870,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             TestIds.id(4002),
             settings,
             List.of(rootCommand),
-            AcceptancePreflight.IDENTITY,
             null,
             null,
             null,
@@ -873,7 +880,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4003),
             rootCommand.requestHash());
-    AcceptedCommands root = runtime.spawn(rootRequest);
+    AcceptedCommands root = runtime.spawn(rootRequest, AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadConstraints(1_000, false, false), root.thread().constraints());
     assertEquals(SpawnTrigger.CONTROLLER, root.thread().spawnTrigger());
 
@@ -884,7 +891,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             TestIds.id(4006),
             settings,
             List.of(childCommand),
-            AcceptancePreflight.IDENTITY,
             root.thread().id(),
             root.thread().headEntryId(),
             null,
@@ -895,7 +901,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4007),
             childCommand.requestHash());
-    AcceptedCommands child = runtime.spawn(childRequest);
+    AcceptedCommands child = runtime.spawn(childRequest, AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadConstraints(1_000, true, false), child.thread().constraints());
     assertEquals(SpawnTrigger.MODEL_TOOL, child.thread().spawnTrigger());
     ThreadJoin childJoin = runtime.findJoin(TestIds.id(4007)).orElseThrow();
@@ -909,7 +915,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             null,
             settings,
             List.of(resumedCommand),
-            AcceptancePreflight.IDENTITY,
             root.thread().id(),
             root.thread().headEntryId(),
             new SpawnRequest.Continuation(current.headEntryId(), current.nextCommandSequence()),
@@ -920,7 +925,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4009),
             resumedCommand.requestHash());
-    AcceptedCommands resumed = runtime.spawn(resumedRequest);
+    AcceptedCommands resumed = runtime.spawn(resumedRequest, AcceptancePreflight.IDENTITY);
 
     assertEquals(SpawnTrigger.MODEL_TOOL, resumed.thread().spawnTrigger());
     assertEquals(new ThreadConstraints(1_000, true, false), resumed.thread().constraints());
@@ -955,7 +960,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             sessionId,
             settings(),
             commands,
-            AcceptancePreflight.IDENTITY,
             null,
             null,
             null,
@@ -967,7 +971,8 @@ class HarnessRuntimeJoinAcceptanceTest {
             ticketId,
             commands.getFirst().requestHash());
 
-    assertThrows(IllegalArgumentException.class, () -> runtime.spawn(request));
+    assertThrows(
+        IllegalArgumentException.class, () -> runtime.spawn(request, AcceptancePreflight.IDENTITY));
     assertTrue(store.transaction(tx -> tx.sessions().find(sessionId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.threads().find(threadId)).isEmpty());
     assertTrue(runtime.findJoin(ticketId).isEmpty());

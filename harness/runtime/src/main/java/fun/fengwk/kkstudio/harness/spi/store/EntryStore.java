@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.spi.store;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPathMetrics;
-import fun.fengwk.kkstudio.harness.runtime.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
+import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
 
 import java.util.List;
 import java.util.Optional;

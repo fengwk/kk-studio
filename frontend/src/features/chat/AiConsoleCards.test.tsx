@@ -75,8 +75,8 @@ describe('ChatCard', () => {
     )
     expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()
     expect(screen.getByText('missing')).toBeInTheDocument()
-    expect(screen.getByText('（已删除/缺失）')).toBeInTheDocument()
-    expect(screen.getByLabelText('missing （已删除/缺失）')).toHaveAttribute(
+    expect(screen.getByText('已删除/缺失')).toBeInTheDocument()
+    expect(screen.getByLabelText('missing 已删除/缺失')).toHaveAttribute(
       'aria-disabled',
       'true',
     )
@@ -92,8 +92,8 @@ describe('ChatCard', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('assistant')).toBeInTheDocument()
-    expect(screen.queryByText('（已删除/缺失）')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('assistant （已删除/缺失）')).not.toBeInTheDocument()
+    expect(screen.queryByText('已删除/缺失')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('assistant 已删除/缺失')).not.toBeInTheDocument()
   })
 
   it('renders YOLO tag and environment name in metadata when configured', () => {
@@ -200,8 +200,7 @@ function agent(): AgentDefinitionDTO {
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
-    variant: 'default',
+    execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: 0,

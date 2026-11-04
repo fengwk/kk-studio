@@ -9,8 +9,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
@@ -27,7 +25,7 @@ import java.util.Map;
 import java.util.TreeSet;
 
 /**
- * 解析全局 Agent definition、model、Skill 与 MCP 工具引用。
+ * 解析全局 Agent definition、Skill 与 MCP 工具引用。
  *
  * <p>写入事务的锁序固定为 Skill package {@code FOR SHARE}、MCP server {@code FOR SHARE}、Agent {@code FOR
  * UPDATE}。 引用集合先完整收集再按 canonical name 升序加锁，锁后重读存在性，不边锁边遍历。
@@ -37,13 +35,11 @@ import java.util.TreeSet;
 public final class AgentDefinitionReferenceResolver {
 
   private static final String DEFINITION_RESOURCE = "agent_definition";
-  private static final String MODEL_RESOURCE = "agent_model";
   private static final String SKILL_RESOURCE = "skill";
   private static final String TOOL_RESOURCE = "agent_tool";
   private static final ContributorId MCP_CONTRIBUTOR = McpToolCatalog.CONTRIBUTOR_ID;
 
   private final AgentDefinitionRepository agentDefinitionRepository;
-  private final AgentModelRepository agentModelRepository;
   private final SkillPackageRepository skillPackageRepository;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
@@ -62,14 +58,6 @@ public final class AgentDefinitionReferenceResolver {
       throw new AiResourceNotFoundException(DEFINITION_RESOURCE);
     }
     return definition;
-  }
-
-  AgentModel requireModelForUpdate(String modelName) {
-    AgentModel model = agentModelRepository.getByNameForUpdate(modelName);
-    if (model == null) {
-      throw new AiResourceNotFoundException(MODEL_RESOURCE);
-    }
-    return model;
   }
 
   /**

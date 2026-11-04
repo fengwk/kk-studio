@@ -2,12 +2,12 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceActions } from '@/features/canvas/useCanvasResourceActions'
-import { getCanvasResourceOriginalUrl } from '@/shared/api/studio-service'
+import { getCanvasResourceOriginalUrl } from '@/features/canvas/canvas-api'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const RESOURCE_ID = 'd5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
 }))
 

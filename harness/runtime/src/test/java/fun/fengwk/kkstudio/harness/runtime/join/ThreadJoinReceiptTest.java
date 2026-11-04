@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+
 import java.util.UUID;
 
 /** {@link ThreadJoinReceipt} 不可变数据记录与构造约束测试。 */

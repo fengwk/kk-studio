@@ -14,8 +14,8 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimePayloadUnavailableException;
 
 import java.io.IOException;
 import java.io.OutputStream;

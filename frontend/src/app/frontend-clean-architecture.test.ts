@@ -10,7 +10,13 @@ import { createProjectsApi, projectsApi } from '@/features/projects'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 
 /** 组成 AI 控制台的一级特性：它们与 Project 领域互相独立。 */
-const AI_CONSOLE_FEATURES = ['features/chat', 'features/catalog', 'features/environment', 'features/extensions']
+const AI_CONSOLE_FEATURES = [
+  'features/thread',
+  'features/chat',
+  'features/catalog',
+  'features/environment',
+  'features/extensions',
+]
 
 function resolvePath(relativePath: string): string {
   return fileURLToPath(new URL(relativePath, import.meta.url))
@@ -22,21 +28,22 @@ describe('Frontend architecture and entry contracts', () => {
     const eslint = new ESLint()
     const filePath = 'src/features/canvas/guard-probe.ts'
     for (const source of [
-      "import '@/features/chat/runtime/AgentPane'",
-      "import '../chat/runtime/AgentPane'",
-      "export * from '@/features/chat/runtime/AgentPane'",
-      "import type { AgentPane } from '@/features/chat/runtime/AgentPane'",
-      "void import('@/features/chat/runtime/AgentPane')",
-      "type Probe = import('@/features/chat/runtime/AgentPane')",
+      "import '@/features/thread/runtime/AgentPane'",
+      "import '@/features/thread/composer'",
+      "import '../thread/runtime/AgentPane'",
+      "import '../thread/composer'",
+      "export * from '@/features/thread/runtime/AgentPane'",
+      "import type { AgentPane } from '@/features/thread/runtime/AgentPane'",
+      "void import('@/features/thread/runtime/AgentPane')",
+      "type Probe = import('@/features/thread/runtime/AgentPane')",
     ]) {
       const [result] = await eslint.lintText(source, { filePath })
       expect(result.messages.some((message) => message.ruleId === 'architecture/feature-dependencies')).toBe(true)
     }
     for (const source of [
-      "import '@/features/chat/composer'",
-      "import '../chat/composer'",
       "import '@/features/canvas/types'",
       "import '@/shared/api/client'",
+      "import '@/shared/lib/upload-file'",
     ]) {
       const [result] = await eslint.lintText(source, { filePath })
       expect(result.messages.filter((message) => message.ruleId === 'architecture/feature-dependencies')).toEqual([])
@@ -233,7 +240,7 @@ describe('Frontend architecture and entry contracts', () => {
     })
 
     it('enforces AI feature does not reversely import projects feature', () => {
-      // 测试意图：验证 AI 控制台各特性（chat / catalog / environment / extensions）的生产代码完全与 features/projects 解耦
+      // 测试意图：验证 AI 控制台各特性（thread / chat / catalog / environment / extensions）的生产代码完全与 features/projects 解耦
       const aiFiles = AI_CONSOLE_FEATURES.flatMap((feature) => scanProductionFiles(path.join(srcRoot, feature)))
       expect(aiFiles.length).toBeGreaterThan(0)
 

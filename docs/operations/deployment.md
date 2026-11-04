@@ -438,8 +438,8 @@ docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
 
 # test：停止并保留数据；第二条额外删除 PostgreSQL/MinIO/execution-exit volumes
-docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
-docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml down --remove-orphans
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml down -v --remove-orphans
 
 # distributed：停止并保留数据；第二条删除 PG/MinIO/daemon workspace/execution-exit volumes
 ./scripts/dev/verify/e2e/distributed.sh down

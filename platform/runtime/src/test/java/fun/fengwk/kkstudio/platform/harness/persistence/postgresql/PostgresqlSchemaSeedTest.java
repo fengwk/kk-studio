@@ -14,8 +14,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 
@@ -466,9 +466,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "MiniMax-M2.7:high",
           singleString(
               st,
-              "select a.model_name || ':' || a.variant"
+              "select (a.execution -> 'settings' ->> 'modelName') || ':'"
+                  + " || (a.execution -> 'settings' ->> 'variant')"
                   + " from agent_definition a"
-                  + " where a.name = 'default-assistant'"),
+                  + " where a.name = 'default-assistant' and a.execution ->> 'driver' = 'builtin'"),
           "the default E2E agent must remain bound to the global model name MiniMax-M2.7");
       assertEquals(
           "minimax:MODEL",
@@ -476,7 +477,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select m.provider_name || ':' || m.kind"
                   + " from agent_definition a"
-                  + " join agent_model m on m.name = a.model_name"
+                  + " join agent_model m on m.name = a.execution -> 'settings' ->> 'modelName'"
                   + " where a.name = 'default-assistant'"),
           "the default E2E agent model must resolve to the minimax MODEL row");
     }

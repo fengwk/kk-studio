@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import '../cases/app-events.mjs'
-import '../cases/real.mjs'
-import '../cases/distributed.mjs'
-import { getCase } from '../lib/registry.mjs'
+import { getCase } from '../run-matrix.mjs'
 
 const identity = {
   type: 'connected',
@@ -69,6 +66,33 @@ test('daemon.ready accepts valid capability catalog including internal preview a
   await assert.rejects(run({
     ...card, capabilities: ids.filter((id) => id !== 'fs.read').map((id) => ({ id })),
   }))
+})
+
+test('tool.read_turn executes the daemon.ready prerequisite', async () => {
+  // 在后续模型查询前中断，验证跨 case 调用确实到达 daemon.ready。
+  const stopped = new Error('daemon prerequisite reached')
+  await assert.rejects(getCase('tool.read_turn').run({
+    daemonEnv: 'fixture', vars: {},
+    call: async () => { throw stopped },
+  }), (error) => error === stopped)
+})
+
+test('attachment case resolves seed prerequisites across modules', async () => {
+  // 替换前置 case 的边界，验证两个独立分支均能定位到原对象。
+  for (const [id, vars] of [
+    ['seed.agent_and_provider', {}],
+    ['seed.structured_model_config', { agent: {} }],
+  ]) {
+    const prerequisite = getCase(id)
+    const original = prerequisite.run
+    const stopped = new Error(id)
+    prerequisite.run = async () => { throw stopped }
+    try {
+      await assert.rejects(getCase('chat.attachment_upload_contract').run({ vars }), (error) => error === stopped)
+    } finally {
+      prerequisite.run = original
+    }
+  }
 })
 
 test('distributed lease projection requires complete capability catalog across both nodes', async () => {

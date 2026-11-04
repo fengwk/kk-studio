@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.realtime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.RealtimePayloadFetcher;
 

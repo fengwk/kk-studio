@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.Objects;

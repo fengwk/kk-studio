@@ -6,8 +6,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.catalog.tool.ToolCatalogQueryService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 

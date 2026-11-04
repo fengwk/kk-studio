@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 
 import java.util.Objects;
 import java.util.UUID;
