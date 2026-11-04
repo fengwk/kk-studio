@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.List;
@@ -30,19 +31,23 @@ public class SessionDeletionOrchestrator {
   private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final SessionBlobRefManager refManager;
+  private final SessionFileRepository sessionFileRepository;
 
   public SessionDeletionOrchestrator(
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
       ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       ObjectProvider<HarnessRuntime> runtimes,
-      SessionBlobRefManager refManager) {
+      SessionBlobRefManager refManager,
+      SessionFileRepository sessionFileRepository) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
+    this.sessionFileRepository =
+        Objects.requireNonNull(sessionFileRepository, "sessionFileRepository");
   }
 
   /**
@@ -98,6 +103,7 @@ public class SessionDeletionOrchestrator {
    * thread_id 指向将被删除的 harness Thread）。
    */
   private void deleteRelation(OwnerRef owner, UUID sessionId) {
+    sessionFileRepository.deleteBySession(sessionId);
     switch (owner) {
       case OwnerRef.Chat chat -> chatSessionRepository.deleteBySessionId(sessionId);
       case OwnerRef.IssueAgent issueAgent -> requireIssueAgentOwnership().deleteBinding(issueAgent);

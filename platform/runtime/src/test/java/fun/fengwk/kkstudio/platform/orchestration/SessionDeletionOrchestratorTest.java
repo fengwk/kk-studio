@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ThreadStore;
 import fun.fengwk.kkstudio.platform.chat.Chat;
 import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.time.Instant;
@@ -86,6 +87,7 @@ class SessionDeletionOrchestratorTest {
   private ThreadStore threadStore;
   private JoinStore joinStore;
   private SessionBlobRefManager refManager;
+  private SessionFileRepository sessionFileRepository;
   private SessionDeletionOrchestrator service;
 
   /** 内存模型：Session -> Thread、Thread -> 直接子 Thread，以及当前仍存在的 Session/Thread。 */
@@ -110,6 +112,7 @@ class SessionDeletionOrchestratorTest {
     threadStore = mock(ThreadStore.class);
     joinStore = mock(JoinStore.class);
     refManager = mock(SessionBlobRefManager.class);
+    sessionFileRepository = mock(SessionFileRepository.class);
 
     when(transaction.sessions()).thenReturn(sessionStore);
     when(transaction.entries()).thenReturn(entryStore);
@@ -150,7 +153,12 @@ class SessionDeletionOrchestratorTest {
 
     service =
         new SessionDeletionOrchestrator(
-            chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, refManager);
+            chatSessionRepository,
+            chatRepository,
+            issueAgentOwnerships,
+            runtimes,
+            refManager,
+            sessionFileRepository);
   }
 
   @Test
@@ -362,12 +370,32 @@ class SessionDeletionOrchestratorTest {
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                null, chatRepository, issueAgentOwnerships, runtimes, refManager));
+                null,
+                chatRepository,
+                issueAgentOwnerships,
+                runtimes,
+                refManager,
+                sessionFileRepository));
     assertThrows(
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                chatSessionRepository, chatRepository, issueAgentOwnerships, runtimes, null));
+                chatSessionRepository,
+                chatRepository,
+                issueAgentOwnerships,
+                runtimes,
+                null,
+                sessionFileRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SessionDeletionOrchestrator(
+                chatSessionRepository,
+                chatRepository,
+                issueAgentOwnerships,
+                runtimes,
+                refManager,
+                null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 
