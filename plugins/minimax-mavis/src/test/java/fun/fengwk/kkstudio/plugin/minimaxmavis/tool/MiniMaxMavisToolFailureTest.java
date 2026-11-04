@@ -1121,6 +1121,7 @@ class MiniMaxMavisToolFailureTest {
         SESSION_ID,
         ROOT_THREAD_ID,
         ROOT_SESSION_ID,
+        UUID.randomUUID(),
         Instant.now(),
         TurnMediaCapabilities.NONE,
         mock(BranchView.class),

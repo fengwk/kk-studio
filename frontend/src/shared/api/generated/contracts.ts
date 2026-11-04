@@ -1865,13 +1865,6 @@ export interface ResetStageBudgetRequestDTO {
   maxRuns: number
 }
 
-/** Java：fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO */
-export interface ResolveUnknownIssueRequestDTO {
-  expectedVersion: string
-  requestKey: string
-  verification: string
-}
-
 /** Java：fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO */
 export interface ResumeIssueRequestDTO {
   expectedVersion: string

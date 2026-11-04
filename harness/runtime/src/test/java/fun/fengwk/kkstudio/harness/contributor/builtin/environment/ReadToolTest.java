@@ -278,6 +278,7 @@ class ReadToolTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             UUID.randomUUID(),
+            UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
             branch,

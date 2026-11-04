@@ -331,6 +331,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
                 sessionId,
                 threadId,
                 sessionId,
+                UUID.randomUUID(),
                 emptyBranchView(),
                 TurnMediaCapabilities.NONE),
             1,

@@ -293,6 +293,7 @@ class TaskToolTest {
             CHILD_SESSION_ID,
             ROOT_THREAD_ID,
             PARENT_SESSION_ID,
+            UUID.randomUUID(),
             Instant.now(),
             TurnMediaCapabilities.NONE,
             mock(BranchView.class),

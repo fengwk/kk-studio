@@ -2,6 +2,12 @@ package fun.fengwk.kkstudio.project.tool;
 
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
@@ -11,28 +17,31 @@ import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
+import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code issue_transition} 的事务边界：以 Run 冻结快照里的 runId 为入口，校验当前 Run 有效、Issue 阶段与调用 Thread 身份后， 把交接目标写入
+ * {@code issue_transition} 的事务边界：以真实调用 Thread 的稳定绑定定位 Issue，再以该 Issue 的活动 Run 作为唯一授权依据，把交接目标写入
  * {@code project_issue_run.next_state}。
  *
- * <p>授权只以数据库中的当前 Run 为准，绝不相信 prompt 中的 runId 或继承来的 branch 快照：runId 只是定位符，真正的边界是 「活动 Run 仍存在且
- * active、其 Thread 就是调用 Thread、其 Issue/阶段与 scope/当前 Issue 一致」。因此：
+ * <p>模型不提供任何身份：Thread 来自执行上下文，Issue 来自 Project 自己的稳定绑定，Run 来自 Project 自己的活动 Run 记录，因此在
+ * prompt、工具参数或历史文本里伪造身份都不起作用。授权边界是「活动 Run 仍存在且 active、其 Thread 就是调用 Thread、其阶段与当前 Issue
+ * 阶段一致、且这次调用确实是本 Run 起点之后的 assistant turn」。因此：
  *
  * <ul>
  *   <li>按锁序 Project SHARE → Issue UPDATE → Run UPDATE 读写，避免与接受/收尾路径并发写同一 Run。
- *   <li>要求 {@code callingThreadId == scope.sourceThreadId} 且等于 Run 的 Thread：旧 Run、别的 Agent Thread
- *       以及继承 scope 的 fork 都在写前被拒绝。
+ *   <li>锁内读取该 Thread 的真实历史路径，要求 assistant 所属 TURN_START 严格晚于 {@code startEntryId}：已结束 Run 的迟到调用、同一
+ *       Thread 后续 Run 期间才落库的旧 assistant turn、兄弟分支与 fork 继承的输入都在写前被拒绝。
  *   <li>只接受当前阶段 workflow {@code next} 白名单中启用的目标；同目标的重复调用是无写操作的幂等重放，异目标在已接受后确定性拒绝。
  *   <li>写入失败（版本 CAS 冲突）整体回滚，绝不留下部分交接事实。
  * </ul>
@@ -40,74 +49,72 @@ import java.util.UUID;
 public class IssueTransitionService {
 
   private static final String INCONSISTENT_OWNERSHIP = "Project thread ownership is inconsistent";
-  private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueThreadExecution threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
 
   public IssueTransitionService(
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository,
+      IssueAgentThreadRepository issueAgentThreadRepository,
+      IssueThreadExecution threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec) {
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
     this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
+    this.issueAgentThreadRepository =
+        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.threadExecutions = Objects.requireNonNull(threadExecutions, "threadExecutions");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
   }
 
   /** 接受一次阶段交接请求；返回已登记的目标与是否为幂等重放。 */
   @Transactional
-  public IssueTransitionResult accept(UUID callingThreadId, String runScopeJson, String toState) {
+  public IssueTransitionResult accept(UUID callingThreadId, UUID assistantEntryId, String toState) {
     Objects.requireNonNull(callingThreadId, "callingThreadId");
-    ProjectRunScope scope = decodeScope(runScopeJson);
-    if (!scope.active()) {
-      throw new AiValidationException(
-          "issue_run", "this run has already been closed; a handoff cannot be accepted");
-    }
-    if (!scope.sourceThreadId().equals(callingThreadId)) {
-      throw new AiValidationException(
-          "issue_run", "issue_transition is only available on the run's own thread");
-    }
+    Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     ProjectStateCode target = requireTarget(toState);
 
-    IssueRun runPeek = issueRunRepository.getById(scope.runId());
-    if (runPeek == null || !runPeek.getIssueId().equals(scope.issueId())) {
+    IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(callingThreadId);
+    if (binding == null) {
+      throw new AiValidationException(
+          "issue_run", "issue_transition is only available on a thread bound to an Issue agent");
+    }
+    IssueRun activePeek = issueRunRepository.getActiveByIssueId(binding.issueId());
+    if (activePeek == null) {
+      throw noActiveRun();
+    }
+    Issue peekIssue = issueRepository.getById(binding.issueId());
+    if (peekIssue == null) {
       throw inconsistent();
     }
-    Issue peek = issueRepository.getById(scope.issueId());
-    if (peek == null || !peek.getProjectId().equals(scope.projectId())) {
+    Project project = projectRepository.lockForKeyShare(peekIssue.getProjectId());
+    if (project == null) {
       throw inconsistent();
     }
-    Project project = projectRepository.lockForKeyShare(peek.getProjectId());
-    if (project == null || !project.getId().equals(scope.projectId())) {
-      throw inconsistent();
-    }
-    Issue issue = issueRepository.lockById(scope.issueId());
+    Issue issue = issueRepository.lockById(binding.issueId());
     if (issue == null) {
       throw inconsistent();
     }
-    if (issue.isArchived()) {
-      throw new AiValidationException("issue", "Issue is archived");
+    IssueRun run = issueRunRepository.lockById(activePeek.getId());
+    if (run == null || !run.getIssueId().equals(issue.getId())) {
+      throw inconsistent();
     }
-    IssueRun run = issueRunRepository.lockById(scope.runId());
-    if (run == null || !run.isActive()) {
-      throw new AiValidationException(
-          "issue_run", "Issue has no active run; a handoff cannot be accepted");
+    if (!run.isActive()) {
+      throw noActiveRun();
     }
     if (!run.getThreadId().equals(callingThreadId)) {
       throw new AiValidationException("issue_run", "the active run belongs to a different thread");
     }
-    if (!run.getState().equals(issue.getState()) || !run.getState().equals(scope.stage())) {
-      throw new AiValidationException(
-          "issue_run",
-          "the active run stage "
-              + run.getState()
-              + " does not match the current issue stage "
-              + issue.getState());
+    if (issue.isArchived()) {
+      throw new AiValidationException("issue", "Issue is archived");
     }
+    requireAssistantTurnOfActiveRun(run, callingThreadId, assistantEntryId);
 
     ProjectWorkflow workflow;
     ProjectStateCode from;
@@ -123,6 +130,14 @@ public class IssueTransitionService {
     if (source == null || ProjectWorkflowReservedState.isReserved(from)) {
       throw new AiValidationException(
           "issue_run", "Issue is not in an executable work stage: " + issue.getState());
+    }
+    if (!run.getState().equals(issue.getState())) {
+      throw new AiValidationException(
+          "issue_run",
+          "the active run stage "
+              + run.getState()
+              + " does not match the current issue stage "
+              + issue.getState());
     }
 
     if (run.getNextState() != null) {
@@ -156,12 +171,44 @@ public class IssueTransitionService {
     return new IssueTransitionResult(from.value(), target.value(), run.getId(), false);
   }
 
-  private static ProjectRunScope decodeScope(String runScopeJson) {
-    try {
-      return RUN_SCOPE_CODEC.decode(runScopeJson);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("issue_run", "invalid run context: " + error.getMessage());
+  /**
+   * 要求 assistant 落在当前路径，且其所属 Turn 由调用 Thread 创建并严格晚于 Run 起点。
+   *
+   * <p>同一 Thread 会被后续 Run 复用，"Thread 相同"不足以证明归属：旧 Turn 的 assistant 入口迟到落库后仍能在本 Thread 上取到新 Run，必须检查
+   * Turn 起点而不是 assistant 的落库位置。
+   */
+  private void requireAssistantTurnOfActiveRun(
+      IssueRun run, UUID callingThreadId, UUID assistantEntryId) {
+    EntryPath path = threadExecutions.readThread(callingThreadId).entryPath();
+    List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
+    int start = entryIds.indexOf(run.getStartEntryId());
+    if (start < 0) {
+      throw inconsistent();
     }
+    int assistant = entryIds.indexOf(assistantEntryId);
+    if (assistant > start
+        && path.entries().get(assistant).payload() instanceof MessagePayload message
+        && message.message().role() == AgentMessageRole.ASSISTANT) {
+      for (int i = assistant - 1; i >= 0; i--) {
+        var payload = path.entries().get(i).payload();
+        if (payload instanceof TurnEndPayload) {
+          break;
+        }
+        if (payload instanceof TurnStartPayload turn) {
+          if (i > start && turn.ownerThreadId().equals(callingThreadId)) {
+            return;
+          }
+          break;
+        }
+      }
+    }
+    throw new AiValidationException(
+        "issue_run", "issue_transition must be called from the assistant turn of the active run");
+  }
+
+  private static AiValidationException noActiveRun() {
+    return new AiValidationException(
+        "issue_run", "Issue has no active run; a handoff cannot be accepted");
   }
 
   private static ProjectStateCode requireTarget(String toState) {
