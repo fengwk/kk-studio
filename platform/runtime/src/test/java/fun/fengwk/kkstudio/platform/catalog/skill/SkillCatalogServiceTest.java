@@ -44,6 +44,8 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO;
@@ -106,6 +108,96 @@ class SkillCatalogServiceTest {
             blobManager,
             blobRepository,
             environmentRegistry);
+  }
+
+  @Test
+  void listFilesReadsOnlyTheServerArchiveIndex() {
+    // 意图：文件清单直接来自 blob 上服务端生成的索引，并按路径确定性排序。
+    SkillArchiveBuilder.Result archive = archive("review", "dev");
+    UUID blobId = UUID.randomUUID();
+    StorageBlob artifact = indexedBlob(blobId, ARTIFACT_SHA, archive);
+    when(packageRepository.getPackage(PACKAGE))
+        .thenReturn(
+            new SkillPackage(
+                PACKAGE,
+                "dev tools",
+                HEAD,
+                blobId,
+                List.of(new SkillManifestEntry("dev", "d"), new SkillManifestEntry("review", "r")),
+                Instant.parse("2024-01-01T00:00:00Z"),
+                0L,
+                Instant.parse("2024-01-01T00:00:00Z"),
+                Instant.parse("2024-01-01T00:00:00Z"),
+                null));
+    when(blobManager.getBlob(blobId)).thenReturn(artifact);
+
+    List<SkillPackageFileDTO> files = service.listFiles(PACKAGE);
+
+    assertEquals(
+        List.of("dev/SKILL.md", "review/SKILL.md"),
+        files.stream().map(SkillPackageFileDTO::getPath).toList());
+    for (SkillPackageFileDTO file : files) {
+      long expected =
+          archive.index().stream()
+              .filter(entry -> entry.path().equals(file.getPath()))
+              .findFirst()
+              .orElseThrow()
+              .size();
+      assertEquals(expected, file.getSize());
+    }
+  }
+
+  @Test
+  void listFilesFailsClosedWithoutAServerIndex() {
+    // 意图：缺少服务端索引是数据损坏，绝不由客户端内容或文件名回退推断。
+    UUID blobId = UUID.randomUUID();
+    StorageBlob artifact = blob(blobId, ARTIFACT_SHA, 10);
+    when(packageRepository.getPackage(PACKAGE)).thenReturn(uploadPackageWith(blobId, ARTIFACT_SHA));
+    when(blobManager.getBlob(blobId)).thenReturn(artifact);
+
+    assertThrows(IllegalStateException.class, () -> service.listFiles(PACKAGE));
+  }
+
+  @Test
+  void editUploadPackageUpdatesDescriptionWithCas() {
+    // 意图：上传渠道允许改描述，且必须命中客户端展示的 version。
+    when(packageRepository.lockPackage(PACKAGE)).thenReturn(uploadPackage(3));
+    when(packageRepository.updateDescription(PACKAGE, "updated", 3)).thenReturn(true);
+    SkillPackage updated = uploadPackage(4);
+    when(packageRepository.getPackage(PACKAGE)).thenReturn(updated);
+    when(blobManager.getBlob(updated.artifactBlobId()))
+        .thenReturn(blob(updated.artifactBlobId(), ARTIFACT_SHA, 10));
+
+    SkillPackageDetailDTO detail = service.editPackage(PACKAGE, editDTO("3", "updated"));
+
+    assertEquals("UPLOAD", detail.getSource());
+    verify(packageRepository).updateDescription(PACKAGE, "updated", 3);
+    verify(packageRepository, never()).updateGitSettings(any(), any(), any());
+  }
+
+  @Test
+  void editUploadPackageRejectsGitFields() {
+    // 意图：上传渠道传入分支或令牌是无效契约，必须在写入前拒绝。
+    when(packageRepository.lockPackage(PACKAGE)).thenReturn(uploadPackage(3));
+    SkillPackageEditDTO branchEdit = editDTO("3", "updated");
+    branchEdit.setBranch("main");
+    assertThrows(AiValidationException.class, () -> service.editPackage(PACKAGE, branchEdit));
+    SkillPackageEditDTO tokenEdit = editDTO("3", "updated");
+    tokenEdit.applyToken(null);
+    assertThrows(AiValidationException.class, () -> service.editPackage(PACKAGE, tokenEdit));
+    verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
+  }
+
+  @Test
+  void editStalePackageIsRejectedBeforeAnyWrite() {
+    // 意图：统一编辑沿用 CAS version，陈旧卡片不会改写描述或 Git 设置。
+    when(packageRepository.lockPackage(PACKAGE)).thenReturn(gitPackage(2, HEAD, HEAD));
+
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.editPackage(PACKAGE, editDTO("1", "stale")));
+    verify(packageRepository, never()).updateDescription(any(), any(), anyLong());
+    verify(packageRepository, never()).updateGitSettings(any(), any(), any());
   }
 
   @Test
@@ -414,6 +506,13 @@ class SkillCatalogServiceTest {
     dto.setRepositoryUrl("https://git.example.com/repo.git");
     dto.setBranch("main");
     dto.setToken(token);
+    return dto;
+  }
+
+  private static SkillPackageEditDTO editDTO(String expectedVersion, String description) {
+    SkillPackageEditDTO dto = new SkillPackageEditDTO();
+    dto.setExpectedVersion(expectedVersion);
+    dto.setDescription(description);
     return dto;
   }
 

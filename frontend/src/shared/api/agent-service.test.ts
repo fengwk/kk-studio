@@ -193,7 +193,7 @@ describe('agentService', () => {
       branch: 'main',
     }
     await service.editSkillPackage('core', editPkg)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/skill-packages/git/core', editPkg)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/skill-packages/core', editPkg)
 
     const checkPkg = {
       expectedVersion: '2',

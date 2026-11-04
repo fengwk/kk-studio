@@ -21,8 +21,9 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillArchiveDownloadDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillEnvironmentSyncDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitPublishDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePreviewDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageSummaryDTO;
@@ -32,7 +33,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUploadPublishDTO;
 import java.util.List;
 
 /**
- * Platform 技能包 API：当前版本列表与详情、Git 渠道检查与发布、上传渠道预览/发布/取消、归档下载与环境同步状态。
+ * Platform 技能包 API：当前版本列表与详情、归档文件清单与下载、统一编辑、Git 渠道检查与发布、上传渠道预览/发布/取消与环境同步状态。
  *
  * <p>所有写操作都携带客户端已展示的 CAS {@code expectedVersion}（新建除外），陈旧卡片统一得到 version conflict；令牌永不出现在任何响应中。
  */
@@ -61,21 +62,26 @@ public class StudioSkillCatalogController {
     return ApiResponse.ok(skillCatalogService.listEnvironmentSync(name));
   }
 
+  @GetMapping("/skill-packages/{name}/files")
+  public ApiResponse<List<SkillPackageFileDTO>> listFiles(@PathVariable("name") String name) {
+    return ApiResponse.ok(skillCatalogService.listFiles(name));
+  }
+
   @PostMapping("/skill-packages/{name}/archive-url")
   public ApiResponse<SkillArchiveDownloadDTO> archiveDownload(@PathVariable("name") String name) {
     return ApiResponse.ok(skillCatalogService.archiveDownload(name));
+  }
+
+  @PutMapping("/skill-packages/{name}")
+  public ApiResponse<SkillPackageDetailDTO> editPackage(
+      @PathVariable("name") String name, @RequestBody SkillPackageEditDTO editDTO) {
+    return ApiResponse.ok(skillCatalogService.editPackage(name, editDTO));
   }
 
   @PostMapping("/skill-packages/git")
   public ApiResponse<SkillPackageDetailDTO> createGitPackage(
       @RequestBody SkillPackageGitCreateDTO createDTO) {
     return ApiResponse.created(skillCatalogService.createGitPackage(createDTO));
-  }
-
-  @PutMapping("/skill-packages/git/{name}")
-  public ApiResponse<SkillPackageDetailDTO> editGitPackage(
-      @PathVariable("name") String name, @RequestBody SkillPackageGitEditDTO editDTO) {
-    return ApiResponse.ok(skillCatalogService.editGitPackage(name, editDTO));
   }
 
   @PostMapping("/skill-packages/git/{name}/check")

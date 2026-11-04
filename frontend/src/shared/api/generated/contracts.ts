@@ -1934,19 +1934,25 @@ export interface SkillPackageDetailDTO {
   updateTime: number
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO */
+export interface SkillPackageEditDTO {
+  expectedVersion: string
+  description?: string | null
+  branch?: string | null
+  token?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageFileDTO */
+export interface SkillPackageFileDTO {
+  path: string
+  size: string
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitCreateDTO */
 export interface SkillPackageGitCreateDTO {
   packageName: string
   description?: string | null
   repositoryUrl: string
-  branch: string
-  token?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.ai.skill.SkillPackageGitEditDTO */
-export interface SkillPackageGitEditDTO {
-  expectedVersion: string
-  description?: string | null
   branch: string
   token?: string | null
 }
