@@ -8,6 +8,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
 
+import java.util.Collections;
 import java.util.List;
 
 class AgentModelGroupConfigCodecTest {
@@ -39,13 +40,40 @@ class AgentModelGroupConfigCodecTest {
   void rejectsInvalidStoredGroups() {
     for (String json :
         List.of(
+            "",
             "null",
+            "{\"members\":[],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
             "{\"members\":[null],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"},{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[399],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":-1}",
+            "{\"members\":[{\"modelName\":\" a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0,\"extra\":1}",
             "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\",\"extra\":1}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}",
             "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[429,429],\"cooldownSeconds\":0}",
             "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":1.5}",
             "{\"members\":[],\"members\":[],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}")) {
       assertThrows(IllegalArgumentException.class, () -> codec.decode(json), json);
     }
+  }
+
+  /** 写入 DTO 同样拒绝无效引用和超长成员列表，而不是序列化成不可读取的记录。 */
+  @Test
+  void rejectsInvalidDtosBeforeEncoding() {
+    AgentModelGroupDTO group =
+        codec.decode(
+            "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}");
+    var member = group.getMembers().getFirst();
+    member.setModelName("x".repeat(129));
+    assertEquals(
+        "group.members[0].modelName must be <= 128 characters",
+        assertThrows(IllegalArgumentException.class, () -> codec.encode(group)).getMessage());
+    member.setModelName("a");
+    group.setMembers(Collections.nCopies(65, member));
+    assertEquals(
+        "group.members must not exceed 64",
+        assertThrows(IllegalArgumentException.class, () -> codec.encode(group)).getMessage());
   }
 }
