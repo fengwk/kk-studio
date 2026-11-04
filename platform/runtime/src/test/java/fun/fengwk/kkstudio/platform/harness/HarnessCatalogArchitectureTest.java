@@ -116,6 +116,8 @@ class HarnessCatalogArchitectureTest {
                 + "DatabaseAgentTurnContextResolver.java");
     Path gatewayPath =
         main.resolve("fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java");
+    Path gatewayRunPath =
+        main.resolve("fun/fengwk/kkstudio/platform/harness/tool/gateway/GatewayRun.java");
     Path validatorPath =
         main.resolve(
             "fun/fengwk/kkstudio/platform/catalog/definition/"
@@ -150,8 +152,8 @@ class HarnessCatalogArchitectureTest {
           source.contains("HarnessCatalog"), consumer + " must not reference HarnessCatalog");
     }
 
-    // ToolExecutionGateway 仅为非工具元数据保留 HarnessCatalog，严禁工具查找
-    List<Path> metadataConsumers = List.of(gatewayPath);
+    // 本地执行体仅为非工具元数据保留 HarnessCatalog，严禁工具查找
+    List<Path> metadataConsumers = List.of(gatewayRunPath);
     for (Path consumer : metadataConsumers) {
       String source = Files.readString(consumer, StandardCharsets.UTF_8);
       assertTrue(
@@ -166,16 +168,17 @@ class HarnessCatalogArchitectureTest {
       assertFalse(
           source.contains("harnessCatalog.tools()"),
           consumer + " must not list tools via harnessCatalog.tools()");
-      assertTrue(
-          source.contains("toolCatalogSource.acquire"),
-          consumer + " must acquire an epoch lease before accessing tools");
     }
 
-    // 确认 Gateway 使用自定义条目类型元数据。
+    // 准入阶段租用目录；自定义条目类型元数据校验随本地执行体一起位于 GatewayRun。
     String gatewaySource = Files.readString(gatewayPath, StandardCharsets.UTF_8);
     assertTrue(
-        gatewaySource.matches("(?s).*harnessCatalog\\s*\\.findCustomEntryType.*"),
-        "ToolExecutionGateway must use harnessCatalog.findCustomEntryType for custom entry validation");
+        gatewaySource.contains("toolCatalogSource.acquire"),
+        "ToolExecutionGateway must acquire an epoch lease before accessing tools");
+    String gatewayRunSource = Files.readString(gatewayRunPath, StandardCharsets.UTF_8);
+    assertTrue(
+        gatewayRunSource.matches("(?s).*harnessCatalog\\s*\\.findCustomEntryType.*"),
+        "GatewayRun must use harnessCatalog.findCustomEntryType for custom entry validation");
   }
 
   @Test
@@ -193,8 +196,7 @@ class HarnessCatalogArchitectureTest {
                 .normalize(),
             main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogSource.java")
                 .normalize(),
-            main.resolve(
-                    "fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java")
+            main.resolve("fun/fengwk/kkstudio/platform/harness/tool/gateway/GatewayRun.java")
                 .normalize());
 
     String harnessCatalogImport = "import " + HarnessCatalog.class.getName() + ";";

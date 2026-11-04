@@ -45,7 +45,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * {@link ToolExecutionGateway#admit}：纯本地 admission——容量 Busy、确定性 Rejected、Admitted 持有资源并由 {@code
@@ -134,7 +133,7 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.ENV_A,
                         "{\"command\":\"ls\",\"workdir\":\"/home/dev\",\"timeout_seconds\":0}"))));
 
-    assertEquals(ToolExecutionGateway.INVALID_REQUEST_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.INVALID_REQUEST_KIND, rejected.error().kind());
     assertTrue(transport.invocations.isEmpty());
     admission.tryAcquire().orElseThrow().close();
   }
@@ -258,7 +257,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 ToolGatewayTestSupport.execution(
                     ToolGatewayTestSupport.hostRequest("call-1", missing))));
-    assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, notFound.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_NOT_FOUND_KIND, notFound.error().kind());
 
     // 冻结定义与目录当前定义不一致。
     ToolDescriptor drifted =
@@ -275,7 +274,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 ToolGatewayTestSupport.execution(
                     ToolGatewayTestSupport.hostRequest("call-2", drifted))));
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatch.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND, mismatch.error().kind());
     assertTrue(
         mismatch.error().message().contains(ToolErrorGuidance.ExecutionFact.NOT_EXECUTED.fact()));
 
@@ -296,55 +295,6 @@ class ToolExecutionGatewayAdmitTest {
     assertTrue(tool.requests.isEmpty());
     assertTrue(transport.invocations.isEmpty());
     admission.tryAcquire().orElseThrow().close();
-  }
-
-  /** 工具实例的 descriptor 在冻结后被改写或变为 null：branch 加载之前确定性拒绝。 */
-  @Test
-  void descriptorDriftAfterFreezeIsRejectedBeforeBranchLoad() {
-    AtomicReference<ToolDescriptor> live = new AtomicReference<>(DESCRIPTOR);
-    ToolGatewayTestSupport.FakeTool tool =
-        new ToolGatewayTestSupport.FakeTool(DESCRIPTOR) {
-          @Override
-          public ToolDescriptor descriptor() {
-            return live.get();
-          }
-        };
-    ToolExecutionGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(tool),
-            new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStager(),
-            new ConcurrencyAdmission(Integer.MAX_VALUE));
-    ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
-    live.set(ToolGatewayTestSupport.hostDescriptor("other"));
-
-    ToolGateway.Rejected rejected =
-        assertInstanceOf(
-            ToolGateway.Rejected.class, gateway.admit(ToolGatewayTestSupport.execution(request)));
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
-    assertTrue(tool.requests.isEmpty(), "rejected admission must never execute the tool");
-  }
-
-  /** branch 未选择 Environment 的环境工具：admission 阶段仍 fail-safe 为 ENVIRONMENT_NOT_SELECTED。 */
-  @Test
-  void unselectedEnvironmentToolIsRejectedWithoutTouchingTransport() {
-    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolExecutionGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(),
-            transport,
-            new ToolGatewayTestSupport.FakeResourceStager());
-
-    ToolGateway.Rejected rejected =
-        assertInstanceOf(
-            ToolGateway.Rejected.class,
-            gateway.admit(
-                ToolGatewayTestSupport.execution(
-                    ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1"))));
-
-    assertEquals("ENVIRONMENT_NOT_SELECTED", rejected.error().kind());
-    assertTrue(rejected.error().message().contains("Select an Environment"));
-    assertTrue(transport.invocations.isEmpty());
   }
 
   /** 目录租用失败（admit 抛出）：释放并发配额，异常原样传播，没有任何资源残留。 */
@@ -403,7 +353,7 @@ class ToolExecutionGatewayAdmitTest {
                     approved(null),
                     new ToolGatewayTestSupport.RecordingRemoteExecutions())));
 
-    assertEquals(ToolExecutionGateway.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
+    assertEquals(ToolErrorClassifier.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
     assertTrue(
         rejected.error().message().contains(ToolErrorGuidance.ExecutionFact.NOT_EXECUTED.fact()));
     assertTrue(

@@ -142,7 +142,7 @@ class ToolExecutionGatewayPreflightTest {
                         EnvironmentSupport.NONE,
                         null,
                         null))));
-    assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertTrue(
         unknownDeny.error().message().contains("Tool missing is no longer available"),
         unknownDeny.error().message());
@@ -163,7 +163,7 @@ class ToolExecutionGatewayPreflightTest {
                         EnvironmentSupport.NONE,
                         null,
                         null))));
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
+    assertEquals(ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertTrue(
         mismatchDeny.error().message().contains("Tool demo changed after this call was planned"),
         mismatchDeny.error().message());
@@ -171,39 +171,6 @@ class ToolExecutionGatewayPreflightTest {
         mismatchDeny.error().message().contains("The tool was not executed."),
         mismatchDeny.error().message());
     verifyNoInteractions(evaluator);
-  }
-
-  /** 未选择 Environment 的环境工具必须在 permission 判定之前短路：返回稳定 kind，且不弹审批、不读权限策略。 */
-  @Test
-  void unselectedEnvironmentToolIsDeniedBeforePermissionEvaluation() {
-    PermissionEvaluator evaluator = mock(PermissionEvaluator.class);
-    ToolGatewayTestSupport.CountingToolSettingsProvider settingsProvider =
-        new ToolGatewayTestSupport.CountingToolSettingsProvider(
-            ToolGatewayTestSupport.settings(PermissionAction.ASK));
-    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
-    ToolGatewayTestSupport.FakeResourceStager stager =
-        new ToolGatewayTestSupport.FakeResourceStager();
-    ToolExecutionGateway gateway =
-        new ToolExecutionGateway(
-            TestRuntimeToolCatalogSource.of(catalog),
-            new ToolGatewayTestSupport.FakeTransport(),
-            evaluator,
-            settingsProvider,
-            stager,
-            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
-            ToolGatewayTestSupport.TEST_CLOCK,
-            new ConcurrencyAdmission(Integer.MAX_VALUE));
-
-    ToolGateway.PreflightResult result =
-        gateway.preflight(ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1"));
-
-    ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
-    assertEquals("ENVIRONMENT_NOT_SELECTED", deny.error().kind());
-    assertTrue(deny.error().message().contains("Select an Environment"), deny.error().message());
-    // 权限策略未被读取，evaluator 也未被调用：绝不会把该错误伪装成审批或权限拒绝。
-    verifyNoInteractions(evaluator);
-    assertEquals(0, settingsProvider.readCount());
   }
 
   @Test

@@ -1,53 +1,22 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import lombok.extern.slf4j.Slf4j;
-
 import fun.fengwk.kkstudio.common.json.ToolArguments;
-import fun.fengwk.kkstudio.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.common.result.ResultContent;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
-import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
-import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
@@ -60,57 +29,26 @@ import fun.fengwk.kkstudio.platform.vfs.VfsWriteGuard;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
+ * 生产工具执行网关的预检与准入，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
- * <p>{@link #preflight} 校验冻结绑定、Environment 与权限；需要审批的文件编辑还会只读生成真实文件审查。{@link #admit}
- * 是纯本地检查：申请并发租约、钉住目录租用、装配可选环境绑定，不触碰任何外部系统，也不查询 Harness 存储（分支视图、会话与冻结媒体能力由 Harness 随执行描述传入），因此
- * {@link ToolGateway.Busy} / {@link ToolGateway.Rejected} 肯定没有副作用。
+ * <p>{@link #preflight} 校验冻结绑定、权限，并在需要审批的文件编辑上生成真实文件审查。{@link #admit} 是纯本地检查：申请并发租约、钉住目录租用、
+ * 装配可选环境绑定，不触碰任何外部系统，也不查询 Harness 存储（分支视图、会话与冻结媒体能力由 Harness 随执行描述传入），因此 {@link ToolGateway.Busy} /
+ * {@link ToolGateway.Rejected} 肯定没有副作用。
  *
  * <p>{@link #preflight} 与 {@link #admit} 都在当前目录租用中严格取回冻结贡献：工具不存在或已被停用（例如插件被关闭）或定义、贡献身份、
- * requirements 变化时以确定性错误告知模型，绝不按新定义执行旧参数。
+ * requirements 变化时以确定性错误告知模型，绝不按新定义执行旧参数。只读命名空间的写入在审批与权限评估之前确定性拒绝；YOLO 跳过 preflight 直接从 {@link
+ * #admit} 进入执行，因此该拒绝在准入阶段同样生效。
  *
- * <p>{@link GatewayRun#execute} 在调用方的执行线程上阻塞调用 {@link Tool#execute}：中断映射为取消，工具异常按固定表分类（远程发送不确定性 上报
- * {@code unknown}，不按普通失败处理）。并发租约与目录租用只由 {@link GatewayRun#close()} 释放：Processor 在终态决议提交之后、
- * 执行体返回之后调用它，因此取消绝不代表工作线程已经退出，插件实例不会在仍被访问时被回收。
- *
- * <p>远端 Environment 调用每次 {@link BoundEnvironment#execute} 都生成独立 execution id，发送前经 {@link
- * ToolGateway.RemoteExecutionObserver#tryStart} 登记；登记失败绝不发送。只有 transport 明确保证未发送的 Busy /
- * Unavailable 才确认未启动，远端 {@code onExitConfirmed} 则独立确认该次执行，普通结果终态不替代退出 ACK。
- *
- * <p>终态结果进入 Runtime 前会校验 call ID、自定义条目注册与 WRITE 声明，并按大小限制外部化内容。
+ * <p>远端执行、终态装配与错误分类分别由 {@link RemoteToolExecution}、{@link AbstractToolRun} 与 {@link
+ * ToolErrorClassifier} 负责。
  */
-@Slf4j
 public final class ToolExecutionGateway implements ToolGateway {
-
-  static final String PERMISSION_DENIED_KIND = "PERMISSION_DENIED";
-  static final String TOOL_NOT_FOUND_KIND = "TOOL_NOT_FOUND";
-  static final String TOOL_DEFINITION_MISMATCH_KIND = "TOOL_DEFINITION_MISMATCH";
-  static final String ENVIRONMENT_NOT_SELECTED_KIND = "ENVIRONMENT_NOT_SELECTED";
-  static final String CANCELLED_KIND = "CANCELLED";
-  static final String UNAVAILABLE_KIND = "UNAVAILABLE";
-  static final String REMOTE_UNCERTAIN_KIND = "REMOTE_UNCERTAIN";
-  static final String INVALID_REQUEST_KIND = "INVALID_REQUEST";
-  static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
-  static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
-  static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
-  static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
-  static final String VFS_READ_ONLY_KIND = "VFS_READ_ONLY";
 
   private static final String PERMISSION_DENIED_MESSAGE =
       ToolErrorGuidance.message(
@@ -130,19 +68,12 @@ public final class ToolExecutionGateway implements ToolGateway {
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
       "Call the tool again; the next turn uses its current definition";
 
-  /** 确定性拒绝的下一步：同一调用在修复前会得到同样结果，不构成自动重试建议。 */
-  private static final String DETERMINISTIC_REJECTION_NEXT_ACTION =
-      "Correct the underlying contract violation before calling the tool again";
-
-  /** 结果不确定时的下一步：先核查副作用再决定，绝不能假设未执行。 */
-  private static final String VERIFY_EFFECT_NEXT_ACTION =
-      "Check whether the tool already took effect before calling it again";
-
   private final RuntimeToolCatalogSource toolCatalogSource;
-  private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
   private final ToolResultFinalizer finalizer;
+  private final EnvironmentCapabilityTransport capabilityTransport;
+  private final RemoteToolExecution remoteExecution;
   private final Supplier<Duration> retryDelay;
   private final Clock clock;
   private final ConcurrencyAdmission admission;
@@ -158,13 +89,14 @@ public final class ToolExecutionGateway implements ToolGateway {
       Clock clock,
       ConcurrencyAdmission admission) {
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
-    this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.finalizer =
         new ToolResultFinalizer(
             Objects.requireNonNull(resourceStager, "resourceStager"), resourceMaxBytes);
+    this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
+    this.remoteExecution = new RemoteToolExecution(capabilityTransport, finalizer);
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.admission = Objects.requireNonNull(admission, "admission");
@@ -175,7 +107,8 @@ public final class ToolExecutionGateway implements ToolGateway {
   /**
    * 严格从本次租用取回冻结贡献：完整定义、贡献身份与 requirements 都必须一致。
    *
-   * <p>任何不一致都映射为确定性拒绝，绝不按当前同名工具重放，也绝不因此产生任何外部副作用。
+   * <p>任何不一致都映射为确定性拒绝，绝不按当前同名工具重放，也绝不因此产生任何外部副作用。{@link RuntimeToolCatalogSource.Lease#require}
+   * 已校验完整定义与贡献身份，因此执行请求中的 descriptor 直接取冻结 binding。
    */
   private ResolvedContribution requireContribution(
       RuntimeToolCatalogSource.Lease lease, ToolBinding binding) {
@@ -186,7 +119,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolInvocationError error =
           mismatch.reason() == ToolBindingMismatchException.Reason.NOT_FOUND
               ? new ToolInvocationError(
-                  TOOL_NOT_FOUND_KIND,
+                  ToolErrorClassifier.TOOL_NOT_FOUND_KIND,
                   ToolErrorGuidance.message(
                       "Tool "
                           + toolName
@@ -195,7 +128,7 @@ public final class ToolExecutionGateway implements ToolGateway {
                       ExecutionFact.NOT_EXECUTED,
                       TOOL_UNAVAILABLE_NEXT_ACTION))
               : new ToolInvocationError(
-                  TOOL_DEFINITION_MISMATCH_KIND,
+                  ToolErrorClassifier.TOOL_DEFINITION_MISMATCH_KIND,
                   ToolErrorGuidance.message(
                       "Tool " + toolName + " changed after this call was planned",
                       ExecutionFact.NOT_EXECUTED,
@@ -204,33 +137,12 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
-  /**
-   * 冻结 binding 声明环境需求但没有 Environment 路由身份时，返回稳定的 {@code ENVIRONMENT_NOT_SELECTED}；否则返回 null。
-   *
-   * <p>这是 branch 未选择 Environment 的确定性结果：错误明确要求为当前 branch 选择 Environment 后重试，绝不伪装成权限、定义或 transport
-   * 失败。
-   */
-  private static ToolInvocationError environmentNotSelected(ToolBinding binding) {
-    if (binding.environmentSupport() != EnvironmentSupport.REQUIRED
-        || binding.environmentId() != null) {
-      return null;
-    }
-    return new ToolInvocationError(
-        ENVIRONMENT_NOT_SELECTED_KIND,
-        ToolErrorGuidance.message(
-            "Tool "
-                + binding.descriptor().name()
-                + " requires an Environment but this branch has none selected",
-            ExecutionFact.NOT_EXECUTED,
-            "Select an Environment for the branch, then call the tool again"));
-  }
-
   /** 写 {@code vfs:/skills}、{@code vfs:/resources} 的确定性拒绝：在任何审批、权限评估与环境绑定之前返回，声明未执行。 */
   private static ToolInvocationError readOnlyRejection(
       ToolInvocationRequest request, UUID rootSessionId) {
     return VfsWriteGuard.rejection(
             request.binding().descriptor().name(), request.call().argumentsJson(), rootSessionId)
-        .map(message -> new ToolInvocationError(VFS_READ_ONLY_KIND, message))
+        .map(message -> new ToolInvocationError(ToolErrorClassifier.VFS_READ_ONLY_KIND, message))
         .orElse(null);
   }
 
@@ -262,12 +174,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       if (resolved.error() != null) {
         return new ToolGateway.Deny(resolved.error());
       }
-      // 未选择 Environment 的 branch 仍声明并允许调用环境工具；此时必须在权限判定之前给出可操作的确定性拒绝，
-      // 既不弹审批也不消耗权限策略。
-      ToolInvocationError environmentNotSelected = environmentNotSelected(request.binding());
-      if (environmentNotSelected != null) {
-        return new ToolGateway.Deny(environmentNotSelected);
-      }
       // 只读命名空间的写入在权限评估与审批之前确定性拒绝：既不弹审批，也不消耗权限策略，YOLO 同样不能绕过。
       ToolInvocationError readOnlyRejection = readOnlyRejection(request, null);
       if (readOnlyRejection != null) {
@@ -291,7 +197,8 @@ public final class ToolExecutionGateway implements ToolGateway {
               : new ToolGateway.Ask(reason);
         }
         case DENY -> new ToolGateway.Deny(
-            new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
+            new ToolInvocationError(
+                ToolErrorClassifier.PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
       };
     }
   }
@@ -316,26 +223,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
       ToolContribution contribution = resolved.contribution();
       Tool tool = contribution.tool();
-      ToolDescriptor currentDescriptor = tool == null ? null : tool.descriptor();
-      if (!Objects.equals(
-          currentDescriptor, execution.request().binding().definition().descriptor())) {
-        return reject(
-            catalogLease,
-            lease,
-            new ToolInvocationError(
-                TOOL_DEFINITION_MISMATCH_KIND,
-                ToolErrorGuidance.message(
-                    "Registered tool descriptor does not match frozen descriptor: "
-                        + contribution.definition().descriptor().name(),
-                    ExecutionFact.NOT_EXECUTED,
-                    DEFINITION_MISMATCH_NEXT_ACTION)));
-      }
-      // preflight 已拦截的形态在此保留同样的 fail-safe：事务外仍有窄窗口，绝不能退化为普通 UNAVAILABLE。
-      ToolInvocationError environmentNotSelected =
-          environmentNotSelected(execution.request().binding());
-      if (environmentNotSelected != null) {
-        return reject(catalogLease, lease, environmentNotSelected);
-      }
+      ToolBinding binding = execution.request().binding();
       // YOLO 跳过 preflight 时直接从 admit 进入执行：只读命名的写入拒绝必须在这里同样生效。
       ToolInvocationError readOnlyRejection =
           readOnlyRejection(execution.request(), execution.scope().rootSessionId());
@@ -352,7 +240,7 @@ public final class ToolExecutionGateway implements ToolGateway {
             catalogLease,
             lease,
             new ToolInvocationError(
-                EDIT_REVIEW_REQUIRED_KIND,
+                ToolErrorClassifier.EDIT_REVIEW_REQUIRED_KIND,
                 ToolErrorGuidance.message(
                     "Required edit approval must include a valid edit review",
                     ExecutionFact.NOT_EXECUTED,
@@ -360,10 +248,9 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
 
       BoundEnvironment boundEnvironment =
-          execution.request().binding().environmentId() != null
-              ? new PlatformBoundEnvironment(
-                  execution.request().binding().environmentId(),
-                  capabilityTransport,
+          binding.environmentId() != null
+              ? remoteExecution.bind(
+                  binding.environmentId(),
                   execution.request().call().id(),
                   execution.expectedFile(),
                   execution.remoteExecutions())
@@ -386,7 +273,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       try {
         toolRequest =
             new ToolExecutionRequest(
-                currentDescriptor,
+                binding.descriptor(),
                 execution.request().call(),
                 tool.resolveTimeout(execution.request().call()),
                 context);
@@ -396,24 +283,16 @@ public final class ToolExecutionGateway implements ToolGateway {
             catalogLease,
             lease,
             new ToolInvocationError(
-                INVALID_REQUEST_KIND,
+                ToolErrorClassifier.INVALID_REQUEST_KIND,
                 ToolErrorGuidance.message(
-                    failureMessage(invalidRequest, "Tool request is invalid"),
+                    ToolErrorClassifier.failureMessage(invalidRequest, "Tool request is invalid"),
                     ExecutionFact.NOT_EXECUTED,
                     "Correct the tool arguments, then call the tool again")));
       }
       return new ToolGateway.Admitted(
-          new GatewayRun(
-              tool,
-              toolRequest,
-              finalizer,
-              currentDescriptor.name(),
-              contribution,
-              execution.request().binding(),
-              catalogLease,
-              lease));
+          new GatewayRun(tool, toolRequest, finalizer, contribution, binding, catalogLease, lease));
     } catch (RuntimeException | Error failure) {
-      releaseAfterFailure(catalogLease, lease, failure);
+      AdmissionLeases.releaseAfterFailure(catalogLease, lease, failure);
       throw failure;
     }
   }
@@ -421,97 +300,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   @Override
   public Run reattach(ReattachExecution reattach) throws EnvironmentCapabilityUnavailableException {
     Objects.requireNonNull(reattach, "reattach");
-    EnvironmentId environmentId = reattach.environmentId();
-    UUID remoteExecutionId = reattach.remoteExecutionId();
-    String modelCallId = reattach.request().call().id();
-    String toolName = reattach.request().call().toolName();
-    Duration timeout = reattach.timeout();
-
-    CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
-    AtomicReference<Consumer<ToolResult>> progressRef = new AtomicReference<>();
-    ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials =
-        new ConcurrentLinkedQueue<>();
-
-    EnvironmentCapabilityExecutionListener listener =
-        new EnvironmentCapabilityExecutionListener() {
-          @Override
-          public void onPartial(EnvironmentCapabilityResult partial) {
-            if (!terminal.isDone()) {
-              Consumer<ToolResult> progress = progressRef.get();
-              if (progress != null) {
-                progress.accept(toToolResult(partial, remoteExecutionId, modelCallId));
-              } else {
-                bufferedPartials.add(partial);
-              }
-            }
-          }
-
-          @Override
-          public void onComplete(EnvironmentCapabilityResult result) {
-            terminal.complete(result);
-          }
-
-          @Override
-          public void onError(Throwable error) {
-            terminal.completeExceptionally(error);
-          }
-
-          @Override
-          public void onExitConfirmed() {
-            reattach.remoteExecutions().confirmExit(remoteExecutionId);
-          }
-        };
-
-    EnvironmentCapabilityExecutionHandle transportHandle =
-        capabilityTransport.attach(environmentId, remoteExecutionId, listener);
-    if (transportHandle == null) {
-      throw new IllegalStateException(
-          "remote capability returned a null execution handle; outcome cannot be confirmed");
-    }
-    return new ReattachRun(
-        transportHandle,
-        terminal,
-        finalizer,
-        toolName,
-        modelCallId,
-        remoteExecutionId,
-        timeout,
-        progressRef,
-        bufferedPartials);
-  }
-
-  /** 释放目录租用与并发租用；即使目录关闭失败，并发配额仍独立释放。 */
-  private static void release(
-      RuntimeToolCatalogSource.Lease catalogLease, ConcurrencyAdmission.Lease admissionLease) {
-    try {
-      if (catalogLease != null) {
-        catalogLease.close();
-      }
-    } catch (RuntimeException | Error failure) {
-      try {
-        admissionLease.close();
-      } catch (RuntimeException | Error cleanup) {
-        if (cleanup != failure) {
-          failure.addSuppressed(cleanup);
-        }
-      }
-      throw failure;
-    }
-    admissionLease.close();
-  }
-
-  /** 已有主异常时，清理失败只附加到原异常，不替换它。 */
-  private static void releaseAfterFailure(
-      RuntimeToolCatalogSource.Lease catalogLease,
-      ConcurrencyAdmission.Lease admissionLease,
-      Throwable failure) {
-    try {
-      release(catalogLease, admissionLease);
-    } catch (RuntimeException | Error cleanup) {
-      if (cleanup != failure) {
-        failure.addSuppressed(cleanup);
-      }
-    }
+    return remoteExecution.reattach(reattach);
   }
 
   /** 拒绝路径：目录租用与并发租用各释放一次，返回确定性拒绝。 */
@@ -519,703 +308,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       RuntimeToolCatalogSource.Lease catalogLease,
       ConcurrencyAdmission.Lease admissionLease,
       ToolInvocationError error) {
-    release(catalogLease, admissionLease);
+    AdmissionLeases.release(catalogLease, admissionLease);
     return new ToolGateway.Rejected(error);
-  }
-
-  /**
-   * Platform 的 {@link BoundEnvironment} 适配实现：把异步 {@link EnvironmentCapabilityTransport} 收敛为阻塞调用。
-   */
-  private static final class PlatformBoundEnvironment implements BoundEnvironment {
-    private final EnvironmentId environmentId;
-    private final EnvironmentCapabilityTransport capabilityTransport;
-    private final String modelCallId;
-    private final ExpectedFile expectedFile;
-    private final ToolGateway.RemoteExecutionObserver remoteExecutions;
-
-    private PlatformBoundEnvironment(
-        EnvironmentId environmentId,
-        EnvironmentCapabilityTransport capabilityTransport,
-        String modelCallId,
-        ExpectedFile expectedFile,
-        ToolGateway.RemoteExecutionObserver remoteExecutions) {
-      this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
-      this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
-      this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
-      this.expectedFile = expectedFile;
-      this.remoteExecutions = Objects.requireNonNull(remoteExecutions, "remoteExecutions");
-    }
-
-    @Override
-    public EnvironmentId environmentId() {
-      return environmentId;
-    }
-
-    /**
-     * 发送并阻塞等待单一绝对 deadline。{@code request.timeout} 是远端执行预算，{@code terminalDeliveryGrace}
-     * 是终态传输恢复窗；两者只合成一次从发送前起算的等待上界，partial 与重连都不延长它。{@code timeout} 为 0 表示显式无界，不会因恢复窗变成有界等待。
-     *
-     * <p>发送前异常（Busy / Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类。拿到句柄后，任何未能以真实 terminal
-     * 收敛的异常退出都会先补一个异常终态并调用 {@code terminate(CANCELLED)}，把远端在途执行与 transfer 释放掉；清理自身的失败只作为 suppressed
-     * 附加到原异常，绝不覆盖或吞掉原始失败。等待超时以 {@code TIMED_OUT} 收尾并抛出 {@link
-     * EnvironmentCapabilitySendUncertainException}，调用线程中断则以 {@code CANCELLED} 收尾并原样抛出 {@link
-     * InterruptedException}。
-     */
-    @Override
-    public ToolResult execute(
-        EnvironmentCapabilityDescriptor capability,
-        ToolExecutionRequest request,
-        Consumer<ToolResult> progress)
-        throws InterruptedException {
-      Objects.requireNonNull(capability, "capability");
-      Objects.requireNonNull(request, "request");
-      Objects.requireNonNull(progress, "progress");
-      // 每次实际远端调用拥有独立身份；参数构造校验必须先于登记，登记成功才允许发送。
-      UUID remoteExecutionId = UUID.randomUUID();
-      String remoteCallId = remoteExecutionId.toString();
-      EnvironmentCapabilityCall capabilityCall =
-          new EnvironmentCapabilityCall(remoteCallId, request.call().argumentsJson());
-      EnvironmentCapabilityExecutionRequest capabilityRequest =
-          new EnvironmentCapabilityExecutionRequest(
-              capability, capabilityCall, request.timeout(), expectedFile);
-      CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
-      EnvironmentCapabilityExecutionListener listener =
-          new EnvironmentCapabilityExecutionListener() {
-            @Override
-            public void onPartial(EnvironmentCapabilityResult partial) {
-              if (!terminal.isDone()) {
-                progress.accept(toToolResult(partial, remoteExecutionId));
-              }
-            }
-
-            @Override
-            public void onComplete(EnvironmentCapabilityResult result) {
-              terminal.complete(result);
-            }
-
-            @Override
-            public void onError(Throwable error) {
-              terminal.completeExceptionally(error);
-            }
-
-            @Override
-            public void onExitConfirmed() {
-              // 退出 ACK 独立于结果 future：即使结果已异常完成，迟到 ACK 仍必须确认本次远端执行。
-              remoteExecutions.confirmExit(remoteExecutionId);
-            }
-          };
-      if (!remoteExecutions.tryStart(remoteExecutionId, environmentId)) {
-        throw new EnvironmentCapabilityCancelledException(
-            "remote execution was not started because the tool generation is stopped or no"
-                + " longer owned");
-      }
-      long startNanos = System.nanoTime();
-      EnvironmentCapabilityExecutionHandle transportHandle;
-      try {
-        transportHandle = capabilityTransport.invoke(environmentId, capabilityRequest, listener);
-      } catch (EnvironmentCapabilityBusyException
-          | EnvironmentCapabilityUnavailableException notExecuted) {
-        // 只有传输端口明确保证的发送前 Busy / Unavailable 才能确认未启动；其它异常不构成未发送证据。
-        try {
-          remoteExecutions.confirmNotStarted(remoteExecutionId);
-        } catch (RuntimeException | Error confirmationFailure) {
-          confirmationFailure.addSuppressed(notExecuted);
-          if (confirmationFailure instanceof RuntimeException) {
-            // Unknown 分类会记录异常 message；只提供安全诊断，原始持久化失败仍作为 cause 保留。
-            throw new IllegalStateException(
-                "phase=REMOTE_NOT_STARTED_CONFIRM; exception="
-                    + confirmationFailure.getClass().getSimpleName(),
-                confirmationFailure);
-          }
-          throw confirmationFailure;
-        }
-        throw notExecuted;
-      }
-      if (transportHandle == null) {
-        throw new IllegalStateException(
-            "remote capability returned a null execution handle; outcome cannot be confirmed");
-      }
-      try {
-        Duration timeout = request.timeout();
-        Duration grace = transportHandle.terminalDeliveryGrace();
-        if (grace == null) {
-          throw new IllegalStateException(
-              "remote capability returned a null terminal delivery grace;"
-                  + " outcome cannot be confirmed");
-        }
-        if (grace.isNegative()) {
-          throw new IllegalStateException(
-              "remote capability returned a negative terminal delivery grace: "
-                  + grace
-                  + "; outcome cannot be confirmed");
-        }
-        EnvironmentCapabilityResult result;
-        if (timeout.isZero()) {
-          // 0 是显式无界执行预算：grace 只描述恢复窗，不能把它缩短成有界等待。
-          result = terminal.get();
-        } else {
-          Duration waitBudget = timeout.plus(grace);
-          long remainingNanos =
-              Math.max(0L, waitBudget.toNanos() - (System.nanoTime() - startNanos));
-          try {
-            result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
-          } catch (TimeoutException timedOut) {
-            EnvironmentCapabilitySendUncertainException timeoutException =
-                new EnvironmentCapabilitySendUncertainException(
-                    "remote capability timed out waiting for terminal outcome after " + waitBudget,
-                    timedOut);
-            // 只有仍无终态时才由 runtime 抢占；若终态已在竞态中完成，优先交付真实结果或真实失败。
-            if (terminal.completeExceptionally(timeoutException)) {
-              terminate(
-                  transportHandle,
-                  EnvironmentCapabilityTerminationCause.TIMED_OUT,
-                  timeoutException);
-              throw timeoutException;
-            }
-            result = terminal.get();
-          }
-        }
-        if (result == null) {
-          throw new IllegalStateException(
-              "remote capability completed without a result; outcome cannot be confirmed");
-        }
-        return toToolResult(result, remoteExecutionId);
-      } catch (InterruptedException interrupted) {
-        releaseInFlight(
-            terminal,
-            transportHandle,
-            EnvironmentCapabilityTerminationCause.CANCELLED,
-            interrupted);
-        throw interrupted;
-      } catch (ExecutionException failed) {
-        if (failed.getCause() instanceof RuntimeException runtime) {
-          throw runtime;
-        }
-        throw new IllegalStateException(
-            "remote capability failed with a non-runtime error; outcome cannot be confirmed",
-            failed.getCause());
-      } catch (RuntimeException | Error failure) {
-        releaseInFlight(
-            terminal, transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, failure);
-        throw failure;
-      }
-    }
-
-    /**
-     * 以本地失败收敛尚未完成的 terminal，并终止远端在途执行。
-     *
-     * <p>terminal 已由结果终态完成时不重复终止，异常按原路径分类；远端退出仍等待独立 ACK。清理异常只附加为 suppressed。
-     */
-    private static void releaseInFlight(
-        CompletableFuture<EnvironmentCapabilityResult> terminal,
-        EnvironmentCapabilityExecutionHandle transportHandle,
-        EnvironmentCapabilityTerminationCause cause,
-        Throwable failure) {
-      ToolExecutionGateway.releaseInFlight(terminal, transportHandle, cause, failure);
-    }
-
-    /** 终止远端；清理失败不替换原始异常。 */
-    private static void terminate(
-        EnvironmentCapabilityExecutionHandle transportHandle,
-        EnvironmentCapabilityTerminationCause cause,
-        Throwable failure) {
-      ToolExecutionGateway.terminate(transportHandle, cause, failure);
-    }
-
-    private ToolResult toToolResult(EnvironmentCapabilityResult result, UUID remoteExecutionId) {
-      return ToolExecutionGateway.toToolResult(result, remoteExecutionId, modelCallId);
-    }
-  }
-
-  static void releaseInFlight(
-      CompletableFuture<EnvironmentCapabilityResult> terminal,
-      EnvironmentCapabilityExecutionHandle transportHandle,
-      EnvironmentCapabilityTerminationCause cause,
-      Throwable failure) {
-    if (!terminal.completeExceptionally(failure)) {
-      return;
-    }
-    terminate(transportHandle, cause, failure);
-  }
-
-  static void terminate(
-      EnvironmentCapabilityExecutionHandle transportHandle,
-      EnvironmentCapabilityTerminationCause cause,
-      Throwable failure) {
-    try {
-      transportHandle.terminate(cause);
-    } catch (RuntimeException | Error cleanup) {
-      if (cleanup != failure && failure != null) {
-        failure.addSuppressed(cleanup);
-      }
-    }
-  }
-
-  static ToolResult toToolResult(
-      EnvironmentCapabilityResult result, UUID remoteExecutionId, String modelCallId) {
-    // 远端只应回显本次执行 id；映射回模型 call id。模型 id 回显不是合法远端关联，保留为不匹配。
-    String remoteCallId = remoteExecutionId.toString();
-    String toolCallId = result.callId();
-    if (remoteCallId.equals(toolCallId)) {
-      toolCallId = modelCallId;
-    } else if (modelCallId.equals(toolCallId)) {
-      toolCallId = remoteCallId;
-    }
-    return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
-  }
-
-  static ToolInvocationError invalidResult(String whatFailed) {
-    return new ToolInvocationError(
-        ToolResultFinalizer.INVALID_RESULT_KIND,
-        ToolErrorGuidance.message(
-            whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
-  }
-
-  static ToolInvocationError invalidPartial(String whatFailed) {
-    return new ToolInvocationError(
-        INVALID_PARTIAL_KIND,
-        ToolErrorGuidance.message(
-            whatFailed, ExecutionFact.UNCERTAIN, DETERMINISTIC_REJECTION_NEXT_ACTION));
-  }
-
-  static ToolInvocationError validatePartial(ToolResult partial, String expectedCallId) {
-    if (partial == null) {
-      return invalidPartial("partial must not be null");
-    }
-    if (!partial.toolCallId().equals(expectedCallId)) {
-      return invalidPartial("partial toolCallId does not match the request call");
-    }
-    for (ResultContent content : partial.contents()) {
-      if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
-        return invalidPartial("partial must not carry binary or resource content");
-      }
-    }
-    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-        partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
-      return invalidPartial(
-          "partial must not exceed "
-              + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
-              + " bytes of canonical tool result JSON");
-    }
-    return null;
-  }
-
-  static ToolGateway.Completion fail(ToolInvocationError error) {
-    return new ToolGateway.Failed(error, false);
-  }
-
-  static ToolGateway.Completion unknown(String toolName, Throwable failure, String whatFailed) {
-    // 底层原始 message 只进日志，绝不进入模型可见错误文本。
-    log.warn("tool gateway unknown outcome for tool {}: {}", toolName, safeMessage(failure));
-    return new ToolGateway.Unknown(
-        new ToolInvocationError(
-            EXECUTION_FAILED_KIND,
-            ToolErrorGuidance.message(
-                whatFailed, ExecutionFact.UNCERTAIN, VERIFY_EFFECT_NEXT_ACTION)));
-  }
-
-  static ToolGateway.Completion classify(String toolName, RuntimeException error) {
-    if (error instanceof EnvironmentCapabilityCancelledException cancelled) {
-      // 取消可能发生在副作用之后：只能声明结果未确认，绝不能声称未执行。
-      return new ToolGateway.Cancelled(
-          new ToolInvocationError(
-              CANCELLED_KIND,
-              ToolErrorGuidance.message(
-                  failureMessage(cancelled, "Tool execution was cancelled"),
-                  ExecutionFact.UNCERTAIN,
-                  VERIFY_EFFECT_NEXT_ACTION)));
-    }
-    if (error instanceof EnvironmentCapabilityFailedException failed) {
-      return new ToolGateway.Failed(
-          new ToolInvocationError(
-              EXECUTION_FAILED_KIND,
-              ToolErrorGuidance.message(
-                  failureMessage(failed, "Tool execution failed"),
-                  ExecutionFact.FAILED,
-                  "Inspect the failure and adjust the request before calling the tool" + " again")),
-          false);
-    }
-    if (error instanceof EnvironmentCapabilitySendUncertainException uncertain) {
-      return new ToolGateway.Unknown(
-          new ToolInvocationError(
-              REMOTE_UNCERTAIN_KIND,
-              ToolErrorGuidance.message(
-                  failureMessage(uncertain, "Remote tool outcome is uncertain"),
-                  ExecutionFact.UNCERTAIN,
-                  VERIFY_EFFECT_NEXT_ACTION)));
-    }
-    if (error instanceof EnvironmentCapabilityUnavailableException unavailable) {
-      // transport 契约：unavailable 时调用肯定未执行。
-      return new ToolGateway.Failed(
-          new ToolInvocationError(
-              UNAVAILABLE_KIND,
-              ToolErrorGuidance.message(
-                  failureMessage(unavailable, "Tool is unavailable"),
-                  ExecutionFact.NOT_EXECUTED,
-                  "Wait for the Environment to become available, then call the tool" + " again")),
-          true);
-    }
-    if (error instanceof EnvironmentCapabilityBusyException busy) {
-      return new ToolGateway.Failed(
-          new ToolInvocationError(
-              UNAVAILABLE_KIND,
-              ToolErrorGuidance.message(
-                  failureMessage(busy, "Tool is busy"),
-                  ExecutionFact.NOT_EXECUTED,
-                  "Wait for the Environment to finish its current work, then call"
-                      + " the tool again")),
-          true);
-    }
-    return unknown(toolName, error, "the tool failed for an unclassified reason");
-  }
-
-  private static String failureMessage(Throwable error, String fallback) {
-    String message = safeMessage(error);
-    return message == null ? fallback : message;
-  }
-
-  private static String safeMessage(Throwable error) {
-    if (error == null) {
-      return null;
-    }
-    try {
-      String message = error.getMessage();
-      return message == null || message.isBlank() ? null : message;
-    } catch (RuntimeException ignored) {
-      return null;
-    }
-  }
-
-  /**
-   * 一次已准入的阻塞执行：在调用方线程上调用工具并把结果与异常分类为 {@link ToolGateway.Completion}。
-   *
-   * <p>并发租约与目录租用只由 {@link #close()} 释放；Processor 保证它在终态决议提交之后、{@link #execute} 返回（或抛出）之后才被调用。
-   * 工具上报非法 partial 时中断执行线程并以确定性失败收敛：执行已开始，因此只声明结果未交付且不可确认，不能声称未执行。
-   */
-  static final class GatewayRun implements ToolGateway.Run {
-    private final Tool tool;
-    private final ToolExecutionRequest request;
-    private final ToolResultFinalizer finalizer;
-    private final String toolName;
-    private final String expectedCallId;
-    private final HarnessCatalog harnessCatalog;
-    private final ToolContribution contribution;
-    private final ToolBinding binding;
-    private final RuntimeToolCatalogSource.Lease catalogLease;
-    private final ConcurrencyAdmission.Lease admissionLease;
-    private final AtomicBoolean closed = new AtomicBoolean();
-    private final AtomicReference<ToolInvocationError> rejectedPartial = new AtomicReference<>();
-    private final Object executionLock = new Object();
-    private Thread executingThread;
-
-    GatewayRun(
-        Tool tool,
-        ToolExecutionRequest request,
-        ToolResultFinalizer finalizer,
-        String toolName,
-        ToolContribution contribution,
-        ToolBinding binding,
-        RuntimeToolCatalogSource.Lease catalogLease,
-        ConcurrencyAdmission.Lease admissionLease) {
-      this.tool = Objects.requireNonNull(tool, "tool");
-      this.request = Objects.requireNonNull(request, "request");
-      this.finalizer = Objects.requireNonNull(finalizer, "finalizer");
-      this.toolName = Objects.requireNonNull(toolName, "toolName");
-      this.expectedCallId = request.call().id();
-      this.catalogLease = Objects.requireNonNull(catalogLease, "catalogLease");
-      this.harnessCatalog = catalogLease.harnessCatalog();
-      this.contribution = Objects.requireNonNull(contribution, "contribution");
-      this.binding = Objects.requireNonNull(binding, "binding");
-      this.admissionLease = Objects.requireNonNull(admissionLease, "admissionLease");
-    }
-
-    @Override
-    public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
-      Objects.requireNonNull(progress, "progress");
-      synchronized (executionLock) {
-        executingThread = Thread.currentThread();
-      }
-      ToolGateway.Completion completion;
-      try {
-        completion = invoke(progress);
-      } finally {
-        synchronized (executionLock) {
-          executingThread = null;
-        }
-      }
-      ToolInvocationError invalid = rejectedPartial.get();
-      return invalid == null ? completion : new ToolGateway.Failed(invalid, false);
-    }
-
-    private ToolGateway.Completion invoke(Consumer<ToolResult> progress) {
-      try {
-        return complete(tool.execute(request, guard(progress)));
-      } catch (InterruptedException interrupted) {
-        // 取消可能发生在副作用之后：只能声明结果未确认，绝不能声称未执行。
-        return new ToolGateway.Cancelled(
-            new ToolInvocationError(
-                CANCELLED_KIND,
-                ToolErrorGuidance.message(
-                    "Tool execution was cancelled",
-                    ExecutionFact.UNCERTAIN,
-                    VERIFY_EFFECT_NEXT_ACTION)));
-      } catch (RuntimeException error) {
-        return ToolExecutionGateway.classify(toolName, error);
-      }
-    }
-
-    @Override
-    public void close() {
-      if (closed.compareAndSet(false, true)) {
-        release(catalogLease, admissionLease);
-      }
-    }
-
-    /** 校验 partial；非法即记录并中断执行线程（只在执行体内部投递），由 {@link #execute} 收敛为确定性失败。 */
-    private Consumer<ToolResult> guard(Consumer<ToolResult> progress) {
-      return partial -> {
-        ToolInvocationError invalid = validatePartial(partial, expectedCallId);
-        if (invalid == null) {
-          progress.accept(partial);
-          return;
-        }
-        if (rejectedPartial.compareAndSet(null, invalid)) {
-          synchronized (executionLock) {
-            if (executingThread != null) {
-              executingThread.interrupt();
-            }
-          }
-        }
-      };
-    }
-
-    private ToolGateway.Completion complete(ToolOutcome outcome) {
-      if (outcome == null || outcome.result() == null) {
-        return fail(invalidResult("terminal result must not be null"));
-      }
-      ToolResult result = outcome.result();
-      if (!result.toolCallId().equals(expectedCallId)) {
-        return fail(invalidResult("terminal result toolCallId does not match the request call"));
-      }
-      ToolEffectBatch effects;
-      try {
-        effects = mapEffects(outcome);
-      } catch (RuntimeException invalid) {
-        return fail(
-            new ToolInvocationError(
-                CONTRIBUTOR_CONTRACT_VIOLATION_KIND,
-                ToolErrorGuidance.message(
-                    failureMessage(invalid, "Tool outcome returned invalid custom entries"),
-                    ExecutionFact.UNCERTAIN,
-                    DETERMINISTIC_REJECTION_NEXT_ACTION)));
-      }
-      ToolResultFinalizer.Outcome finalized;
-      try {
-        finalized = finalizer.finalizeResult(toolName, result);
-      } catch (RuntimeException failure) {
-        return ToolExecutionGateway.unknown(toolName, failure, "tool result finalization failed");
-      }
-      return switch (finalized) {
-        case ToolResultFinalizer.Outcome.Success success -> new ToolGateway.Succeeded(
-            new ToolSuccess(success.result(), effects));
-        case ToolResultFinalizer.Outcome.Failed failed -> fail(failed.error());
-        case ToolResultFinalizer.Outcome.StoreFailed storeFailed -> new ToolGateway.Unknown(
-            storeFailed.error());
-      };
-    }
-
-    /** 仅接受已注册且由当前工具声明 WRITE 权限的自定义条目。 */
-    private ToolEffectBatch mapEffects(ToolOutcome outcome) {
-      // ToolOutcome 已保证 error 结果不携带 effects。
-      if (outcome.customEntries().isEmpty()) {
-        return ToolEffectBatch.EMPTY;
-      }
-      String contributorId = contribution.id().contributorId().value();
-      List<CustomEntryPayload> payloads = new ArrayList<>(outcome.customEntries().size());
-      for (AppendCustomEntry entry : outcome.customEntries()) {
-        if (harnessCatalog
-            .findCustomEntryType(contribution.id().contributorId(), entry.customType())
-            .isEmpty()) {
-          throw new IllegalArgumentException(
-              "tool custom entry targets an unregistered custom entry type: " + entry.customType());
-        }
-        boolean declaredWrite = false;
-        for (ContributorStateAccess access : binding.contributor().stateAccesses()) {
-          if (access.customType().equals(entry.customType())
-              && access.mode() == ContributorStateAccessMode.WRITE) {
-            declaredWrite = true;
-            break;
-          }
-        }
-        if (!declaredWrite) {
-          throw new IllegalArgumentException(
-              "tool custom entry targets state without a declared WRITE access: "
-                  + entry.customType());
-        }
-        payloads.add(new CustomEntryPayload(contributorId, entry.customType(), entry.dataJson()));
-      }
-      return new ToolEffectBatch(payloads);
-    }
-  }
-
-  static final class ReattachRun implements ToolGateway.Run {
-    private final EnvironmentCapabilityExecutionHandle transportHandle;
-    private final CompletableFuture<EnvironmentCapabilityResult> terminal;
-    private final ToolResultFinalizer finalizer;
-    private final String toolName;
-    private final String modelCallId;
-    private final UUID remoteExecutionId;
-    private final Duration timeout;
-    private final AtomicReference<Consumer<ToolResult>> progressRef;
-    private final ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials;
-    private final AtomicBoolean closed = new AtomicBoolean();
-    private final AtomicReference<ToolInvocationError> rejectedPartial = new AtomicReference<>();
-    private final Object executionLock = new Object();
-    private Thread executingThread;
-
-    ReattachRun(
-        EnvironmentCapabilityExecutionHandle transportHandle,
-        CompletableFuture<EnvironmentCapabilityResult> terminal,
-        ToolResultFinalizer finalizer,
-        String toolName,
-        String modelCallId,
-        UUID remoteExecutionId,
-        Duration timeout,
-        AtomicReference<Consumer<ToolResult>> progressRef,
-        ConcurrentLinkedQueue<EnvironmentCapabilityResult> bufferedPartials) {
-      this.transportHandle = Objects.requireNonNull(transportHandle, "transportHandle");
-      this.terminal = Objects.requireNonNull(terminal, "terminal");
-      this.finalizer = Objects.requireNonNull(finalizer, "finalizer");
-      this.toolName = Objects.requireNonNull(toolName, "toolName");
-      this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
-      this.remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
-      this.timeout = Objects.requireNonNull(timeout, "timeout");
-      this.progressRef = Objects.requireNonNull(progressRef, "progressRef");
-      this.bufferedPartials = Objects.requireNonNull(bufferedPartials, "bufferedPartials");
-    }
-
-    @Override
-    public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
-      Objects.requireNonNull(progress, "progress");
-      synchronized (executionLock) {
-        executingThread = Thread.currentThread();
-      }
-      Consumer<ToolResult> guarded = guard(progress);
-      progressRef.set(guarded);
-      EnvironmentCapabilityResult buffered;
-      while ((buffered = bufferedPartials.poll()) != null) {
-        guarded.accept(toToolResult(buffered, remoteExecutionId, modelCallId));
-      }
-      ToolGateway.Completion completion;
-      try {
-        completion = invoke();
-      } finally {
-        progressRef.set(null);
-        synchronized (executionLock) {
-          executingThread = null;
-        }
-      }
-      ToolInvocationError invalid = rejectedPartial.get();
-      return invalid == null ? completion : new ToolGateway.Failed(invalid, false);
-    }
-
-    private ToolGateway.Completion invoke() {
-      try {
-        EnvironmentCapabilityResult result;
-        long timeoutNanos = timeout.toNanos();
-        try {
-          result = terminal.get(timeoutNanos, TimeUnit.NANOSECONDS);
-        } catch (TimeoutException timedOut) {
-          EnvironmentCapabilitySendUncertainException timeoutException =
-              new EnvironmentCapabilitySendUncertainException(
-                  "remote capability timed out waiting for reattach terminal outcome after "
-                      + timeout,
-                  timedOut);
-          if (terminal.completeExceptionally(timeoutException)) {
-            terminate(
-                transportHandle, EnvironmentCapabilityTerminationCause.TIMED_OUT, timeoutException);
-            throw timeoutException;
-          }
-          result = terminal.get();
-        }
-        if (result == null) {
-          throw new IllegalStateException(
-              "remote capability completed without a result; outcome cannot be confirmed");
-        }
-        ToolResult toolResult = toToolResult(result, remoteExecutionId, modelCallId);
-        return complete(toolResult);
-      } catch (InterruptedException interrupted) {
-        releaseInFlight(
-            terminal,
-            transportHandle,
-            EnvironmentCapabilityTerminationCause.CANCELLED,
-            interrupted);
-        return new ToolGateway.Cancelled(
-            new ToolInvocationError(
-                CANCELLED_KIND,
-                ToolErrorGuidance.message(
-                    "Tool execution was cancelled",
-                    ExecutionFact.UNCERTAIN,
-                    VERIFY_EFFECT_NEXT_ACTION)));
-      } catch (ExecutionException failed) {
-        Throwable cause = failed.getCause();
-        if (cause instanceof RuntimeException runtime) {
-          return ToolExecutionGateway.classify(toolName, runtime);
-        }
-        return ToolExecutionGateway.classify(
-            toolName,
-            new IllegalStateException(
-                "remote capability failed with a non-runtime error; outcome cannot be confirmed",
-                cause));
-      } catch (RuntimeException error) {
-        return ToolExecutionGateway.classify(toolName, error);
-      }
-    }
-
-    private ToolGateway.Completion complete(ToolResult result) {
-      if (result == null) {
-        return fail(invalidResult("terminal result must not be null"));
-      }
-      if (!result.toolCallId().equals(modelCallId)) {
-        return fail(invalidResult("terminal result toolCallId does not match the request call"));
-      }
-      ToolResultFinalizer.Outcome finalized;
-      try {
-        finalized = finalizer.finalizeResult(toolName, result);
-      } catch (RuntimeException failure) {
-        return ToolExecutionGateway.unknown(toolName, failure, "tool result finalization failed");
-      }
-      return switch (finalized) {
-        case ToolResultFinalizer.Outcome.Success success -> new ToolGateway.Succeeded(
-            new ToolSuccess(success.result(), ToolEffectBatch.EMPTY));
-        case ToolResultFinalizer.Outcome.Failed failed -> fail(failed.error());
-        case ToolResultFinalizer.Outcome.StoreFailed storeFailed -> new ToolGateway.Unknown(
-            storeFailed.error());
-      };
-    }
-
-    @Override
-    public void close() {
-      if (closed.compareAndSet(false, true)) {
-        terminate(transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, null);
-      }
-    }
-
-    private Consumer<ToolResult> guard(Consumer<ToolResult> progress) {
-      return partial -> {
-        ToolInvocationError invalid = validatePartial(partial, modelCallId);
-        if (invalid == null) {
-          progress.accept(partial);
-          return;
-        }
-        if (rejectedPartial.compareAndSet(null, invalid)) {
-          synchronized (executionLock) {
-            if (executingThread != null) {
-              executingThread.interrupt();
-            }
-          }
-        }
-      };
-    }
   }
 }
