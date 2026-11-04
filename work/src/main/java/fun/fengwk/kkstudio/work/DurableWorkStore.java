@@ -142,8 +142,8 @@ public final class DurableWorkStore {
 
   /** Harness 等自有事务核心的构造：SQL 与事务状态由调用方提供的钩子承载。 */
   public DurableWorkStore(String targetType, DurableWorkJdbc jdbc) {
-    if (targetType == null || targetType.isBlank()) {
-      throw new IllegalArgumentException("targetType must not be blank");
+    if (targetType == null || !targetType.matches("[A-Z][A-Z0-9_]{0,15}")) {
+      throw new IllegalArgumentException("targetType must match [A-Z][A-Z0-9_]{0,15}");
     }
     this.targetType = targetType;
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");

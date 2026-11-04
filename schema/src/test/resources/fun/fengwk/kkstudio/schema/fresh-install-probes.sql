@@ -765,16 +765,16 @@ select pg_temp.rejects('a work lease token and its deadline are stored together'
     $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
       values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
     'ck_durable_work_lease_pair');
-select pg_temp.rejects('only TOOL and AGENT work may require an Environment',
+select pg_temp.rejects('work type must start with an uppercase letter',
     $$insert into durable_work (target_type, target_id, available_at, wake_version,
           required_environment_id)
-      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
-    'ck_durable_work_required_environment');
+      values ('_CUSTOM', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
+    'ck_durable_work_target_type');
 insert into durable_work (target_type, target_id, available_at, wake_version, required_environment_id)
-    values ('AGENT', pg_temp.uid(700), now(), 1, pg_temp.uid(9000));
-select pg_temp.assert_true('AGENT work accepts required environment',
-    (select count(*) = 1 from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700)));
-delete from durable_work where target_type = 'AGENT' and target_id = pg_temp.uid(700);
+    values ('CUSTOM_DRIVER', pg_temp.uid(700), now(), 1, pg_temp.uid(9000));
+select pg_temp.assert_true('a module-defined work type accepts required environment',
+    (select count(*) = 1 from durable_work where target_type = 'CUSTOM_DRIVER' and target_id = pg_temp.uid(700)));
+delete from durable_work where target_type = 'CUSTOM_DRIVER' and target_id = pg_temp.uid(700);
 insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
     values (pg_temp.uid(800), pg_temp.uid(700), pg_temp.uid(1000), 'INPUT', pg_temp.uid(900));
 select pg_temp.rejects('a pin cannot reference a missing Resource',
@@ -1255,9 +1255,9 @@ select pg_temp.rejects('an empty access token is rejected',
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.
 -- ---------------------------------------------------------------------------
-select pg_temp.rejects('durable work accepts only the known target types',
+select pg_temp.rejects('durable work rejects lowercase target types',
     $$insert into durable_work (target_type, target_id, available_at, wake_version)
-      values ('BOGUS', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
+      values ('custom', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
 
 -- The dedicated run-free, call-free Thread of Issue 11: only the Agent Thread
 -- binding keeps it alive.

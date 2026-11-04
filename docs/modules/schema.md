@@ -33,7 +33,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
 | Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Platform](platform.md#harness-持久化与调度) |
-| Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
+| Durable Work | durable_work：全部后台调度共用的 mailbox，类型由各模块定义 | [Durable Work](work.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 

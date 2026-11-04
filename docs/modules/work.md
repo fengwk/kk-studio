@@ -2,7 +2,7 @@
 
 本文属于[系统设计](../system-design.md)的模块层，面向修改后台调度的开发者。
 
-`work` 模块提供全部后台调度共用的 PostgreSQL mailbox。Harness 的 THREAD / MODEL / TOOL、Project 的 ISSUE 与 Canvas 的 CANVAS_RUN 都是 `durable_work` 表中的一种 `target_type`；每个 `(target_type, target_id)` 至多一行，表示「这个 target 需要被重新处理一次」。行里只有调度事实（due、wake 次数、租约），业务状态始终留在各自的领域表里，Worker 领取后必须重新读取当前业务状态再决定做什么。
+`work` 模块提供全部后台调度共用的 PostgreSQL mailbox。Harness 的 THREAD / MODEL / TOOL、Project 的 ISSUE 与 Canvas 的 CANVAS_RUN 都是 `durable_work` 表中的一种 `target_type`；每个 `(target_type, target_id)` 至多一行，表示「这个 target 需要被重新处理一次」。类型由所属模块定义，名称以大写字母开头，后接大写字母、数字或下划线，长度不超过 16。数据库不枚举类型或规定类型的环境亲和性；各调用方负责约束自己的调度语义。行里只有调度事实（due、wake 次数、租约），业务状态始终留在各自的领域表里，Worker 领取后必须重新读取当前业务状态再决定做什么。
 
 ## 心智模型
 

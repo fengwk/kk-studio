@@ -261,24 +261,24 @@ class PostgresqlHarnessSchemaTest {
         agentExecutionId,
         envId);
 
-    // 3. durable_work 接受 AGENT target 且支持 required_environment_id
+    // 3. durable_work 接受由模块定义的 target 与 required_environment_id。
     jdbc.update(
         "insert into durable_work (target_type, target_id, available_at, wake_version,"
-            + " required_environment_id) values ('AGENT', ?, now(), 1, ?)",
+            + " required_environment_id) values ('CUSTOM_DRIVER', ?, now(), 1, ?)",
         threadId,
         envId);
 
-    // durable_work 拒绝 THREAD 带有 required_environment_id
-    DataIntegrityViolationException threadAffinity =
+    // 类型校验只约束格式，不枚举具体 Driver。
+    DataIntegrityViolationException invalidType =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
                     "insert into durable_work (target_type, target_id, available_at, wake_version,"
-                        + " required_environment_id) values ('THREAD', ?, now(), 1, ?)",
+                        + " required_environment_id) values ('custom', ?, now(), 1, ?)",
                     UUID.randomUUID(),
                     envId));
-    assertTrue(threadAffinity.getMessage().contains("ck_durable_work_required_environment"));
+    assertTrue(invalidType.getMessage().contains("ck_durable_work_target_type"));
   }
 
   private UUID seedExecutionExitThread() {
