@@ -225,11 +225,12 @@ describe('canvas api transport adapter', () => {
     await expect(listCanvases()).rejects.toThrow('请求失败')
   })
 
-  it('fails closed when the envelope is malformed or missing its data field', async () => {
+  it('returns envelope data as-is and fails closed only for a malformed envelope', async () => {
     fetchMock.mockResolvedValueOnce(response({ status: 200, code: 'OK', message: '' }))
     await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
 
-    fetchMock.mockResolvedValueOnce(response(envelope(null)))
-    await expect(listCanvases()).rejects.toBeInstanceOf(ApiError)
+    const payload = [documentPayload()]
+    fetchMock.mockResolvedValueOnce(response(envelope(payload)))
+    await expect(listCanvases()).resolves.toEqual(payload)
   })
 })
