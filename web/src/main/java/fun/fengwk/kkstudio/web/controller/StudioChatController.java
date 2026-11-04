@@ -13,8 +13,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.platform.chat.ChatIds;
 import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;

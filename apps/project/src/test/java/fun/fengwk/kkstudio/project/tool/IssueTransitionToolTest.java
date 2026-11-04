@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
@@ -43,6 +44,9 @@ class IssueTransitionToolTest {
   private static final UUID RUN_ID = new UUID(0L, 3L);
   private static final UUID ISSUE_ID = new UUID(0L, 4L);
   private static final UUID PROJECT_ID = new UUID(0L, 5L);
+  private static final UUID SESSION_ID = new UUID(0L, 6L);
+  private static final UUID ROOT_THREAD_ID = new UUID(0L, 7L);
+  private static final UUID ROOT_SESSION_ID = new UUID(0L, 8L);
 
   private static final String SCOPE_JSON =
       new ProjectRunScopeJsonCodec()
@@ -78,12 +82,26 @@ class IssueTransitionToolTest {
     BranchView branch = mock(BranchView.class);
     when(branch.latestCustomEntry(ProjectRunScope.CUSTOM_TYPE))
         .thenReturn(Optional.of(new CustomStateSnapshot(SCOPE_JSON)));
-    return new ToolExecutionContext(INVOCATION_ID, threadId, Instant.now(), branch);
+    return context(threadId, branch);
   }
 
   /** 没有冻结 contributor state 的普通 branch。 */
   private static ToolExecutionContext contextWithoutScope(UUID threadId) {
-    return new ToolExecutionContext(INVOCATION_ID, threadId, Instant.now(), mock(BranchView.class));
+    return context(threadId, mock(BranchView.class));
+  }
+
+  /** 补齐执行上下文里与 Run 定位无关的冻结事实：会话、执行根与消费者媒体能力。 */
+  private static ToolExecutionContext context(UUID threadId, BranchView branch) {
+    return new ToolExecutionContext(
+        INVOCATION_ID,
+        threadId,
+        SESSION_ID,
+        ROOT_THREAD_ID,
+        ROOT_SESSION_ID,
+        Instant.now(),
+        TurnMediaCapabilities.NONE,
+        branch,
+        Optional.empty());
   }
 
   private ToolResult execute(String argumentsJson, ToolExecutionContext context) {

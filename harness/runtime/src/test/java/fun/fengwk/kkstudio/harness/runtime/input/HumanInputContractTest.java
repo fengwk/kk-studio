@@ -9,10 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;

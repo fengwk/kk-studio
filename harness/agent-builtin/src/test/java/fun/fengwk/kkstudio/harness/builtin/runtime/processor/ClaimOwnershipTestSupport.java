@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;

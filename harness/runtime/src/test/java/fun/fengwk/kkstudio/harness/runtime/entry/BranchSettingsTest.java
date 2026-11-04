@@ -6,6 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.GoalSetting;
+
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;

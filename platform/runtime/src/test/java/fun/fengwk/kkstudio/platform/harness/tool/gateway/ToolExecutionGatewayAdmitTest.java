@@ -11,6 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -21,22 +26,17 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -44,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -79,6 +78,11 @@ class ToolExecutionGatewayAdmitTest {
     assertEquals(DESCRIPTOR.defaultTimeout(), executed.timeout());
     assertEquals(ToolGatewayTestSupport.INVOCATION_ID, executed.context().invocationId());
     assertEquals(ToolGatewayTestSupport.THREAD_ID, executed.context().threadId());
+    assertEquals(ToolGatewayTestSupport.SESSION_ID, executed.context().sessionId());
+    assertEquals(ToolGatewayTestSupport.ROOT_THREAD_ID, executed.context().rootThreadId());
+    assertEquals(ToolGatewayTestSupport.ROOT_SESSION_ID, executed.context().rootSessionId());
+    assertEquals(TurnMediaCapabilities.NONE, executed.context().mediaCapabilities());
+    assertSame(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW, executed.context().branch());
     assertTrue(transport.invocations.isEmpty());
   }
 
@@ -206,20 +210,15 @@ class ToolExecutionGatewayAdmitTest {
     admission.tryAcquire().orElseThrow().close();
   }
 
-  /** 满容量在目录查找之前拒绝：既不租用目录也不加载分支。 */
+  /** 满容量在目录查找之前拒绝：既不租用目录也不执行工具。 */
   @Test
-  void fullCapacityBusyDoesNotAcquireCatalogOrLoadBranch() {
+  void fullCapacityBusyDoesNotAcquireCatalogOrExecute() {
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     ConcurrencyAdmission.Lease held = admission.tryAcquire().orElseThrow();
-    AtomicBoolean branchLoaded = new AtomicBoolean();
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
-            (assistantEntryId, contributorId) -> {
-              branchLoaded.set(true);
-              return ToolGatewayTestSupport.EMPTY_BRANCH_VIEW;
-            },
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
             admission);
@@ -230,7 +229,7 @@ class ToolExecutionGatewayAdmitTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR))));
 
-    assertFalse(branchLoaded.get());
+    assertTrue(tool.requests.isEmpty(), "admission must never execute the tool");
     held.close();
   }
 
@@ -308,14 +307,9 @@ class ToolExecutionGatewayAdmitTest {
             return live.get();
           }
         };
-    AtomicBoolean branchLoaded = new AtomicBoolean();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
-            (assistantEntryId, contributorId) -> {
-              branchLoaded.set(true);
-              return ToolGatewayTestSupport.EMPTY_BRANCH_VIEW;
-            },
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -326,7 +320,7 @@ class ToolExecutionGatewayAdmitTest {
         assertInstanceOf(
             ToolGateway.Rejected.class, gateway.admit(ToolGatewayTestSupport.execution(request)));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
-    assertFalse(branchLoaded.get());
+    assertTrue(tool.requests.isEmpty(), "rejected admission must never execute the tool");
   }
 
   /** branch 未选择 Environment 的环境工具：admission 阶段仍 fail-safe 为 ENVIRONMENT_NOT_SELECTED。 */
@@ -384,22 +378,16 @@ class ToolExecutionGatewayAdmitTest {
     admission.tryAcquire().orElseThrow().close();
   }
 
-  /** 必需的 edit 审批没有有效 review：确定性拒绝，branch loader 与 transport 都不被触达，租约释放。 */
+  /** 必需的 edit 审批没有有效 review：确定性拒绝，transport 不被触达，租约释放。 */
   @Test
-  void requiredEditWithoutReviewIsRejectedWithoutTouchingBranchLoaderOrTransport() {
+  void requiredEditWithoutReviewIsRejectedWithoutTouchingTransport() {
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
     ToolInvocationRequest request = editRequest(catalog, "call-edit-1");
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
-    AtomicBoolean branchLoaderCalled = new AtomicBoolean();
-    ContributorBranchViewLoader loader =
-        (assistantEntryId, contributorId) -> {
-          branchLoaderCalled.set(true);
-          return ToolGatewayTestSupport.EMPTY_BRANCH_VIEW;
-        };
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            catalog, loader, transport, new ToolGatewayTestSupport.FakeResourceStager(), admission);
+            catalog, transport, new ToolGatewayTestSupport.FakeResourceStager(), admission);
 
     ToolGateway.Rejected rejected =
         assertInstanceOf(
@@ -407,8 +395,7 @@ class ToolExecutionGatewayAdmitTest {
             gateway.admit(
                 new ToolGateway.Execution(
                     ToolGatewayTestSupport.INVOCATION_ID,
-                    ToolGatewayTestSupport.THREAD_ID,
-                    ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                    ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
                     1,
                     request,
                     approved(null),
@@ -422,7 +409,6 @@ class ToolExecutionGatewayAdmitTest {
             .error()
             .message()
             .contains("Request approval with an edit review before calling the tool again"));
-    assertFalse(branchLoaderCalled.get());
     assertTrue(transport.invocations.isEmpty());
     admission.tryAcquire().orElseThrow().close();
   }
@@ -449,8 +435,7 @@ class ToolExecutionGatewayAdmitTest {
                 gateway.admit(
                     new ToolGateway.Execution(
                         ToolGatewayTestSupport.INVOCATION_ID,
-                        ToolGatewayTestSupport.THREAD_ID,
-                        ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                        ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
                         1,
                         request,
                         approved(new ToolEditReview(expectedFile, "-old\n+new")),
@@ -502,8 +487,7 @@ class ToolExecutionGatewayAdmitTest {
                 gateway.admit(
                     new ToolGateway.Execution(
                         ToolGatewayTestSupport.INVOCATION_ID,
-                        ToolGatewayTestSupport.THREAD_ID,
-                        ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                        ToolGatewayTestSupport.scope(ToolGatewayTestSupport.EMPTY_BRANCH_VIEW),
                         1,
                         request,
                         approved(null),

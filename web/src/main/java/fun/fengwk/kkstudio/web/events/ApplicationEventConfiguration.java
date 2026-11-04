@@ -6,11 +6,13 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
+import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
+import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationBinding;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeBus;
@@ -59,16 +61,6 @@ public class ApplicationEventConfiguration {
         advanced.applicationEventHeartbeatIntervalMillis());
   }
 
-  /**
-   * 内部观察者（TaskTool / PluginPromptTaskService）的 Thread change 源：复用 {@link ThreadVersionEventSource}
-   * 的原子订阅与 resync 语义，只保留纯 wake 信号。
-   */
-  @Bean
-  public HarnessThreadChangeSource harnessThreadChangeSource(
-      ThreadVersionEventSource versionSource) {
-    return new WebHarnessThreadChangeSource(versionSource);
-  }
-
   /** 全应用共享一个专用 PostgreSQL connection，固定监听全部低延迟通知 channel。 */
   @Bean(destroyMethod = "close")
   public PostgresqlNotificationLoop postgresqlNotificationLoop(
@@ -78,17 +70,18 @@ public class ApplicationEventConfiguration {
           BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher,
       @Qualifier("canvasFunctionDispatcher")
           BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher,
-      ThreadVersionHub threadVersionHub,
+      HarnessChangeNotifications harnessNotifications,
       CanvasVersionHub canvasVersionHub,
       ProjectInvalidationHub projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
-      ExecutionTreeChangeHub executionTreeChangeHub,
-      InteractionChangeHub interactionChangeHub,
       EnvironmentChangeHub environmentChangeHub,
       PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    HarnessNotificationBinding threadVersions = harnessNotifications.threadVersionsNotification();
+    HarnessNotificationBinding executionTree = harnessNotifications.executionTreeNotification();
+    HarnessNotificationBinding interactions = harnessNotifications.interactionsNotification();
     return new PostgresqlNotificationLoop(
         dataSource,
         List.of(
@@ -111,9 +104,9 @@ public class ApplicationEventConfiguration {
                 }),
             // 2. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
             new PostgresqlNotificationHandler(
-                ThreadVersionHub.CHANNEL,
-                threadVersionHub::onNotification,
-                threadVersionHub::broadcastResync),
+                threadVersions.channel(),
+                threadVersions.onNotification(),
+                threadVersions.onResync()),
             // 3. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionHub.CHANNEL,
@@ -137,24 +130,20 @@ public class ApplicationEventConfiguration {
                 environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
             // 7. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
-                ExecutionTreeChangeHub.CHANNEL,
-                executionTreeChangeHub::onNotification,
-                executionTreeChangeHub::broadcastResync),
+                executionTree.channel(), executionTree.onNotification(), executionTree.onResync()),
             // 8. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
             new PostgresqlNotificationHandler(
-                InteractionChangeHub.CHANNEL,
-                interactionChangeHub::onNotification,
-                interactionChangeHub::broadcastResync),
+                interactions.channel(), interactions.onNotification(), interactions.onResync()),
             // 9. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
                 payload -> {
                   environmentChangeHub.onNotification(payload);
-                  interactionChangeHub.broadcastResync();
+                  interactions.onResync().run();
                 },
                 () -> {
                   environmentChangeHub.broadcastResync();
-                  interactionChangeHub.broadcastResync();
+                  interactions.onResync().run();
                 }),
             // 10. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
             // 建连/重连时同样 resync，通知丢失由周期对账追平
@@ -213,23 +202,19 @@ public class ApplicationEventConfiguration {
 
   @Bean(destroyMethod = "close")
   public ApplicationEventHub applicationEventHub(
-      ThreadVersionEventSource threadVersionSource,
+      HarnessChangeSubscriptions harnessChanges,
       RealtimeEventSource realtimeSource,
       RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
-      ExecutionTreeChangeHub executionTreeChangeHub,
-      InteractionChangeHub interactionChangeHub,
       EnvironmentChangeHub environmentChangeHub,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
-        threadVersionSource,
+        harnessChanges,
         realtimeSource,
         realtimeSubscriptions,
         canvasVersionSource,
         projectInvalidationHub,
-        executionTreeChangeHub,
-        interactionChangeHub,
         environmentChangeHub,
         settings.queueCapacity());
   }

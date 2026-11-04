@@ -17,4 +17,4 @@
  */
 package fun.fengwk.kkstudio.platform.harness;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;

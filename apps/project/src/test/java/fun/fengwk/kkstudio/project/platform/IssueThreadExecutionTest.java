@@ -15,29 +15,29 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.util.List;
@@ -141,7 +141,7 @@ class IssueThreadExecutionTest {
     ThreadState thread = mock(ThreadState.class);
     when(thread.id()).thenReturn(threadId);
     when(accepted.thread()).thenReturn(thread);
-    when(runtime.spawn(any(SpawnRequest.class))).thenReturn(accepted);
+    when(runtime.spawn(any(SpawnRequest.class), any())).thenReturn(accepted);
 
     assertSame(
         accepted,
@@ -157,7 +157,7 @@ class IssueThreadExecutionTest {
                 input.requestHash())));
 
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
-    verify(runtime).spawn(spawn.capture());
+    verify(runtime).spawn(spawn.capture(), any());
     SpawnRequest request = spawn.getValue();
     assertEquals(runId, request.ticketId());
     assertEquals(threadId, request.threadId());

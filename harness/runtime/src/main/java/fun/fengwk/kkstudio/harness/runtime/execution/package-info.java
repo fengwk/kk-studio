@@ -1,8 +1,7 @@
 /**
- * 具体执行代次的窄退出账本：{@link fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact} 冻结一次
- * Model、Tool 或 Remote 执行的 thread / invocation / attempt / lease / kind / parent identity，并以 {@link
- * fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState} 单向记录未确认、Studio 退出、远端 ACK
- * 或确定未启动。
+ * 具体执行代次的窄退出账本：{@link fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact} 冻结一次 Model、Tool
+ * 或 Remote 执行的 thread / invocation / attempt / lease / kind / parent identity，并以 {@link
+ * fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState} 单向记录未确认、Studio 退出、远端 ACK 或确定未启动。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger}
  * 只负责登记、身份匹配确认与确认后的持久推进，不复制 Invocation 状态机。确认必须使用登记时冻结的完整身份，重复相同证据幂等、确认后的不同证据冲突；只有真正从未确认推进到终态的 ACK

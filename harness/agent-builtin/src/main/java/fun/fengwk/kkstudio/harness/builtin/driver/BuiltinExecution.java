@@ -7,8 +7,8 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 
 import java.util.Iterator;
 import java.util.Objects;

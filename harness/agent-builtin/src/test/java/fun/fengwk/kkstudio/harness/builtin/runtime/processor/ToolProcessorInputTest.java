@@ -19,9 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ToolProcessorTestSupport.Fixture;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
 
 /**

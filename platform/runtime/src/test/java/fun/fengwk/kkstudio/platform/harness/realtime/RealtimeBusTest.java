@@ -7,11 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimePayloadUnavailableException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.port.RealtimePayloadFetcher;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimePayloadUnavailableException;
+import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.spi.RealtimePayloadFetcher;
 
 import java.time.Instant;
 import java.util.ArrayList;

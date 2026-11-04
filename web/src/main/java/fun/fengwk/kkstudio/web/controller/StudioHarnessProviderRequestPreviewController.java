@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;

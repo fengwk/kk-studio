@@ -14,8 +14,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 

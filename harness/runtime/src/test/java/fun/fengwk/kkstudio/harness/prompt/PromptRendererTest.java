@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.samskivert.mustache.MustacheException;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinCompletionRenderer;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskMessages;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletionRenderer;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 
 import java.util.Map;

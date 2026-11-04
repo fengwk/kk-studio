@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -197,46 +198,172 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
   }
 
-  /** 验证 ToolExecutionContext 构造、重载与完整非空校验。 */
+  /** 验证 ToolExecutionContext 的会话/执行根/冻结能力快照与完整非空校验。 */
   @Test
   void toolExecutionContextValidatesNonNull() {
     UUID invocationId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    UUID rootThreadId = UUID.randomUUID();
+    UUID rootSessionId = UUID.randomUUID();
     Instant now = Instant.now();
     BranchView view = new DummyBranchView();
+    TurnMediaCapabilities capabilities = TurnMediaCapabilities.NONE;
     BoundEnvironment env = new DummyBoundEnvironment();
 
     ToolExecutionContext ctxWithEnv =
-        new ToolExecutionContext(invocationId, threadId, now, view, env);
+        new ToolExecutionContext(
+            invocationId,
+            threadId,
+            sessionId,
+            rootThreadId,
+            rootSessionId,
+            now,
+            capabilities,
+            view,
+            Optional.of(env));
     assertEquals(invocationId, ctxWithEnv.invocationId());
     assertEquals(threadId, ctxWithEnv.threadId());
+    assertEquals(sessionId, ctxWithEnv.sessionId());
+    assertEquals(rootThreadId, ctxWithEnv.rootThreadId());
+    assertEquals(rootSessionId, ctxWithEnv.rootSessionId());
     assertEquals(now, ctxWithEnv.executedAt());
+    assertEquals(capabilities, ctxWithEnv.mediaCapabilities());
     assertEquals(view, ctxWithEnv.branch());
     assertTrue(ctxWithEnv.environment().isPresent());
     assertEquals(env, ctxWithEnv.environment().get());
 
     ToolExecutionContext ctxWithoutEnv =
-        new ToolExecutionContext(invocationId, threadId, now, view);
+        new ToolExecutionContext(
+            invocationId,
+            threadId,
+            sessionId,
+            rootThreadId,
+            rootSessionId,
+            now,
+            capabilities,
+            view,
+            Optional.empty());
     assertFalse(ctxWithoutEnv.environment().isPresent());
 
     // 完整非空校验
     assertThrows(
         NullPointerException.class,
-        () -> new ToolExecutionContext(null, threadId, now, view, Optional.empty()));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolExecutionContext(invocationId, null, now, view, Optional.empty()));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolExecutionContext(invocationId, threadId, null, view, Optional.empty()));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolExecutionContext(invocationId, threadId, now, null, Optional.empty()));
+        () ->
+            new ToolExecutionContext(
+                null,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                now,
+                capabilities,
+                view,
+                Optional.empty()));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolExecutionContext(
-                invocationId, threadId, now, view, (Optional<BoundEnvironment>) null));
+                invocationId,
+                null,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                now,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                null,
+                rootThreadId,
+                rootSessionId,
+                now,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                null,
+                rootSessionId,
+                now,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                null,
+                now,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                null,
+                capabilities,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                now,
+                null,
+                view,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                now,
+                capabilities,
+                null,
+                Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId,
+                threadId,
+                sessionId,
+                rootThreadId,
+                rootSessionId,
+                now,
+                capabilities,
+                view,
+                (Optional<BoundEnvironment>) null));
   }
 
   /** 验证 BoundEnvironment 执行窄能力契约。 */

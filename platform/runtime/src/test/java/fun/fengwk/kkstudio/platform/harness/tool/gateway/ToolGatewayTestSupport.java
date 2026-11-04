@@ -7,6 +7,9 @@ import static org.mockito.Mockito.when;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -32,27 +35,24 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityS
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolGateway;
+import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
+import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionRule;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
+import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
 import java.security.MessageDigest;
@@ -81,7 +81,9 @@ final class ToolGatewayTestSupport {
   static final EnvironmentId ENV_B = TestEnvironments.environmentId("env-2");
   static final UUID INVOCATION_ID = new UUID(0L, 42L);
   static final UUID THREAD_ID = new UUID(0L, 7L);
-  static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
+  static final UUID SESSION_ID = new UUID(0L, 9L);
+  static final UUID ROOT_THREAD_ID = new UUID(0L, 10L);
+  static final UUID ROOT_SESSION_ID = new UUID(0L, 12L);
 
   /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -105,15 +107,11 @@ final class ToolGatewayTestSupport {
         }
       };
 
-  /** 测试默认的 ContributorBranchViewLoader。 */
-  static final ContributorBranchViewLoader DEFAULT_CONTRIBUTOR_BRANCH_LOADER =
-      (assistantEntryId, contributorId) -> EMPTY_BRANCH_VIEW;
-
-  /** 测试默认明确失败的 ContributorBranchViewLoader。 */
-  static final ContributorBranchViewLoader FAILING_CONTRIBUTOR_BRANCH_LOADER =
-      (assistantEntryId, contributorId) -> {
-        throw new IllegalStateException("no contributor branch loader is configured");
-      };
+  /** 测试默认的冻结上下文事实：Harness 会在 admission 前把这些事实随执行描述传入。 */
+  static ToolGateway.ExecutionScope scope(BranchView branch) {
+    return new ToolGateway.ExecutionScope(
+        THREAD_ID, SESSION_ID, ROOT_THREAD_ID, ROOT_SESSION_ID, branch, TurnMediaCapabilities.NONE);
+  }
 
   /** 固定 busy/overload 延迟 supplier。 */
   static final Supplier<Duration> BUSY_RETRY_DELAY = () -> Duration.ofSeconds(2);
@@ -229,8 +227,7 @@ final class ToolGatewayTestSupport {
       ToolInvocationRequest request, ToolGateway.RemoteExecutionObserver remoteExecutions) {
     return new ToolGateway.Execution(
         INVOCATION_ID,
-        THREAD_ID,
-        ASSISTANT_ENTRY_ID,
+        scope(EMPTY_BRANCH_VIEW),
         1,
         request,
         ToolApproval.notRequired(),
@@ -291,13 +288,11 @@ final class ToolGatewayTestSupport {
 
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
-      ContributorBranchViewLoader branchLoader,
       FakeTransport transport,
       FakeResourceStager store,
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
-        branchLoader,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
@@ -317,7 +312,6 @@ final class ToolGatewayTestSupport {
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
         toolCatalogSource,
-        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),

@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
 import java.util.List;
 import java.util.Objects;

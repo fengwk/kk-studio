@@ -9,8 +9,8 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
  * Platform 测试宿主的能力目录与 Harness 装配基座。
  *
  * <p>生产 {@link EnvironmentSessionListener} 由 web 组合根（dispatcher wake）提供；platform 不再是组合根后， 测试上下文用
- * no-op 桥接满足 {@code EnvironmentDaemonGateway} 的构造依赖。internal Thread change source 同样由 web
- * 组合根提供（PostgreSQL LISTEN 适配）；本测试上下文提供不产生信号的占位 bean 满足构造依赖——platform 测试从不真正等待任务完成。
+ * no-op 桥接满足 {@code EnvironmentDaemonGateway} 的构造依赖。internal Thread change source 同样由 web 组合根以平台
+ * {@code ThreadVersionHub} bean 提供；本测试上下文提供不产生信号的占位 bean 满足构造依赖——platform 测试从不真正等待任务完成。
  *
  * <p>Harness 目录由测试宿主冻结已注册贡献，生产目录仍只由 web 组合根提供。
  */

@@ -1,18 +1,18 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 
 import java.util.List;
 import java.util.UUID;
@@ -112,14 +112,8 @@ public final class SpawnTestSupport {
       AcceptancePreflight preflight) {
     return runtime.spawn(
         request(
-            source.thread(),
-            source.session(),
-            settings,
-            source.commands(),
-            preflight,
-            null,
-            false,
-            ticket));
+            source.thread(), source.session(), settings, source.commands(), null, false, ticket),
+        preflight);
   }
 
   public static AcceptedCommands acceptAndJoin(
@@ -140,21 +134,21 @@ public final class SpawnTestSupport {
               root.sessionId(),
               root.rootSettings(),
               source.commands(),
-              preflight,
               null,
               root.yoloEnabled(),
-              ticket));
+              ticket),
+          preflight);
       case AcceptCommandsTarget.Thread thread -> runtime.spawn(
           request(
               thread.threadId(),
               null,
               defaultSettings(),
               source.commands(),
-              preflight,
               new SpawnRequest.Continuation(
                   thread.expectedHeadEntryId(), thread.expectedNextCommandSequence()),
               false,
-              ticket));
+              ticket),
+          preflight);
       default -> throw new IllegalArgumentException("unsupported source " + source.target());
     };
   }
@@ -164,7 +158,6 @@ public final class SpawnTestSupport {
       UUID sessionId,
       BranchSettings settings,
       List<NewThreadCommand> commands,
-      AcceptancePreflight preflight,
       SpawnRequest.Continuation continuation,
       boolean yoloEnabled,
       Ticket ticket) {
@@ -177,7 +170,6 @@ public final class SpawnTestSupport {
         sessionId,
         agentSettings,
         commands,
-        preflight,
         ticket.parentThreadId(),
         notify ? ticket.parentHeadEntryId() : null,
         continuation,

@@ -15,16 +15,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;

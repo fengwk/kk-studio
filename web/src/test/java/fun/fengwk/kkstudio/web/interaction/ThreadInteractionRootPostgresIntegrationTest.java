@@ -25,12 +25,43 @@ import fun.fengwk.kkstudio.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
+import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.Session;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -42,45 +73,14 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
-import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
-import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -881,7 +881,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             UUID.randomUUID(),
             SETTINGS,
             List.of(command),
-            AcceptancePreflight.IDENTITY,
             parentThreadId,
             headEntryId(parentThreadId),
             null,
@@ -893,7 +892,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 MAX_TURNS, MAX_DEPTH, MAX_CONCURRENT_CHILDREN, MAX_CONCURRENT_THREADS),
             UUID.randomUUID(),
             ThreadCommandPayloadJsonCodec.requestHash(
-                new UserMessageCommandPayload(AgentMessage.user(prompt)))));
+                new UserMessageCommandPayload(AgentMessage.user(prompt)))),
+        AcceptancePreflight.IDENTITY);
     return threadId;
   }
 
