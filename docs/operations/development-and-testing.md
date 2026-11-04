@@ -106,6 +106,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 日常改动先做静态检查与受影响模块的编译/定向测试，再按风险选择更接近真实环境的验证。
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
+Canvas E2E 创建的画布不会通过 HTTP 删除，应使用可丢弃的测试数据环境。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -639,15 +640,17 @@ Daemon。
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
 | `catalog` | 16 | `GET /api/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
-| `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/规范十进制 revision | 0 | `<=1500ms` | `>=5` | 20 |
+| `canvas` | 4 | `POST /api/canvases`，验证创建结果，测量创建事务 | 0 | `<=1500ms` | `>=5` | 20 |
 
 阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。
 这是本机免费回归基线，不是容量规划；以本次 `reports/performance/latest/report.md` 的样本、
-错误、延迟、吞吐与清理结果判断是否通过，字段契约失败应先按正确性问题处理。
+错误、延迟与吞吐判断是否通过，字段契约失败应先按正确性问题处理。
 
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
-fail closed。Canvas worker 按 run title prefix 清理已知和扫描出的资源；正常、失败、超时、INT、
-TERM 都执行 `down --volumes --remove-orphans`。
+fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
+runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
+TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
+create+delete 工作负载结果比较。
 
 ## 供应链门禁
 

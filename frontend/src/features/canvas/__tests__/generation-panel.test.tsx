@@ -10,7 +10,7 @@ import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasFunctionConfig } from '@/features/canvas/types'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/studio-service', () => ({
+vi.mock('@/features/canvas/canvas-api', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
   getCanvasResourcePreviewUrl: vi.fn(async () => ({
     method: 'GET',

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.LinkedHashMap;
 import java.util.List;

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
@@ -43,7 +44,6 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 

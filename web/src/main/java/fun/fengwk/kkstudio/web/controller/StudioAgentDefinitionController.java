@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /** Agent definition 全局 CRUD API。 */
 @AllArgsConstructor

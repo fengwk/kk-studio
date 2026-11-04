@@ -419,21 +419,21 @@ const moduleDependencies = {
     'platform-plugin-api',
     'platform-daemon-server',
   ],
-  'apps/canvas/core': ['common', 'platform-plugin-api'],
-  'apps/canvas/infra': [
+  'apps/canvas/spi': ['common'],
+  'apps/canvas/runtime': [
     'common',
     'share',
     'work',
-    'canvas-core',
+    'canvas-spi',
     'platform-plugin-api',
     'platform-runtime',
   ],
   'apps/project': ['common', 'share', 'work', 'harness-runtime', 'platform-runtime'],
   'apps/ide': ['common', 'share', 'harness-environment', 'platform-daemon-server', 'platform-runtime'],
-  'plugins/comfyui': ['common', 'platform-plugin-api'],
-  'plugins/media': ['common', 'platform-plugin-api'],
+  'plugins/comfyui': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
+  'plugins/media': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],
-  'plugins/opencli': ['common', 'harness-runtime', 'platform-plugin-api'],
+  'plugins/opencli': ['common', 'canvas-spi', 'harness-runtime', 'platform-plugin-api'],
   web: null,
 }
 
