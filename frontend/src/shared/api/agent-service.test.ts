@@ -178,6 +178,9 @@ describe('agentService', () => {
     await service.listSkillPackageEnvironments('core')
     expect(client.get).toHaveBeenNthCalledWith(3, '/skill-packages/core/environments')
 
+    await service.listSkillPackageFiles('core')
+    expect(client.get).toHaveBeenNthCalledWith(4, '/skill-packages/core/files')
+
     const createPkg = {
       packageName: 'core',
       description: 'Core skills',

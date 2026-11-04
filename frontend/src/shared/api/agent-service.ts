@@ -16,8 +16,9 @@ import type {
   SkillEnvironmentSyncDTO,
   SkillPackageCheckDTO,
   SkillPackageDetailDTO,
-  SkillPackageGitCreateDTO,
   SkillPackageEditDTO,
+  SkillPackageFileDTO,
+  SkillPackageGitCreateDTO,
   SkillPackageGitPublishDTO,
   SkillPackagePreviewDTO,
   SkillPackageSummaryDTO,
@@ -117,6 +118,9 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     listSkillPackageEnvironments: (name: string): Promise<SkillEnvironmentSyncDTO[]> =>
       client.get(`/skill-packages/${encodeURIComponent(name)}/environments`),
+
+    listSkillPackageFiles: (name: string): Promise<SkillPackageFileDTO[]> =>
+      client.get(`/skill-packages/${encodeURIComponent(name)}/files`),
 
     createSkillPackage: (data: SkillPackageGitCreateDTO): Promise<SkillPackageDetailDTO> =>
       client.post('/skill-packages/git', data, { timeout: 0 }),

@@ -140,7 +140,9 @@ test.describe('Catalog & Skill Packages i18n Real React Browser Verification', (
     await nameInput.fill('invalid:name@pkg')
     await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click()
     const errorAlert = page.getByRole('dialog').getByRole('alert')
-    await expect(errorAlert).toContainText('Package name cannot contain : / @ \\')
+    await expect(errorAlert).toContainText(
+      'Package name must be 1 to 64 lowercase letters, digits or single hyphens',
+    )
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click()
 
     // 4. 删除弹窗确认描述双括号插值验证
