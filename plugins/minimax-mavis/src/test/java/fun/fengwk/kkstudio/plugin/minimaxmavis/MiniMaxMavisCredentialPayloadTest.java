@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import fun.fengwk.kkstudio.platform.plugin.support.PluginRedaction;
+
 import java.time.Instant;
 
 /**
@@ -150,7 +152,7 @@ class MiniMaxMavisCredentialPayloadTest {
         representation.contains(SECRET_TOKEN),
         "toString() must never contain the plain access token");
     assertTrue(
-        representation.contains(MavisRedaction.REDACTED),
+        representation.contains(PluginRedaction.REDACTED),
         "toString() must indicate redacted access token");
     assertTrue(representation.contains(CLIENT_UUID), "toString() should contain client UUID");
     assertTrue(

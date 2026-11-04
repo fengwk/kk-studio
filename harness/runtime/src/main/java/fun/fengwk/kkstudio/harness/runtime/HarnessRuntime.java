@@ -624,14 +624,13 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在单个短 transaction 内读取一页「等待环境」只读分组（{@code READY} TOOL 调用 + 到期且无有效执行 lease 的 TOOL Work + 环境无有效
-   * READY 连接租约），按分组代表的 {@code (createdAt, id)} 稳定升序 keyset 分页。
+   * 读取冻结环境的待领取调用候选：READY TOOL 调用及到期且无有效执行 lease 的 TOOL Work，先按根和环境分组，再按代表键分页。
    *
    * <p>{@code afterRepresentativeCreatedAt} / {@code afterRepresentativeInvocationId}
    * 是游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；storage 多取一条判定 {@code hasMore}。这里只暴露聚合事实，产品
-   * owner 与来源展示由上层按根解析。生产实现的 due / lease 判定使用数据库时钟，本入口只传入 JVM 毫秒时钟供内存实现使用。
+   * owner、环境在线状态与来源展示由上层解析。生产实现的 due / lease 判定使用数据库时钟。
    */
-  public PendingEnvironmentWaitPage listPendingEnvironmentWaits(
+  public PendingEnvironmentWaitPage listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
     Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
@@ -643,7 +642,7 @@ public final class HarnessRuntime {
         tx -> {
           List<PendingEnvironmentWaitRow> rows =
               tx.tools()
-                  .listPendingEnvironmentWaits(
+                  .listEnvironmentWaitCandidates(
                       afterRepresentativeCreatedAt, afterRepresentativeInvocationId, probeSize);
           boolean hasMore = rows.size() > limit;
           List<PendingEnvironmentWait> waits = new ArrayList<>(Math.min(rows.size(), limit));
@@ -667,9 +666,9 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在单个短 transaction 内读取一批调用的「环境等待」只读快照：每个调用返回其冻结的所需环境（server-side 工具为 null）与此刻是否在等待该环境上线。
+   * 读取一批调用的冻结环境、READY 状态和 Work 可领取性及时间边界，不判断环境在线状态。
    *
-   * <p>它与 {@link #listPendingEnvironmentWaits} 读同一 Work 事实、同一权威时间域，只服务于工具行展示，不做根+环境聚合，也不落地等待状态。
+   * <p>它与 {@link #listEnvironmentWaitCandidates} 读同一 Work 事实、同一权威时间域，不做根+环境聚合。
    */
   public List<EnvironmentToolWait> listEnvironmentToolWaits(Collection<UUID> invocationIds) {
     Objects.requireNonNull(invocationIds, "invocationIds");
@@ -686,21 +685,22 @@ public final class HarnessRuntime {
                 new EnvironmentToolWait(
                     row.invocationId(),
                     row.environmentId(),
-                    row.waitingForEnvironment(),
-                    row.environmentName(),
-                    row.freshnessAt()));
+                    row.invocationReady(),
+                    row.workAvailable(),
+                    row.workFreshnessAt()));
           }
           return List.copyOf(waits);
         });
   }
 
-  /**
-   * 待处理读模型仅因时间推移（无写事件、无通知）最早可能改变的权威时刻；没有任何此类时刻时返回空。
-   *
-   * <p>浏览器据此安排一次回读，因此租约自然到期不需要周期轮询或新的通知来源。
-   */
-  public Optional<Instant> findNextEnvironmentWaitChange() {
-    return store.transaction(tx -> tx.tools().findNextEnvironmentWaitChange());
+  /** 所有 READY 调用关联的冻结环境，包括尚未到期或仍有执行租约的 Work，供平台计算环境租约截止点。 */
+  public List<EnvironmentId> listReadyToolEnvironments() {
+    return store.transaction(tx -> tx.tools().listReadyToolEnvironments());
+  }
+
+  /** Work 可领取性下一次仅因时间推移可能变化的时刻。 */
+  public Optional<Instant> findNextEnvironmentWorkChange() {
+    return store.transaction(tx -> tx.tools().findNextEnvironmentWorkChange());
   }
 
   /**
@@ -877,15 +877,19 @@ public final class HarnessRuntime {
    * @param nextCommandSequence batch 第一条命令使用的 sequence
    * @param commands 命令 batch，顺序即产品顺序
    * @param now 规划时间
+   * @param childThread 是否为非执行根线程
+   * @param rootEnvironmentName 执行根当前环境，子线程规划时使用
    */
   public EntryPath previewInputCandidatePath(
       UUID threadId,
       EntryPath sourcePath,
       long nextCommandSequence,
       List<NewThreadCommand> commands,
-      Instant now) {
+      Instant now,
+      boolean childThread,
+      String rootEnvironmentName) {
     return TurnPlanPreview.inputCandidatePath(
-        threadId, sourcePath, nextCommandSequence, commands, now);
+        threadId, sourcePath, nextCommandSequence, commands, now, childThread, rootEnvironmentName);
   }
 
   /**

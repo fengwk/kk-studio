@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import type {
@@ -221,9 +221,14 @@ class FakeBridge implements IdeBridge {
   snapshotDocuments: Array<{ path: string; text: string }> = []
   snapshotComplete = true
   connected = true
-  dirty = true
+  dirty = false
   closeViewResult?: BridgeResult
   closeViewError?: Error
+  closeViewGate?: Promise<BridgeResult>
+  snapshotResult?: BridgeResult
+  snapshotError?: Error
+  restoreResult?: BridgeResult
+  ptyListener?: (viewId: string, pid: number) => void | Promise<void>
 
   assign(viewId: string, workspacePath: string, bindingEpoch: string, directory: string): void {
     this.assignments.set(viewId, { workspacePath, bindingEpoch, directory })
@@ -244,7 +249,9 @@ class FakeBridge implements IdeBridge {
 
   async waitForConnection(): Promise<void> {}
 
-  onPty(): void {}
+  onPty(listener: (viewId: string, pid: number) => void | Promise<void>): void {
+    this.ptyListener = listener
+  }
 
   async request(
     viewId: string,
@@ -257,12 +264,21 @@ class FakeBridge implements IdeBridge {
       return { ok: true, clean: !this.dirty }
     }
     if (command.op === 'closeView') {
+      if (this.closeViewGate !== undefined && !command.discard) {
+        return this.closeViewGate
+      }
       if (this.closeViewError !== undefined) {
         throw this.closeViewError
       }
       return this.closeViewResult ?? { ok: true }
     }
     if (command.op === 'snapshot') {
+      if (this.snapshotError !== undefined) {
+        throw this.snapshotError
+      }
+      if (this.snapshotResult !== undefined) {
+        return this.snapshotResult
+      }
       return {
         ok: true,
         documents: this.snapshotDocuments,
@@ -272,7 +288,7 @@ class FakeBridge implements IdeBridge {
       }
     }
     if (command.op === 'restore') {
-      return { ok: true, restored: command.documents?.length ?? 0, skipped: 0 }
+      return this.restoreResult ?? { ok: true, restored: command.documents?.length ?? 0, skipped: 0 }
     }
     if (command.op === 'changeDirectory' && command.directory !== undefined) {
       const assignment = this.assignments.get(viewId)
@@ -294,7 +310,7 @@ const processes: ProcessSupervisor = {
   async trackDescendant() {},
 }
 
-async function setup(options: { maxViews?: number } = {}) {
+async function setup(options: { maxViews?: number; processes?: ProcessSupervisor; recoveryQuotaBytes?: number } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'kk-ide-lifecycle-'))
   const project = join(dataDir, 'project')
   await mkdir(project)
@@ -314,12 +330,13 @@ async function setup(options: { maxViews?: number } = {}) {
   const manager = new FakeManager()
   const bridge = new FakeBridge()
   const events: IdeServiceEvent[] = []
-  const service = await createIdeService(config, processes, {
+  const service = await createIdeService(config, options.processes ?? processes, {
     scheduler,
     manager,
     bridge,
     onEvent: (event) => events.push(event),
     ...(options.maxViews === undefined ? {} : { maxViews: options.maxViews }),
+    ...(options.recoveryQuotaBytes === undefined ? {} : { recoveryQuotaBytes: options.recoveryQuotaBytes }),
   })
   cleanups.push(() => service.close())
   return { service, manager, bridge, scheduler, events, project, config }
@@ -336,7 +353,7 @@ function open(
 }
 
 function boundCommand(
-  action: 'CHANGE_DIRECTORY' | 'FOCUS_TERMINAL' | 'CLOSE_VIEW' | 'DETACH_VIEW',
+  action: 'CHANGE_DIRECTORY' | 'FOCUS_TERMINAL' | 'CLOSE_VIEW',
   state: { viewId: string; documentId: string; bindingEpoch: string },
   extra: Partial<IdeCommand> = {},
 ): IdeCommand {
@@ -378,6 +395,316 @@ async function openStreamingView() {
 }
 
 describe('managed IDE claim and tenant lifecycle', () => {
+  it('retains a failed create when the manager generation changes during registration', async () => {
+    const { service, manager, bridge, project, events } = await setup({ maxViews: 1 })
+    const register = manager.registerView.bind(manager)
+    manager.registerView = async (viewId, epoch, workspacePath) => {
+      const result = await register(viewId, epoch, workspacePath)
+      // Simulate a replacement session before registration is acknowledged.
+      await manager.stop()
+      await manager.ensureStarted(signal())
+      return result
+    }
+    const viewId = randomUUID()
+    const reply = await service.handle(open(viewId, randomUUID(), randomUUID(), project), signal())
+    expect(reply).toMatchObject({ ok: false, code: 'BUSY' })
+    expect(bridge.assignments.has(viewId)).toBe(false)
+    expect(manager.closes).toHaveLength(0)
+    expect(service.getViewState(viewId)?.state).toBe('CLOSING')
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'cleanup-failed', viewId }))
+    expect(await service.handle(open(randomUUID(), randomUUID(), randomUUID(), project), signal()))
+      .toMatchObject({ ok: false, code: 'BUSY' })
+  })
+
+  it.each(['registration-rejected', 'generation-changed'] as const)(
+    'does not publish a new binding when resume is %s',
+    async (scenario) => {
+      const { service, manager, bridge, project } = await setup()
+      const viewId = randomUUID()
+      const documentId = randomUUID()
+      const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+      expect(opened.ok).toBe(true)
+      const register = manager.registerView.bind(manager)
+      manager.registerView = async (id, epoch, workspacePath) => {
+        if (scenario === 'registration-rejected') {
+          return { viewId: id, bindingEpoch: epoch, workspacePath, state: 'CLOSING' }
+        }
+        const result = await register(id, epoch, workspacePath)
+        await manager.stop()
+        await manager.ensureStarted(signal())
+        return result
+      }
+      // The old epoch remains the only locally published binding after a failed resume.
+      const resumed = await service.handle(open(viewId, documentId, randomUUID(), undefined, 'resume'), signal())
+      expect(resumed).toMatchObject({
+        ok: false, code: scenario === 'registration-rejected' ? 'CLEANUP_FAILED' : 'BUSY',
+      })
+      expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', bindingEpoch: opened.bindingEpoch })
+      expect(bridge.assignments.get(viewId)?.bindingEpoch).toBe(opened.bindingEpoch)
+    },
+  )
+
+  it.each(['drift', 'not-open', 'cleanup-throws'] as const)(
+    'converges failed registration (%s) or retains its quota when cleanup throws',
+    async (scenario) => {
+      const { service, manager, bridge, project, events } = await setup({ maxViews: 1 })
+      manager.registerView = async (viewId, bindingEpoch, workspacePath) => ({
+        viewId, bindingEpoch: scenario === 'drift' ? '999' : bindingEpoch, workspacePath,
+        state: scenario === 'not-open' ? 'CLOSING' : 'OPEN',
+      })
+      if (scenario === 'cleanup-throws') {
+        manager.registerView = async () => { throw new Error('registration failed') }
+        manager.closeView = async () => { throw new Error('cleanup failed') }
+      }
+      const viewId = randomUUID()
+      const reply = await service.handle(open(viewId, randomUUID(), randomUUID(), project), signal())
+      expect(reply.ok).toBe(false)
+      expect(bridge.assignments.has(viewId)).toBe(false)
+      if (scenario === 'cleanup-throws') {
+        expect(service.getViewState(viewId)?.state).toBe('CLOSING')
+        expect(events).toContainEqual(expect.objectContaining({ kind: 'cleanup-failed', viewId }))
+        expect(await service.handle(open(randomUUID(), randomUUID(), randomUUID(), project), signal()))
+          .toMatchObject({ ok: false, code: 'BUSY' })
+      } else {
+        expect(service.getViewState(viewId)).toBeNull()
+        expect(manager.closes).toHaveLength(1)
+      }
+    },
+  )
+
+  it('retries idle stop after failure rather than declaring the server stopped', async () => {
+    const { service, manager, scheduler, events, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    await service.handle(boundCommand('CLOSE_VIEW', {
+      viewId, documentId, bindingEpoch: opened.bindingEpoch as string,
+    }, { discard: false }), signal())
+    manager.stopError = new Error('stop failed')
+    await scheduler.advance(IDE_IDLE_STOP_MILLIS)
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'idle-stop-failed' }))
+    expect(manager.session()).toBeDefined()
+    manager.stopError = undefined
+    await scheduler.advance(IDE_IDLE_STOP_MILLIS)
+    expect(manager.stopCalls).toBe(2)
+    expect(manager.session()).toBeUndefined()
+  })
+
+  it('rejects resume of an absent view and directory drift on an existing one', async () => {
+    const { service, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    expect(await service.handle(open(viewId, documentId, randomUUID(), project, 'resume'), signal()))
+      .toMatchObject({ ok: false, code: 'VIEW_GONE' })
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const other = join(project, 'other')
+    await mkdir(other)
+    expect(await service.handle(open(viewId, documentId, randomUUID(), other, 'resume'), signal()))
+      .toMatchObject({ ok: false, code: 'VIEW_IN_USE' })
+    expect(service.getViewState(viewId)?.bindingEpoch).toBe(opened.bindingEpoch)
+  })
+
+  it('keeps an unreachable view open after normal close and allows explicit force', async () => {
+    const { service, bridge, events, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    bridge.connected = false
+    expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal()))
+      .toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
+    expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal()))
+      .toEqual({ ok: true, viewId })
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'backup-failed', viewId }))
+  })
+
+  it('propagates terminal and directory bridge rejection without mutating the view', async () => {
+    const { service, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    bridge.request = async () => ({ ok: false, code: 'BUSY', message: 'bridge rejected' })
+    for (const command of [
+      boundCommand('FOCUS_TERMINAL', state),
+      boundCommand('CHANGE_DIRECTORY', state, { directory: project }),
+      { action: 'COLLAPSE_MOBILE', ...state },
+    ]) {
+      expect(await service.handle(command, signal())).toMatchObject({ ok: false, code: 'BUSY' })
+    }
+    expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', directory: await realpath(project) })
+  })
+
+  it('rejects malformed commands before reserving or registering a view', async () => {
+    const { service, manager, project } = await setup()
+    const valid = open(randomUUID(), randomUUID(), randomUUID(), project)
+    // Invalid fields must not cause process or workspace side effects.
+    for (const command of [
+      { ...valid, mode: 'invalid' },
+      { ...valid, viewId: 'invalid' },
+      { ...valid, documentId: undefined },
+      { ...valid, directory: ' ' },
+      { ...valid, directory: 'x'.repeat(4097) },
+      { ...valid, directory: 'bad\npath' },
+      { action: 'LIST_DIRECTORIES', directory: '\u0000' },
+      { action: 'CLOSE_VIEW', viewId: valid.viewId },
+    ]) {
+      expect(await service.handle(command, signal())).toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+    }
+    expect(manager.registers).toHaveLength(0)
+    expect(service.hasActiveViews()).toBe(false)
+    expect(service.getViewState('invalid')).toBeNull()
+  })
+
+  it('rejects unsafe stream requests without allocating streams', async () => {
+    const { service, project } = await setup()
+    const viewId = randomUUID()
+    const opened = await service.handle(open(viewId, randomUUID(), randomUUID(), project), signal())
+    const epoch = opened.bindingEpoch as string
+    const valid: IdeStreamRequest = { mode: 'HTTP', method: 'GET', path: '/', headers: [] }
+    // Exercise traversal, byte limits and header validation at the data-plane boundary.
+    for (const request of [
+      { ...valid, mode: 'bad' as IdeStreamRequest['mode'] },
+      { ...valid, method: 'GET /' },
+      ...['//host', '/a\\b', '/%2e%2e/x', '/a/.%2e', '/\n', `/${'界'.repeat(3000)}`]
+        .map((path) => ({ ...valid, path })),
+      { ...valid, headers: Array.from({ length: 101 }, () => ['x', 'y'] as [string, string]) },
+      { ...valid, headers: [['bad name', 'x']] as [string, string][] },
+      { ...valid, headers: [['x', 'a'.repeat(16385)]] as [string, string][] },
+    ]) {
+      await expect(service.resolveView(viewId, epoch, request)).rejects.toThrow(/invalid/)
+    }
+    await expect(service.resolveView(viewId, '999', valid)).rejects.toMatchObject({ code: 'VIEW_GONE' })
+    expect(service.activeStreamCount()).toBe(0)
+  })
+
+  it.each(['rejected', 'exception', 'quota', 'incomplete'] as const)(
+    'reports %s snapshots while still completing an explicitly forced close',
+    async (scenario) => {
+      const { service, bridge, manager, events, project } = await setup(
+        scenario === 'quota' ? { recoveryQuotaBytes: 1 } : {},
+      )
+      const viewId = randomUUID()
+      const documentId = randomUUID()
+      const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+      const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+      // An unknown native outcome authorizes force without masking snapshot failures.
+      bridge.closeViewResult = { ok: false, code: 'UNAVAILABLE' }
+      expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal()))
+        .toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+      bridge.closeViewResult = undefined
+      if (scenario === 'rejected') bridge.snapshotResult = { ok: false, message: 'snapshot rejected' }
+      if (scenario === 'exception') bridge.snapshotError = new Error('private detail')
+      if (scenario === 'incomplete') bridge.snapshotComplete = false
+      expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal()))
+        .toEqual({ ok: true, viewId })
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: scenario === 'incomplete' ? 'backup-incomplete' : 'backup-failed', viewId,
+      }))
+      if (scenario === 'exception') {
+        expect(events).toContainEqual(expect.objectContaining({ message: 'dirty text snapshot failed' }))
+      }
+      expect(manager.closes).toHaveLength(1)
+      expect(service.getViewState(viewId)).toBeNull()
+    },
+  )
+
+  it('rejects corrupt, unbound, disconnected and rejected restores without losing the backup', async () => {
+    const { service, bridge, project, config } = await setup()
+    const viewId = randomUUID()
+    expect(await service.restoreBackup(viewId, signal())).toEqual({ restored: 0, skipped: 0 })
+    const recovery = join(config.dataDir, 'ide', 'recovery')
+    await mkdir(recovery, { recursive: true })
+    const file = join(recovery, `${viewId}.json`)
+    await writeFile(file, '{bad json')
+    await expect(service.restoreBackup(viewId, signal())).rejects.toThrow(/corrupt/)
+    const backup = JSON.stringify({
+      viewId, bindingEpoch: '1', directory: project, createdAt: new Date().toISOString(),
+      complete: true, documents: [{ path: join(project, 'draft'), text: 'draft' }],
+    })
+    await writeFile(file, backup)
+    await expect(service.restoreBackup(viewId, signal())).rejects.toMatchObject({ code: 'VIEW_GONE' })
+    const opened = await service.handle(open(viewId, randomUUID(), randomUUID(), project), signal())
+    expect(opened.ok).toBe(true)
+    bridge.connected = false
+    await expect(service.restoreBackup(viewId, signal())).rejects.toMatchObject({ code: 'UNAVAILABLE' })
+    bridge.connected = true
+    bridge.restoreResult = { ok: false, code: 'BUSY', message: 'restore rejected' }
+    await expect(service.restoreBackup(viewId, signal())).rejects.toMatchObject({ code: 'BUSY', message: 'restore rejected' })
+    expect(await readFile(file, 'utf8')).toBe(backup)
+  })
+
+  it('supervises PTY descendants under the current server and rejects missing supervision', async () => {
+    const tracked: Array<[number, number]> = []
+    const supervisor: ProcessSupervisor = {
+      ...processes,
+      async trackDescendant(parent, pid) { tracked.push([parent, pid]) },
+    }
+    const { service, bridge, manager, project } = await setup({ processes: supervisor })
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    await bridge.ptyListener?.(viewId, 5678)
+    expect(tracked).toEqual([[4242, 5678]])
+    await manager.stop()
+    await expect(bridge.ptyListener?.(viewId, 5679)).rejects.toThrow(/supervision is unavailable/)
+    expect(opened.ok).toBe(true)
+    const unsupervised = await setup({ processes: { start: processes.start, close: processes.close } })
+    expect(await unsupervised.service.handle({ action: 'FOCUS_TERMINAL' }, signal()))
+      .toMatchObject({ ok: false, message: 'terminal supervision is unavailable' })
+  })
+
+  it('rejects commands and streams after shutdown and makes close idempotent', async () => {
+    const { service, manager, project } = await setup()
+    const viewId = randomUUID()
+    const opened = await service.handle(open(viewId, randomUUID(), randomUUID(), project), signal())
+    const stream = await service.resolveView(viewId, opened.bindingEpoch as string, {
+      mode: 'HTTP', method: 'GET', path: '/', headers: [],
+    })
+    await service.close()
+    // Shutdown invalidates streams and cannot be reversed by later lease proofs.
+    expect(stream.signal.aborted).toBe(true)
+    stream.release()
+    service.apply({ round: '1', bindings: [] }, 0)
+    expect(await listViews(service)).toMatchObject({ ok: false, message: 'IDE service is closed' })
+    await expect(service.resolveView(viewId, opened.bindingEpoch as string, {
+      mode: 'HTTP', method: 'GET', path: '/', headers: [],
+    })).rejects.toThrow(/closed/)
+    expect(service.canStartUpdate()).toBe(false)
+    await expect(service.stopForUpdate(signal())).rejects.toMatchObject({ code: 'BUSY' })
+    await service.close()
+    expect(manager.stopCalls).toBe(1)
+  })
+
+  it('routes directory listing and mobile collapse through the service', async () => {
+    const { service, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    // Listing is unbound; mobile layout must target the current binding.
+    expect(await service.handle({ action: 'LIST_DIRECTORIES', directory: project }, signal())).toMatchObject({
+      ok: true, directoryListing: { path: await realpath(project), children: [] },
+    })
+    expect(await service.handle({
+      action: 'COLLAPSE_MOBILE', viewId, documentId, bindingEpoch: opened.bindingEpoch,
+    }, signal())).toEqual({ ok: true, viewId })
+    expect(bridge.commands.at(-1)).toMatchObject({ viewId, command: { op: 'collapseMobile' } })
+  })
+
+  it('permits direct force cleanup when the bridge is disconnected', async () => {
+    const { service, bridge, manager, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    bridge.connected = false
+    // A disconnected window cannot provide a known native cancellation.
+    expect((await service.handle(boundCommand('CLOSE_VIEW', {
+      viewId, documentId, bindingEpoch: opened.bindingEpoch as string,
+    }, { discard: true }), signal())).ok).toBe(true)
+    expect(manager.closes).toHaveLength(1)
+  })
+
   it('assigns the confirmed directory to the bridge on create and resume', async () => {
     const { service, bridge, project } = await setup()
     const nextDirectory = join(project, 'next')
@@ -447,7 +774,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(service.getViewState(viewId)?.directory).toBe(confirmed)
   })
 
-  it.each(['FOCUS_TERMINAL', 'DETACH_VIEW', 'CLOSE_VIEW'] as const)(
+  it.each(['FOCUS_TERMINAL', 'CLOSE_VIEW'] as const)(
     'round-trips the actual %s service command acknowledgement',
     async (action) => {
       const { service, project } = await setup()
@@ -455,7 +782,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
       const documentId = randomUUID()
       const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
       const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-      const reply = await service.handle(boundCommand(action, state, action === 'CLOSE_VIEW' ? { discard: true } : {}), signal())
+      const reply = await service.handle(boundCommand(action, state, action === 'CLOSE_VIEW' ? { discard: false } : {}), signal())
       expect(reply).toEqual({ ok: true, viewId })
       const result = toProtoIdeResult(reply)
       expect(result.ok).toBe(true)
@@ -481,7 +808,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(manager.closes).toHaveLength(0)
     await scheduler.advance(1_000)
     await waitFor(() => service.getViewState(viewId) === null)
-    expect(manager.closes[0]?.mode).toBe('expired')
+    expect(manager.closes[0]?.mode).toBe('discard')
   })
 
   it('replays the same claim exactly once and rejects drift', async () => {
@@ -516,7 +843,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     service.apply({ round: '2', bindings: [{ viewId, documentId, bindingEpoch: oldEpoch }] }, scheduler.now())
     await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS)
     await waitFor(() => service.getViewState(viewId) === null)
-    expect(manager.closes[0]?.mode).toBe('expired')
+    expect(manager.closes[0]?.mode).toBe('discard')
   })
 
   it('enforces 45s document exclusivity while allowing same-document rebind', async () => {
@@ -534,17 +861,19 @@ describe('managed IDE claim and tenant lifecycle', () => {
     await service.handle(open(viewId, documentA, randomUUID(), undefined, 'resume'), signal())
   })
 
-  it('detach freezes the old epoch and late proof cannot revive it', async () => {
-    const { service, scheduler, project, manager } = await setup()
+  it('rejects the retired detach action without altering the view or its lease', async () => {
+    const { service, scheduler, project } = await setup()
     const viewId = randomUUID()
     const documentId = randomUUID()
     const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
     const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-    expect((await service.handle(boundCommand('DETACH_VIEW', state), signal())).ok).toBe(true)
+    expect(await service.handle({ action: 'DETACH_VIEW', ...state }, signal())).toMatchObject({
+      ok: false, code: 'UNAVAILABLE', message: 'unknown ide action',
+    })
+    await scheduler.advance(1_000)
     service.apply({ round: '9', bindings: [state] }, scheduler.now())
-    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS)
-    await waitFor(() => service.getViewState(viewId) === null)
-    expect(manager.closes).toHaveLength(1)
+    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS - 1_000)
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
   })
 
   it('retains CLOSING and quota after cleanup failure, then permits an explicit retry', async () => {
@@ -554,13 +883,13 @@ describe('managed IDE claim and tenant lifecycle', () => {
     const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
     const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
     manager.closeFail = true
-    const failed = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())
+    const failed = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
     expect(failed).toMatchObject({ ok: false, code: 'CLEANUP_FAILED' })
     expect(service.getViewState(viewId)?.state).toBe('CLOSING')
     expect(service.hasActiveViews()).toBe(true)
     expect(service.canStartUpdate()).toBe(false)
     manager.closeFail = false
-    const retried = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())
+    const retried = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
     expect(retried.ok).toBe(true)
     expect(service.getViewState(viewId)).toBeNull()
   })
@@ -592,7 +921,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     const documentId = randomUUID()
     const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
     const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
+    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())).ok).toBe(true)
     await scheduler.advance(IDE_IDLE_STOP_MILLIS - 1)
     expect(manager.stopCalls).toBe(0)
     await scheduler.advance(1)
@@ -628,7 +957,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     upstream.release()
     expect(service.activeStreamCount()).toBe(0)
     const state = { viewId, documentId, bindingEpoch: epoch }
-    await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())
+    await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
     expect(service.canStartUpdate()).toBe(true)
     await service.stopForUpdate(signal())
     expect(manager.stopCalls).toBe(1)
@@ -733,7 +1062,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     await waitFor(() => service.getViewState(viewId) === null)
   })
 
-  it('refuses a normal close while dirty and closes clean through bridge plus managed discard', async () => {
+  it('hands dirty state to native confirmation and preserves it on cancellation', async () => {
     const { service, manager, bridge, project } = await setup()
     const viewId = randomUUID()
     const documentId = randomUUID()
@@ -741,32 +1070,36 @@ describe('managed IDE claim and tenant lifecycle', () => {
     const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
 
     bridge.dirty = true
+    bridge.closeViewResult = { ok: false, code: 'CANCELLED' }
     const dirty = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
-    expect(dirty).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(dirty).toMatchObject({ ok: false, code: 'CANCELLED' })
     expect(service.getViewState(viewId)?.state).toBe('OPEN')
     expect(manager.closes).toHaveLength(0)
+    // A known cancellation never authorizes force.
+    expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).toMatchObject({ ok: false, code: 'BUSY' })
 
-    bridge.dirty = false
+    bridge.closeViewResult = { ok: true }
     const closed = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
     expect(closed.ok).toBe(true)
     expect(manager.closes[0]?.mode).toBe('discard')
     const bridgeClose = bridge.commands.find((entry) => entry.command.op === 'closeView')
     expect(bridgeClose?.command.discard).toBeUndefined()
+    expect(bridge.commands.some((entry) => entry.command.op === 'inspect')).toBe(false)
   })
 
-  it('keeps streams and binding when an inspection is clean but the final bridge close rejects', async () => {
+  it('keeps streams and binding when native close is cancelled', async () => {
     const { service, manager, bridge, viewId, state, opened, upstream } = await openStreamingView()
     bridge.dirty = false
     bridge.closeViewResult = {
       ok: false,
-      code: 'DIRTY',
+      code: 'CANCELLED',
       message: 'save or discard unsaved changes before closing the view',
     }
 
     const rejected = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
 
-    expect(rejected).toMatchObject({ ok: false, code: 'DIRTY' })
-    expect(bridge.commands.filter((entry) => entry.command.op === 'inspect')).toHaveLength(1)
+    expect(rejected).toMatchObject({ ok: false, code: 'CANCELLED' })
+    expect(bridge.commands.filter((entry) => entry.command.op === 'inspect')).toHaveLength(0)
     expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', bindingEpoch: state.bindingEpoch })
     expect(upstream.signal.aborted).toBe(false)
     expect(service.activeStreamCount()).toBe(1)
@@ -816,7 +1149,68 @@ describe('managed IDE claim and tenant lifecycle', () => {
       expect(bridge.isConnected(viewId, state.bindingEpoch)).toBe(true)
       expect(await readFile(opened.workspacePath as string, 'utf8')).toContain('folders')
       upstream.release()
+      // An unknown native outcome permits force, with a recovery snapshot first.
+      bridge.closeViewError = undefined
+      bridge.closeViewResult = undefined
+      expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
+      expect(bridge.commands.some((entry) => entry.command.op === 'snapshot')).toBe(true)
     }
+  })
+
+  it('waits beyond both former close budgets for native confirmation', async () => {
+    const { service, bridge, manager, scheduler, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    let resolve!: (result: BridgeResult) => void
+    bridge.closeViewGate = new Promise((done) => { resolve = done })
+    let settled = false
+    const pending = service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal()).then((result) => {
+      settled = true
+      return result
+    })
+    await flush()
+    // Neither the 20s bridge budget nor 30s service budget may end the prompt.
+    await scheduler.advance(31_000)
+    expect(settled).toBe(false)
+    expect(manager.closes).toHaveLength(0)
+    // The workbench may still open new HTTP or websocket streams while its dialog is visible.
+    const stream = await service.resolveView(viewId, state.bindingEpoch, {
+      mode: 'HTTP', method: 'GET', path: '/', headers: [],
+    })
+    expect(stream.signal.aborted).toBe(false)
+    stream.release()
+    service.apply({ round: '1', bindings: [state] }, scheduler.now())
+    resolve({ ok: true })
+    expect((await pending).ok).toBe(true)
+  })
+
+  it.each(['abort', 'disconnect'] as const)('ignores a late native success after %s', async (scenario) => {
+    const { service, bridge, manager, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    let resolve!: (result: BridgeResult) => void
+    bridge.closeViewGate = new Promise((done) => { resolve = done })
+    const controller = new AbortController()
+    const pending = service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), controller.signal)
+    await flush()
+    if (scenario === 'abort') {
+      controller.abort()
+      expect((await pending).ok).toBe(false)
+      resolve({ ok: true })
+    } else {
+      bridge.connected = false
+      resolve({ ok: true })
+      expect((await pending).ok).toBe(false)
+    }
+    // A late success must not dispose resources after control was lost.
+    await flush()
+    expect(manager.closes).toHaveLength(0)
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
+    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
   })
 
   it('aborts only the accepted view stream and removes only its managed resources', async () => {
@@ -860,14 +1254,25 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(service.activeStreamCount()).toBe(0)
   })
 
-  it('snapshots ordinary dirty text privately on expiry and restores it into a new binding', async () => {
-    const { service, scheduler, bridge, project, config } = await setup()
+  it('retains dirty expired views and snapshots on explicit force after an unknown outcome', async () => {
+    const { service, scheduler, bridge, manager, events, project, config } = await setup()
     const viewId = randomUUID()
     const documentId = randomUUID()
+    bridge.dirty = true
     bridge.snapshotDocuments = [{ path: join(project, 'draft.txt'), text: 'unsaved text' }]
-    await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
     await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS)
-    await waitFor(() => service.getViewState(viewId) === null)
+    await waitFor(() => events.some((event) => event.kind === 'expiry-deferred'))
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
+    expect(manager.closes).toHaveLength(0)
+    expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal()))
+      .toMatchObject({ ok: false, code: 'BUSY' })
+    bridge.closeViewResult = { ok: false, code: 'UNAVAILABLE' }
+    expect(await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal()))
+      .toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+    bridge.closeViewResult = undefined
+    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
     expect(bridge.commands.some((entry) => entry.command.op === 'snapshot')).toBe(true)
 
     const backupFile = join(config.dataDir, 'ide', 'recovery', `${viewId}.json`)
@@ -879,6 +1284,38 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(reopened.ok).toBe(true)
     expect(await service.restoreBackup(viewId, signal())).toEqual({ restored: 1, skipped: 0 })
     expect(bridge.commands.some((entry) => entry.command.op === 'restore')).toBe(true)
+  })
+
+  it('retains an expired unreachable view until a user explicitly forces it closed', async () => {
+    const { service, scheduler, bridge, manager, events, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    bridge.connected = false
+    await scheduler.advance(IDE_VIEW_EXPIRY_MILLIS)
+    await waitFor(() => events.some((event) => event.kind === 'expiry-deferred'))
+    expect(service.getViewState(viewId)?.state).toBe('OPEN')
+    expect(manager.closes).toHaveLength(0)
+    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
+    expect(manager.closes).toHaveLength(1)
+  })
+
+  it('does not carry force authorization across a new binding epoch', async () => {
+    const { service, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    const old = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+    bridge.closeViewResult = { ok: false, code: 'UNAVAILABLE' }
+    expect(await service.handle(boundCommand('CLOSE_VIEW', old, { discard: false }), signal()))
+      .toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+    bridge.closeViewResult = undefined
+    const resumed = await service.handle(open(viewId, documentId, randomUUID(), undefined, 'resume'), signal())
+    const current = { ...old, bindingEpoch: resumed.bindingEpoch as string }
+    // A new epoch must not inherit a previous close's uncertain outcome.
+    expect(await service.handle(boundCommand('CLOSE_VIEW', current, { discard: true }), signal()))
+      .toMatchObject({ ok: false, code: 'BUSY' })
   })
 
   it('keeps every view CLOSING and refuses a replacement when crash cleanup cannot be proven', async () => {
@@ -922,7 +1359,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(manager.stopCalls).toBe(0)
 
     upstream.release()
-    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: true }), signal())).ok).toBe(true)
+    expect((await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())).ok).toBe(true)
     await scheduler.advance(IDE_IDLE_STOP_MILLIS - 1)
     expect(manager.stopCalls).toBe(0)
     await scheduler.advance(1)

@@ -118,7 +118,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(path, compactionPreparation);
+        return resolveCompaction(compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, path.baseSettings(), clock.instant()));
@@ -280,7 +280,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (model != null) {
       return resolveLogical(model, requested.variant(), null);
     }
-    String defaultModel = agent.modelName();
+    ModelSelection defaultSelection = builtinAgentModel(agent);
+    String defaultModel = defaultSelection == null ? null : defaultSelection.modelName();
     AgentModel fallback =
         defaultModel == null || defaultModel.equals(requested.modelName())
             ? null
@@ -291,7 +292,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + requested.modelName()
               + " and the agent default model are both unavailable; bind an available model");
     }
-    return resolveLogical(fallback, requested.variant(), agent.variant());
+    return resolveLogical(fallback, requested.variant(), defaultSelection.variant());
+  }
+
+  private static ModelSelection builtinAgentModel(AgentDefinition agent) {
+    ExecutionSelection execution = agent.execution();
+    if (execution == null || !BuiltinExecution.DRIVER.equals(execution.driver())) {
+      return null;
+    }
+    try {
+      return BuiltinExecution.model(execution);
+    } catch (IllegalArgumentException error) {
+      throw rejection(
+          "invalid agent builtin execution: " + agent.name() + ": " + messageOrClass(error));
+    }
   }
 
   /**
@@ -424,19 +438,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
    * config 与 removedPrefixTokens 现算。
    */
-  private Result resolveCompaction(EntryPath parentPath, CompactionPreparation preparation) {
+  private Result resolveCompaction(CompactionPreparation preparation) {
     String compactionAgentName = BuiltinAgentDefinitions.COMPACTION_NAME;
     AgentDefinition agent =
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.modelName() == null) {
+    if (agent.execution() == null) {
       throw rejection("compaction agent has no configured model");
     }
+    if (!BuiltinExecution.DRIVER.equals(agent.execution().driver())) {
+      throw rejection("compaction agent must use builtin execution");
+    }
+    ModelSelection selection = builtinAgentModel(agent);
     AgentModel model =
         require(
-            modelRepository.getByName(agent.modelName()), "model not found: " + agent.modelName());
-    ResolvedSelection resolved = resolveLogical(model, agent.variant(), null);
+            modelRepository.getByName(selection.modelName()),
+            "model not found: " + selection.modelName());
+    ResolvedSelection resolved = resolveLogical(model, selection.variant(), null);
     for (MemberRuntime member : resolved.members()) {
       requireReasoningSupport(member);
     }
@@ -458,11 +477,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
     ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
     BranchSettings childSettings =
-        new BranchSettings(
-            compactionAgentName,
-            compactorExecution,
-            parentPath.baseSettings().environmentName(),
-            null);
+        new BranchSettings(compactionAgentName, compactorExecution, null, null);
     return new TurnResolver.CompactionResolved(
         compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }

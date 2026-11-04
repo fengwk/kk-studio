@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * ComfyUI 插件的运行期实例：按一次配置装配一个共享客户端与每个冻结工作流各自的 adapter。
  *
- * <p>实例拥有它创建的客户端；{@link #close()} 幂等释放自身资源，绝不关闭注入的宿主资源。停用或没有工作流时两域贡献都为空，Harness 始终为空。
+ * <p>实例拥有它创建的客户端；{@link #close()} 幂等释放自身资源，绝不关闭注入的宿主资源。停用或没有工作流时不贡献任何能力，也不贡献 Harness Contributor。
  */
 final class ComfyuiInstance implements PluginInstance {
 
@@ -100,8 +100,8 @@ final class ComfyuiInstance implements PluginInstance {
   }
 
   @Override
-  public List<CanvasFunctionAdapter> canvasAdapters() {
-    return canvasAdapters;
+  public <T> List<T> contributions(Class<T> type) {
+    return PluginInstance.contributionsOf(type, canvasAdapters);
   }
 
   @Override

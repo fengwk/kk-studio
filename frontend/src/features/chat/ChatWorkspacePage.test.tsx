@@ -17,10 +17,10 @@ import {
   setChatPaneTarget,
   type ChatPaneState,
 } from '@/features/chat/chat-pane-state'
-import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { chatService } from '@/features/chat/chat-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import {
   createBuiltinExecution,
@@ -53,13 +53,13 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     listChatSessions: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
@@ -87,9 +87,8 @@ const assistantAgent: AgentDefinitionDTO = {
   description: null,
   systemPrompt: null,
   type: 'USER',
-  model: 'MiniMax',
-  variant: 'default',
-  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+  execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
+  config: { tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: 0,
   updateTime: 0,
@@ -362,7 +361,7 @@ describe('ChatWorkspacePage', () => {
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
     expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
     const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
+    expect(request.owner).toEqual({ kind: 'CHAT', id: CHAT_ID })
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.commands).toHaveLength(1)
     expect(request.commands[0]?.type).toBe('USER_MESSAGE')

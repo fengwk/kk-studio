@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.pluginhost.service;
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
@@ -23,6 +22,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginFunctionNamesProjection;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Authenticati
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.BrowserSession;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Reachability;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 
 import java.time.Clock;
@@ -73,6 +74,7 @@ public final class PluginManagementService {
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
   private final PluginConfigurationService configurationService;
+  private final PluginFunctionNamesProjection functionNamesProjection;
   private final PluginAuthAttemptRepository authAttempts;
   private final Duration authAttemptTtl;
   private final Clock clock;
@@ -83,6 +85,7 @@ public final class PluginManagementService {
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
+      PluginFunctionNamesProjection functionNamesProjection,
       PluginAuthAttemptRepository authAttempts,
       Duration authAttemptTtl,
       Clock clock) {
@@ -92,6 +95,8 @@ public final class PluginManagementService {
     this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.configurationService =
         Objects.requireNonNull(configurationService, "configurationService");
+    this.functionNamesProjection =
+        Objects.requireNonNull(functionNamesProjection, "functionNamesProjection");
     this.authAttempts = Objects.requireNonNull(authAttempts, "authAttempts");
     if (authAttemptTtl.isZero() || authAttemptTtl.isNegative()) {
       throw new IllegalArgumentException("authAttemptTtl must be a positive duration");
@@ -118,10 +123,48 @@ public final class PluginManagementService {
       String pluginId,
       long expectedRevision,
       String valuesJson,
-      Map<String, PluginSecretPatch> secretPatch) {
+      Map<String, PluginSecretPatchDTO> secretPatch) {
     StudioPlugin plugin = requirePlugin(pluginId);
-    configurationService.configure(pluginId, expectedRevision, valuesJson, secretPatch);
+    configurationService.configure(
+        pluginId, expectedRevision, valuesJson, toSecretPatch(secretPatch));
     return describe(plugin);
+  }
+
+  /** 校验秘密补丁并转为领域操作；错误不得包含请求字段名或秘密值。 */
+  private static Map<String, PluginSecretPatch> toSecretPatch(
+      Map<String, PluginSecretPatchDTO> secretPatch) {
+    Map<String, PluginSecretPatch> mapped = new LinkedHashMap<>();
+    if (secretPatch == null) {
+      return mapped;
+    }
+    for (Map.Entry<String, PluginSecretPatchDTO> entry : secretPatch.entrySet()) {
+      String field = entry.getKey();
+      if (field == null || field.isBlank() || !field.equals(field.strip())) {
+        throw new AiValidationException(RESOURCE, "secretPatch must use canonical field names");
+      }
+      PluginSecretPatchDTO dto = entry.getValue();
+      if (dto == null || dto.getOperation() == null) {
+        throw new AiValidationException(RESOURCE, "secretPatch must declare an operation");
+      }
+      String operation = dto.getOperation();
+      if (("KEEP".equals(operation) || "CLEAR".equals(operation)) && dto.getValue() != null) {
+        throw new AiValidationException(RESOURCE, operation + " must not carry a value");
+      }
+      try {
+        mapped.put(
+            field,
+            switch (operation) {
+              case "KEEP" -> PluginSecretPatch.keep();
+              case "SET" -> PluginSecretPatch.set(dto.getValue());
+              case "CLEAR" -> PluginSecretPatch.clear();
+              default -> throw new AiValidationException(
+                  RESOURCE, "secretPatch operation must be KEEP, SET or CLEAR");
+            });
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(RESOURCE, "secretPatch value is invalid");
+      }
+    }
+    return mapped;
   }
 
   /** 校验 region、取官方登录地址，再写入本次唯一的 pending attempt。返回值只有 attemptId 与登录地址。 */
@@ -292,7 +335,9 @@ public final class PluginManagementService {
         applied.flatMap(entry -> entry.instance().connectionCheck()).isPresent());
     dto.setHarnessToolNames(applied.map(entry -> toolNames(snapshot, entry)).orElse(List.of()));
     dto.setCanvasFunctionNames(
-        applied.map(entry -> functionNames(snapshot, entry)).orElse(List.of()));
+        applied
+            .map(entry -> functionNamesProjection.functionNames(snapshot, entry))
+            .orElse(List.of()));
     return dto;
   }
 
@@ -306,18 +351,6 @@ public final class PluginManagementService {
     for (ToolContribution tool : snapshot.harnessCatalog().tools()) {
       if (plugin.contributorIds().contains(tool.id().contributorId())) {
         names.add(tool.definition().descriptor().name());
-      }
-    }
-    return List.copyOf(names);
-  }
-
-  private static List<String> functionNames(
-      PluginCatalogSnapshot snapshot, PluginCatalogSnapshot.ConfiguredPlugin plugin) {
-    List<String> names = new ArrayList<>();
-    for (CanvasFunctionCatalog.RegisteredFunction function :
-        snapshot.canvasFunctionCatalog().list()) {
-      if (plugin.functionNames().contains(function.function().name())) {
-        names.add(function.function().name());
       }
     }
     return List.copyOf(names);

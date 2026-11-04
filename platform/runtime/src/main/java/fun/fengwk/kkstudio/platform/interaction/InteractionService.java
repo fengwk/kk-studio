@@ -9,19 +9,17 @@ import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
  * 人工交互（问卷回答与工具审批）的统一写入口：唯一的产品 owner 授权与锁序边界。
  *
- * <p>写入前先沿目标 Thread 的不可变祖先链解析真实执行根，再按根解析产品 owner：根为 Issue+Agent Thread 时先按 {@code Project SHARE ->
- * Issue UPDATE} 锁定产品层级，再进入 Harness Runtime（Session {@literal ->} Thread {@literal ->} Model
- * {@literal ->} Tool siblings {@literal ->} Work）；根为 Chat 或内部 Thread 时没有产品层级，直接进入
- * Runtime。审批与回答仍写回来源 invocation 本身，不因根归属改写目标；按根取产品锁使没有直接产品绑定的后代任务也受同一产品层级先锁后 Runtime
- * 的约束。该顺序保证永不出现「先锁 Thread 再反锁 Issue」的死锁，并使回答/审批与产品状态迁移（暂停、归档、Run 切换）在同一事务内串行化。
+ * <p>写入前沿目标 Thread 的不可变祖先链解析真实执行根及其 Session，再让每个产品归属实现获取所需的产品锁，最后进入 Runtime。 审批与回答仍写回来源 invocation
+ * 本身；后代任务也按根的产品层级先锁，避免锁序倒置。
  *
  * <p>暂停（paused）与阻塞（BLOCKED）只阻止后续外部派发，不阻止人工回答/审批被记录：本入口照常落盘 durable 事实并登记 Work，是否继续 派发外部调用由 Issue
  * 工作流在消费 Work 时按当前 Run 身份与授权判定；本服务不代其判定，也不提供任何绕过该判定的通道。
@@ -29,14 +27,13 @@ import java.util.UUID;
 @Service
 public class InteractionService {
 
-  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
+  private final List<SessionOwnership> ownerships;
   private final InteractionRootResolver rootResolver;
 
   /** 创建统一交互写入口。 */
   public InteractionService(
-      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
-      ObjectProvider<HarnessRuntime> runtimes) {
-    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
+      List<SessionOwnership> ownerships, ObjectProvider<HarnessRuntime> runtimes) {
+    this.ownerships = List.copyOf(ownerships);
     this.rootResolver = new InteractionRootResolver(runtimes);
   }
 
@@ -65,18 +62,12 @@ public class InteractionService {
     return requireRuntime().decideToolApproval(command);
   }
 
-  /**
-   * 解析 Thread 的产品归属并锁定产品层级：先沿来源 Thread 的不可变祖先链定位真实执行根，命中 Issue+Agent 绑定时按 {@code Project SHARE ->
-   * Issue UPDATE} 加锁；根没有 Issue 归属（Chat 或内部委派）时无需产品锁。后代任务即使没有直接绑定，也按其根的产品层级先锁。
-   *
-   * <p>Project/Issue 行在绑定仍存在时缺失或层级不一致属于产品归属事实损坏，fail closed 而不是退化成无产品锁的写入。
-   */
+  /** 按真实执行根及其 Session 调用所有产品锁钩子，先于 Runtime 写入。 */
   private void lockProductScope(UUID threadId) {
     UUID rootThreadId = rootResolver.requireRootId(threadId);
-    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
-    // 没有 Project 应用就没有 Issue+Agent 归属的执行根。
-    if (ownership != null) {
-      ownership.lockRootForInteraction(rootThreadId);
+    UUID rootSessionId = requireRuntime().getThreadSnapshot(rootThreadId).thread().sessionId();
+    for (SessionOwnership ownership : ownerships) {
+      ownership.lockForInteraction(rootThreadId, rootSessionId);
     }
   }
 

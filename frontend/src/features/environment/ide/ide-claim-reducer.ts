@@ -101,16 +101,12 @@ export function isViewInUse(error: unknown): boolean {
   )
 }
 
-export function isDirtyClose(error: unknown): boolean {
-  return /DIRTY|unsaved|save or discard/i.test(ideErrorText(error))
-}
-
 export function isUnknownIdeFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
     if (error.status == null || error.status >= 500) {
       return true
     }
-    return error.code === 'IDE_UNAVAILABLE'
+    return error.code?.toLowerCase() === 'ide_unavailable'
   }
   // axios 拦截器之外抛出的网络错误没有 HTTP 状态，同样只能作为结果未知处理。
   return true

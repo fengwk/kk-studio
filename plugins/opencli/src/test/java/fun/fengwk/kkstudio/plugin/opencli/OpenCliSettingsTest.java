@@ -29,10 +29,6 @@ class OpenCliSettingsTest {
     assertEquals(5000L, s.connectTimeoutMillis());
     assertEquals(120000L, s.requestTimeoutMillis());
     assertEquals(130000L, s.longPollTimeoutMillis());
-    assertEquals(16384, s.streamBufferBytes());
-    assertEquals(524288, s.maxJsonResponseBytes());
-    assertEquals(4096, s.maxErrorResponseBytes());
-    assertEquals(65535, s.maxOutputChars());
 
     assertFalse(s.gptImage2().paidEnabled());
     assertEquals(900, s.gptImage2().askTimeoutSeconds());
@@ -56,10 +52,6 @@ class OpenCliSettingsTest {
             10000L,
             60000L,
             150000L,
-            32768,
-            1048576,
-            8192,
-            100000,
             new OpenCliSettings.GptImage2(true, 600, 700000L, 1000000L),
             new OpenCliSettings.Seedance(true, "ws-1", 2, 500000L, 20000L, 1000000L));
 
@@ -105,10 +97,6 @@ class OpenCliSettingsTest {
     assertBound(1L, 120000L, "connectTimeoutMillis", v -> withRootField(v, 0));
     assertBound(1000L, 1800000L, "requestTimeoutMillis", v -> withRootField(v, 1));
     assertBound(121000L, 600000L, "longPollTimeoutMillis", v -> withRootField(v, 2));
-    assertBound(1024L, 1048576L, "streamBufferBytes", v -> withRootField(v, 3));
-    assertBound(1024L, 4194304L, "maxJsonResponseBytes", v -> withRootField(v, 4));
-    assertBound(256L, 65536L, "maxErrorResponseBytes", v -> withRootField(v, 5));
-    assertBound(1024L, 1000000L, "maxOutputChars", v -> withRootField(v, 6));
   }
 
   @Test
@@ -218,16 +206,12 @@ class OpenCliSettingsTest {
         v.length > 0 ? v[0] : 5000L,
         v.length > 1 ? v[1] : 120000L,
         v.length > 2 ? v[2] : 130000L,
-        v.length > 3 ? (int) v[3] : 16384,
-        v.length > 4 ? (int) v[4] : 524288,
-        v.length > 5 ? (int) v[5] : 4096,
-        v.length > 6 ? (int) v[6] : 65535,
         OpenCliTestSettings.defaults().gptImage2(),
         OpenCliTestSettings.defaults().seedance());
   }
 
   private static OpenCliSettings withRootField(long val, int index) {
-    long[] v = new long[] {5000L, 120000L, 130000L, 16384, 524288, 4096, 65535};
+    long[] v = new long[] {5000L, 120000L, 130000L};
     v[index] = val;
     return create(false, null, v);
   }

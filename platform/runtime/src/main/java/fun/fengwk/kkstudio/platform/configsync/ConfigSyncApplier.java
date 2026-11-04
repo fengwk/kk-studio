@@ -214,8 +214,7 @@ public class ConfigSyncApplier {
       AgentDefinitionEditablePropertiesDTO source, AgentDefinitionEditablePropertiesDTO target) {
     target.setDescription(source.getDescription());
     target.setSystemPrompt(source.getSystemPrompt());
-    target.setModel(source.getModel());
-    target.setVariant(source.getVariant());
+    target.setExecution(source.getExecution());
     target.setConfig(source.getConfig());
   }
 
@@ -225,7 +224,6 @@ public class ConfigSyncApplier {
     copy.setTools(config.getTools());
     copy.setSkills(config.getSkills());
     copy.setSubagents(subagents);
-    copy.setInheritParentEnvironment(config.getInheritParentEnvironment());
     return copy;
   }
 }

@@ -88,6 +88,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionQueryService;
@@ -157,6 +158,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   @Autowired private HarnessStore store;
   @Autowired private InteractionQueryService queryService;
   @Autowired private InteractionService interactionService;
+  @Autowired private EnvironmentWaitProjectionService environmentWaitProjectionService;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private Clock clock;
   @Autowired private ThreadProcessor threadProcessor;
@@ -208,8 +210,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(tree.c().toString(), item.getThreadId(), "source thread stays the grandchild");
     assertEquals(tree.cSessionId().toString(), item.getSessionId());
     assertEquals(tree.root().toString(), item.getRootThreadId(), "root is the execution root");
-    assertEquals("CHAT", item.getOwner().getType());
-    assertEquals(chatId.toString(), item.getOwner().getChatId());
+    assertEquals("CHAT", item.getOwner().getKind());
+    assertEquals(chatId.toString(), item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
     assertEquals("ask_user", item.getToolName());
     assertEquals(QUESTIONNAIRE, item.getArgumentsJson());
@@ -244,9 +246,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(cInvocation.toString(), item.getInteractionId());
     assertEquals(tree.c().toString(), item.getThreadId());
     assertEquals(tree.root().toString(), item.getRootThreadId());
-    assertEquals("ISSUE_AGENT", item.getOwner().getType());
-    assertEquals(issue.issueId().toString(), item.getOwner().getIssueId());
-    assertEquals(AGENT, item.getOwner().getAgentName());
+    assertEquals("ISSUE_AGENT", item.getOwner().getKind());
+    assertEquals(issue.issueId() + ":" + AGENT, item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL.name(), item.getStatus());
 
     UUID decisionId = UUID.randomUUID();
@@ -460,8 +461,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(seed.invocationId().toString(), item.getInteractionId());
     assertEquals(seed.threadId().toString(), item.getRootThreadId());
     assertEquals(seed.threadId().toString(), item.getThreadId());
-    assertEquals("CHAT", item.getOwner().getType());
-    assertEquals(chatId.toString(), item.getOwner().getChatId());
+    assertEquals("CHAT", item.getOwner().getKind());
+    assertEquals(chatId.toString(), item.getOwner().getId());
     assertEquals(ToolInvocationStatus.WAITING_INPUT.name(), item.getStatus());
   }
 
@@ -480,23 +481,43 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     Tree tree = buildTree();
     UUID chatId = bindChat(tree.rootSessionId());
     UUID firstInvocationId = attachEnvironmentWait(tree.c(), EnvironmentId.of(firstEnvironmentId));
-    UUID secondInvocationId = attachEnvironmentWait(tree.b(), EnvironmentId.of(firstEnvironmentId));
-    Instant firstRepresentativeCreatedAt = toolInvocation(firstInvocationId).createdAt();
-    assertTrue(
-        firstRepresentativeCreatedAt.isBefore(toolInvocation(secondInvocationId).createdAt()),
-        "the group representative is the earliest invocation of the group");
 
     // 执行根 R2：独立根，同一环境 -> 另一个分组计数 1。
     Seed second =
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(firstEnvironmentId));
     bindChat(second.sessionId());
+    // R1 的第二个调用排在 R2 后面，原始调用以 limit=1 分页会错误拆分 R1。
+    UUID secondInvocationId = attachEnvironmentWait(tree.b(), EnvironmentId.of(firstEnvironmentId));
+    jdbc.update(
+        """
+        update harness_tool_invocation
+        set created_at = statement_timestamp() - case id
+          when ?::uuid then interval '3 seconds'
+          when ?::uuid then interval '2 seconds'
+          else interval '1 second'
+        end
+        where id in (?::uuid, ?::uuid, ?::uuid)
+        """,
+        firstInvocationId,
+        second.invocationId(),
+        firstInvocationId,
+        second.invocationId(),
+        secondInvocationId);
+    Instant firstRepresentativeCreatedAt = toolInvocation(firstInvocationId).createdAt();
+    assertTrue(
+        firstRepresentativeCreatedAt.isBefore(toolInvocation(second.invocationId()).createdAt()));
+    assertTrue(
+        toolInvocation(second.invocationId())
+            .createdAt()
+            .isBefore(toolInvocation(secondInvocationId).createdAt()));
 
     StudioHarnessThreadController threadController =
         new StudioHarnessThreadController(
             runtime,
             mock(ModelRequestDebugService.class),
             interactionService,
-            mock(UsageCostProjectionService.class));
+            mock(UsageCostProjectionService.class),
+            environmentWaitProjectionService);
     var waitingTool =
         threadController
             .getSnapshot(second.threadId().toString(), null)
@@ -533,6 +554,16 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(
         Set.of(tree.root().toString(), second.threadId().toString(), third.threadId().toString()),
         all.stream().map(InteractionDTO::getRootThreadId).collect(Collectors.toSet()));
+    List<InteractionDTO> singlePages = drain(null, 1);
+    assertEquals(3, singlePages.size());
+    assertEnvironmentWait(
+        singlePages.getFirst(),
+        tree.root(),
+        firstEnvironmentId,
+        2,
+        firstRepresentativeCreatedAt,
+        "CHAT",
+        chatId.toString());
     assertFalse(
         all.stream()
             .anyMatch(item -> ownerless.threadId().toString().equals(item.getRootThreadId())));
@@ -561,17 +592,28 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(1, afterReady.size());
     assertEnvironmentWait(
         afterReady.get(0), third.threadId(), secondEnvironmentId, 1, null, "CHAT", null);
+    // limit=1 必须跨过多个在线候选分组，而不是在过滤后丢失后面的离线分组。
+    InteractionPageDTO filteredPage = queryService.listInteractions(null, null, 1);
+    assertEquals(1, filteredPage.getTotal());
+    assertEquals(third.threadId().toString(), filteredPage.getItems().getFirst().getRootThreadId());
     assertEquals(
         jdbc.queryForObject(
             "select lease_until from environment_connection where environment_id = ?",
             (rs, row) -> rs.getTimestamp(1).toInstant(),
             firstEnvironmentId),
         queryService.listInteractions(null, null, 10).getFreshnessAt());
-    assertFalse(
-        runtime
-            .listEnvironmentToolWaits(List.of(firstInvocationId))
-            .getFirst()
-            .waitingForEnvironment());
+    assertTrue(
+        runtime.listEnvironmentToolWaits(List.of(firstInvocationId)).getFirst().workAvailable());
+
+    // CONNECTING 即使持有未到期租约也不算 READY，恢复 READY 后再次隐藏。
+    jdbc.update(
+        "update environment_connection set status = 'CONNECTING' where environment_id = ?",
+        firstEnvironmentId);
+    assertEquals(3, queryService.listInteractions(null, null, 1).getTotal());
+    jdbc.update(
+        "update environment_connection set status = 'READY' where environment_id = ?",
+        firstEnvironmentId);
+    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
 
     // 模拟已过期的租约：不写任何等待行，分组按原始事实重新出现。
     markEnvironmentOffline(firstEnvironmentId);
@@ -632,8 +674,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         items.get(1).getInteractionId(),
         "the manual input keeps its operable interaction id");
     assertEquals("INPUT", items.get(1).getType());
-    assertEquals("CHAT", items.get(1).getOwner().getType());
-    assertEquals(manualChatId.toString(), items.get(1).getOwner().getChatId());
+    assertEquals("CHAT", items.get(1).getOwner().getKind());
+    assertEquals(manualChatId.toString(), items.get(1).getOwner().getId());
 
     // 真实 snapshot HTTP 不把聚合页的全局 freshnessAt 复制给每个调用。
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
@@ -683,6 +725,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     UUID environmentId = bindEnvironment(name);
     Seed seed =
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(environmentId));
+    bindChat(seed.sessionId());
     // 当前 Thread 设置没有环境，Work 冻结的环境仍应完整呈现。
     assertNull(SETTINGS.environmentName());
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
@@ -710,6 +753,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(version, online.path("version").asText());
     var onlineTool = online.path("toolInvocations").get(0);
     assertFalse(onlineTool.path("waitingForEnvironment").asBoolean());
+    assertEquals(0, queryService.listInteractions(null, null, 1).getTotal());
     // 新字段与既有 Instant 用同一真实 HTTP mapper，epoch 时间戳而非独立字符串转换。
     assertTrue(onlineTool.path("environmentWaitFreshnessAt").isNumber());
     assertEquals(
@@ -723,6 +767,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                     Boolean.class,
                     environmentId)),
         "database environment lease must naturally expire");
+    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
     var expired = snapshotHttp(mvc, seed.threadId());
     assertEquals(version, expired.path("version").asText());
     assertTrue(expired.path("toolInvocations").get(0).path("waitingForEnvironment").asBoolean());
@@ -750,9 +795,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(expectedEnvironmentId.toString(), item.getEnvironmentId());
     assertEquals(expectedWaitingCount, item.getWaitingCount().intValue());
     assertEquals(expectedRootThreadId.toString(), item.getRootThreadId());
-    assertEquals(expectedOwnerType, item.getOwner().getType());
+    assertEquals(expectedOwnerType, item.getOwner().getKind());
     if (expectedChatId != null) {
-      assertEquals(expectedChatId, item.getOwner().getChatId());
+      assertEquals(expectedChatId, item.getOwner().getId());
     }
     if (expectedCreatedAt != null) {
       assertEquals(expectedCreatedAt, item.getCreateTime());
@@ -931,8 +976,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         1L,
         "issue-" + issueId);
     jdbc.update(
-        "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
-            + " values (?, ?, ?)",
+        "insert into project_issue_agent_thread (issue_id, agent_name, session_id, thread_id)"
+            + " select ?, ?, session_id, id from harness_thread where id = ?",
         issueId,
         AGENT,
         rootThreadId);

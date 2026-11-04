@@ -1,6 +1,9 @@
 import { assert, cid, expectHttpError } from '../lib/http.mjs'
 import { createEnvironmentFixture, deleteEnvironmentFixture } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 /**
  * IDE 视图身份：固定规范小写 UUID。
@@ -76,7 +79,7 @@ registerCase({
   id: 'environment.ide_view_no_ready_owner_rejected',
   level: 'L1',
   title: 'IDE 视图在没有 READY owner 时明确拒绝，不伪造绑定',
-  docs: '在新建且没有 READY owner 的 Environment 上，以合法 canonical 输入请求 POST /api/environments/{id}/ide/views，返回 409 + canonical code ide_unavailable，响应不含 entryUrl/bindingEpoch 等绑定结果；PUT 目录、POST 终端、DELETE 关闭同样返回 409 ide_unavailable；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
+  docs: '在新建且没有 READY owner 的 Environment 上，IDE 打开、列举目录、切换目录、终端、移动布局和关闭返回 409 ide_unavailable，且不伪造绑定；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
   async run(ctx) {
     const card = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
     const viewsPath = `/api/environments/${encodeURIComponent(card.id)}/ide/views`
@@ -122,6 +125,20 @@ registerCase({
         { status: 409 },
       )
       assertCanonicalError(terminalError, { status: 409, code: 'ide_unavailable' })
+
+      const listError = await expectHttpError(
+        () => ctx.call('GET', `/api/environments/${encodeURIComponent(card.id)}/ide/directories`),
+        { status: 409 },
+      )
+      assertCanonicalError(listError, { status: 409, code: 'ide_unavailable' })
+      const mobileError = await expectHttpError(
+        () => ctx.call('POST', `${viewsPath}/${IDE_VIEW_ID}/mobile-layout`, {
+          documentId: IDE_DOCUMENT_ID,
+          bindingEpoch: '1',
+        }),
+        { status: 409 },
+      )
+      assertCanonicalError(mobileError, { status: 409, code: 'ide_unavailable' })
 
       const closeError = await expectHttpError(
         () =>

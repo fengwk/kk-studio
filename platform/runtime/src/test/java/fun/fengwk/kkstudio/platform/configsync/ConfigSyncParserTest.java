@@ -193,7 +193,7 @@ class ConfigSyncParserTest {
     String yaml =
         "agents:\n"
             + "  - name: a\n"
-            + "    model: m\n"
+            + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
             + "    config:\n"
             + "      tools: []\n"
             + "      skills: []\n"
@@ -205,6 +205,31 @@ class ConfigSyncParserTest {
     assertTrue(
         document.skipped().stream()
             .anyMatch(skip -> "agents".equals(skip.getKind()) && "a".equals(skip.getName())));
+  }
+
+  /** 测试意图：旧环境开关作为未知字段报告，配置同步不得导入该 Agent。 */
+  @Test
+  void legacyAgentEnvironmentFieldSkipsEntry() {
+    String yaml =
+        "agents:\n"
+            + "  - name: a\n"
+            + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
+            + "    config:\n"
+            + "      tools: []\n"
+            + "      skills: []\n"
+            + "      subagents: []\n"
+            + "      inheritParentEnvironment: true\n";
+    ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
+
+    assertTrue(document.agents().isEmpty());
+    assertTrue(
+        document.skipped().stream()
+            .anyMatch(
+                skip ->
+                    "agents".equals(skip.getKind())
+                        && "a".equals(skip.getName())
+                        && skip.getReason().contains("unsupported field:")
+                        && skip.getReason().contains("inheritParentEnvironment")));
   }
 
   @Test
@@ -341,7 +366,7 @@ class ConfigSyncParserTest {
         parser.parse(
             "agents:\n"
                 + "  - name: a\n"
-                + "    model: m\n"
+                + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
                 + "    config:\n"
                 + "      tools: []\n"
                 + "      skills: []\n"
@@ -418,27 +443,47 @@ class ConfigSyncParserTest {
                     + "    bogus: 1\n"));
   }
 
-  /** 意图：Agent 的 model 是全局名称，不再携带 provider 分隔符。 */
+  /** 内置执行选择保留全局模型名称和 variant。 */
   @Test
   void agentModelRefUsesGlobalModelName() {
     ConfigSyncParser.ParsedDocument document =
         parser.parse(
             "agents:\n"
                 + "  - name: a\n"
-                + "    model: bad\n"
+                + "    execution: {driver: builtin, settings: {modelName: bad, variant: fast}}\n"
                 + "    config:\n"
                 + "      tools: []\n"
                 + "      skills: []\n"
                 + "      subagents: []\n");
 
-    assertEquals("bad", document.agents().get(0).modelName());
+    assertEquals("bad", document.agents().get(0).builtinModel().modelName());
+    assertEquals("fast", document.agents().get(0).builtinModel().variant());
+  }
+
+  /** 旧字段即使与新 execution 并存也必须硬拒绝，不能被当作未知字段跳过。 */
+  @Test
+  void legacyAgentFieldsAreRejected() {
+    String execution =
+        "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n";
+    for (String legacy : List.of("    model: m\n", "    variant: default\n")) {
+      assertThrows(
+          AiValidationException.class,
+          () -> parser.parse("agents:\n  - name: a\n" + execution + legacy + "    config: {}\n"));
+    }
+    assertThrows(
+        AiValidationException.class,
+        () -> parser.parse("agents:\n  - name: a\n    model: m\n    config: {}\n"));
   }
 
   @Test
   void agentConfigMustBeAnObject() {
     assertThrows(
         AiValidationException.class,
-        () -> parser.parse("agents:\n  - name: a\n    model: m\n    config: []\n"));
+        () ->
+            parser.parse(
+                "agents:\n  - name: a\n"
+                    + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
+                    + "    config: []\n"));
   }
 
   /** 测试意图：内置 Agent 的保留名称在导入期是硬冲突，文件不能覆盖或降级系统持有的定义。 */
@@ -450,7 +495,7 @@ class ConfigSyncParserTest {
             parser.parse(
                 "agents:\n"
                     + "  - name: Compaction\n"
-                    + "    model: m\n"
+                    + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
                     + "    config:\n"
                     + "      tools: []\n"
                     + "      skills: []\n"
@@ -465,7 +510,7 @@ class ConfigSyncParserTest {
             "agents:\n"
                 + "  - name: a\n"
                 + "    type: BUILTIN\n"
-                + "    model: m\n"
+                + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
                 + "    config:\n"
                 + "      tools: []\n"
                 + "      skills: []\n"

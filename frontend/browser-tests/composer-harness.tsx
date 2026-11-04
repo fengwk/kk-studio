@@ -3,14 +3,14 @@ import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
-import { ThreadComposer, type ThreadComposerHandle } from '@/features/chat/runtime/thread-panel/ThreadComposer'
-import { THREAD_COMMANDS, type ThreadCommand } from '@/features/chat/runtime/thread-panel/thread-commands'
-import type { ComposerPart } from '@/features/chat/composer/composer-parts'
+import { ThreadComposer, type ThreadComposerHandle } from '@/features/thread/runtime/thread-panel/ThreadComposer'
+import { THREAD_COMMANDS, type ThreadCommand } from '@/features/thread/runtime/thread-panel/thread-commands'
+import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type {
   ThreadComposerModelOption,
   ThreadComposerModelSelection,
   ThreadComposerSettingsInput,
-} from '@/features/chat/runtime/thread-panel/ThreadComposerControls'
+} from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
 
 setLocale('zh-CN')
 

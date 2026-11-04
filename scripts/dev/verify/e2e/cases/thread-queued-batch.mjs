@@ -23,7 +23,10 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 registerCase({
   id: 'thread.queued_command_batch',
@@ -112,13 +115,12 @@ registerCase({
         name: `e2e-agent-queue-${suffix}`,
         description: 'Local queued command batch E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
-        model: model.name,
-        variant: 'default',
-        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
+        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentResponse.json)
       assert(
-        agent?.name && agent.model === model.name,
+        agent?.name && agent.execution?.driver === 'builtin' && agent.execution.settings?.modelName === model.name,
         JSON.stringify(agentResponse.json),
       )
       chat = await createChat(ctx, {
@@ -133,8 +135,7 @@ registerCase({
         sessionId,
         threadId: tid,
         rootSettings: branchSettingsOf(agent, {
-          modelName: model.name,
-          variant: 'default',
+          ...agent.execution.settings,
         }),
         yoloEnabled: false,
         commands: [userMessageCommand(initialPrompt, cid())],

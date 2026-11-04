@@ -254,14 +254,14 @@ for (const stage of ['prepare', 'complete'] as const) {
     await opener.click()
     const dialog = page.getByRole('dialog')
     const input = dialog.getByTestId('plugin-callback-input')
-    await expect(input).toHaveCSS('height', '32px')
+    await expect(input).toHaveCSS('height', '44px')
     await expect(input).toHaveAttribute('type', 'password')
     await expect(input).toHaveAttribute('autocomplete', 'off')
 
     const login = dialog.getByRole('button', { name: '打开官方登录页面' })
-    await expect(login).toHaveCSS('height', '32px')
+    await expect(login).toHaveCSS('min-height', '44px')
     const close = dialog.getByRole('button', { name: '关闭' })
-    await expect(close).toHaveCSS('height', '32px')
+    await expect(close).toHaveCSS('height', '44px')
 
     if (stage === 'prepare') {
       await input.fill('offline-callback')
@@ -417,7 +417,7 @@ test('connection check runs only on explicit click and reports the three typed d
   await expect(dialog.getByTestId('plugin-check-authentication')).toHaveText('凭据已接受')
   // 浏览器登录态恒为未知，绝不冒充已登录。
   await expect(dialog.getByTestId('plugin-check-browser-session')).toHaveText(
-    '未知（本检查不核验浏览器登录态）',
+    '未知；本检查不核验浏览器登录态',
   )
   await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Rev 3')
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)

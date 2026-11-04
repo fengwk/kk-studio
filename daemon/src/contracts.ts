@@ -64,17 +64,6 @@ export interface ProcessSupervisor {
   close(): Promise<void>
 }
 
-/**
- * Current-user OS proxy lookup.
- *
- * `null` means the operating system explicitly selected a direct connection. A lookup failure,
- * an unsupported proxy, or an unavailable resolver is an error and is never reported as direct.
- */
-export interface SystemProxyResolver {
-  resolve(uri: string, signal: AbortSignal): Promise<string | null>
-  close(): Promise<void>
-}
-
 export type ResultContent =
   | { type: 'text'; text: string }
   | { type: 'json'; json: unknown }
@@ -135,6 +124,8 @@ export type IdeAction =
   | 'CLOSE_VIEW'
   | 'DETACH_VIEW'
   | 'LIST_VIEWS'
+  | 'LIST_DIRECTORIES'
+  | 'COLLAPSE_MOBILE'
 
 export type IdeOpenMode = 'create' | 'resume'
 export type IdeViewState = 'OPEN' | 'CLOSING'
@@ -176,6 +167,12 @@ export interface IdeReply {
   directory?: string
   workspacePath?: string
   views?: IdeViewSummary[]
+  directoryListing?: {
+    path: string
+    parentPath?: string
+    children: { name: string; path: string }[]
+    truncated: boolean
+  }
   code?: string
   message?: string
 }

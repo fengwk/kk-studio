@@ -13,10 +13,10 @@
 - **身份声明**：`descriptor()` 返回全局唯一的 `PluginDescriptor(id, name, version)`。
 - **受控配置 Schema**：`configurationSchema()` 声明强类型普通配置（`valuesSchema`）、初始默认值 JSON（`defaultsJson`）与受保护秘密定义（`secrets`）。配置校验与存储遵循严格 JSON 规范，秘密绝不以明文回读或导出。
 - **认证规范**：`authenticationSpec()` 声明插件的认证模式，支持 `None`（无认证）、`StaticKey`（静态 API Key / Token，支持声明变更时失效认证代际的上下文关联字段）和 `DeepLink`（OAuth 风格的两阶段认证，支持区域候选）。
-- **两域实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例按需暴露两个独立端口：
-  - `contributor()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
-  - `canvasFunctionAdapter()`：向 Canvas 贡献图形节点执行适配器（`CanvasFunctionAdapter`）。
-  两域均可独立为空，无对应贡献的插件返回 `Optional.empty()`。
+- **实例装配**：`configure(config, context)` 根据数据库中经 CAS 校验的当前配置与只读凭据端口装配 `PluginInstance`。实例暴露两类贡献：
+  - `harnessContributors()`：向 Harness Runtime 贡献 Agent 外部工具（`HarnessContributor`）；
+  - `contributions(Class<T>)`：按类型交出产品域贡献，Canvas 读取 `contributions(CanvasFunctionAdapter.class)` 得到图形节点执行适配器。
+  两类贡献都在 configure 期冻结、互不依赖，均可为空列表；插件因此同时依赖 platform-plugin-api、harness-runtime 与自己的产品 SPI（Canvas 为 `kk-studio-canvas-spi`）。
 
 当前发行物包含四个内置插件：
 
@@ -98,7 +98,7 @@
 - **类与包**：[`fun.fengwk.kkstudio.plugin.opencli`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/)，安装定义为 [`OpenCliPlugin`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliPlugin.java)，自动配置为 [`OpenCliAutoConfiguration`](../../plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliAutoConfiguration.java)。
 - **认证契约**：静态密钥认证（`apiKey`，上下文字段为 `baseUrl`），同时支持可选的受保护私有身份 `instanceId`。两者均保存在 secrets 中，绝不回读明文。
 - **配置项**：
-  - 核心连接与流控制：`enabled`（默认 `false`）、`baseUrl`、`connectTimeoutMillis`、`requestTimeoutMillis`、`longPollTimeoutMillis`、`streamBufferBytes`、`maxJsonResponseBytes`、`maxOutputChars`；
+  - 核心连接与超时：`enabled`（默认 `false`）、`baseUrl`、`connectTimeoutMillis`、`requestTimeoutMillis`、`longPollTimeoutMillis`；响应及输出大小限制由客户端固定控制；
   - `gptImage2` 子配置：`paidEnabled`、`askTimeoutSeconds`、`hubExecutionTimeoutMillis`、`maxWaitMillis`；
   - `seedance` 子配置：`enabled`、`retry`、`hubExecutionTimeoutMillis`、`statusPollIntervalMillis`、`maxWaitMillis`。
 - **Canvas 适配器**：

@@ -8,7 +8,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { isConflictError } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
 import type { PluginSecretPatchOperation } from '@/shared/api/contracts/ai-plugin'
@@ -391,7 +391,7 @@ export function PluginConfigModal({
 
   return (
     <Dialog
-      className="resource-modal-card plugin-config-modal"
+      className="resource-modal-card plugin-config-modal modal-touch-target"
       title={t('plugins.configDialog.title', { name: plugin.name })}
       onClose={handleClose}
       pending={pending}

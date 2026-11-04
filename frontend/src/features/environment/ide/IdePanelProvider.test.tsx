@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,10 +24,11 @@ const service = vi.hoisted(() => ({
   openIdeView: vi.fn(),
   changeIdeViewDirectory: vi.fn(),
   openIdeViewTerminal: vi.fn(),
+  setIdeViewMobileLayout: vi.fn(),
   closeIdeView: vi.fn(),
 }))
 
-vi.mock('@/shared/api/environment-service', () => ({ environmentService: service }))
+vi.mock('@/features/environment/environment-service', () => ({ environmentService: service }))
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
@@ -203,6 +204,9 @@ describe('IdePanelProvider', () => {
     service.openIdeView.mockReset()
     service.changeIdeViewDirectory.mockReset()
     service.openIdeViewTerminal.mockReset()
+    service.setIdeViewMobileLayout.mockReset()
+    service.setIdeViewMobileLayout.mockResolvedValue(undefined)
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
     service.closeIdeView.mockReset()
     service.listEnvironments.mockResolvedValue([CARD_A, CARD_B])
     service.closeIdeView.mockResolvedValue(undefined)
@@ -560,12 +564,10 @@ describe('IdePanelProvider', () => {
     })
   })
 
-  it('keeps the iframe on a dirty close and sends discard only after explicit confirmation', async () => {
+  it('keeps the iframe when the bridge is unavailable and forces only after confirmation', async () => {
     const user = userEvent.setup()
     service.closeIdeView
-      .mockRejectedValueOnce(new ApiError('unsaved changes; save or discard', 409, 'IDE_UNAVAILABLE', {
-        detail: 'DIRTY: save or discard',
-      }))
+      .mockRejectedValueOnce(new ApiError('unavailable', 409, 'ide_unavailable'))
       .mockResolvedValueOnce(undefined)
     const { sockets } = renderPanel()
     connect(sockets)
@@ -573,7 +575,7 @@ describe('IdePanelProvider', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
     await waitFor(() => {
-      expect(screen.getByRole('alertdialog', { name: '放弃未保存的修改？' })).toBeInTheDocument()
+      expect(screen.getByRole('alertdialog', { name: '强制关闭 IDE 视图？' })).toBeInTheDocument()
     })
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     expect(service.closeIdeView).toHaveBeenNthCalledWith(1, ENV_A, expect.any(String), expect.objectContaining({
@@ -581,7 +583,7 @@ describe('IdePanelProvider', () => {
       discard: false,
     }))
 
-    await user.click(screen.getByRole('button', { name: '放弃并关闭' }))
+    await user.click(screen.getByRole('button', { name: '强制关闭' }))
     await waitFor(() => {
       expect(service.closeIdeView).toHaveBeenCalledTimes(2)
     })
@@ -597,6 +599,40 @@ describe('IdePanelProvider', () => {
       presentation: IdePresentation
     }
     expect(last.presentation.openedEnvironmentIds).toEqual([])
+  })
+
+  it('does not offer force close after IDE cancellation', async () => {
+    service.closeIdeView.mockRejectedValueOnce(new ApiError(
+      'closing the view was cancelled or editors remain open', 400, 'validation_error',
+      { resource: 'ide_close_cancelled' },
+    ))
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await openA(user)
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await waitFor(() => expect(service.closeIdeView).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+  })
+
+  it('applies mobile layout once on narrow iframe load, reporting failures', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
+    service.setIdeViewMobileLayout.mockRejectedValueOnce(new Error('unavailable'))
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await openA(user)
+    const iframe = screen.getByTestId('ide-iframe')
+    fireEvent.load(iframe)
+    fireEvent.load(iframe)
+    await waitFor(() => expect(report).toHaveBeenCalledWith('Failed to apply IDE mobile layout'))
+    expect(service.setIdeViewMobileLayout).toHaveBeenCalledTimes(1)
+    expect(service.setIdeViewMobileLayout).toHaveBeenCalledWith(ENV_A, expect.any(String), expect.objectContaining({
+      documentId: expect.any(String), bindingEpoch: '11',
+    }))
+    report.mockRestore()
   })
 
   it('retains an offline view and its iframe, but removes an authoritative deletion without DELETE', async () => {

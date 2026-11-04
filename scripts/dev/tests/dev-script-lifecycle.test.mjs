@@ -71,6 +71,10 @@ test('test intent: frontend dependencies are reinstalled only when the lock chan
     // 仓库根由 worktree 标记向上解析，因此夹具必须是一个可识别的 checkout。
     mkdirSync(path.join(appHome, '.git'))
     copyFileSync(DEV_SCRIPT, path.join(appHome, 'scripts/dev/app.sh'))
+    mkdirSync(path.join(appHome, 'scripts/dev/lib'))
+    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/repo-root.sh'), path.join(appHome, 'scripts/dev/lib/repo-root.sh'))
+    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/http-wait.sh'), path.join(appHome, 'scripts/dev/lib/http-wait.sh'))
+    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/e2e-credentials.sh'), path.join(appHome, 'scripts/dev/lib/e2e-credentials.sh'))
     const frontend = path.join(appHome, 'frontend')
     mkdirSync(frontend)
     const lock = path.join(frontend, 'package-lock.json')
@@ -196,4 +200,23 @@ test('test intent: readiness fails fast for an exited child and start cleans up'
     2,
     'both Backend and Frontend readiness failures must log and clean up',
   )
+})
+
+test('shared HTTP readiness distinguishes eventual success, timeout and an exited child', () => {
+  // Stub only curl/sleep so polling and its return codes run without a server or wall-clock delay.
+  const script = `
+    source scripts/dev/lib/http-wait.sh
+    count=0
+    curl() { count=$((count + 1)); [ "$count" -ge 2 ]; }
+    sleep() { :; }
+    poll_http http://unused 3 || exit 11
+    [ "$count" -eq 2 ] || exit 12
+    curl() { return 1; }
+    poll_http http://unused 2 && exit 13
+    [ "$?" -eq 1 ] || exit 14
+    poll_http http://unused 2 999999999 && exit 15
+    [ "$?" -eq 2 ] || exit 16
+  `
+  const result = runBash(script)
+  assert.equal(result.status, 0, output(result))
 })

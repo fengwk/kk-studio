@@ -21,6 +21,8 @@ import {
   HeartbeatSchema,
   IdeAction,
   IdeCommandSchema,
+  IdeDirectoryListingSchema,
+  IdeDirectoryEntrySchema,
   IdeLeaseBindingSchema,
   IdeLeaseSchema,
   IdeOpenMode,
@@ -136,6 +138,30 @@ function validInvoke() {
 }
 
 describe('control binary codec', () => {
+  it('roundtrips directory listing and mobile actions with their payloads', () => {
+    // Verify the new fields survive validation and binary serialization.
+    for (const action of [IdeAction.LIST_DIRECTORIES, IdeAction.COLLAPSE_MOBILE]) {
+      const command = create(EnvelopeSchema, {
+        messageType: MessageType.IDE_COMMAND, environmentId: ENVIRONMENT_ID, invocationId: INVOCATION_ID,
+        payload: { case: 'ideCommand', value: create(IdeCommandSchema, action === IdeAction.LIST_DIRECTORIES
+          ? { action, directory: '/workspace' }
+          : { action, viewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+            documentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', bindingEpoch: 1n }) },
+      })
+      expect(decodeBinary(encodeBinary(command))).toEqual(command)
+    }
+    const result = create(EnvelopeSchema, {
+      messageType: MessageType.IDE_RESULT, environmentId: ENVIRONMENT_ID, invocationId: INVOCATION_ID,
+      payload: { case: 'ideResult', value: create(IdeResultSchema, {
+        ok: true, directoryListing: create(IdeDirectoryListingSchema, {
+          path: '/workspace', parentPath: '/', truncated: true,
+          children: [create(IdeDirectoryEntrySchema, { name: 'src', path: '/workspace/src' })],
+        }),
+      }) },
+    })
+    expect(decodeBinary(encodeBinary(result))).toEqual(result)
+  })
+
   it('encodes the shared fixtures to golden byte-for-byte', () => {
     for (const [name, factory] of GOLDEN_FIXTURES) {
       assertBytesEqual(encodeBinary(factory()), readGolden(name))
@@ -723,14 +749,12 @@ describe('control binary codec', () => {
             case: 'update',
             value: create(UpdateSchema, {
               operationId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
-              targetVersion: '1.0.0',
-              artifactUrl: 'https://attacker.com/evil.tar.gz',
-              artifactSha256: 'a'.repeat(64),
+              targetVersion: '../invalid',
             }),
           },
         }),
       ),
-    ).toThrow(/official archive/)
+    ).toThrow(/targetVersion/)
 
     expect(() =>
       encodeBinary(

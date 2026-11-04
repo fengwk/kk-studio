@@ -5,7 +5,6 @@ import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
-  DAEMON_VERSION,
   checkConfig,
   invalidConfigurationLine,
   loadDaemonConfig,
@@ -19,7 +18,6 @@ import {
   UnsupportedPlatformError,
   acquireDirectoryLock,
   createProcessSupervisor,
-  createSystemProxyResolver,
   ensurePrivateDirectory,
   type DirectoryLock,
 } from './native/index.js'
@@ -30,8 +28,7 @@ import { createLspCapabilities } from './coding/lsp.js'
 import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.js'
 import { createSkillCapability } from './skill/sync.js'
 import { createIdeService } from './ide/service.js'
-import { handleUpdate } from './update.js'
-import { awaitStartupHandoff } from './update-entry.js'
+import { handleUpdate } from './installer.js'
 
 /**
  * Environment Daemon 独立进程入口与依赖装配。
@@ -117,31 +114,8 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
-    // 新进程在装配任何业务能力之前完成更新交接：目标版本预检、私有启动确认、等待 updater
-    // 写出 result 并释放安装目录互斥。任何失败结果都必须在 READY 前终止当前进程。
-    const handoff = await awaitStartupHandoff({
-      dataDir,
-      distributionDir: config.distributionDir,
-      configPath: config.configPath,
-    })
-    if (handoff.state === 'failed') {
-      // 交接失败已经由更新器持久化并标记消费；当前进程没有可信的新版本，不得进入 READY。
-      process.stderr.write(`daemon failed: update handoff failed: ${handoff.message}\n`)
-      outcome = 1
-      return outcome
-    }
-    if (handoff.state === 'updated' && handoff.targetVersion !== DAEMON_VERSION) {
-      // 本进程不是已安装的目标版本（例如旧服务在替换后被重启）：不得以旧代码进入 READY。
-      process.stderr.write('daemon failed: this process is not the installed update target\n')
-      outcome = 1
-      return outcome
-    }
-
-    const systemProxy = createSystemProxyResolver()
-    let closeNetwork = (): Promise<void> => systemProxy.close()
-    closers.push(() => closeNetwork())
-    const network = await installOutboundNetwork(process.env, systemProxy)
-    closeNetwork = () => network.close()
+    const network = await installOutboundNetwork()
+    closers.push(() => network.close())
 
     const lspGroup = createLspCapabilities(config, supervisor)
     closers.push(() => lspGroup.close())
@@ -187,10 +161,9 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,
-      // 受管更新以 supervisor 运行受控子进程；报告器只接收发行归档 body 的累计字节。
+      // 安装器运行在独立 OS 作业中，服务停止后仍能完成替换和重启。
       update: {
-        handleUpdate: (command, cfg, signal, reportProgress) =>
-          handleUpdate(command, cfg, signal, supervisor, reportProgress),
+        handleUpdate: (command, cfg, signal) => handleUpdate(command, cfg, signal),
       },
       temporaryResources: {
         async sweep(ttlSeconds: number): Promise<void> {

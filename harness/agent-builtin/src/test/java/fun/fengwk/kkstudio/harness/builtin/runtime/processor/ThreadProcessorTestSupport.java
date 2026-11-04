@@ -1299,8 +1299,7 @@ public final class ThreadProcessorTestSupport {
               4096L,
               CONTEXT_WINDOW,
               MAX_OUTPUT_TOKENS,
-              new BranchSettings(
-                  "compaction", compactorExecution, path.baseSettings().environmentName(), null));
+              new BranchSettings("compaction", compactorExecution, null, null));
         }
         return new TurnResolver.Resolved(
             requestFor(path.baseSettings()), CONTEXT_WINDOW, MAX_OUTPUT_TOKENS);

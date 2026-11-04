@@ -15,9 +15,8 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.canvas.CanvasFunctionCatalogSource;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -92,7 +91,6 @@ class PluginCatalogWiringTest {
         assertTrue(catalog.tools().isEmpty());
         assertTrue(catalog.selectableTools().isEmpty());
         assertTrue(catalog.customEntryTypes().isEmpty());
-        assertTrue(catalog.contextProjectors().isEmpty());
       }
     }
   }
@@ -136,7 +134,7 @@ class PluginCatalogWiringTest {
       assertNull(runtime.applicationError());
       assertTrue(refresher.isRunning(), "the refresher must be started with the context");
 
-      try (CanvasFunctionCatalogSource.Lease lease = source.acquire()) {
+      try (PluginCanvasFunctionCatalogSource.Lease lease = source.acquire()) {
         assertTrue(lease.catalog().list().isEmpty());
         context.close();
         assertEquals(0, plugin.closes.get(), "shutdown must not kill a leased instance");
@@ -149,7 +147,8 @@ class PluginCatalogWiringTest {
       assertThrows(
           IllegalStateException.class,
           source::acquire,
-          "the production canvas source must be bound to the closed runtime, not to a static catalog");
+          "the production canvas source must be bound to the closed runtime, not to a static"
+              + " catalog");
     }
   }
 
@@ -194,9 +193,10 @@ class PluginCatalogWiringTest {
                         .harnessCatalog()
                         .findDescriptor(new ContributorId("minimax-mavis"))
                         .isPresent());
-                assertTrue(lease.snapshot().canvasFunctionCatalog().list().isEmpty());
+                assertTrue(
+                    PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
               }
-              try (CanvasFunctionCatalogSource.Lease lease = source.acquire()) {
+              try (PluginCanvasFunctionCatalogSource.Lease lease = source.acquire()) {
                 assertTrue(lease.catalog().list().isEmpty());
               }
               assertTrue(context.getBeansOfType(HarnessContributor.class).isEmpty());
@@ -229,7 +229,7 @@ class PluginCatalogWiringTest {
     }
   }
 
-  /** 无普通配置、无秘密、两域贡献均为空的最小安装定义。 */
+  /** 无普通配置、无秘密、不贡献任何能力的最小安装定义。 */
   private static final class WiringPlugin implements StudioPlugin {
 
     private final AtomicInteger closes = new AtomicInteger();
@@ -265,7 +265,7 @@ class PluginCatalogWiringTest {
         }
 
         @Override
-        public List<CanvasFunctionAdapter> canvasAdapters() {
+        public <T> List<T> contributions(Class<T> type) {
           return List.of();
         }
 

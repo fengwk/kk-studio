@@ -51,14 +51,12 @@ describe('ai-agent-draft-codec', () => {
     expect(emptyAgentDraft(model())).toMatchObject({
       model: 'model',
       variant: '',
-      inheritParentEnvironment: true,
       subagents: [],
       skills: [],
     })
     expect(emptyAgentDraft()).toMatchObject({
       model: '',
       variant: '',
-      inheritParentEnvironment: true,
       subagents: [],
       skills: [],
     })
@@ -94,10 +92,8 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: false,
         tools: [' read ', ''],
         skills: [{ packageName: ' core ', name: ' dev ' }],
         subagents: [' writer ', ''],
@@ -111,9 +107,9 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: '',
       systemPrompt: '',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       model: 'model',
       variant: 'quality',
-      inheritParentEnvironment: false,
       tools: ['read'],
       skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['writer'],
@@ -122,7 +118,7 @@ describe('ai-agent-draft-codec', () => {
     expect(
       toAgentDraft({
         ...agent,
-        variant: null,
+        execution: { driver: 'builtin', settings: { modelName: 'model', variant: null } },
       }),
     ).toMatchObject({ variant: '' })
   })
@@ -132,10 +128,8 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
@@ -145,10 +139,8 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgentUpdate(draft())).toEqual({
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'model',
-      variant: 'quality',
+      execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
@@ -163,13 +155,19 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       config: {
-        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
       },
     })
-    expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
+    expect(toEditableAgent(draft({ variant: ' ' })).execution).toEqual({
+      driver: 'builtin', settings: { modelName: 'model', variant: null },
+    })
+  })
+
+  it('preserves unknown driver settings until explicitly changed', () => {
+    const execution = { driver: 'future', settings: { opaque: 'value' } }
+    expect(toEditableAgentUpdate(draft({ execution, model: '' })).execution).toEqual(execution)
   })
 
   it('preserves embedded newlines in multiline description payloads', () => {
@@ -197,53 +195,12 @@ describe('ai-agent-draft-codec', () => {
     },
   )
 
-  it('writes the strict config shape with tools, skills, subagents, and inheritParentEnvironment', () => {
+  it('writes the strict config shape with tools, skills, and subagents', () => {
     expect(toEditableAgent(draft()).config).toEqual({
-      inheritParentEnvironment: true,
       tools: ['read', 'bash'],
       skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['helper'],
     })
-  })
-
-  it('encodes and decodes inheritParentEnvironment as exact required boolean', () => {
-    const defaultDraft = emptyAgentDraft()
-    expect(defaultDraft.inheritParentEnvironment).toBe(true)
-
-    const trueAgent: AgentDefinitionDTO = {
-      name: 'assistant-true',
-      description: null,
-      systemPrompt: null,
-      type: 'USER',
-      model: 'model',
-      variant: null,
-      config: {
-        inheritParentEnvironment: true,
-        tools: [],
-        skills: [],
-        subagents: [],
-      },
-      version: '1',
-      createTime: 0,
-      updateTime: 0,
-    }
-    const trueDraft = toAgentDraft(trueAgent)
-    expect(trueDraft.inheritParentEnvironment).toBe(true)
-    expect(toEditableAgent(trueDraft).config.inheritParentEnvironment).toBe(true)
-    expect(toEditableAgentUpdate(trueDraft).config.inheritParentEnvironment).toBe(true)
-
-    const falseAgent: AgentDefinitionDTO = {
-      ...trueAgent,
-      name: 'assistant-false',
-      config: {
-        ...trueAgent.config,
-        inheritParentEnvironment: false,
-      },
-    }
-    const falseDraft = toAgentDraft(falseAgent)
-    expect(falseDraft.inheritParentEnvironment).toBe(false)
-    expect(toEditableAgent(falseDraft).config.inheritParentEnvironment).toBe(false)
-    expect(toEditableAgentUpdate(falseDraft).config.inheritParentEnvironment).toBe(false)
   })
 
   it('projects an unconfigured built-in model as empty and only BUILTIN may write null without leaking type', () => {
@@ -252,10 +209,8 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'BUILTIN',
-      model: null,
-      variant: null,
+      execution: null,
       config: {
-        inheritParentEnvironment: true,
         tools: [],
         skills: [],
         subagents: [],
@@ -271,7 +226,7 @@ describe('ai-agent-draft-codec', () => {
     // USER 路径仍要求模型：默认允许空模型导致抛错，且请求体从不包含 type。
     expect(() => toEditableAgentUpdate(toAgentDraft(builtin))).toThrow(/model/)
     const builtinUpdate = toEditableAgentUpdate(toAgentDraft(builtin), true)
-    expect(builtinUpdate.model).toBeNull()
+    expect(builtinUpdate.execution).toBeNull()
     expect(builtinUpdate).not.toHaveProperty('type')
   })
 })

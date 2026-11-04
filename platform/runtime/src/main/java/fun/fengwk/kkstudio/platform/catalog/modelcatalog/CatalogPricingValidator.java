@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
-import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelPricingCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 
 /**
@@ -14,7 +14,7 @@ final class CatalogPricingValidator {
 
   static void validate(AgentModelPricingDTO pricing) {
     try {
-      AgentModelRuntimeConfigParser.parsePricing(pricing);
+      AgentModelPricingCodec.parsePricing(pricing);
     } catch (IllegalArgumentException error) {
       String message = error.getMessage();
       throw new CatalogPriceException(

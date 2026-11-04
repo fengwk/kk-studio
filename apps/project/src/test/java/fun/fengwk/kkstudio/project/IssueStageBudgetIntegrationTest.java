@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.StageBudgetView;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -44,13 +46,15 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, endEntry, "Run start entry must belong to the frozen session");
 
     IssueRun completed =
-        issueRunService.completeRun(
+        issueRunService.finishRun(
             first.getId(),
             first.getVersion(),
             key("complete"),
+            IssueRunStatus.COMPLETED,
             appendHistoryEntry(firstThread),
             null,
-            "REVIEW");
+            "REVIEW",
+            null);
     assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals("COMPLETED", completed.getStatus().name());
 
@@ -65,6 +69,10 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_agent_thread where issue_id = ? and agent_name = ?",
             issue.getId(),
             agent));
+    // 详情与快照读路径按 run ordinal 升序列出该 Issue 的全部 Run。
+    assertEquals(
+        List.of(first.getId(), second.getId()),
+        issueRunService.listRuns(issue.getId()).stream().map(IssueRun::getId).toList());
   }
 
   /** 不同 Agent 使用不同稳定 Thread，但共享同一 {@code (issue,state)} 阶段额度。 */
@@ -77,11 +85,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun runA = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         runA.getId(),
         runA.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(runA.getThreadId()),
+        null,
         null,
         null);
 
@@ -110,11 +120,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         run.getId(),
         run.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(run.getThreadId()),
+        null,
         null,
         null);
 
@@ -135,11 +147,13 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.completeRun(
+    issueRunService.finishRun(
         run.getId(),
         run.getVersion(),
         key("complete"),
+        IssueRunStatus.COMPLETED,
         appendHistoryEntry(run.getThreadId()),
+        null,
         null,
         null);
 
@@ -183,6 +197,55 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
                 afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));
   }
 
+  /** 重放绕过旧版本与活动 Run 检查；异 payload 和新的重置请求不能改变额度。 */
+  @Test
+  void budgetReceiptsReplayAndActiveRunBlocksNewReset() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("额度重放", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    String authKey = key("auth");
+    StageBudgetView authorized =
+        issueStageBudgetService.authorizeStageBudget(
+            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2);
+    assertEquals(
+        authorized,
+        issueStageBudgetService.authorizeStageBudget(
+            issue.getId(), issue.getVersion(), authKey, "DESIGN", 2));
+    assertThrows(
+        ProjectDuplicateException.class,
+        () ->
+            issueStageBudgetService.authorizeStageBudget(
+                issue.getId(), issue.getVersion(), authKey, "DESIGN", 3));
+    Issue afterAuth = issueEditingService.getIssue(issue.getId());
+    String resetKey = key("reset");
+    StageBudgetView reset =
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2);
+    assertEquals(0, reset.budgetAfterOrdinal());
+    Issue afterReset = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), afterReset.getVersion(), key("t"), "DESIGN");
+    issueRunService.acceptRun(issue.getId(), key("accept"));
+    Issue active = issueEditingService.getIssue(issue.getId());
+    assertEquals(
+        reset,
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), afterAuth.getVersion(), resetKey, "REVIEW", 2));
+    assertThrows(
+        ProjectDuplicateException.class,
+        () ->
+            issueStageBudgetService.resetStageBudget(
+                issue.getId(), active.getVersion(), resetKey, "REVIEW", 3));
+    ProjectValidationException error =
+        assertThrows(
+            ProjectValidationException.class,
+            () ->
+                issueStageBudgetService.resetStageBudget(
+                    issue.getId(), active.getVersion(), key("reset"), "DESIGN", 4));
+    assertTrue(error.getMessage().contains("active run"));
+    assertEquals(2, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").maxRuns());
+    assertEquals(active.getVersion(), issueEditingService.getIssue(issue.getId()).getVersion());
+  }
+
   /** 额度计算不按 Agent 过滤，因此切换 Agent 不重置已消耗次数。 */
   @Test
   void budgetCountingIgnoresAgentIdentity() {
@@ -206,10 +269,9 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 终态消耗：FAILED/CANCELLED/UNKNOWN 各按 {@code (issue,state)} 高水位消耗一次，不因收尾状态被豁免。
+   * 终态消耗：FAILED/CANCELLED 各按 {@code (issue,state)} 高水位消耗一次，不因收尾状态被豁免。
    *
-   * <p>意图：锁定真实 SQL 计数的「失败、取消与 UNKNOWN 同样计数」语义——三种终态各消费一次后额度耗尽；人工核查 UNKNOWN 门禁并恢复后，新建 Run
-   * 因额度耗尽被确定性拒绝，而不是被门禁或活动 Run 拒绝。
+   * <p>意图：锁定真实 SQL 计数的「失败与取消同样计数」语义——三种终态各消费一次后额度耗尽；显式恢复暂停后，新建 Run 因额度耗尽被确定性拒绝，而不是被 门禁或活动 Run 拒绝。
    */
   @Test
   void terminalRunsOfEveryStatusConsumeBudget() {
@@ -219,11 +281,14 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.failRun(
+    issueRunService.finishRun(
         failedRun.getId(),
         failedRun.getVersion(),
         key("fail"),
+        IssueRunStatus.FAILED,
         failedRun.getStartEntryId(),
+        null,
+        null,
         "boom");
     assertEquals(
         1L,
@@ -234,11 +299,15 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
 
     IssueRun cancelledRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.cancelRun(
+    issueRunService.finishRun(
         cancelledRun.getId(),
         cancelledRun.getVersion(),
         key("cancel"),
-        appendHistoryEntry(cancelledRun.getThreadId()));
+        IssueRunStatus.CANCELLED,
+        appendHistoryEntry(cancelledRun.getThreadId()),
+        null,
+        null,
+        null);
     assertEquals(
         2L,
         issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
@@ -247,24 +316,24 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     Issue afterCancel = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
 
-    IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
-    issueRunService.markUnknown(
-        unknownRun.getId(),
-        unknownRun.getVersion(),
-        key("unknown"),
-        appendHistoryEntry(unknownRun.getThreadId()),
-        "side effect lost");
+    IssueRun thirdRun = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.finishRun(
+        thirdRun.getId(),
+        thirdRun.getVersion(),
+        key("fail-2"),
+        IssueRunStatus.FAILED,
+        appendHistoryEntry(thirdRun.getThreadId()),
+        null,
+        null,
+        "Run stopped with in-flight side effects; outcome unknown");
     StageBudgetView exhausted = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
-    assertEquals(3L, exhausted.usedRuns(), "UNKNOWN run consumes one");
+    assertEquals(3L, exhausted.usedRuns(), "a second FAILED run consumes one");
     assertEquals(0L, exhausted.remainingRuns());
 
-    // UNKNOWN 门禁先由人工核查解除再恢复；此后唯一阻塞新 Run 的因素是额度耗尽。
-    Issue afterUnknown = issueEditingService.getIssue(issue.getId());
-    issueLifecycleService.resolveUnknown(
-        afterUnknown.getId(), afterUnknown.getVersion(), key("resolve"), "checked");
-    Issue afterResolve = issueEditingService.getIssue(issue.getId());
+    // 先显式解除 ERROR 暂停；此后唯一阻塞新 Run 的因素是额度耗尽。
+    Issue afterFailure = issueEditingService.getIssue(issue.getId());
     issueLifecycleService.resumeIssue(
-        afterResolve.getId(), afterResolve.getVersion(), key("resume"));
+        afterFailure.getId(), afterFailure.getVersion(), key("resume"));
 
     ProjectValidationException budgetExhausted =
         assertThrows(

@@ -4,8 +4,8 @@
  *
  * 结构：
  * - scripts/dev/verify/e2e/run-matrix.mjs   CLI + 报告
- * - scripts/dev/verify/e2e/lib/*            HTTP/fixtures/registry
- * - scripts/dev/verify/e2e/cases/*          用例注册
+ * - scripts/dev/verify/e2e/lib/*            HTTP/fixtures
+ * - scripts/dev/verify/e2e/cases/*          用例数组
  *
  * 报告（gitignore）：
  *   reports/e2e/<runId>/{report.md,summary.json,cases/,artifacts/,logs/}
@@ -34,33 +34,41 @@ import { httpJson, pageResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets } from './lib/redact.mjs'
-import { ALL_CASES } from './lib/registry.mjs'
+import { findCase } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
+import { cases as seedCases } from './cases/seed-and-harness.mjs'
+import { cases as crudCases } from './cases/crud.mjs'
+import { cases as projectCases } from './cases/project.mjs'
+import { cases as i18nCases } from './cases/i18n.mjs'
+import { cases as configMatrixCases } from './cases/config-matrix.mjs'
+import { cases as systemSettingsCases } from './cases/system-settings.mjs'
+import { cases as installConfigCases } from './cases/environment-install-config.mjs'
+import { cases as configSyncCases } from './cases/config-sync.mjs'
+import { cases as runtimeIdeCases } from './cases/environment-runtime-ide.mjs'
+import { cases as appEventsCases } from './cases/app-events.mjs'
+import { cases as modelAttemptCases } from './cases/model-attempt-visibility.mjs'
+import { cases as canvasStorageCases } from './cases/canvas-storage.mjs'
+import { cases as canvasFunctionCases } from './cases/canvas-function.mjs'
+import { cases as chatAttachmentCases } from './cases/chat-attachment.mjs'
+import { cases as canvasApiCases } from './cases/canvas-api.mjs'
+import { cases as interactionCases } from './cases/interaction.mjs'
+import { cases as queuedBatchCases } from './cases/thread-queued-batch.mjs'
+import { cases as realCases } from './cases/real.mjs'
+import { cases as distributedCases } from './cases/distributed.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// 加载全部 case 模块（注册副作用）
-await import('./cases/seed-and-harness.mjs')
-await import('./cases/crud.mjs')
-await import('./cases/project.mjs')
-await import('./cases/i18n.mjs')
-await import('./cases/config-matrix.mjs')
-await import('./cases/system-settings.mjs')
-await import('./cases/config-sync.mjs')
-await import('./cases/environment-install-config.mjs')
-await import('./cases/environment-runtime-ide.mjs')
-await import('./cases/app-events.mjs')
-await import('./cases/model-attempt-visibility.mjs')
-await import('./cases/canvas-storage.mjs')
-await import('./cases/canvas-function.mjs')
-await import('./cases/chat-attachment.mjs')
-await import('./cases/canvas-api.mjs')
-await import('./cases/interaction.mjs')
-await import('./cases/thread-queued-batch.mjs')
-await import('./cases/real.mjs')
-await import('./cases/distributed.mjs')
+// config-sync 原先先导入 install-config，因此其 case 排在 config-sync 前。
+export const ALL_CASES = [
+  ...seedCases, ...crudCases, ...projectCases, ...i18nCases, ...configMatrixCases,
+  ...systemSettingsCases, ...installConfigCases, ...configSyncCases, ...runtimeIdeCases,
+  ...appEventsCases, ...modelAttemptCases, ...canvasStorageCases, ...canvasFunctionCases,
+  ...chatAttachmentCases, ...canvasApiCases, ...interactionCases, ...queuedBatchCases,
+  ...realCases, ...distributedCases,
+]
+export const getCase = (id) => findCase(ALL_CASES, id)
 
 class CaseContext {
   constructor({
@@ -592,17 +600,16 @@ async function main(argv) {
   return failed.length ? 1 : 0
 }
 
-// keep import for potential dynamic loaders
-void pathToFileURL
-
 // 只设置 exitCode 并交回事件循环自然退出：process.exit 会丢弃管道上尚未 drain 的异步
 // stdout/stderr 写入（--docs 等大输出会被截断），自然退出会等待 pending 写入完成后按 exitCode 结束。
-main(process.argv.slice(2)).then(
-  (code) => {
-    process.exitCode = code
-  },
-  (err) => {
-    console.error(err)
-    process.exitCode = 2
-  },
-)
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).then(
+    (code) => {
+      process.exitCode = code
+    },
+    (err) => {
+      console.error(err)
+      process.exitCode = 2
+    },
+  )
+}

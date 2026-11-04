@@ -232,7 +232,7 @@ test('test intent: UI smoke creates an agent without an implicit Environment', (
     'ui.chat.create_agent_no_implicit_environment',
     '{ requiresTools: true }',
     'tempAgentName',
-    'model: REAL_UI_MODEL_ID',
+    "execution: { driver: 'builtin', settings: { modelName: REAL_UI_MODEL_ID",
     'agentCreateRes.status === 201',
     "!Object.hasOwn(agentCreateRes.json.data, 'environmentId')",
     "!Object.hasOwn(agentCreateRes.json.data, 'branchSettings')",

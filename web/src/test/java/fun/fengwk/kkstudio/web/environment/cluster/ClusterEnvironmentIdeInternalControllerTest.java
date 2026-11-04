@@ -1,31 +1,48 @@
 package fun.fengwk.kkstudio.web.environment.cluster;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
@@ -62,6 +79,154 @@ class ClusterEnvironmentIdeInternalControllerTest {
                 new ClusterEnvironmentIdeInternalController(
                     localEnvironmentIdeService, clusterNodeRegistry, authentication))
             .build();
+  }
+
+  /** 新端点也必须验证包含原始 query 的签名并只交付本地 owner。 */
+  @Test
+  void newEndpointsAuthenticateAndDelegate() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    String directories = IdeInternalPaths.environmentPrefix(ENV) + "/directories?path=%2Fa%2Bb";
+    mockMvc
+        .perform(
+            get(URI.create(directories))
+                .headers(mockHeaders(authentication.sign("GET", directories, NODE_B))))
+        .andExpect(status().isOk());
+    verify(localEnvironmentIdeService).listDirectories(ENV, "/a+b");
+
+    String mobile = IdeInternalPaths.viewsPath(ENV) + "/" + VIEW + "/mobile-layout";
+    mockMvc
+        .perform(
+            post(mobile)
+                .headers(mockHeaders(authentication.sign("POST", mobile, NODE_B)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}"))
+        .andExpect(status().isOk());
+    verify(localEnvironmentIdeService).collapseMobile(eq(ENV), eq(VIEW), any());
+  }
+
+  /** 远端关闭的签名路径必须与实际内部 controller 路由一致。 */
+  @Test
+  void authenticatedCloseUsesViewsPath() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    String path = IdeInternalPaths.viewPath(ENV, VIEW);
+    mockMvc
+        .perform(
+            delete(path)
+                .headers(mockHeaders(authentication.sign("DELETE", path, NODE_B)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\",\"discard\":false}"))
+        .andExpect(status().isOk());
+    verify(localEnvironmentIdeService).closeView(eq(ENV), eq(VIEW), any());
+  }
+
+  /** 客户端契约路径经真实认证和 controller 路由解析，绑定字段不能丢失。 */
+  @Test
+  void boundCommandPathsMatchClientContract() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    String body =
+        "{\"documentId\":\"11111111-1111-1111-1111-111111111111\",\"bindingEpoch\":\"1\"}";
+    String directory = IdeInternalPaths.directoryPath(ENV, VIEW);
+    mockMvc
+        .perform(
+            put(directory)
+                .headers(mockHeaders(authentication.sign("PUT", directory, NODE_B)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body.substring(0, body.length() - 1) + ",\"directory\":\"/next\"}"))
+        .andExpect(status().isOk());
+    String terminal = IdeInternalPaths.terminalPath(ENV, VIEW);
+    mockMvc
+        .perform(
+            post(terminal)
+                .headers(mockHeaders(authentication.sign("POST", terminal, NODE_B)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isOk());
+    String detach = IdeInternalPaths.detachPath(ENV, VIEW);
+    mockMvc
+        .perform(
+            post(detach)
+                .headers(mockHeaders(authentication.sign("POST", detach, NODE_B)))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isOk());
+    verify(localEnvironmentIdeService)
+        .changeDirectory(
+            eq(ENV),
+            eq(VIEW),
+            argThat(
+                dto -> "/next".equals(dto.getDirectory()) && "1".equals(dto.getBindingEpoch())));
+    verify(localEnvironmentIdeService)
+        .focusTerminal(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
+    verify(localEnvironmentIdeService)
+        .detachView(eq(ENV), eq(VIEW), argThat(dto -> "1".equals(dto.getBindingEpoch())));
+  }
+
+  /** 客户端通过 HTTP 收到真实 controller 的错误 JSON，只允许已知取消资源穿透。 */
+  @Test
+  void cancellationResourceSurvivesControllerJsonAndClusterClient() throws Exception {
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
+    doThrow(new AiValidationException("ide_close_cancelled", "cancelled"))
+        .doThrow(new AiValidationException("other_resource", "cancelled"))
+        .doThrow(new AiEnvironmentIdeUnavailableException("cancelled"))
+        .when(localEnvironmentIdeService)
+        .closeView(eq(ENV), eq(VIEW), any());
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          try {
+            HttpHeaders headers = new HttpHeaders();
+            exchange.getRequestHeaders().forEach((name, values) -> headers.put(name, values));
+            MvcResult result =
+                mockMvc
+                    .perform(
+                        delete(exchange.getRequestURI())
+                            .headers(headers)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(exchange.getRequestBody().readAllBytes()))
+                    .andReturn();
+            byte[] response = result.getResponse().getContentAsByteArray();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(result.getResponse().getStatus(), response.length);
+            exchange.getResponseBody().write(response);
+          } catch (Exception error) {
+            throw new IOException(error);
+          } finally {
+            exchange.close();
+          }
+        });
+    server.start();
+    try {
+      IdeClusterClient client =
+          new IdeClusterClient(
+              HttpClient.newHttpClient(),
+              JsonMapper.builder().build(),
+              authentication,
+              Duration.ofSeconds(3),
+              65536);
+      ClusterOwnerRoute owner =
+          ClusterOwnerRoute.remote(
+              NODE_B, URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+      EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
+      request.setDocumentId("11111111-1111-1111-1111-111111111111");
+      request.setBindingEpoch("1");
+      request.setDiscard(false);
+      AiValidationException cancelled =
+          assertThrows(
+              AiValidationException.class, () -> client.closeView(ENV, owner, VIEW, request));
+      assertEquals("ide_close_cancelled", cancelled.resource());
+      AiValidationException other =
+          assertThrows(
+              AiValidationException.class, () -> client.closeView(ENV, owner, VIEW, request));
+      assertEquals("environment", other.resource());
+      assertThrows(
+          AiEnvironmentIdeUnavailableException.class,
+          () -> client.closeView(ENV, owner, VIEW, request));
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test

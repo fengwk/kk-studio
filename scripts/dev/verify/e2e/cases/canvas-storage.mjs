@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 
 import { assert, assertDecimalVersion, cid, envelopeData, expectHttpError } from '../lib/http.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -88,7 +91,7 @@ registerCase({
   requires: ['canvas-storage'],
   title: 'Canvas Resource 直读预签名与全局 Blob 存储边界',
   docs:
-    '需 backend 启用 S3；验证无公开 /api/s3/** 接口，全局 upload reserve->PUT->complete 后可通过 /api/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL（原件 URL 另带权威 mediaType/sizeBytes），typed command CREATE_NODE 的 BLOB 资源槽位引用 READY blob、KEEP 复用同一 Resource 且不推进 revision，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝，画布深删除后 404',
+    '需 backend 启用 S3；验证无公开 /api/s3/** 接口，全局 upload reserve->PUT->complete 后可通过 /api/storage/blobs/{blobId}/download-url|preview-url 获取预签名 URL（原件 URL 另带权威 mediaType/sizeBytes），typed command CREATE_NODE 的 BLOB 资源槽位引用 READY blob、KEEP 复用同一 Resource 且不推进 revision，Resource download/preview-url 只暴露 method/url/headers/expiresAt，TEXT 资源与未知资源明确拒绝',
   async run(ctx) {
     const created = await ctx.call('POST', '/api/canvases', {
       title: `e2e-resource-storage-${cid().slice(0, 8)}`,
@@ -227,12 +230,5 @@ registerCase({
       { status: 404 },
     )
 
-    // 深删除画布后资源 URL 与画布本身都不可达。
-    await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
-    await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })
-    await expectHttpError(
-      () => ctx.call('POST', `/api/canvases/${canvas.id}/resources/${resource.id}/download-url`),
-      { status: 404 },
-    )
   },
 })

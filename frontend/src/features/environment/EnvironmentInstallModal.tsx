@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -257,14 +257,14 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
 
   return (
     <Dialog
-      className="environment-install-modal"
+      className="environment-install-modal modal-touch-target"
       title={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
       pending={pending}
       onClose={onClose}
     >
-        <form onSubmit={event => void submit(event)}>
+        <form className="modal-card-form" onSubmit={event => void submit(event)}>
           <div className="modal-body">
-            <p className="confirm-modal-description">
+            <p className="modal-body-text">
               {t(uninstall ? 'ai.environment.install.uninstallNotice' : 'ai.environment.install.notice')}
             </p>
             {!uninstall && (
@@ -352,7 +352,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 {lspEnabled && (
                   <div className="install-field">
                     <label className="form-group">
-                      <span>LSP servers (JSON)</span>
+                      <span>LSP servers</span>
                       <TextArea
                         rows={8}
                         value={servers}
@@ -390,6 +390,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         </form>
         {feedback && <Toast message={feedback} onDismiss={() => setFeedback(null)} />}
         <ConflictPresenter
+          className="modal-touch-target"
           conflict={conflict}
           onClose={() => setConflict(null)}
           onRefresh={() => {

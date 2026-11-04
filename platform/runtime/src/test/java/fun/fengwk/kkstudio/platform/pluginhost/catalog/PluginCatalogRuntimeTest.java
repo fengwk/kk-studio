@@ -13,7 +13,6 @@ import static org.mockito.Mockito.verify;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -32,14 +31,30 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** {@link PluginCatalogRuntime} 的发布、退役与失败保留契约。 */
 class PluginCatalogRuntimeTest {
 
   private static final String PLUGIN_ID = "alpha.plugin";
 
+  /** 平台不认识的产品贡献：只有注入的产品目录投影会按该类型读取它。 */
+  private record FakeAdapter(String functionName) {}
+
+  /** 示例产品目录视图。 */
+  private record FakeProductCatalog(List<String> functionNames) {
+
+    private FakeProductCatalog {
+      functionNames = List.copyOf(functionNames);
+    }
+  }
+
   private final PluginConfigurationRepository repository =
       mock(PluginConfigurationRepository.class);
+
+  /** 产品目录投影的校验失败开关：模拟新快照发布前的产品目录校验。 */
+  private final AtomicBoolean productCatalogRejects = new AtomicBoolean();
+
   private TestPlugin plugin;
   private PluginCatalogRuntime runtime;
 
@@ -58,7 +73,7 @@ class PluginCatalogRuntimeTest {
                     Optional.empty(),
                     Optional.empty()),
             List.of(),
-            List.of());
+            this::productCatalog);
   }
 
   /** 启动为已安装 Plugin 写入默认配置，并只按已安装 Plugin 的当前配置构建首个快照。 */
@@ -67,6 +82,9 @@ class PluginCatalogRuntimeTest {
     verify(repository).insertIfMissing(PLUGIN_ID, "{}");
     try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
       assertEquals(Map.of(PLUGIN_ID, 1L), lease.snapshot().revisions());
+      assertEquals(
+          List.of("product.run"),
+          lease.snapshot().productCatalog(FakeProductCatalog.class).functionNames());
     }
     assertEquals(1, plugin.instances.size());
     assertNull(runtime.applicationError());
@@ -128,6 +146,33 @@ class PluginCatalogRuntimeTest {
     assertNull(runtime.applicationError());
   }
 
+  /** 产品目录校验失败在发布前拒绝：候选实例回收，旧租用和后续租用仍指向旧快照。 */
+  @Test
+  void productCatalogValidationFailureDiscardsCandidateWithoutRetiringCurrentSnapshot() {
+    PluginCatalogRuntime.Lease held = runtime.acquire();
+    PluginCatalogSnapshot old = held.snapshot();
+    productCatalogRejects.set(true);
+    stored(2L);
+
+    runtime.refresh();
+
+    assertEquals(
+        "plugin configuration could not be applied on this node", runtime.applicationError());
+    assertEquals(1, plugin.instances.get(1).closeCount);
+    assertEquals(0, plugin.instances.get(0).closeCount);
+    try (PluginCatalogRuntime.Lease fresh = runtime.acquire()) {
+      assertSame(old, fresh.snapshot());
+      assertEquals(Map.of(PLUGIN_ID, 1L), fresh.snapshot().revisions());
+      assertEquals(
+          List.of("product.run"),
+          fresh.snapshot().productCatalog(FakeProductCatalog.class).functionNames());
+    }
+    held.close();
+    assertEquals(0, plugin.instances.get(0).closeCount);
+    runtime.close();
+    assertEquals(1, plugin.instances.get(0).closeCount);
+  }
+
   /** 关闭停止授予新租用，关闭幂等；关闭后的刷新只回收候选，不发布。 */
   @Test
   void closeStopsNewLeasesAndDiscardsLaterCandidates() {
@@ -145,6 +190,20 @@ class PluginCatalogRuntimeTest {
     assertEquals(1, plugin.instances.get(1).closeCount);
   }
 
+  /** 注入的产品目录投影：只读插件贡献，返回固定视图；校验开关打开时拒绝本次候选。 */
+  private FakeProductCatalog productCatalog(PluginCatalogSnapshot snapshot) {
+    if (productCatalogRejects.get()) {
+      throw new IllegalArgumentException("duplicate product function name");
+    }
+    List<String> names = new ArrayList<>();
+    for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
+      for (FakeAdapter adapter : configured.instance().contributions(FakeAdapter.class)) {
+        names.add(adapter.functionName());
+      }
+    }
+    return new FakeProductCatalog(names);
+  }
+
   private void stored(long revision) {
     doReturn(
             List.of(
@@ -154,7 +213,7 @@ class PluginCatalogRuntimeTest {
         .findAll();
   }
 
-  /** 每次 configure 产出一个可计数关闭的空实例，可注入 configure 失败。 */
+  /** 每次 configure 产出一个可计数关闭的实例，可注入 configure 失败。 */
   private static final class TestPlugin implements StudioPlugin {
 
     private final List<CountingInstance> instances = new ArrayList<>();
@@ -186,7 +245,10 @@ class PluginCatalogRuntimeTest {
     }
   }
 
+  /** 贡献一个产品 adapter 并记录 close 次数的实例。 */
   private static final class CountingInstance implements PluginInstance {
+
+    private static final List<Object> CONTRIBUTIONS = List.of(new FakeAdapter("product.run"));
 
     private int closeCount;
 
@@ -196,8 +258,8 @@ class PluginCatalogRuntimeTest {
     }
 
     @Override
-    public List<CanvasFunctionAdapter> canvasAdapters() {
-      return List.of();
+    public <T> List<T> contributions(Class<T> type) {
+      return PluginInstance.contributionsOf(type, CONTRIBUTIONS);
     }
 
     @Override

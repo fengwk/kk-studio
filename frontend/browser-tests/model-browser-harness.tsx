@@ -11,7 +11,7 @@ import {
   ThreadComposerControls,
   type ThreadComposerControlMenu,
   type ThreadComposerModelSelection,
-} from '@/features/chat/runtime/thread-panel/ThreadComposerControls'
+} from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
 import { FIXTURE_MODELS } from './model-browser-fixtures'
 
 const params = new URLSearchParams(location.search)

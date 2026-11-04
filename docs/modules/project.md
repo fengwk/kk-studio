@@ -10,7 +10,7 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 PostgreSQL 持久化、Issue 调度与 Agent 业务工具，经
 [`ProjectAutoConfiguration`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。它直接使用 [Platform](platform.md) 的公开服务（运行时、Agent 任务、全局 Blob、Agent 目录与
-Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。领域与 share DTO 的映射在
+Session 深删除），并实现平台定义的 `SessionOwnership` 与 `AgentReferenceCheck`；平台从不依赖 Project。领域与 share DTO 的映射在
 [`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java)，由本模块扫描为唯一组件，并注入宿主的 Jackson 3 `ObjectMapper` 与唯一的 [`ProjectWorkflowJsonCodec`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)。Issue
 Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方向由仓库检查
 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
@@ -25,8 +25,7 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
 | [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
-| [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 等业务工具与 Run 上下文 projector |
-| [turn](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn) | 冻结在 branch 上的 `ProjectRunScope` 及其编解码 |
+| [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具与 Thread 归属解析 |
 | [dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto) | 领域模型与 share wire DTO 的双向映射 |
 | [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Web 映射 |
 
@@ -39,7 +38,8 @@ Project 只经两个窄适配接触运行时与存储，平台异常在此收敛
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
-`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project KEY SHARE -> Issue UPDATE` 锁定产品层级（Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
+`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectSessionOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSessionOwnership.java) 实现平台定义的 `SessionOwnership`：命令接受与人工交互按 `Project SHARE -> Issue UPDATE` 锁定产品层级（接受时 Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。规则是不允许分叉、不允许通用命令直写，删除 Session 前先删除绑定行；锁序由 Project 自己维护，平台编排只按固定顺序调用它。
+[`ProjectAgentReferenceCheck`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectAgentReferenceCheck.java) 实现平台的 `AgentReferenceCheck`：删除 Agent 前检查未归档项目的工作流阶段，平台不再读取 `project` 表。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
 
@@ -107,7 +107,8 @@ Issue A
 
 `(issueId, agentName)` 在首次接受执行时创建稳定 Thread 绑定；同 Agent 跨阶段、
 返工与重开复用该 Thread。每个绑定拥有独立 Harness Session，提供历史与附件授权
-范围；Thread 解析 Session，Run 冻结 Session/Thread 和历史区间。
+范围；绑定保存 Session/Thread，复合外键保证二者一致，Run 冻结 Session/Thread 和历史区间。
+分支归属通过 Harness 读取调用线程的 Session，再查询 Project 的绑定，因此同一 Session 的兄弟分支即使没有 Run 也受同一归属约束。
 
 阶段额度按 `(issueId,state)` 授权：
 
@@ -117,14 +118,14 @@ used = COUNT(Run WHERE issue_id = ? AND state = ?
 remaining = max(0, max_runs - used)
 ```
 
-Run ordinal 在 Issue 内单调分配。新 Run 的失败、取消和 UNKNOWN 都消耗一次额度；
+Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一次额度；
 恢复已接受 Run、工具循环、协议续生成和问答等待沿用原次数。更换 Agent、返工或重开
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由明确授权或重置操作维护。
 
-[`IssueStageBudget`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStageBudget.java)
+[`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
 承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
 `nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
-Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
+Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
 人工重置要求无活动 Run，高水位取服务端 `next_run_ordinal - 1`，前后额度与高水位写入 CONTROL
 活动。used/remaining 在读取时计算，Agent 通过受控执行使用额度。已接受 Run 还受
 持久活动时长余额与模型、工具安全上限约束，安全等待暂停活动计时。
@@ -136,7 +137,7 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 | 当前工作阶段 | `Issue.state` | 沿合法边转移，DONE 可显式重开 |
 | 业务阻塞 | BLOCKED、原阶段和原因 | 阻塞后显式恢复到原阶段 |
 | 人工暂停或执行失败 | USER / ERROR 暂停原因 | 检查后显式恢复 |
-| 副作用结果不明 | UNKNOWN Run 与暂停原因 | 记录核查依据，再显式恢复 |
+| 副作用结果不明 | FAILED Run 与 ERROR 暂停 | 核查后显式恢复 |
 | 工具等待输入或审批 | Harness ToolInvocation | 在 Pane 或待处理入口回答/决定 |
 | 新 Run 额度耗尽 | 阶段预算与 Run 历史计算 | 人工授权或重置 |
 
@@ -144,14 +145,16 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 身份收尾，到安全点才置 WAITING。回答问卷后，业务 BLOCKED 或人工暂停仍需各自恢复。
 输入等待恢复沿用原 Run，即使新 Run 额度已经用尽也可继续。
 
-人工 Stop 收尾为 CANCELLED 并保留 USER 暂停；在途结果不明时进入 UNKNOWN。
-UNKNOWN 核查记录提交后转为 USER 暂停，执行需再显式恢复。直接换阶段和归档要求无
+人工 Stop 对活动 Run 在同一事务中先读取执行事实，再以 Run 稳定请求标识和线程版本调用 Harness Stop，
+以返回的权威 head 收尾；运行时不可用时停止失败，不把活动 Run 当作空闲处理。
+正常收尾为 CANCELLED 并保留 USER 暂停；停止前在途结果不明时收尾为 FAILED 并保留 ERROR 暂停。
+空闲时再次 Stop 不覆盖 ERROR 及其详情，执行需显式恢复。直接换阶段和归档要求无
 活动 Run，归档后的产品拒绝执行。
 
 ### 接受、交接与报告
 
 Run 接受在同一物理事务内完成状态和额度检查、Thread 选择或创建、起点冻结、显式
-Agent/Model/Environment/contributor state 命令与任务输入提交、Run 与 RUN 活动插入、
+Agent/Model/Environment 命令与任务输入提交、Run 与 RUN 活动插入、
 Harness 命令接受及 Work 登记。首次创建先写 Harness Session、
 ROOT 和 Thread，再写产品绑定与 Run，满足即时外键；失败时全部回滚。
 
@@ -159,15 +162,14 @@ ROOT 和 Thread，再写产品绑定与 Run，满足即时外键；失败时全�
 再次执行需要接受新 Run 并检查额度。额度耗尽时等待人工授权。
 
 Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先写入 Run.next_state，
-工具返回“已接受，收尾后生效”。随后派发仅允许模型收尾与冻结 descriptor 声明的只读
-工具；用户输入继续受控接受，处理完后才能交接。
+工具返回“已接受，收尾后生效”。用户输入继续受控接受，处理完后才能交接。
 
 ```text
 接受 next_state
   -> 处理剩余输入、问答与在途调用，到安全点
   -> root Join 冻结 terminalEntryId / finalAnswerEntryId
   -> 事务复验 Run ID/version、历史区间、合法边与门禁
-  -> 冻结报告，Run=COMPLETED，写 active=false scope
+  -> 冻结报告，Run=COMPLETED
   -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
 ```
 
@@ -178,33 +180,34 @@ Run 区间为 `(start_entry_id,end_entry_id]`，沿 Entry 父链解释；最终�
 真实可见 Entry（取自 root Join 冻结的 `finalAnswerEntryId`），缺少报告时展示终态原因。
 Issue 的要求由需求和阶段定义，Agent 交接走 `issue_transition`；Issue Run 的任务输入是
 可信 `CUSTOM_MESSAGE`，其 owner 命令不出现在公共 batch 端点。
-Issue 工具说明、交接回执与当前 Run 上下文使用本模块的
+Issue 工具说明、交接回执与当前 Run 的任务消息使用本模块的
 [`prompts`](../../apps/project/src/main/resources/fun/fengwk/kkstudio/project/prompts/) Markdown 资源，
-由 Harness 的严格模板渲染器填入冻结事实。
+由 Harness 的严格模板渲染器按三花括号填入未转义的可信 Markdown 事实。
 
 执行记录落在 model 行：
 [`IssueAgentThread`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueAgentThread.java)
 保存 `(issueId, agentName) -> threadId` 稳定绑定；
 [`IssueRun`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model/IssueRun.java)
 保存 `(startEntryId, endEntryId]`、Session/Thread、阶段与终态事实。每 Issue 唯一活动 Run、
-终态必须冻结区间、FAILED/UNKNOWN 必须给出原因等不变量由 `project_issue_run` 的检查约束与
+终态必须冻结区间、FAILED 必须给出原因等不变量由 `project_issue_run` 的检查约束与
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
-Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈，不作为人工核查门禁，只在人工停止且仍有在途工作或结果未定时让 Run 收敛为 `UNKNOWN` 暂停。Project 通过 `ThreadExecutionFacts` 统一判断「在途」。
+Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈，不作为人工核查门禁。人工停止时仍有在途工作或结果未定则收敛为 FAILED 和 ERROR 暂停。Project 通过 `ThreadExecutionFacts` 统一判断「在途」。
 
 Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初始化其
 YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代读取根的开关，
 后续人工开关只更新根行。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_EXECUTION` /
-`SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE` 与末尾任务输入；阶段 Environment 就来自该 Run 的
+`SET_ENVIRONMENT` 与末尾任务输入；阶段 Environment 就来自该 Run 的
 显式命令，Platform 不按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
 Thread `BranchSettings` 的带外重写。
 
-`branch` 上的 [`ProjectRunScope`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn/ProjectRunScope.java)
-以 contributor `project` / customType `run` 冻结本次 Run 的 issue/project/stage 上下文与
-`sourceThreadId`，并显式记录 `active`：Run 接受时为 true，结束时在同一业务锁内接受一条同一 runId、
-`active=false` 的纯 `SET_CONTRIBUTOR_STATE` 快照；projector 对已关闭 scope 输出空，业务写工具拒绝
-已关闭 scope，新 Run 的 true 快照按命令顺序覆盖旧 scope。`issue_transition` 从冻结 scope 取得 runId，
-在业务锁内校验 Run/Issue/阶段/版本与调用 Thread 身份，fork 不凭继承 scope 获权。Run 完成只认本次
+Run 的业务上下文只有一条 Markdown 任务消息：接受时由 Project 自己的模板渲染 Issue 事实、阶段说明
+与可交接目标，以 `CUSTOM_MESSAGE` 随输入回合交给模型。Project 不写任何 branch custom state，也不在
+收尾时回写 Harness 状态，因此压缩可能摘要任务消息，但交接规则始终随工具说明每轮发送。
+`issue_transition` 只依据真实调用 Thread 解析 Project 自己的稳定绑定与活动 Run，在业务锁内校验
+Run/Issue/阶段/版本与调用 Thread 身份，并要求本次调用的 assistant 入口落在该 Thread 当前历史路径上，
+其所属 TURN_START 由该 Thread 创建且严格晚于活动 Run 的 `startEntryId`：旧 Run 的迟到调用、同 Thread 后续 Run 期间的旧 Turn、兄弟分支与
+fork 都不获权。Run 完成只认本次
 root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED` 分别
 完成 / 失败 / 取消），既不按快照最新 head 猜测，也不等待永久子树 idle；工具 UNKNOWN 只作为模型反馈，
 不升级为人工核查暂停。
@@ -221,10 +224,12 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 读侧由 [`ProjectSnapshotAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSnapshotAssembler.java) 与
 [`IssueDetailAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueDetailAssembler.java)
 在模块内部完成快照用例聚合；
-`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
+`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作，最终答复证据的预校验和发布由
+`IssueReconcileEvidence` 在同一事务内负责；
 [`IssueMutationSupport`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueMutationSupport.java)
-只集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、幂等 receipt、版本/归档门禁与活动落库，
-不承载具体动作或状态/额度规则；Repository 只做单表读写与 CAS 行数判定。
+集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、版本/归档门禁与活动落库；
+`IssueActivityIdempotency` 统一锁前、锁内两次 receipt 判定；Run 的完成、取消与失败由同一事务入口收尾。
+阶段额度仓库读取额度时按 Run 历史聚合已消耗次数；其余仓库负责实体读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
@@ -242,7 +247,7 @@ Work 邮箱是共享 `durable_work` 表中 target type 为 `ISSUE` 的行。
 deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不重复
 retain，重复交付不双计。深删除 Session 只释放该 Session 自己的引用。
 
-Project 深删除在一个事务内锁住 Project 行（`FOR UPDATE`），拒绝仍活动的 Run 与未解除的 `UNKNOWN` 暂停，
+Project 深删除在一个事务内锁住 Project 行（`FOR UPDATE`），拒绝仍活动的 Run，
 再按 Evidence（先于 Run 行，因为 `project_issue_evidence.run_id` 是 RESTRICT 外键）->
 Activities -> Work -> Runs -> Stage 预算 -> Agent Session 深删除 -> Issue -> Project 的顺序清理；
 Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。

@@ -20,6 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
@@ -303,7 +305,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 
-  /** USER 型 Agent 必须绑定真实 model：合成 provider + model 走真实外键，绝不旁路约束。 */
+  /** USER 型 Agent 的内置执行选择引用合成 provider 与 model。 */
   private static void seedAgentModel() {
     jdbcClient
         .sql(
@@ -328,9 +330,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             .name(name)
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
-            .modelName(MODEL_NAME)
-            .configJson(
-                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .execution(BuiltinExecution.of(new ModelSelection(MODEL_NAME, null)))
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .version(0L)
             .build();
     return agent;

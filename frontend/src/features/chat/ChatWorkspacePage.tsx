@@ -5,13 +5,12 @@ import { ArrowLeft, PanelRight } from 'lucide-react'
 import { useOptionalIdePanel } from '@/features/environment/ide/ide-panel-context'
 import { ChatWorkspacePane } from '@/features/chat/ChatWorkspacePane'
 import { NewBranchDialog } from '@/features/chat/NewBranchDialog'
-import { samePaneTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
+import { loadPendingAcceptance, samePaneTarget, type PaneTarget } from '@/features/thread/runtime/agent-pane'
 import { hasThreadNameConflict } from '@/features/chat/thread-name-conflict'
 import { harnessService } from '@/shared/api/harness-service'
-import { loadPendingAcceptance } from '@/features/chat/runtime/agent-pane'
-import { restoreComposerDraft } from '@/features/chat/composer/composer-draft'
-import { partsKey, trimMessageParts } from '@/features/chat/composer/composer-parts'
-import type { BranchRequestInput, PaneReport } from '@/features/chat/runtime/root-thread/types'
+import { restoreComposerDraft } from '@/features/thread/composer/composer-draft'
+import { partsKey, trimMessageParts } from '@/features/thread/composer/composer-parts'
+import type { BranchRequestInput, PaneReport } from '@/features/thread/runtime/root-thread/types'
 import {
   applyChatLayout,
   chatPanePosition,
@@ -27,15 +26,15 @@ import {
   type ChatPaneState,
 } from '@/features/chat/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { chatService } from '@/features/chat/chat-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Button } from '@/shared/ui/controls/Button'
-import { ThreadPresentationActions } from '@/features/chat/runtime/ThreadPresentationActions'
-import type { ThreadPresentation } from '@/features/chat/runtime/thread-presentation'
+import { ThreadPresentationActions } from '@/features/thread/runtime/ThreadPresentationActions'
+import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
 import type {
@@ -168,7 +167,7 @@ function ChatWorkspaceContent({
       return [pane.id, {
         target,
         draftKey: partsKey(parts),
-        pending: loadPendingAcceptance({ type: 'CHAT', chatId: chat.id }, pane.id, undefined, target) != null,
+        pending: loadPendingAcceptance({ kind: 'CHAT', id: chat.id }, pane.id, undefined, target) != null,
         hasUnsentDraft: trimMessageParts(parts).length > 0,
         sessionId: target.kind === 'NEW_THREAD_DRAFT' ? target.sessionId : null,
         branchName: target.kind === 'NEW_THREAD_DRAFT' ? target.threadName : null,

@@ -133,7 +133,7 @@ class MiniMaxMavisAutoConfigurationTest {
   }
 
   /** 记录 HTTP 请求的假传输实现。 */
-  private static final class RecordingTransport implements MavisHttpTransport {
+  private static final class RecordingTransport extends MavisHttpTransport {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
 
     @Override

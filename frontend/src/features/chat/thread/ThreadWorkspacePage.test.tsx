@@ -5,13 +5,13 @@ import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
+import { chatService } from '@/features/chat/chat-service'
+import { environmentService } from '@/features/environment/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { interactionService } from '@/shared/api/interaction-service'
-import { createTextPart } from '@/features/chat/composer/composer-parts'
+import { createTextPart } from '@/features/thread/composer/composer-parts'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
-import { saveThreadDraftParts } from '@/features/chat/runtime/thread-draft-store'
+import { saveThreadDraftParts } from '@/features/thread/runtime/thread-draft-store'
 import { setLocale } from '@/shared/i18n'
 import type {
   HarnessSessionEntryDTO,
@@ -37,13 +37,13 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/chat-service', () => ({
+vi.mock('@/features/chat/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     listChatSessions: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
@@ -412,15 +412,7 @@ describe('ThreadWorkspacePage', () => {
         threadId: CHILD_THREAD_ID,
         rootThreadId: rootId,
         sessionId: 'session-child',
-        owner: {
-          type: 'CHAT',
-          chatId: 'chat-1',
-          chatTitle: null,
-          issueId: null,
-          issueTitle: null,
-          agentName: null,
-          rootThreadName: null,
-        },
+        owner: { kind: 'CHAT', id: 'chat-1', title: null, link: '/chats/chat-1' },
         toolCallId: 'call-bash-1',
         toolName: 'bash',
         argumentsJson: '{"command":"rm -rf /tmp/test"}',

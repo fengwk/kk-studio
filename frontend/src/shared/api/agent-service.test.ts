@@ -87,9 +87,8 @@ describe('agentService', () => {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
-      model: 'MiniMax-M2.7',
-      variant: 'default',
-      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
+      config: { tools: [], skills: [], subagents: [] },
     }
     const updateProviderBody: AgentProviderUpdateDTO = {
       providerType: 'openai',
@@ -118,9 +117,8 @@ describe('agentService', () => {
       description: 'updated',
       expectedVersion: '9',
       systemPrompt: null,
-      model: 'MiniMax-M2.7',
-      variant: 'default',
-      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
+      config: { tools: [], skills: [], subagents: [] },
     }
 
     await service.createProvider(providerBody)

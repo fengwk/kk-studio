@@ -12,6 +12,7 @@ LAUNCHD_LABEL=fun.fengwk.kkstudio.environment-daemon
 PLIST_MARKER='<!-- Managed by scripts/daemon/install.sh -->'
 CONFIG_FILE=
 TOKEN_FILE=
+VERSION=
 SEEN_OPTIONS=
 DOWNLOAD_DIR=
 BACKUP_DIR=
@@ -29,10 +30,10 @@ VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 
 usage() {
   cat <<'EOF'
-Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token>
+Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--version <version>]
        bash install.sh status | uninstall | help
 
-Install downloads the latest official GitHub release for this OS/architecture, validates
+Install downloads the specified or latest official GitHub release for this OS/architecture, validates
 private sibling inputs with that distribution, replaces program/config/token and restarts
 the user service. Requires curl and a SHA256 tool; no JRE or user Node is needed.
 Inputs must be named daemon.json and daemon.token in the same private directory.
@@ -265,11 +266,15 @@ release_curl() {
 download_daemon() {
   local effective_url asset checksum expected actual pattern
   require_cmd curl
-  effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' "$RELEASE_BASE/latest") ||
-    fail "无法下载：不能解析最新正式版本。请检查网络后重试。"
-  case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
-    *) fail "latest release did not resolve to an official immutable release tag" ;; esac
-  [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
+  if [ -n "$VERSION" ]; then
+    RELEASE_TAG="v$VERSION"
+  else
+    effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' "$RELEASE_BASE/latest") ||
+      fail "无法下载：不能解析最新正式版本。请检查网络后重试。"
+    case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
+      *) fail "latest release did not resolve to an official immutable release tag" ;; esac
+  fi
+  [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._+-]{1,64}$ ]] || fail "invalid official release tag"
   # Bash 3.2 on macOS treats the leading byte of "；" as part of an unbraced name.
   echo "版本：${RELEASE_TAG}；平台：${RELEASE_OS}-${RELEASE_ARCH}" >&2
   stage '3/7 下载归档'
@@ -284,7 +289,9 @@ download_daemon() {
     fail "无法下载：正式版本 SHA256 获取失败。请检查网络后重试。"
   stage '4/7 校验解包配置'
   expected=$(cat "$checksum")
-  pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
+  pattern=${asset//./\\.}
+  pattern=${pattern//+/\\+}
+  pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${pattern}$"
   [[ $expected =~ $pattern ]] || fail "校验失败：SHA256 文件格式无效。"
   expected=${BASH_REMATCH[1]}
   if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$DOWNLOADED_ARCHIVE");
@@ -509,14 +516,19 @@ cmd_install() {
   local option value
   while [ $# -gt 0 ]; do
     option=$1
-    case "$option" in --config-file | --token-file) ;; *) fail "unknown option (value not echoed)" ;; esac
+    case "$option" in --config-file | --token-file | --version) ;; *) fail "unknown option (value not echoed)" ;; esac
     case "$SEEN_OPTIONS" in *"|$option|"*) fail "duplicate option: $option" ;; esac
     SEEN_OPTIONS="$SEEN_OPTIONS|$option|"
     [ $# -ge 2 ] || fail "missing value for $option"
     value=$2
     [ -n "$value" ] || fail "missing value for $option"
-    absolute_path "$value" "$option"
-    case "$option" in --config-file) CONFIG_FILE=$value ;; --token-file) TOKEN_FILE=$value ;; esac
+    case "$option" in
+      --version)
+        [[ $value =~ ^[0-9A-Za-z._+-]{1,64}$ ]] || fail "invalid version"
+        VERSION=$value ;;
+      --config-file) absolute_path "$value" "$option"; CONFIG_FILE=$value ;;
+      --token-file) absolute_path "$value" "$option"; TOKEN_FILE=$value ;;
+    esac
     shift 2
   done
   [ -n "$CONFIG_FILE" ] && [ -n "$TOKEN_FILE" ] || fail "install requires --config-file and --token-file"

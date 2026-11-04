@@ -15,11 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
+import fun.fengwk.kkstudio.platform.http.ApiResponse;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
-import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /**
  * Platform MCP server name-keyed CRUD、配置读取与 Streamable HTTP 发现 API。

@@ -10,14 +10,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -335,56 +333,6 @@ class ThreadCommandPayloadJsonCodecTest {
     }
   }
 
-  /** 测试意图：SET_CONTRIBUTOR_STATE 的 state 四字段严格往返，嵌套 data 不丢字段。 */
-  @Test
-  void roundTripsSetContributorStateCommandWithoutDroppingDataFields() {
-    SetContributorStateCommandPayload payload =
-        new SetContributorStateCommandPayload(
-            new CustomEntryPayload(
-                "com.example.issue",
-                "issue-scope",
-                "{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],\"nested\":{\"k\":1}}"));
-    String json = codec.encode(payload);
-    assertEquals(
-        "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
-            + "\"data\":{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],"
-            + "\"nested\":{\"k\":1}}}}",
-        json);
-    assertEquals(ThreadCommandType.SET_CONTRIBUTOR_STATE, payload.type());
-    SetContributorStateCommandPayload decoded =
-        (SetContributorStateCommandPayload)
-            codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json);
-    assertEquals(payload, decoded);
-    // data 逐字保留（含数组与嵌套对象），重编码与原始 JSON 一致。
-    assertEquals(json, codec.encode(decoded));
-  }
-
-  /**
-   * 测试意图：SET_CONTRIBUTOR_STATE 只接受 {@code
-   * {state:{contributorId,customType,data}}}；缺失、未知、类型错误与非法标识符一律拒绝。
-   */
-  @Test
-  void rejectsSetContributorStateMissingUnknownOrWrongTypedFields() {
-    for (String json :
-        List.of(
-            "{}",
-            "{\"state\":5}",
-            "{\"state\":[]}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",",
-            "{\"state\":{\"customType\":\"t\",\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\"}}",
-            "{\"state\":{\"contributorId\":\"C\",\"customType\":\"t\",\"data\":{}}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":[]}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{},\"extra\":1}}",
-            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{}},\"extra\":1}")) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json),
-          "SET_CONTRIBUTOR_STATE must reject: " + json);
-    }
-  }
-
   private static String notificationCommandJson(String messageJson) {
     return "{\"notificationId\":\"00000000-0000-0000-0000-000000000015\","
         + "\"kind\":\"SUBAGENT_RESULT\","
@@ -399,32 +347,24 @@ class ThreadCommandPayloadJsonCodecTest {
   }
 
   /**
-   * 测试意图：SET_CONTRIBUTOR_STATE 的 state.data 是 Contributor 自由 JSON；encode 与 decode 都必须按 BigDecimal
-   * 搬运，1e309/1e-324 与高精度小数不得退化为 Infinity / 0 或被改写成字符串，否则 canonical dataJson 与 command request hash
-   * 都会漂移。
+   * 测试意图：SET_EXECUTION 的 settings 是自由 JSON；encode 与 decode 都必须按 BigDecimal 搬运，1e309/1e-324
+   * 与高精度小数不得退化为 Infinity / 0 或被改写成字符串，否则 canonical dataJson 与 command request hash 都会漂移。
    */
   @Test
-  void preservesContributorStateDataNumberPrecision() {
-    String dataJson = "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}";
-    SetContributorStateCommandPayload payload =
-        new SetContributorStateCommandPayload(
-            new CustomEntryPayload("com.example.issue", "issue-scope", dataJson));
+  void preservesExecutionSettingsNumberPrecision() {
+    String dataJson = "{\"big\":1E+309,\"exact\":0.1234567890123456789012345678,\"tiny\":1E-324}";
+    SetExecutionCommandPayload payload =
+        new SetExecutionCommandPayload(new ExecutionSelection("builtin", dataJson));
 
     String json = codec.encode(payload);
 
     assertTrue(json.contains("\"big\":1E+309"), json);
     assertTrue(json.contains("\"tiny\":1E-324"), json);
     assertFalse(json.contains("Infinity"), json);
-    assertEquals(
-        "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
-            + "\"data\":"
-            + dataJson
-            + "}}",
-        json);
+    assertEquals("{\"execution\":{\"driver\":\"builtin\",\"settings\":" + dataJson + "}}", json);
 
-    SetContributorStateCommandPayload decoded =
-        (SetContributorStateCommandPayload)
-            codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json);
+    SetExecutionCommandPayload decoded =
+        (SetExecutionCommandPayload) codec.decode(ThreadCommandType.SET_EXECUTION, json);
     assertEquals(payload, decoded);
     assertEquals(json, codec.encode(decoded));
     // request hash 只基于 canonical 请求形态：精度丢失会改变 hash。

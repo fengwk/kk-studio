@@ -30,6 +30,22 @@ async function setupEnvironmentRoute(page: Page) {
 }
 
 test.describe('Chat defaults & metadata contracts', () => {
+  test('mobile create dialog keeps the YOLO switch and footer reachable', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 640 })
+    await setupEnvironmentRoute(page)
+    await page.goto(HARNESS_URL)
+    await page.getByTestId('open-create-btn').click()
+    const dialog = page.getByRole('dialog')
+    const yolo = dialog.getByRole('switch', { name: 'YOLO 模式' })
+    const box = (await yolo.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+    await yolo.click()
+    await expect(yolo).toHaveAttribute('aria-checked', 'true')
+    await expect(dialog.getByRole('button', { name: '确认创建' })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('chat-create-mobile.png'), animations: 'disabled' })
+  })
+
   test('create Chat: toggle YOLO, select environment, and submit intended configuration', async ({ page }) => {
     await setupEnvironmentRoute(page)
     await page.goto(HARNESS_URL)
@@ -57,7 +73,7 @@ test.describe('Chat defaults & metadata contracts', () => {
     await expect(envSelect).toContainText('ubuntu')
 
     // 填写标题并提交
-    const nameInput = page.getByPlaceholder('Chat 名称（可重名）')
+    const nameInput = page.getByPlaceholder('Chat 名称')
     await nameInput.fill('YOLO Custom Chat')
     await page.getByRole('button', { name: '确认创建' }).click()
 
@@ -84,7 +100,7 @@ test.describe('Chat defaults & metadata contracts', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
 
-    const nameInput = page.getByPlaceholder('Chat 名称（可重名）')
+    const nameInput = page.getByPlaceholder('Chat 名称')
     await nameInput.fill('Safe Chat')
     await page.getByRole('button', { name: '确认创建' }).click()
 
@@ -109,7 +125,7 @@ test.describe('Chat defaults & metadata contracts', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
 
-    const nameInput = page.getByPlaceholder('Chat 名称（可重名）')
+    const nameInput = page.getByPlaceholder('Chat 名称')
     await expect(nameInput).toHaveValue('Existing Chat')
 
     const yoloSwitch = page.getByRole('switch', { name: 'YOLO 模式' })
@@ -153,10 +169,10 @@ test.describe('Chat defaults & metadata contracts', () => {
     await expect(dialog).toBeVisible()
 
     const envSelect = page.getByRole('button', { name: '默认环境' })
-    await expect(envSelect).toContainText('deleted-env （不可用）')
+    await expect(envSelect).toContainText('deleted-env · 不可用')
 
     await envSelect.click()
-    const unavailableOption = page.getByRole('option', { name: 'deleted-env （不可用）' })
+    const unavailableOption = page.getByRole('option', { name: 'deleted-env · 不可用' })
     await expect(unavailableOption).toBeVisible()
   })
 

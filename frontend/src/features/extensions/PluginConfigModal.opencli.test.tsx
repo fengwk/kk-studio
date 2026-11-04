@@ -6,12 +6,11 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
-import { pluginsService } from '@/shared/api/plugins-service'
+import { pluginsService } from '@/features/extensions/plugins-service'
 import { ApiError } from '@/shared/api/client'
-import { decodePluginDTO } from '@/shared/api/ai-plugin-codec'
 import type { PluginDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/plugins-service', () => ({
+vi.mock('@/features/extensions/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },
 }))
 
@@ -22,7 +21,7 @@ const goldenEnvelope: unknown = JSON.parse(readFileSync(resolve(
 if (goldenEnvelope === null || typeof goldenEnvelope !== 'object' || !('data' in goldenEnvelope)) {
   throw new Error('OpenCLI HTTP golden must contain a data envelope')
 }
-const opencliPluginFixture = decodePluginDTO(goldenEnvelope.data)
+const opencliPluginFixture = goldenEnvelope.data as PluginDTO
 
 describe('PluginConfigModal OpenCLI regression coverage', () => {
   let queryClient: QueryClient
@@ -50,10 +49,13 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
     expect(screen.getByText(`Rev ${opencliPluginFixture.configuration.revision}`)).toBeInTheDocument()
 
-    // 顶层 9 个标量字段渲染（以 baseUrl/connectTimeoutMillis/requestTimeoutMillis 为代表）
+    // 连接设置仍可编辑，内部响应缓冲限制不再是用户配置。
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')
     expect(screen.getByRole('textbox', { name: 'connectTimeoutMillis' })).toHaveValue('5000')
     expect(screen.getByRole('textbox', { name: 'requestTimeoutMillis' })).toHaveValue('120000')
+    for (const field of ['streamBufferBytes', 'maxJsonResponseBytes', 'maxErrorResponseBytes', 'maxOutputChars']) {
+      expect(screen.queryByRole('textbox', { name: field })).not.toBeInTheDocument()
+    }
 
     // instanceId 与 apiKey 绝对不作为普通表单输入渲染，也不在 valuesJson 暴露
     expect(screen.queryByRole('textbox', { name: 'instanceId' })).not.toBeInTheDocument()
@@ -276,7 +278,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('plugin-config-conflict-banner')).toBeInTheDocument()
       expect(
-        screen.getByText('配置已被其他操作修改（版本冲突），请刷新并查看最新改动。'),
+        screen.getByText('配置已被其他操作修改，发生版本冲突。请刷新并查看最新改动。'),
       ).toBeInTheDocument()
     })
 

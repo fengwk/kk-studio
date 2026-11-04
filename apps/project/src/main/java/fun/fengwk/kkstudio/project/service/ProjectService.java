@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -16,7 +15,6 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
@@ -214,11 +212,6 @@ public class ProjectService {
             "project",
             "Cannot delete a project while an issue has an active run; stop or settle it first");
       }
-      if (PauseReason.UNKNOWN.name().equals(issue.getPauseReason())) {
-        throw new ProjectValidationException(
-            "project",
-            "Cannot delete a project while an issue has an unresolved UNKNOWN gate; resolve unknown verification first");
-      }
     }
     for (Issue issue : issues) {
       issueEvidenceService.releaseAll(issue.getId());
@@ -229,7 +222,7 @@ public class ProjectService {
       List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issue.getId());
       for (IssueAgentThread binding : bindings) {
         sessionDeletion.deleteSessionsByOwner(
-            new OwnerRef.IssueAgent(issue.getId(), binding.agentName()));
+            ProjectSessionOwnership.owner(issue.getId(), binding.agentName()));
       }
       if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
         throw new ProjectVersionConflictException(

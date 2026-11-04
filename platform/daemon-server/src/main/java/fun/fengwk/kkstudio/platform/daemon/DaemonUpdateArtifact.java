@@ -17,8 +17,7 @@ public final class DaemonUpdateArtifact {
   /**
    * 官方 Daemon 制品 URL：固定仓库 + tag + 按 os/arch 的归档名，且只覆盖发布矩阵内的平台。
    *
-   * <p>Release tag 与归档文件名中的版本必须是同一事实（反向引用 {@code \1} 强制两者逐字相等），未知平台同样不被接受。 捕获组 1 即该制品版本，供 {@code
-   * DaemonUpdateCommand} 与 targetVersion 做一致性比较。
+   * <p>Release tag 与归档文件名中的版本必须是同一事实（反向引用 {@code \1} 强制两者逐字相等），未知平台同样不被接受。
    */
   public static final Pattern ARTIFACT_URL_PATTERN =
       Pattern.compile(

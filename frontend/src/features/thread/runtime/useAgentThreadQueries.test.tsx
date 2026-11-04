@@ -1,0 +1,164 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { agentService } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { useAgentThreadQueries } from './useAgentThreadQueries'
+import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadSnapshotDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+
+const ROOT = '11111111-2222-4333-8444-555555555555'
+const CHILD = '22222222-2222-4333-8444-555555555555'
+const OTHER = '33333333-2222-4333-8444-555555555555'
+
+function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): HarnessThreadSnapshotDTO {
+  return {
+    version: '1',
+    thread: {
+      threadId: id, name: 'Thread', sessionId: 'session', headEntryId: 'head',
+      parentThreadId: id === ROOT ? null : ROOT,
+      rootThreadId: ROOT, yoloEnabled: false,
+      nextCommandSequence: '1', version: '1', status: 'RUNNING',
+      executionControl: 'RUNNABLE',
+      branchSettings: { agentName: 'agent', execution: createBuiltinExecution('m', 'default'),
+        environmentName: 'composer-is-not-the-route', goal: null },
+      createTime: 0, updateTime: 0,
+    },
+    baseEntryId: null,
+    entries: [], queuedCommands: [], executionStatus: 'IDLE', activeAssistantOutput: null, generationFailures: [], stopReceipts: [], unconfirmedExecutions: [],
+    toolInvocations: [{
+      id: 'tool', threadId: 'thread', turnStartEntryId: 'turn', assistantEntryId: 'entry', callIndex: 0,
+      status: 'READY', attempt: 1, toolCallId: 'call', toolName: 'bash', rendererKey: 'bash',
+      environmentId: null, requiredEnvironmentId: 'frozen-environment',
+      requiredEnvironmentName: 'archlinux', waitingForEnvironment: true, environmentWaitFreshnessAt: null,
+      argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
+      createTime: 0, updateTime: 0, ...overrides,
+    }],
+  }
+}
+
+let sockets: FakeWebSocketHarness
+let client: QueryClient
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={client}>
+    <ApplicationEventProvider url="ws://test/api/events" socketFactory={sockets.factory}>
+      {children}
+    </ApplicationEventProvider>
+  </QueryClientProvider>
+)
+beforeEach(() => {
+  sockets = new FakeWebSocketHarness()
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  vi.spyOn(agentService, 'listAgents').mockResolvedValue({ results: [] } as never)
+  vi.spyOn(agentService, 'listModels').mockResolvedValue({ results: [] } as never)
+})
+afterEach(() => {
+  cleanup()
+  client.clear()
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
+
+it.each([ROOT, CHILD])('根/readonly %s 消费真实根通知，同 version 离线→上线且不写入', async (id) => {
+  const get = vi.spyOn(harnessService, 'getThreadSnapshot')
+    .mockResolvedValue(snapshot(id))
+  const write = vi.spyOn(harnessService, 'decideApproval')
+  const { result } = renderHook(() => useAgentThreadQueries(id), { wrapper })
+  await waitFor(() => expect(result.current.snapshotQuery.isSuccess).toBe(true))
+  const socket = sockets.openLatest()
+  const changed = (rootThreadId: string) => act(() => socket.emitServer({
+    type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
+  }))
+  changed(OTHER)
+  expect(get).toHaveBeenCalledTimes(1)
+  get.mockResolvedValue(snapshot(id, { waitingForEnvironment: false }))
+  changed(ROOT)
+  await waitFor(() => expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(false))
+  expect(result.current.thread?.version).toBe('1')
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(write).not.toHaveBeenCalled()
+  get.mockResolvedValue(snapshot(id))
+  act(() => socket.emitServer({ type: 'resync', resource: { kind: 'interactions' } }))
+  await waitFor(() => expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(true))
+  act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'interactions' }, cursor: '0' }))
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(4))
+})
+
+it('没有 READY 环境调用就不订阅，换绑释放旧根', async () => {
+  const get = vi.spyOn(harnessService, 'getThreadSnapshot')
+    .mockResolvedValue(snapshot(ROOT, { requiredEnvironmentId: null }))
+  const { result, rerender } = renderHook(({ id }) => useAgentThreadQueries(id), {
+    wrapper, initialProps: { id: ROOT },
+  })
+  await waitFor(() => expect(result.current.snapshotQuery.isSuccess).toBe(true))
+  expect(sockets.openLatest().sentMessages()).toEqual([])
+  get.mockResolvedValue(snapshot(CHILD))
+  rerender({ id: CHILD })
+  await waitFor(() => expect(result.current.thread?.threadId).toBe(CHILD))
+  const socket = sockets.openLatest()
+  expect(socket.sentMessages()).toContainEqual({ type: 'subscribe', resource: { kind: 'interactions' } })
+  get.mockResolvedValue(snapshot(OTHER, { status: 'RUNNING' }))
+  rerender({ id: OTHER })
+  await waitFor(() => expect(result.current.thread?.threadId).toBe(OTHER))
+  expect(socket.sentMessages()).toContainEqual({ type: 'unsubscribe', resource: { kind: 'interactions' } })
+})
+
+it('snapshot 最早自然截止单次回读，续租注销旧 timer，旧过期投影不热循环', async () => {
+  const now = Date.now()
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  let current = snapshot(ROOT, { environmentWaitFreshnessAt: (now + 10000) / 1000 })
+  current.toolInvocations.push({
+    ...current.toolInvocations[0], id: 'later', environmentWaitFreshnessAt: (now + 60000) / 1000,
+  })
+  const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockImplementation(async () => current)
+  const { result, unmount } = renderHook(() => useAgentThreadQueries(ROOT), { wrapper })
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(result.current.snapshotQuery.isSuccess).toBe(true)
+  const socket = sockets.openLatest()
+  current = snapshot(ROOT, { environmentWaitFreshnessAt: (now + 20000) / 1000 })
+  await act(async () => {
+    socket.emitServer({ type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId: ROOT } })
+    await vi.advanceTimersByTimeAsync(1)
+  })
+  await act(async () => vi.advanceTimersByTimeAsync(10250))
+  expect(get).toHaveBeenCalledTimes(2)
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(get).toHaveBeenCalledTimes(3)
+  await act(async () => vi.advanceTimersByTimeAsync(60000))
+  expect(get).toHaveBeenCalledTimes(3)
+  unmount()
+})
+
+it('无通知续租时在旧截止点回读，并在新租约自然到期后显示等待环境', async () => {
+  // 心跳只续租而不发通知；旧截止点的回读必须取得新截止点，最终发现无写事件的过期。
+  const now = Date.now()
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  let current = snapshot(ROOT, {
+    waitingForEnvironment: false,
+    environmentWaitFreshnessAt: (now + 10000) / 1000,
+  })
+  const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockImplementation(async () => current)
+  const { result } = renderHook(() => useAgentThreadQueries(ROOT), { wrapper })
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(false)
+
+  current = snapshot(ROOT, {
+    waitingForEnvironment: false,
+    environmentWaitFreshnessAt: (now + 20000) / 1000,
+  })
+  await act(async () => vi.advanceTimersByTimeAsync(10250))
+  expect(get).toHaveBeenCalledTimes(2)
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(false)
+
+  current = snapshot(ROOT, { waitingForEnvironment: true, environmentWaitFreshnessAt: null })
+  await act(async () => vi.advanceTimersByTimeAsync(10000))
+  expect(get).toHaveBeenCalledTimes(3)
+  expect(result.current.toolInvocations[0].waitingForEnvironment).toBe(true)
+  await act(async () => vi.advanceTimersByTimeAsync(60000))
+  expect(get).toHaveBeenCalledTimes(3)
+})

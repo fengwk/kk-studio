@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -70,8 +69,7 @@ class SubagentTaskRunnerTest {
   private final UUID parentThreadId = UUID.randomUUID();
   private final UUID invocationId = UUID.randomUUID();
   private final UUID parentHeadEntryId = UUID.randomUUID();
-  private final BranchSettings target =
-      new BranchSettings(AGENT, BuiltinExecution.of(MODEL), "env");
+  private final BranchSettings target = new BranchSettings(AGENT, BuiltinExecution.of(MODEL), null);
 
   private final HarnessRuntime runtime = mock(HarnessRuntime.class);
   private final AgentBranchSettingsMaterializer materializer =
@@ -94,11 +92,9 @@ class SubagentTaskRunnerTest {
   }
 
   /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
-  /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
   private void stubParent(List<String> allowedSubagents) {
     ThreadSnapshot parent = mock(ThreadSnapshot.class);
     ToolInvocation tool = mock(ToolInvocation.class);
-    EntryPath path = mock(EntryPath.class);
     Entry turnStartEntry = mock(Entry.class);
     TurnStartPayload turnStart = mock(TurnStartPayload.class);
     when(parent.thread())
@@ -124,15 +120,13 @@ class SubagentTaskRunnerTest {
     when(tool.id()).thenReturn(invocationId);
     EntryCurrentState parentState = mock(EntryCurrentState.class);
     when(parent.entryState()).thenReturn(parentState);
-    when(parentState.baseSettings())
-        .thenReturn(new BranchSettings("parent-agent", BuiltinExecution.of(MODEL), "parent-env"));
     List<SubagentBinding> allowed =
         allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList();
     when(turnStartEntry.payload()).thenReturn(turnStart);
     when(turnStart.capabilities()).thenReturn(new TurnCapabilities(List.of(), allowed));
     when(parentState.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
     when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(parent);
-    when(materializer.materializeSubagent(AGENT, "parent-env")).thenReturn(target);
+    when(materializer.materialize(AGENT)).thenReturn(target);
   }
 
   private static AcceptedCommands accepted(UUID sessionId, UUID threadId, boolean replayed) {
@@ -359,8 +353,7 @@ class SubagentTaskRunnerTest {
     assertEquals(
         new SetExecutionCommandPayload(BuiltinExecution.of(MODEL)), commands.get(1).payload());
     assertTrue(commands.get(2).payload() instanceof CustomMessageCommandPayload);
-    // 关键契约：既有子 Thread 保留自身环境。父环境 "parent-env" 与子环境 "child-env" 不同，
-    // 因此续接绝不重发 SET_ENVIRONMENT，避免把父环境写进既有子。
+    // 环境由执行根持有，续接绝不向子线程发送 SET_ENVIRONMENT。
     assertTrue(
         commands.stream().noneMatch(c -> c.payload() instanceof SetEnvironmentCommandPayload),
         commands.toString());

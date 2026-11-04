@@ -6,7 +6,8 @@ import {
 } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
+import { ApiError } from '@/shared/api/client'
 import type {
   EnvironmentIdeOpenViewDTO,
   EnvironmentIdeViewDTO,
@@ -25,7 +26,6 @@ import {
   buildUsageViews,
   ideClaimReducer,
   initialViews,
-  isDirtyClose,
   isUnknownIdeFailure,
   isViewGone,
   isViewInUse,
@@ -252,19 +252,7 @@ export function useIdeClaimReconciliation({
         attempt,
         errorMessage: safeIdeError(error),
       })
-      // 已建立但入口不合法的视图立刻尝试释放，避免留下无法访问的资源。
-      if (
-        isCanonicalUuid(response?.viewId)
-        && POSITIVE_DECIMAL.test(response?.bindingEpoch ?? '')
-      ) {
-        void environmentService.closeIdeView(environmentId, response.viewId, {
-          documentId: documentIdRef.current,
-          bindingEpoch: response.bindingEpoch,
-          discard: true,
-        }).catch(() => {
-          // 清理失败留给 Daemon 的 10 分钟回收，不在 UI 中伪造成功。
-        })
-      }
+      // 不强制关闭无法验证的视图；保留给 Daemon 管理。
       return
     }
 
@@ -477,12 +465,21 @@ export function useIdeClaimReconciliation({
         bindingEpoch: view.bindingEpoch,
         discard,
       })
+      const current = viewsRef.current[environmentId]
+      if (current?.viewId !== view.viewId || current.bindingEpoch !== view.bindingEpoch) {
+        return { ok: false, dirty: false, message: 'binding-changed' }
+      }
       dispatch({ type: 'REMOVE_VIEW', environmentId })
       registerUsageQuiet()
       return { ok: true, dirty: false }
     } catch (error) {
-      const dirty = isDirtyClose(error)
-      const closeError = dirty
+      const cancelled = error instanceof ApiError && error.errors?.resource === 'ide_close_cancelled'
+      const current = viewsRef.current[environmentId]
+      if (current?.viewId !== view.viewId || current.bindingEpoch !== view.bindingEpoch) {
+        return { ok: false, dirty: false, message: 'binding-changed' }
+      }
+      const dirty = !discard && !cancelled && isUnknownIdeFailure(error)
+      const closeError = dirty || cancelled
         ? undefined
         : isUnknownIdeFailure(error)
           ? 'close-result-unknown'
@@ -552,9 +549,19 @@ export function useIdeClaimReconciliation({
   }
 
   function handleIframeLoaded(environmentId: string, entryUrl: string): void {
+    const before = viewsRef.current[environmentId]
     dispatch({ type: 'IFRAME_LOADED', environmentId, entryUrl })
     const view = viewsRef.current[environmentId]
     if (view?.entryUrl === entryUrl) {
+      if (!before?.iframeLoaded && view.status === 'ready' && view.bindingEpoch != null
+        && !view.claimInFlight && window.matchMedia('(max-width: 760px)').matches) {
+        void environmentService.setIdeViewMobileLayout(environmentId, view.viewId, {
+          documentId: documentIdRef.current,
+          bindingEpoch: view.bindingEpoch,
+        }).catch(() => {
+          console.error('Failed to apply IDE mobile layout')
+        })
+      }
       maybeRunPendingShell(environmentId)
     }
   }

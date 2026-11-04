@@ -69,7 +69,7 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.getByText(/可选：Java/)).toHaveCount(0)
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveValue('/bin/bash')
     await expect(modal.getByLabel('备注')).toHaveValue('saved note')
-    expect(await modal.getByLabel('LSP servers (JSON)').inputValue()).toContain('~/ts-server')
+    expect(await modal.getByRole('textbox', { name: 'LSP servers' }).inputValue()).toContain('~/ts-server')
     await modal.getByLabel('备注').fill("draft 汉字 '$`")
     await page.screenshot({ path: testInfo.outputPath(`install-${width}.png`), fullPage: true })
     const box = await modal.boundingBox()
@@ -154,7 +154,7 @@ for (const width of [1280, 390, 320]) {
     await lsp.scrollIntoViewIfNeeded()
     await lsp.click()
     await expect(modal.getByRole('checkbox')).toBeChecked()
-    const editor = modal.getByLabel('LSP servers (JSON)')
+    const editor = modal.getByRole('textbox', { name: 'LSP servers' })
     await expect(editor).toHaveValue('')
     expect(await editor.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
     const example = await editor.getAttribute('placeholder')
@@ -167,7 +167,7 @@ for (const width of [1280, 390, 320]) {
     await editor.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`lsp-placeholder-${width}.png`), animations: 'disabled' })
     if (width === 1280) {
-      await modal.locator('.confirm-modal-description').scrollIntoViewIfNeeded()
+      await modal.locator('.modal-body-text').scrollIntoViewIfNeeded()
       await page.screenshot({ path: testInfo.outputPath('install-copy-1280.png'), animations: 'disabled' })
     }
     const os = modal.getByRole('button', { name: '操作系统' })
@@ -268,7 +268,7 @@ for (const viewport of [
     await page.keyboard.press('Tab')
     await expect(page.getByRole('listbox')).toHaveCount(0)
     await expect(modal.getByLabel('Studio 地址')).toBeFocused()
-    const editor = modal.getByLabel('LSP servers (JSON)')
+    const editor = modal.getByRole('textbox', { name: 'LSP servers' })
     await editor.scrollIntoViewIfNeeded()
     const help = modal.locator('#install-lsp-help')
     const bounds = await modal.evaluate(element => {

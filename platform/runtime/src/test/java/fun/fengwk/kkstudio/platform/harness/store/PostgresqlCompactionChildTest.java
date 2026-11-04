@@ -449,11 +449,7 @@ class PostgresqlCompactionChildTest {
                 4096L,
                 CONTEXT_WINDOW,
                 MAX_OUTPUT_TOKENS,
-                new BranchSettings(
-                    "compaction",
-                    BuiltinExecution.of(compactorModel),
-                    path.baseSettings().environmentName(),
-                    null));
+                new BranchSettings("compaction", BuiltinExecution.of(compactorModel), null, null));
           }
           ModelRequestSpec spec = resolvedSpec(path.baseSettings());
           observedResolvedSpecs.add(spec);

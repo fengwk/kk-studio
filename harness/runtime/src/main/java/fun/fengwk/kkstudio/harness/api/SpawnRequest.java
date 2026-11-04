@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.api;
 
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
@@ -17,7 +18,7 @@ import java.util.regex.Pattern;
  * 统一的 Agent 创建请求（子代理 task、插件 Prompt 任务、Issue 任务与压缩共用）：一次「创建（或续用）Agent Thread + 首批输入 + 票据」的全部事实。
  *
  * <p>身份由调用方预分配以保证幂等：新建 Thread 需要 {@code sessionId} 与 {@code threadId}；续用既有 Thread（task 的 {@code
- * thread_id} 续接、Issue 的稳定 Thread）时 {@code sessionId} 为 null，{@code threadId} 指向既有 Thread 并由 {@code
+ * thread_id} 续接、控制器绑定的稳定 Thread）时 {@code sessionId} 为 null，{@code threadId} 指向既有 Thread 并由 {@code
  * continuation} 给出精确 cursor，其创建来源与约束沿用创建时的冻结事实。{@code ticketId} 是票据（Join）的 invocation id，{@code
  * requestHash} 是票据的请求指纹。
  *
@@ -74,6 +75,15 @@ public record SpawnRequest(
     }
     if (yoloEnabled && (parentThreadId != null || continuation != null)) {
       throw new IllegalArgumentException("only a new execution root takes the yolo switch");
+    }
+    if (parentThreadId != null) {
+      if (settings.environmentName() != null) {
+        throw new IllegalArgumentException("child settings must not select an environment");
+      }
+      if (commands.stream()
+          .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
+        throw new IllegalArgumentException("only the execution root can set an environment");
+      }
     }
   }
 

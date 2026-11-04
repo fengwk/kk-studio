@@ -3,10 +3,10 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
-import { environmentService } from '@/shared/api/environment-service'
+import { environmentService } from '@/features/environment/environment-service'
 import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
 
-vi.mock('@/shared/api/environment-service', () => ({
+vi.mock('@/features/environment/environment-service', () => ({
   environmentService: {
     listEnvironmentEvents: vi.fn(),
     getEnvironmentRuntime: vi.fn(),
@@ -94,7 +94,8 @@ describe('EnvironmentManagementModal', () => {
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
     renderModal(testEnvironment(), onClose)
 
-    const closeBtn = screen.getByRole('button', { name: '关闭' })
+    // 底部关闭动作与标题关闭按钮都可用；优先验证新增的底部动作。
+    const closeBtn = screen.getAllByRole('button', { name: '关闭' })[1]
     await user.click(closeBtn)
     expect(onClose).toHaveBeenCalled()
   })

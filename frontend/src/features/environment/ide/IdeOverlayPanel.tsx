@@ -46,6 +46,10 @@ export interface IdeOverlayPanelProps {
   onOpenNewView: (environmentId: string) => void
   onRetryClaim: (environmentId: string) => void
   onReloadEnvironments: () => void
+  /** 读取该 Environment 已确认切换成功的最近目录。 */
+  readRecentDirectories: (environmentId: string) => string[]
+  /** 目录切换成功后才记录；返回该 Environment 最新的最近目录列表。 */
+  recordRecentDirectory: (environmentId: string, directory: string) => string[]
 }
 
 const COMMAND_MESSAGES: Record<string, TranslationKey> = {
@@ -83,15 +87,24 @@ export function IdeOverlayPanel({
   onOpenNewView,
   onRetryClaim,
   onReloadEnvironments,
+  readRecentDirectories,
+  recordRecentDirectory,
 }: IdeOverlayPanelProps) {
   const { t } = useI18n()
   const [directoryOpen, setDirectoryOpen] = useState(false)
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
+  const [recentDirectories, setRecentDirectories] = useState<string[]>([])
   const [copyStatus, setCopyStatus] = useState<'copied' | 'failed' | null>(null)
   const [dirtyCloseEnvironmentId, setDirtyCloseEnvironmentId] = useState<string | null>(null)
   const [discarding, setDiscarding] = useState(false)
   const lastSelectedRef = useRef(selectedEnvironmentId)
+  const viewsRef = useRef(views)
+  const forceBindingRef = useRef<{ viewId: string; bindingEpoch: string } | null>(null)
+
+  useEffect(() => {
+    viewsRef.current = views
+  }, [views])
 
   useEffect(() => {
     if (lastSelectedRef.current === selectedEnvironmentId) {
@@ -100,6 +113,7 @@ export function IdeOverlayPanel({
     lastSelectedRef.current = selectedEnvironmentId
     setDirectoryOpen(false)
     setDirectoryError(null)
+    setRecentDirectories([])
     setCopyStatus(null)
     setDirectoryPending(false)
     setDirtyCloseEnvironmentId(null)
@@ -127,7 +141,7 @@ export function IdeOverlayPanel({
       value: environment.id,
       label: environment.ready
         ? environment.name
-        : `${environment.name} (${t('ai.ide.offline')})`,
+        : `${environment.name} · ${t('ai.ide.offlineShort')}`,
     }))
     if (
       selectedEnvironmentId != null
@@ -158,8 +172,13 @@ export function IdeOverlayPanel({
     if (selectedEnvironmentId == null) {
       return
     }
+    const view = viewsRef.current[selectedEnvironmentId]
     void onCloseEnvironment(selectedEnvironmentId, false).then((result) => {
-      if (!result.ok && result.dirty) {
+      const current = viewsRef.current[selectedEnvironmentId]
+      if (!result.ok && result.dirty && view?.bindingEpoch != null
+        && current?.viewId === view.viewId && current.bindingEpoch === view.bindingEpoch
+        && lastSelectedRef.current === selectedEnvironmentId) {
+        forceBindingRef.current = { viewId: view.viewId, bindingEpoch: view.bindingEpoch }
         setDirtyCloseEnvironmentId(selectedEnvironmentId)
       }
     })
@@ -167,6 +186,12 @@ export function IdeOverlayPanel({
 
   const handleDiscardClose = useCallback(async () => {
     if (dirtyCloseEnvironmentId == null || discarding) {
+      return
+    }
+    const current = viewsRef.current[dirtyCloseEnvironmentId]
+    if (current?.viewId !== forceBindingRef.current?.viewId
+      || current?.bindingEpoch !== forceBindingRef.current?.bindingEpoch) {
+      setDirtyCloseEnvironmentId(null)
       return
     }
     setDiscarding(true)
@@ -182,23 +207,35 @@ export function IdeOverlayPanel({
   }, [dirtyCloseEnvironmentId, discarding, onCloseEnvironment])
 
   const handleDirectoryConfirm = useCallback(async (directory: string) => {
-    if (selectedEnvironmentId == null || directoryPending) {
+    const environmentId = selectedEnvironmentId
+    if (environmentId == null || directoryPending) {
       return
     }
     setDirectoryPending(true)
     setDirectoryError(null)
     try {
-      const result = await onChangeDirectory(selectedEnvironmentId, directory)
+      const result = await onChangeDirectory(environmentId, directory)
       if (!result.ok) {
         setDirectoryError(commandMessage(result.message, 'ai.ide.changeDirectoryFailed'))
         return
       }
+      // 迟到结果落在已切换的 Environment 上时不记录，也不关闭当前的目录树。
+      if (lastSelectedRef.current !== environmentId) {
+        return
+      }
+      setRecentDirectories(recordRecentDirectory(environmentId, directory))
       setDirectoryOpen(false)
       setCopyStatus(null)
     } finally {
       setDirectoryPending(false)
     }
-  }, [commandMessage, directoryPending, onChangeDirectory, selectedEnvironmentId])
+  }, [
+    commandMessage,
+    directoryPending,
+    onChangeDirectory,
+    recordRecentDirectory,
+    selectedEnvironmentId,
+  ])
 
   const handlePanelKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
     if (
@@ -266,7 +303,11 @@ export function IdeOverlayPanel({
               size="compact"
               className="ide-toolbar-directory"
               onClick={() => {
+                if (selectedEnvironmentId == null) {
+                  return
+                }
                 setDirectoryError(null)
+                setRecentDirectories(readRecentDirectories(selectedEnvironmentId))
                 setDirectoryOpen(true)
               }}
               disabled={actionsDisabled}
@@ -590,7 +631,9 @@ export function IdeOverlayPanel({
 
       {directoryOpen && selectedEnvironmentId != null && selectedView?.directory ? (
         <OpenDirectoryModal
+          environmentId={selectedEnvironmentId}
           currentDirectory={selectedView.directory}
+          recentDirectories={recentDirectories}
           pending={directoryPending}
           error={directoryError}
           onConfirm={(directory) => {

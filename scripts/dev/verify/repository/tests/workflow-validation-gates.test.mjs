@@ -7,6 +7,8 @@ const root = new URL('../../../../../', import.meta.url)
 const docker = readFileSync(new URL('.github/workflows/docker-publish.yml', root), 'utf8')
 const release = readFileSync(new URL('.github/workflows/daemon-release.yml', root), 'utf8')
 const daemonCi = readFileSync(new URL('.github/workflows/daemon-ci.yml', root), 'utf8')
+const postgresAction = readFileSync(new URL('.github/actions/postgres-client/action.yml', root), 'utf8')
+const scriptsAction = readFileSync(new URL('.github/actions/repository-script-tests/action.yml', root), 'utf8')
 
 function jobBlock(source, name) {
   const block = source.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\w+:|$(?![\\s\\S]))`, 'm'))?.[1]
@@ -235,11 +237,17 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   ]) {
     assert.ok(source.includes(`POSTGRES_VERSION: '${major}'`))
     const setup = source.indexOf('- name: Set up PostgreSQL client tools')
-    const selection = source.indexOf('- name: Verify PostgreSQL client selection')
     const scripts = source.indexOf('- name: Run repository script tests')
     const validation = source.indexOf(`- name: ${validationName}`)
-    assert.ok(setup > 0 && setup < selection && selection < scripts && scripts < validation)
-    const block = source.slice(setup, validation)
+    assert.ok(setup > 0 && setup < scripts && scripts < validation)
+    const caller = source.slice(setup, validation)
+    assert.match(caller, /uses: \.\/\.github\/actions\/postgres-client/u)
+    assert.match(caller, /uses: \.\/\.github\/actions\/repository-script-tests/u)
+    assert.match(caller, /globs: scripts\/\*\/tests\/\*\.test\.mjs scripts\/dev\/verify\/\*\/tests\/\*\.test\.mjs deploy\/test\/mock\/\*\.test\.mjs/u)
+    assert.ok(caller.indexOf('npm --prefix daemon ci') < caller.indexOf('- name: Run repository script tests'))
+    assert.doesNotMatch(caller, /continue-on-error:|^\s+if:/m)
+    const block = postgresAction
+    assert.ok(block.indexOf('- name: Set up PostgreSQL client tools') < block.indexOf('- name: Verify PostgreSQL client selection'))
     assert.ok(block.includes('https://www.postgresql.org/media/keys/ACCC4CF8.asc'))
     assert.ok(block.includes('URIs: https://apt.postgresql.org/pub/repos/apt'))
     assert.ok(block.includes('Suites: ${VERSION_CODENAME}-pgdg'))
@@ -250,7 +258,13 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
     assert.ok(block.includes('echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"'))
     assert.ok(block.includes('for tool in psql pg_dump pg_restore createdb pg_isready; do'))
     assert.ok(block.includes('test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"'))
+    assert.doesNotMatch(block, /continue-on-error:|^\s+if:/m)
   }
+  assert.match(scriptsAction, /shopt -s nullglob/u)
+  assert.match(scriptsAction, /node_files=\( \$\{TEST_GLOBS\} \)/u)
+  assert.match(scriptsAction, /exit 1/u)
+  assert.match(scriptsAction, /node --test "\$\{node_files\[@\]\}"/u)
+  assert.doesNotMatch(scriptsAction, /continue-on-error:|^\s+if:/m)
 })
 
 test('Windows installer gates run both PowerShell hosts and fail closed', () => {
@@ -302,6 +316,21 @@ test('release reuses the same daemon matrix and gates on it before staging', () 
   const stageNeeds = jobBlock(release, 'stage').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
   assert.ok(stageNeeds)
   assert.deepEqual([...stageNeeds.matchAll(/^ {6}- (.+)$/gm)].map((match) => match[1]), ['daemon_ci'])
+  const stage = jobBlock(release, 'stage')
+  assert.match(stage, /fetch-depth: 0/u)
+  assert.match(stage, /persist-credentials: false/u)
+  const history = stepsOf(stage).find((step) => stepField(step, 'name') === 'Scan full Git history for sensitive data')
+  assert.ok(history)
+  assert.equal(stepField(history, 'run'), [
+    'set -euo pipefail',
+    'test "$(git rev-parse --is-shallow-repository)" = false',
+    'git remote get-url origin > /dev/null',
+    'node scripts/dev/verify/repository/check-sensitive-history.mjs \\',
+    '--remote-pr --fail-on-high --json "${RUNNER_TEMP}/sensitive-history.json"',
+  ].join('\n'))
+  assert.equal(stepField(history, 'if'), undefined)
+  assert.doesNotMatch(history, /continue-on-error:/u)
+  assert.ok(stage.indexOf('Scan full Git history for sensitive data') < stage.indexOf('Stage release assets'))
   for (const removed of ['validate_daemon', 'validate_windows_daemon']) {
     assert.throws(() => jobBlock(release, removed), new RegExp(`missing job ${removed}`, 'u'))
   }
@@ -336,35 +365,6 @@ test('current startup artifact-mode reuses the distribution JAR and stays a requ
   assert.match(step, /APP_JAR: \$\{\{ steps\.distribution\.outputs\.jar \}\}/u)
   assert.equal(stepField(step, 'if'), undefined, 'the artifact-mode subprocess must not be conditional')
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true|--passWithNoTests|-DskipTests/u)
-})
-
-test('Java update commands are replayed through the built Node decoder as a required gate', () => {
-  // Java producer 产物必须由同 job 构建出的生产 Node decoder 真实解码：依赖 daemon 构建，且不得条件化或忽略失败。
-  const steps = validationSteps()
-  const verify = steps.findIndex(
-    (step) => stepField(step, 'run') === 'env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify',
-  )
-  assert.ok(verify >= 0, 'missing the distribution Java verify step')
-  const matching = steps.filter((step) => stepField(step, 'run')?.includes('scripts/daemon/verify-java-update-commands.mjs'))
-  assert.equal(matching.length, 1, 'expected exactly one Java-to-Node update decoder step')
-  const step = matching[0]
-  const index = steps.indexOf(step)
-  assert.ok(index > verify, 'the Java-to-Node decoder step must run after the Java producer verify')
-  const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
-  const builds = steps.filter((step) => stepField(step, 'run') === 'npm --prefix daemon run build')
-  assert.equal(builds.length, 1, 'expected exactly one same-commit daemon build')
-  const build = builds[0]
-  const buildIndex = steps.indexOf(build)
-  assert.ok(
-    install >= 0 && install < buildIndex && buildIndex < verify,
-    'install dependencies and build the Node transport before Java integration tests and decoder replay',
-  )
-  assert.equal(stepField(build, 'if'), undefined, 'the daemon build must not be conditional')
-  assert.doesNotMatch(build, /continue-on-error:|\|\|\s*true/u)
-  const run = stepField(step, 'run')
-  assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs platform\/daemon-server\/target\/daemon-update-java-commands\.json/u)
-  assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
-  assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)
 })
 
 test('publish reuses only the same-run, same-SHA verified artifact', () => {

@@ -179,8 +179,7 @@ create table agent_definition (
     type            varchar(16)   not null default 'USER',
     description     text,
     system_prompt   text,
-    model_name      varchar(128),
-    variant         varchar(64),
+    execution       jsonb,
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
@@ -191,20 +190,24 @@ create table agent_definition (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint fk_agent_definition_model foreign key (model_name)
-        references agent_model (name) on update cascade,
     constraint ck_agent_definition_type check (type in ('USER', 'BUILTIN')),
-    constraint ck_agent_definition_variant_requires_model check (
-        variant is null or model_name is not null
+    constraint ck_agent_definition_execution_shape check (
+        execution is null or case when jsonb_typeof(execution) = 'object' then coalesce(
+            execution ? 'driver' and execution ? 'settings'
+            and execution - 'driver' - 'settings' = '{}'::jsonb
+            and jsonb_typeof(execution -> 'driver') = 'string'
+            and length(btrim(execution ->> 'driver')) > 0
+            and jsonb_typeof(execution -> 'settings') = 'object', false) else false end
     ),
-    constraint ck_agent_definition_user_requires_model check (
-        type = 'BUILTIN' or model_name is not null
+    constraint ck_agent_definition_user_requires_execution check (
+        type = 'BUILTIN' or execution is not null
     ),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
 create index idx_agent_definition_model
-    on agent_definition (model_name);
+    on agent_definition ((execution -> 'settings' ->> 'modelName'))
+    where execution ->> 'driver' = 'builtin';
 
 -- 组内成员冷却：只按 (组, 成员引用) 隔离；group_version 使旧配置的冷却与旧在途 callback 失效。
 create table agent_model_group_cooldown (
@@ -959,7 +962,7 @@ create table harness_thread (
         references harness_thread (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
-    -- 同 Session 复合引用目标：产品表（如 Issue Run）用 (session_id, id) 把
+    -- 同 Session 复合引用目标：上层表用 (session_id, id) 把
     -- Thread 与 Session 一起冻结，无法配错 Session。
     constraint uk_harness_thread_session unique (session_id, id),
     constraint ck_harness_thread_parent_not_self check (
@@ -1080,8 +1083,7 @@ create table harness_thread_command (
             'SET_AGENT',
             'SET_EXECUTION',
             'SET_ENVIRONMENT',
-            'NOTIFICATION',
-            'SET_CONTRIBUTOR_STATE'
+            'NOTIFICATION'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (
@@ -1303,8 +1305,8 @@ create index idx_harness_tool_invocation_pending
 
 comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
--- Durable Work：全部后台调度共用的唯一 mailbox 表。Harness 的 THREAD/MODEL/AGENT/TOOL、Project 的 ISSUE 与
--- Canvas 的 CANVAS_RUN 都是一种 target_type；due、租约与 wake 围栏一律以数据库时钟判定。
+-- Durable Work：全部后台调度共用的唯一 mailbox 表，各调度目标按 target_type 区分；
+-- due、租约与 wake 围栏一律以数据库时钟判定。
 create table durable_work (
     target_type varchar(16) not null,
     target_id uuid not null,
@@ -1623,7 +1625,7 @@ create table project_issue (
     ),
     check (
         (pause_reason is null and pause_detail is null)
-        or (pause_reason is not null and pause_reason in ('USER', 'ERROR', 'UNKNOWN')
+        or (pause_reason is not null and pause_reason in ('USER', 'ERROR')
             and pause_detail is not null and btrim(pause_detail) <> '')
     )
 );
@@ -1636,7 +1638,7 @@ comment on column project_issue.state is
     'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
 comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标（不得是 BLOCKED/DONE，也不能在非 BLOCKED 状态保留）';
 comment on column project_issue.block_reason is 'BLOCKED 的原因（非空白，且非 BLOCKED 时必须为空）';
-comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR / UNKNOWN（与 pause_detail 成对）';
+comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR（与 pause_detail 成对）';
 comment on column project_issue.pause_detail is '控制暂停详情（非空白，且与 pause_reason 成对）';
 comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
 comment on column project_issue.next_activity_sequence is '下一个 Activity sequence 分配器，>= 1';
@@ -1647,10 +1649,11 @@ create index idx_project_issue_board on project_issue (project_id, state, number
 
 -- 稳定的 Issue+Agent Thread 归属：(issue_id, agent_name) -> 一条 Harness Thread。
 -- 每个 Agent Thread 由服务受控创建自己的 Harness Session，绝不跨 Agent、Issue 或
--- 产品复用；归属行不保存 session 指针，应用无法重新指向。
+-- 产品复用；Session 与 Thread 一致性由复合外键保证。
 create table project_issue_agent_thread (
     issue_id uuid not null,
     agent_name varchar(64) not null,
+    session_id uuid not null,
     thread_id uuid not null,
     created_at timestamptz(3) not null default current_timestamp,
     constraint pk_project_issue_agent_thread primary key (issue_id, agent_name),
@@ -1660,12 +1663,15 @@ create table project_issue_agent_thread (
         references project_issue (id) on delete restrict,
     constraint fk_project_issue_agent_thread_agent foreign key (agent_name)
         references agent_definition (name) on delete restrict,
-    constraint fk_project_issue_agent_thread_thread foreign key (thread_id)
-        references harness_thread (id) on delete restrict
+    constraint fk_project_issue_agent_thread_thread foreign key (session_id, thread_id)
+        references harness_thread (session_id, id) on delete restrict
 );
 
 comment on table project_issue_agent_thread is
-    'Issue+Agent 稳定 Thread 归属：每个 Agent 使用自己的 Harness Session（应用受控创建，不跨 Agent/Issue/产品复用），绑定行不保存 session_id';
+    'Issue+Agent 稳定 Thread 归属：Session 与 Thread 由复合外键保证一致';
+
+create index idx_project_issue_agent_thread_session
+    on project_issue_agent_thread (session_id);
 
 -- 每个 Issue 工作阶段一份预算，按 (issue_id,state) 对每个 Agent 的 Run 计数；切换
 -- Agent 既不重置也不拆分额度；保留态（INIT/BLOCKED/DONE）没有预算行。
@@ -1728,7 +1734,7 @@ create table project_issue_run (
     constraint fk_project_issue_run_final_answer foreign key (session_id, final_answer_entry_id)
         references harness_entry (session_id, id) on delete restrict,
     constraint ck_project_issue_run_status check (
-        status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+        status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED')
     ),
     constraint ck_project_issue_run_next_state check (
         next_state is null
@@ -1737,16 +1743,16 @@ create table project_issue_run (
     constraint ck_project_issue_run_clock check (
         (status = 'RUNNING' and active_since is not null and remaining_execution_ms > 0)
         or (status = 'WAITING' and active_since is null and remaining_execution_ms > 0)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN') and active_since is null)
+        or (status in ('COMPLETED', 'FAILED', 'CANCELLED') and active_since is null)
     ),
     constraint ck_project_issue_run_terminal_shape check (
         (status in ('RUNNING', 'WAITING') and ended_at is null and end_entry_id is null
             and final_answer_entry_id is null and error is null)
-        or (status in ('COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+        or (status in ('COMPLETED', 'FAILED', 'CANCELLED')
             and ended_at is not null and ended_at >= started_at and end_entry_id is not null)
     ),
     constraint ck_project_issue_run_error_reason check (
-        status not in ('FAILED', 'UNKNOWN') or (error is not null and btrim(error) <> '')
+        status <> 'FAILED' or (error is not null and btrim(error) <> '')
     ),
     constraint ck_project_issue_run_completed_error check (status <> 'COMPLETED' or error is null)
 );
@@ -1758,7 +1764,7 @@ comment on column project_issue_run.ordinal is 'Issue 内单调运行编号，>=
 comment on column project_issue_run.state is '运行时冻结的工作阶段 state（必须已有阶段预算）';
 comment on column project_issue_run.session_id is '冻结的 Agent 私有 Harness Session';
 comment on column project_issue_run.thread_id is '冻结的 Issue+Agent 工作 Thread（必须已绑定且属于该 Session）';
-comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED, UNKNOWN';
+comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED';
 comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（必须属于本 Session）';
 comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（活跃 Run 必须为空）';
 comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（可空，必须属于本 Session）';
@@ -1768,7 +1774,7 @@ comment on column project_issue_run.observed_activity_sequence is
     'Delivery cursor in the Issue activity stream, not an Entry boundary';
 comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；活跃与等待 Run 必须为正';
 comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点（WAITING 与终态必须为空）';
-comment on column project_issue_run.error is 'FAILED/UNKNOWN 的失败原因（非空白；COMPLETED 必须为空）';
+comment on column project_issue_run.error is 'FAILED 的失败原因（非空白；结果未定时明确说明结果未知；COMPLETED 必须为空）';
 comment on column project_issue_run.version is '乐观锁行版本，>= 0';
 comment on column project_issue_run.started_at is 'Run 创建时间（毫秒精度）';
 comment on column project_issue_run.ended_at is '终态时间（毫秒精度，不得早于 started_at；活跃 Run 为空）';
@@ -1867,7 +1873,7 @@ create index idx_chat_session_chat on chat_session (chat_id, created_at, session
 -- storage foundation. sha256+size_bytes uniquely identify one content in the
 -- ACTIVE state (partial unique index); width/height/duration_ms are immutable
 -- media facts written once at complete time (nullable until probed). ref_count
--- counts live owner references (a READY upload plus later Canvas/Harness
+-- counts live owner references (a READY upload plus later application and Harness
 -- consumers): ACTIVE rows always hold ref_count > 0, DELETING is terminal with
 -- ref_count = 0 and keeps the row as cleanup evidence until its S3 objects are
 -- removed and the row is conditionally deleted.
@@ -1971,7 +1977,7 @@ comment on column storage_blob.height is
 comment on column storage_blob.duration_ms is
     'Immutable media duration in milliseconds probed at complete time; null for still media.';
 comment on column storage_blob.ref_count is
-    'Live owner reference count: READY uploads and later Canvas/Harness consumers.';
+    'Live owner reference count: READY uploads and later application and Harness consumers.';
 comment on column storage_blob.state is
     'Lifecycle state: ACTIVE (ref_count > 0) or DELETING (terminal, ref_count = 0).';
 comment on column storage_blob.created_at is 'Row creation time (timestamptz, millisecond precision).';

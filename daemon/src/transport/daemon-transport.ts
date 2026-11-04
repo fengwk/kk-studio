@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import http, { type IncomingHttpHeaders } from 'node:http'
+import https from 'node:https'
 import http2, {
   constants as h2constants,
   type ServerHttp2Session,
@@ -106,11 +107,15 @@ export class DaemonWebSocketTransport implements ControlTransport {
       'KK-Daemon-Platform': this.platformKey,
     }
 
+    // 不使用可能启用 NODE_USE_ENV_PROXY 的全局 Agent：控制连接必须始终能接收代理修正。
+    const directAgent = this.gatewayUri.startsWith('wss:') ? new https.Agent() : new http.Agent()
     const ws = new WebSocket(this.gatewayUri, {
       headers,
+      agent: directAgent,
       perMessageDeflate: false,
       maxPayload: MAX_WS_PAYLOAD_BYTES,
     })
+    ws.once('close', () => directAgent.destroy())
 
     this.activeWs = ws
 

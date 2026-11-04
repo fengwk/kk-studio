@@ -3,6 +3,7 @@ import { FolderPlus } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
@@ -110,12 +111,19 @@ export function CreateProjectModal({
             </label>
 
             <div className="edit-project-field">
-              <Checkbox
-                checked={yoloEnabled}
-                onChange={setYoloEnabled}
-                label={t('projects.edit.yoloToggle')}
-                disabled={isSubmitting}
-              />
+              <div className="field-label-row">
+                <Checkbox
+                  checked={yoloEnabled}
+                  onChange={setYoloEnabled}
+                  label={t('projects.edit.yoloToggle')}
+                  disabled={isSubmitting}
+                />
+                <HelpHint
+                  label={t('shared.helpAbout', { topic: t('projects.edit.yoloToggle') })}
+                >
+                  {t('projects.edit.yoloHelp')}
+                </HelpHint>
+              </div>
             </div>
           </div>
 

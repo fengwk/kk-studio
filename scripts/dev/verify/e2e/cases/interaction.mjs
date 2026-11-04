@@ -20,7 +20,10 @@ import {
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
-import { registerCase } from '../lib/registry.mjs'
+import { createCaseAdder } from '../lib/registry.mjs'
+
+export const cases = []
+const registerCase = createCaseAdder(cases)
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -49,7 +52,7 @@ const INTERACTION_FIELDS = [
  */
 const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
-const OWNER_FIELDS = ['type', 'chatId', 'chatTitle', 'issueId', 'issueTitle', 'agentName', 'rootThreadName']
+const OWNER_FIELDS = ['kind', 'id', 'title', 'link']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
 
 function instantMillis(value) {
@@ -71,7 +74,7 @@ function parseArguments(interaction) {
 
 function assertInteraction(
   interaction,
-  { threadId, rootThreadId, sessionId, chatId, chatTitle, rootThreadName, questionnaire, label },
+  { threadId, rootThreadId, sessionId, chatId, chatTitle, questionnaire, label },
 ) {
   assertExactFields(interaction, INTERACTION_FIELDS, `${label} interaction`)
   assert(
@@ -94,18 +97,11 @@ function assertInteraction(
   )
   assertExactFields(interaction.owner, OWNER_FIELDS, `${label} interaction owner`)
   assert(
-    interaction.owner.type === 'CHAT'
-      && interaction.owner.chatId === chatId
-      && interaction.owner.chatTitle === chatTitle
-      && interaction.owner.issueId === null
-      && interaction.owner.issueTitle === null
-      && interaction.owner.agentName === null,
+    interaction.owner.kind === 'CHAT'
+      && interaction.owner.id === chatId
+      && interaction.owner.title === chatTitle
+      && interaction.owner.link === `/chats/${chatId}`,
     JSON.stringify(interaction.owner),
-  )
-  assert(
-    typeof interaction.owner.rootThreadName === 'string'
-      && interaction.owner.rootThreadName === rootThreadName,
-    'interaction root display name must match the authoritative Thread snapshot',
   )
   assert(
     JSON.stringify(parseArguments(interaction)) === JSON.stringify(questionnaire),
@@ -275,10 +271,9 @@ registerCase({
         name: `e2e-agent-interaction-${suffix}`,
         description: 'Local pending input E2E agent.',
         systemPrompt: 'Ask the user with ask_user, then report the accepted answer.',
-        model: model.name,
-        variant: 'default',
+        execution: { driver: 'builtin', settings: { modelName: model.name, variant: 'default' } },
         // ask_user 是内置 SELECTABLE 工具：只有显式声明的 Agent 才把问卷工具暴露给模型。
-        config: { tools: ['ask_user'], skills: [], subagents: [], inheritParentEnvironment: true },
+        config: { tools: ['ask_user'], skills: [], subagents: [] },
       })
       agent = envelopeData(agentResponse.json)
       assert(agent?.name, JSON.stringify(agentResponse.json))
@@ -301,8 +296,7 @@ registerCase({
         sessionId,
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(agent, {
-          modelName: model.name,
-          variant: 'default',
+          ...agent.execution.settings,
         }),
         yoloEnabled: false,
         commands: [userMessageCommand(marker, cid())],
@@ -317,7 +311,6 @@ registerCase({
           sessionId: String(sessionId),
           chatId: chat.id,
           chatTitle: chat.title,
-          rootThreadName: (await getThreadSnapshot(ctx, threadId)).thread.name,
           questionnaire,
           label: 'pending',
         },

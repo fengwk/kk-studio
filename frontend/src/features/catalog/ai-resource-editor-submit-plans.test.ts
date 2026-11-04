@@ -72,7 +72,7 @@ describe('ai-resource-editor-submit-plans', () => {
       data: {
         expectedVersion: '8',
         description: 'updated description',
-        model: 'unrelated/model',
+        execution: { driver: 'builtin', settings: { modelName: 'unrelated/model', variant: null } },
       },
     })
     if (plan.kind !== 'agent' || plan.mode !== 'edit') return
@@ -99,7 +99,7 @@ describe('ai-resource-editor-submit-plans', () => {
       kind: 'agent',
       mode: 'edit',
       name: 'summarizer',
-      data: { expectedVersion: '3', model: null, description: 'edited prompt' },
+      data: { expectedVersion: '3', execution: null, description: 'edited prompt' },
     })
     if (plan.kind !== 'agent' || plan.mode !== 'edit') return
     expect(plan.data).not.toHaveProperty('type')

@@ -59,6 +59,7 @@ export function AgentForm({
 }) {
   const { t } = useI18n()
   const builtin = agentType === 'BUILTIN'
+  const driver = draft.execution?.driver ?? 'builtin'
   const selectedModel = models.find((model) => model.name === draft.model)
   const selectedGroup = selectedModel?.kind === 'GROUP'
   const modelUnavailable =
@@ -73,7 +74,7 @@ export function AgentForm({
       ? [
           {
             value: draft.model,
-            label: `${draft.model} (${t('ai.catalog.form.unavailable')})`,
+            label: `${draft.model} · ${t('ai.catalog.form.unavailable')}`,
             disabled: true,
           },
         ]
@@ -86,7 +87,7 @@ export function AgentForm({
       ? [
           {
             value: selectedVariant,
-            label: `${selectedVariant} (${t('ai.catalog.form.unavailable')})`,
+            label: `${selectedVariant} · ${t('ai.catalog.form.unavailable')}`,
             disabled: true,
           },
         ]
@@ -143,6 +144,23 @@ export function AgentForm({
           rows={2}
         />
       </label>
+      <label className="form-group">
+        <FieldLabel required>{t('ai.catalog.form.executionDriver')}</FieldLabel>
+        <Select
+          aria-label={t('ai.catalog.form.executionDriver')}
+          value={driver}
+          options={[
+            ...(driver !== 'builtin' ? [{ value: driver, label: `${driver} (${t('ai.catalog.form.unavailable')})` }] : []),
+            { value: 'builtin', label: 'builtin' },
+          ]}
+          onChange={(value) => {
+            if (value === 'builtin' && driver !== 'builtin') {
+              onChange({ ...draft, execution: null, model: '', variant: '' })
+            }
+          }}
+        />
+      </label>
+      {driver === 'builtin' ? <>
       <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
         <FieldLabel required={!builtin}>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <Select
@@ -191,6 +209,7 @@ export function AgentForm({
           {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
         </label>
       ) : null}
+      </> : null}
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
         <TextArea
@@ -246,22 +265,12 @@ export function AgentForm({
         ) : null}
       </fieldset>
 
-      <div className="form-group">
-        <Checkbox
-          checked={draft.inheritParentEnvironment}
-          onChange={(inheritParentEnvironment) =>
-            onChange({ ...draft, inheritParentEnvironment })
-          }
-          label={t('ai.catalog.form.inheritParentEnvironment')}
-        />
-      </div>
-
-      {models.length === 0 && (
+      {driver === 'builtin' && models.length === 0 && (
         <div className="inline-hint" role="status">
           {t('ai.catalog.form.needModel')}
         </div>
       )}
-      {models.length > 0 && !draft.model && !builtin && (
+      {driver === 'builtin' && models.length > 0 && !draft.model && !builtin && (
         <Button variant="inline" onClick={() => onChange(emptyAgentDraft(models[0]))}>
           {t('ai.catalog.form.fillFirstModel')}
         </Button>

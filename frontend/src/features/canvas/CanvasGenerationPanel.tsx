@@ -30,6 +30,7 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
@@ -504,7 +505,7 @@ export function CanvasGenerationPanel({
         {activeModel.outputs && activeModel.outputs.length > 0 ? (
           <div className="generation-outputs-badge-list" aria-label={t('canvas.generation.outputsAria')}>
             {activeModel.outputs.map((out, idx) => (
-              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} (${out.kind})` : out.kind}>
+              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} · ${out.kind}` : out.kind}>
                 {out.kind}{out.name ? `: ${out.name}` : ''}
               </span>
             ))}
@@ -679,51 +680,16 @@ export function CanvasGenerationPanel({
           >
             <strong>{t('canvas.generation.localPendingTitle')}</strong>
             <p>{localPendingState.message}</p>
-            {confirmingDiscard ? (
-              <div
-                className="generation-discard-confirm"
-                role="alertdialog"
-                aria-label={t('canvas.generation.discardConfirmAria')}
-              >
-                <p>{t('canvas.generation.discardConfirmText')}</p>
-                <div className="generation-discard-confirm-actions">
-                  <Button
-                    variant="ghost"
-                    size="compact"
-                    onClick={() => setConfirmingDiscard(false)}
-                  >
-                    {t('shared.cancel')}
-                  </Button>
-                  <Button
-                    size="compact"
-                    danger
-                    data-testid="confirm-discard-btn"
-                    onClick={() => {
-                      if (localPendingState.raw !== null) {
-                        const success = runtime.discardPendingRun(node.id, localPendingState.raw)
-                        if (success) {
-                          setConfirmingDiscard(false)
-                          setLocalPendingState(null)
-                        }
-                      }
-                    }}
-                  >
-                    {t('canvas.generation.discardConfirm')}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <Button
-                variant="inline"
-                size="compact"
-                danger
-                data-testid="discard-pending-btn"
-                disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
-                onClick={() => setConfirmingDiscard(true)}
-              >
-                {t('canvas.generation.discardPending')}
-              </Button>
-            )}
+            <Button
+              variant="inline"
+              size="compact"
+              danger
+              data-testid="discard-pending-btn"
+              disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
+              onClick={() => setConfirmingDiscard(true)}
+            >
+              {t('canvas.generation.discardPending')}
+            </Button>
           </div>
         ) : null}
         {node.run?.status === 'FAILED' ? (
@@ -737,6 +703,27 @@ export function CanvasGenerationPanel({
         ) : null}
         </div>
       </div>
+      <ConfirmActionModal
+        className="modal-touch-target"
+        modal={confirmingDiscard && localPendingState ? {
+          title: t('canvas.generation.discardConfirmAria'),
+          description: t('canvas.generation.discardConfirmText'),
+          confirmLabel: t('canvas.generation.discardConfirm'),
+          icon: 'delete',
+          tone: 'danger',
+          onConfirm: () => {
+            if (localPendingState.raw !== null) {
+              const success = runtime.discardPendingRun(node.id, localPendingState.raw)
+              if (success) {
+                setConfirmingDiscard(false)
+                setLocalPendingState(null)
+              }
+            }
+          },
+        } : null}
+        pending={false}
+        onClose={() => setConfirmingDiscard(false)}
+      />
     </section>
   )
 }
