@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamState;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import java.util.Set;
  * <p>支持 content、tool_calls fragments、reasoning_content delta、reasoning_details、 尾部 usage、终态校验、截断诊断及
  * native replay 构造。
  */
-final class OpenAiChatStreamAccumulator {
+final class OpenAiChatStreamAccumulator extends ProviderStreamState {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -57,8 +58,6 @@ final class OpenAiChatStreamAccumulator {
   private final ProviderStreamBridge bridge;
 
   private String messageId = null;
-  private String serviceTier = null;
-  private GenerationStopReason stopReason = null;
   private boolean seenDone = false;
 
   /** {@code choices[0]} 首个有效 finish_reason 之后语义封闭：只允许无语义尾帧，绝不再改写任何已累积事实。 */

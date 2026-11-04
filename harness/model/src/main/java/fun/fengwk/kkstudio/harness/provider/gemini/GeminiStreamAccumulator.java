@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamState;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +45,7 @@ import java.util.Set;
  * Part 绝不静默丢弃；若某个 part 无法写入合法 replay（同一 data oneof 同时声明 text 与 functionCall），则显式不冻结 replay
  * 而不是交付损坏的原生回放。
  */
-final class GeminiStreamAccumulator {
+final class GeminiStreamAccumulator extends ProviderStreamState {
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -83,7 +84,6 @@ final class GeminiStreamAccumulator {
   private final List<ProviderToolCall> collectedToolCalls = new ArrayList<>();
   private int nextToolOrdinal = 0;
 
-  private GenerationStopReason stopReason = null;
   private boolean terminalChunkReceived = false;
   private boolean promptBlocked = false;
 
@@ -92,7 +92,6 @@ final class GeminiStreamAccumulator {
 
   private JsonNode latestUsageSnapshot = null;
   private String rawUsageJson = "{}";
-  private String serviceTier = null;
 
   GeminiStreamAccumulator(
       ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamState;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,7 +44,7 @@ import java.util.function.Consumer;
  * <p>每条 transport 帧在进入状态机之前先经 {@link ProviderStreamBridge#emitProtocolEvent} exactly-once
  * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
-public final class OpenAiResponsesStreamAccumulator {
+public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
@@ -80,9 +81,6 @@ public final class OpenAiResponsesStreamAccumulator {
 
   private boolean terminalReceived = false;
   private String requestId = null;
-  private String serviceTier = null;
-  private GenerationStopReason stopReason = null;
-
   private final StringBuilder textBuffer = new StringBuilder();
   private final StringBuilder thinkingBuffer = new StringBuilder();
 

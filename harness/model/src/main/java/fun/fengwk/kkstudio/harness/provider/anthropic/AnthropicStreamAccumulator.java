@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamState;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,7 +44,7 @@ import java.util.TreeMap;
  * 未知但合法的 provider block（如 server tool use）本身原样保留，携带 {@code input_json_delta} 时按 deterministic 规则累积
  * partial JSON 并在终态解析为 {@code input} 对象。
  */
-final class AnthropicStreamAccumulator {
+final class AnthropicStreamAccumulator extends ProviderStreamState {
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -91,12 +92,8 @@ final class AnthropicStreamAccumulator {
   /** usage 快照的原始累积：按顶层字段合并，保留官方未知字段；normalized 计数在终态覆盖同名键。 */
   private final ObjectNode rawUsage = NODES.objectNode();
 
-  private String serviceTier = null;
-
   private String cacheMissReasonType = null;
   private Long cacheMissedInputTokens = null;
-
-  private GenerationStopReason stopReason = null;
 
   AnthropicStreamAccumulator(
       ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
