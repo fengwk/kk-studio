@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -388,7 +389,11 @@ class StudioEnvironmentIdeControllerTest {
   }
 
   /** 记录发出的 IDE 命令的传输替身：真实服务链路只需证明坏目录未产生任何命令。 */
-  private static final class RecordingIdeTransport implements IdeCommandTransport {
+  private static final class RecordingIdeTransport extends IdeCommandTransport {
+
+    private RecordingIdeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private static final String DAEMON_INSTANCE = "33333333-3333-3333-3333-333333333333";
     private static final UUID LEASE = new UUID(0L, 77L);

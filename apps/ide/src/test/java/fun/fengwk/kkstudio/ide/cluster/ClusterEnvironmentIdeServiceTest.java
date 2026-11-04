@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,11 +18,13 @@ import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
@@ -246,7 +249,11 @@ class ClusterEnvironmentIdeServiceTest {
     }
   }
 
-  private static final class RecordingTransport implements IdeCommandTransport {
+  private static final class RecordingTransport extends IdeCommandTransport {
+
+    private RecordingTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<IdeCommand> commands = new ArrayList<>();
 
@@ -295,7 +302,11 @@ class ClusterEnvironmentIdeServiceTest {
     public void abandonIde(UUID invocationId) {}
   }
 
-  private static final class AllowGateway implements IdeBrowserUseGateway {
+  private static final class AllowGateway extends IdeBrowserUseGateway {
+
+    private AllowGateway() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     @Override
     public boolean findExactIntent(

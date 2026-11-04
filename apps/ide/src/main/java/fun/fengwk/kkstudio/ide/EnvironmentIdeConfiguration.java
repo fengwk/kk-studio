@@ -19,7 +19,7 @@ public class EnvironmentIdeConfiguration {
 
   @Bean
   public IdeCommandTransport ideCommandTransport(EnvironmentDaemonServer server) {
-    return new DaemonIdeCommandTransport(server);
+    return new IdeCommandTransport(server);
   }
 
   @Bean

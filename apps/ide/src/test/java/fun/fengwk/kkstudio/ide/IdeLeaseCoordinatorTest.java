@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,9 +11,11 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeDirectoryListingDTO;
@@ -265,7 +268,11 @@ class IdeLeaseCoordinatorTest {
     }
   }
 
-  private static final class FakeTransport implements IdeCommandTransport {
+  private static final class FakeTransport extends IdeCommandTransport {
+
+    private FakeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<DaemonIdeLease> leases = new ArrayList<>();
     private final List<DaemonConnectionIdentity> expectedIdentities = new ArrayList<>();
@@ -300,7 +307,11 @@ class IdeLeaseCoordinatorTest {
     public void abandonIde(UUID invocationId) {}
   }
 
-  private static final class FakeGateway implements IdeBrowserUseGateway {
+  private static final class FakeGateway extends IdeBrowserUseGateway {
+
+    private FakeGateway() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     private final Map<Group, Proofs> proofs = new HashMap<>();
     private final Set<Group> failures = new HashSet<>();

@@ -30,7 +30,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** 意图：生产 gateway 只把 typed client 结果映射为窄证明，缺失为空、失败不可用，未绑定意图不产生续租证明。 */
-class IdeBrowserUseClientGatewayTest {
+class IdeBrowserUseGatewayTest {
 
   private static final UUID LOCAL_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID REMOTE_NODE = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -45,7 +45,7 @@ class IdeBrowserUseClientGatewayTest {
 
   private IdeBrowserUseRegistry registry;
   private ClusterNodeRegistry nodes;
-  private IdeBrowserUseClientGateway gateway;
+  private IdeBrowserUseGateway gateway;
 
   @BeforeEach
   void setUp() {
@@ -59,7 +59,7 @@ class IdeBrowserUseClientGatewayTest {
             nodes,
             registry,
             LOCAL_NODE);
-    gateway = new IdeBrowserUseClientGateway(client);
+    gateway = new IdeBrowserUseGateway(client);
   }
 
   @Test

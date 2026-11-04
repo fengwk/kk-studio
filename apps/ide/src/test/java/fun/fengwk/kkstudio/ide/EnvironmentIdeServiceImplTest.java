@@ -4,11 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeAction;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeCommand;
@@ -16,6 +18,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -40,8 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的
- * detach/close 立即冻结本地授权且不重放不确定结果。
+ * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的 close
+ * 立即撤销本地授权且不重放不确定结果。
  */
 class EnvironmentIdeServiceImplTest {
 
@@ -701,7 +704,11 @@ class EnvironmentIdeServiceImplTest {
 
   private record OpenedEvent(UUID viewId, long epoch, String workspacePath) {}
 
-  private static final class FakeTransport implements IdeCommandTransport {
+  private static final class FakeTransport extends IdeCommandTransport {
+
+    private FakeTransport() {
+      super(mock(EnvironmentDaemonServer.class));
+    }
 
     private final List<IdeCommand> commands = new ArrayList<>();
     private final Deque<IdeResult> replies = new ArrayDeque<>();
@@ -748,7 +755,11 @@ class EnvironmentIdeServiceImplTest {
     }
   }
 
-  private static final class FakeBrowserUse implements IdeBrowserUseGateway {
+  private static final class FakeBrowserUse extends IdeBrowserUseGateway {
+
+    private FakeBrowserUse() {
+      super(mock(IdeBrowserUseClient.class));
+    }
 
     private final List<IntentQuery> queries = new ArrayList<>();
     private boolean matched = true;
