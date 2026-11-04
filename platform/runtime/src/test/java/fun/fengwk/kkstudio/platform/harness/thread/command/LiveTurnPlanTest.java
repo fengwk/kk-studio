@@ -129,8 +129,7 @@ class LiveTurnPlanTest {
         "read",
         "Read a file.",
         "{\"type\":\"object\"}",
-        EnvironmentSupport.OPTIONAL,
-        null,
+        EnvironmentSupport.ROUTED,
         "builtin:read",
         state,
         filterReason);

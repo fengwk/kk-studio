@@ -2079,6 +2079,31 @@ comment on column session_blob_ref.created_at is '引用创建时间（timestamp
 
 comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
+-- Session 级文件元数据：(session_id, path) 唯一确定一个文件版本及引用的全局 blob。
+create table session_file (
+    session_id uuid not null,
+    path       text not null,
+    blob_id    uuid not null,
+    revision   integer not null,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint pk_session_file primary key (session_id, path),
+    constraint fk_session_file_session foreign key (session_id) references harness_session (id) on delete restrict,
+    constraint fk_session_file_blob foreign key (blob_id) references storage_blob (id) on delete restrict,
+    constraint ck_session_file_path check (path <> '' and path = btrim(path) and path !~ '^/' and path !~ '(^|/)\.\.?(/|$)'),
+    constraint ck_session_file_revision check (revision > 0)
+);
+
+create index idx_session_file_blob on session_file (blob_id, session_id);
+
+comment on table session_file is
+    'Session 虚拟文件存储：(session_id, path) 唯一确定一个文件版本及引用的全局 blob';
+comment on column session_file.session_id is '所属 Harness Session（RESTRICT FK）';
+comment on column session_file.path is 'Session 空间相对路径（非空、无首尾空白、无前导斜杠、无 .. 段）';
+comment on column session_file.blob_id is '文件内容引用的全局 blob（RESTRICT FK，ACTIVE 行）';
+comment on column session_file.revision is '乐观锁版本号（严格大于 0）';
+comment on column session_file.updated_at is '最后更新时间戳（毫秒精度）';
+comment on index idx_session_file_blob is '按 blob 反向枚举引用它的 Session 文件（CAS 释放前引用判断与对账）';
+
 ------------------------------------------------------------------------------
 -- 6. Issue published evidence
 --

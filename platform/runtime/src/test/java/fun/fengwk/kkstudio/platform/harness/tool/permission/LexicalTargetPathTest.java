@@ -21,6 +21,7 @@ class LexicalTargetPathTest {
     assertTrue(LexicalTargetPath.isAbsolute("c:\\proj\\a.txt"));
     assertTrue(LexicalTargetPath.isAbsolute("//server/share/proj/a.txt"));
     assertTrue(LexicalTargetPath.isAbsolute("\\\\server\\share\\proj\\a.txt"));
+    assertTrue(LexicalTargetPath.isAbsolute("vfs:/sessions/id/a.txt"));
 
     assertFalse(LexicalTargetPath.isAbsolute(null));
     assertFalse(LexicalTargetPath.isAbsolute(""));
@@ -28,7 +29,8 @@ class LexicalTargetPathTest {
     assertFalse(LexicalTargetPath.isAbsolute("src/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("./a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("C:a.txt"));
-    assertFalse(LexicalTargetPath.isAbsolute("kkstudio:/resources/abc"));
+    assertFalse(LexicalTargetPath.isAbsolute("s3:/bucket/a.txt"));
+    assertFalse(LexicalTargetPath.isAbsolute("vfs://sessions/id/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("file:///srv/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("https://example.com/a.txt"));
   }
@@ -49,6 +51,9 @@ class LexicalTargetPathTest {
     assertEquals(
         "//server/share/proj/a.txt",
         LexicalTargetPath.permissionCoordinate("\\\\server\\share\\proj\\a.txt"));
+    assertEquals(
+        "vfs:/sessions/id/a.txt",
+        LexicalTargetPath.permissionCoordinate("vfs:/sessions/id/tmp/../a.txt"));
   }
 
   @Test

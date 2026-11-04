@@ -722,8 +722,8 @@ class HarnessRuntimeDtoContractTest {
         List.of("environmentName", "cacheControl", "planningError", "frozenInvocation")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.class, fieldName);
     }
-    // 嵌套事实同理：无固定 requiredEnvironmentId、SENT 工具无过滤原因、未检查/未安装的 commit 与 NONE 缓存都没有 key。
-    for (String fieldName : List.of("requiredEnvironmentId", "filterReason")) {
+    // 嵌套事实同理：SENT 工具无过滤原因、未检查/未安装的 commit 与 NONE 缓存都没有 key。
+    for (String fieldName : List.of("filterReason")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.ToolDTO.class, fieldName);
     }
     for (String fieldName : List.of("observedHeadCommit", "installedCommit")) {
@@ -766,7 +766,7 @@ class HarnessRuntimeDtoContractTest {
     sent.setName("read");
     sent.setDescription("Read a file.");
     sent.setInputSchemaJson("{\"type\":\"object\"}");
-    sent.setEnvironmentSupport(EnvironmentSupportDTO.OPTIONAL);
+    sent.setEnvironmentSupport(EnvironmentSupportDTO.ROUTED);
     sent.setProvenance("builtin:read");
     sent.setState("SENT");
     sent.setFilterReason(null);
@@ -797,7 +797,7 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
     assertTrue(json.contains("\"state\":\"FILTERED\""), json);
     assertTrue(json.contains("\"filterReason\":\"ENVIRONMENT_NOT_SELECTED\""), json);
-    assertTrue(json.contains("\"environmentSupport\":\"OPTIONAL\""), json);
+    assertTrue(json.contains("\"environmentSupport\":\"ROUTED\""), json);
     assertTrue(json.contains("\"delivery\":\"LOCAL\""), json);
     assertTrue(json.contains("\"environmentName\":null"), json);
     assertTrue(json.contains("\"planningError\":null"), json);

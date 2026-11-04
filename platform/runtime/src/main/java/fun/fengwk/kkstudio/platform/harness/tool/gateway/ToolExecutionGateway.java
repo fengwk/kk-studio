@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.common.json.ToolArguments;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -54,6 +56,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluation
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettings;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.platform.vfs.VfsWriteGuard;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -107,6 +110,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
   static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
   static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
+  static final String VFS_READ_ONLY_KIND = "VFS_READ_ONLY";
 
   private static final String PERMISSION_DENIED_MESSAGE =
       ToolErrorGuidance.message(
@@ -221,6 +225,33 @@ public final class ToolExecutionGateway implements ToolGateway {
             "Select an Environment for the branch, then call the tool again"));
   }
 
+  /** 写 {@code vfs:/skills}、{@code vfs:/resources} 的确定性拒绝：在任何审批、权限评估与环境绑定之前返回，声明未执行。 */
+  private static ToolInvocationError readOnlyRejection(
+      ToolInvocationRequest request, UUID rootSessionId) {
+    return VfsWriteGuard.rejection(
+            request.binding().descriptor().name(), request.call().argumentsJson(), rootSessionId)
+        .map(message -> new ToolInvocationError(VFS_READ_ONLY_KIND, message))
+        .orElse(null);
+  }
+
+  /** 编辑身份：环境 edit 能力工具或逐调用路由的 edit 文件工具。 */
+  private static boolean isEditTool(Tool tool) {
+    if (tool instanceof EnvironmentCapabilityTool environmentTool) {
+      return EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id());
+    }
+    return tool instanceof FileTool fileTool && fileTool.operation() == FileTool.Operation.EDIT;
+  }
+
+  /** 参数中的 path 是否为 vfs: 坐标：只做前缀判断，不解析命名空间。 */
+  private static boolean isVfsPath(String argumentsJson) {
+    try {
+      String path = ToolArguments.text(ToolArguments.parse(argumentsJson), "path");
+      return path != null && path.startsWith("vfs:");
+    } catch (RuntimeException invalid) {
+      return false;
+    }
+  }
+
   /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
@@ -236,6 +267,11 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolInvocationError environmentNotSelected = environmentNotSelected(request.binding());
       if (environmentNotSelected != null) {
         return new ToolGateway.Deny(environmentNotSelected);
+      }
+      // 只读命名空间的写入在权限评估与审批之前确定性拒绝：既不弹审批，也不消耗权限策略，YOLO 同样不能绕过。
+      ToolInvocationError readOnlyRejection = readOnlyRejection(request, null);
+      if (readOnlyRejection != null) {
+        return new ToolGateway.Deny(readOnlyRejection);
       }
       ToolSettings settings = toolSettingsProvider.get();
       PermissionEvaluator.Evaluation evaluation =
@@ -300,9 +336,16 @@ public final class ToolExecutionGateway implements ToolGateway {
       if (environmentNotSelected != null) {
         return reject(catalogLease, lease, environmentNotSelected);
       }
+      // YOLO 跳过 preflight 时直接从 admit 进入执行：只读命名的写入拒绝必须在这里同样生效。
+      ToolInvocationError readOnlyRejection =
+          readOnlyRejection(execution.request(), execution.scope().rootSessionId());
+      if (readOnlyRejection != null) {
+        return reject(catalogLease, lease, readOnlyRejection);
+      }
 
-      if (tool instanceof EnvironmentCapabilityTool environmentTool
-          && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
+      // 环境编辑的审批必须携带真实文件审查；vfs: 编辑由 revision 条件更新保护并发，不要求文件审查。
+      if (isEditTool(tool)
+          && !isVfsPath(execution.request().call().argumentsJson())
           && execution.approval().required()
           && execution.expectedFile() == null) {
         return reject(

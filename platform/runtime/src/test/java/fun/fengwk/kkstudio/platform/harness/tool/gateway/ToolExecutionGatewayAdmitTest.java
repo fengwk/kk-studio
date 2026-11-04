@@ -513,7 +513,7 @@ class ToolExecutionGatewayAdmitTest {
             edit.definition(),
             new ContributorBinding(
                 edit.id().contributorId().value(), edit.id().localName(), List.of()),
-            EnvironmentSupport.REQUIRED,
+            EnvironmentSupport.ROUTED,
             ToolGatewayTestSupport.ENV_A,
             "test-env"));
   }

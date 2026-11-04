@@ -104,7 +104,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
   成员 Variant 写在组配置内。
 - 模型价格统一为 `{base, overrides, multipliers}`，金额与倍率都是十进制字符串；普通缺价按 0、
   缺倍率按 1、`reasoning: null` 继承 output。
-- Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
+- Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | ROUTED | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。创建型 batch 携带 owner 与 target，owner-free 续写面以 path `threadId` + 精确 cursor 定位且不携带二者。
 - 费用不是 durable wire：Entry 的 `payloadJson` 与 `assistantMetadata` 只保存真实用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`），不保存金额或单价；`usageCost` 在读取时按当前 catalog 现算，模型已删除或无法解析时显式为 null；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。

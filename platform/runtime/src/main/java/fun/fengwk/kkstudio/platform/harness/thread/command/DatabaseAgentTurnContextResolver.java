@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -180,7 +180,7 @@ public final class DatabaseAgentTurnContextResolver {
       }
     }
     if (!config.getSkills().isEmpty()) {
-      toolNames.add(ReadTool.NAME);
+      toolNames.add(FileTool.READ_NAME);
     }
     if (!config.getSubagents().isEmpty()) {
       // task 只由非空 subagents allowlist 声明：递归深度是调用期 gate，绝不动态裁剪工具面。
@@ -212,7 +212,6 @@ public final class DatabaseAgentTurnContextResolver {
         throw rejection("tool not found: " + toolName);
       }
       EnvironmentSupport environmentSupport = contribution.requirements().environmentSupport();
-      EnvironmentId toolRequiredEnv = contribution.requirements().requiredEnvironmentId();
       String inputSchemaJson =
           schemaCodec.encode(contribution.definition().descriptor().inputSchema());
       if (environmentId == null && environmentSupport == EnvironmentSupport.REQUIRED) {
@@ -238,17 +237,6 @@ public final class DatabaseAgentTurnContextResolver {
               contribution.id().contributorId().value(),
               contribution.id().localName(),
               stateAccesses);
-      if (toolRequiredEnv != null
-          && environmentId != null
-          && !toolRequiredEnv.equals(environmentId)) {
-        throw rejection(
-            "tool "
-                + toolName
-                + " requires environment "
-                + toolRequiredEnv
-                + " but branch has environment "
-                + environmentId);
-      }
       EnvironmentId boundEnvironmentId =
           environmentSupport == EnvironmentSupport.NONE ? null : environmentId;
       String boundEnvironmentName =
@@ -278,7 +266,6 @@ public final class DatabaseAgentTurnContextResolver {
         contribution.definition().descriptor().description(),
         inputSchemaJson,
         contribution.requirements().environmentSupport(),
-        contribution.requirements().requiredEnvironmentId(),
         contribution.id().toString(),
         state,
         filterReason);

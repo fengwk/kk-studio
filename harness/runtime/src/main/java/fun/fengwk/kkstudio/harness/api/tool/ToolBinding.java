@@ -16,7 +16,7 @@ import java.util.Objects;
  *
  * <p>执行时按工具名在当前目录中取回贡献，并要求完整定义一致；工具已移除或定义已变化时调用以确定性错误失败，绝不按新定义执行旧参数。
  *
- * <p>环境组合规则是封闭的：{@link EnvironmentSupport#NONE} 不得携带环境；{@link EnvironmentSupport#OPTIONAL}
+ * <p>环境组合规则是封闭的：{@link EnvironmentSupport#NONE} 不得携带环境；{@link EnvironmentSupport#ROUTED}
  * 可以携带当前选择，也可以完全不携带；{@link EnvironmentSupport#REQUIRED} 的正常规划结果必须携带环境——无选择的 {@code REQUIRED} 工具在
  * 请求规划构造之前就已被过滤，因此缺环境的 REQUIRED binding 一定是陈旧或伪造的。
  *

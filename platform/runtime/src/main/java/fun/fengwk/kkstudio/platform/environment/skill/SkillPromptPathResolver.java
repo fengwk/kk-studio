@@ -20,7 +20,7 @@ import java.util.Objects;
 public class SkillPromptPathResolver {
 
   /** Platform 托管的 skill 资源前缀：Daemon 不可用时模型仍然可以经由 platform read 读取。 */
-  public static final String PLATFORM_SKILLS_PREFIX = "kkstudio:/skills/";
+  public static final String PLATFORM_SKILLS_PREFIX = "vfs:/skills/";
 
   private final EnvironmentRegistry environmentRegistry;
 

@@ -15,7 +15,4 @@ public class ToolCatalogEntryDTO {
 
   /** Tool 与 Environment 的关系，取 {@link EnvironmentSupportDTO} 的名字。 */
   private @Nullable EnvironmentSupportDTO environmentSupport;
-
-  /** 精确要求的目标 Environment UUID（canonical UUID 文本）；只接受任意已绑定 Environment 时为 null。 */
-  private @Nullable String requiredEnvironmentId;
 }

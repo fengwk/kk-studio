@@ -75,27 +75,27 @@ class ToolBindingTest {
     assertEquals("dev", environment.environmentName());
     assertEquals("base", environment.contributor().contributorId());
 
-    // OPTIONAL 可以携带成对的环境
+    // ROUTED 可以携带成对的环境
     ToolBinding optionalWithEnv =
         new ToolBinding(
             definition("custom"),
             contributorProvenance("base", "custom", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             ENV_ID,
             "dev");
-    assertEquals(EnvironmentSupport.OPTIONAL, optionalWithEnv.environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, optionalWithEnv.environmentSupport());
     assertEquals(ENV_ID, optionalWithEnv.environmentId());
     assertEquals("dev", optionalWithEnv.environmentName());
 
-    // OPTIONAL 也可以不携带环境
+    // ROUTED 也可以不携带环境
     ToolBinding optionalWithoutEnv =
         new ToolBinding(
             definition("custom"),
             contributorProvenance("base", "custom", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             null,
             null);
-    assertEquals(EnvironmentSupport.OPTIONAL, optionalWithoutEnv.environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, optionalWithoutEnv.environmentSupport());
     assertNull(optionalWithoutEnv.environmentId());
     assertNull(optionalWithoutEnv.environmentName());
   }
@@ -125,7 +125,7 @@ class ToolBindingTest {
   }
 
   /**
-   * 测试意图：严格校验 EnvironmentSupport 与环境属性组合不变式： NONE 带环境被拒；REQUIRED 缺 id 或缺 name 被拒；OPTIONAL id/name
+   * 测试意图：严格校验 EnvironmentSupport 与环境属性组合不变式： NONE 带环境被拒；REQUIRED 缺 id 或缺 name 被拒；ROUTED id/name
    * 不同步被拒；blank 名称被拒；必要字段非空。
    */
   @Test
@@ -165,17 +165,17 @@ class ToolBindingTest {
             new ToolBinding(
                 definition("fs"), contributor, EnvironmentSupport.REQUIRED, null, null));
 
-    // OPTIONAL 必须成对出现或成对缺失：只带 id 或只带 name 必须被拒绝
+    // ROUTED 必须成对出现或成对缺失：只带 id 或只带 name 必须被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolBinding(
-                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, ENV_ID, null));
+                definition("opt"), contributor, EnvironmentSupport.ROUTED, ENV_ID, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolBinding(
-                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, null, "dev"));
+                definition("opt"), contributor, EnvironmentSupport.ROUTED, null, "dev"));
 
     // environmentName 只能是 null 或非空白字符串
     assertThrows(
@@ -187,7 +187,7 @@ class ToolBindingTest {
         IllegalArgumentException.class,
         () ->
             new ToolBinding(
-                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, ENV_ID, "   "));
+                definition("opt"), contributor, EnvironmentSupport.ROUTED, ENV_ID, "   "));
 
     // definition、contributor 与 environmentSupport 必须非空
     assertThrows(

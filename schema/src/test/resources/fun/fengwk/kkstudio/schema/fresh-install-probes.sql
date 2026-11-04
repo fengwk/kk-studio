@@ -703,6 +703,34 @@ select pg_temp.rejects('an object cleanup key must not be blank',
     'ck_storage_object_cleanup_key_nonblank');
 
 -- ---------------------------------------------------------------------------
+-- Session file: path constraints, revision positivity, and session/blob FKs.
+-- ---------------------------------------------------------------------------
+insert into storage_blob (id, sha256, size_bytes, media_type, ref_count) values
+    (pg_temp.uid(605), repeat('5', 64), 10, 'text/plain', 1);
+insert into session_file (session_id, path, blob_id, revision)
+    values (pg_temp.uid(103), 'valid/file.txt', pg_temp.uid(605), 1);
+select pg_temp.assert_true('session_file accepts a valid row',
+    exists(select 1 from session_file where session_id = pg_temp.uid(103) and path = 'valid/file.txt'));
+select pg_temp.rejects('session_file rejects blank path',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), '', pg_temp.uid(605), 1)$$, '23514', 'ck_session_file_path');
+select pg_temp.rejects('session_file rejects leading-slash path',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), '/leading.txt', pg_temp.uid(605), 1)$$, '23514', 'ck_session_file_path');
+select pg_temp.rejects('session_file rejects dot-dot path segment',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), 'a/../b.txt', pg_temp.uid(605), 1)$$, '23514', 'ck_session_file_path');
+select pg_temp.rejects('session_file rejects non-positive revision',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), 'valid/file2.txt', pg_temp.uid(605), 0)$$, '23514', 'ck_session_file_revision');
+select pg_temp.rejects('session_file rejects unknown session',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(9999), 'valid/file3.txt', pg_temp.uid(605), 1)$$, '23503', 'fk_session_file_session');
+select pg_temp.rejects('session_file rejects unknown blob',
+    $$insert into session_file (session_id, path, blob_id, revision)
+      values (pg_temp.uid(103), 'valid/file4.txt', pg_temp.uid(9999), 1)$$, '23503', 'fk_session_file_blob');
+
+-- ---------------------------------------------------------------------------
 -- Canvas: node model, immutable content, real-resource pins, dedup position.
 -- ---------------------------------------------------------------------------
 insert into canvas_document (id, title) values

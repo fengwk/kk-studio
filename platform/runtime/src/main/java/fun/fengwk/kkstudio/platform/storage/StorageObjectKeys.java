@@ -6,8 +6,8 @@ import java.util.UUID;
  * 全局 Blob 存储的确定性对象键推导。
  *
  * <p>所有键都由 id 推导且永不落库：{@code uploads/{uploadId}/original} 是浏览器直传的临时对象， {@code
- * blobs/{blobId}/original} 与 {@code blobs/{blobId}/preview.webp} 是去重后的 blob 对象。 不得出现 {@code
- * kkstudio://} 或持久化 {@code s3://} 形式的 durable URI。
+ * blobs/{blobId}/original} 与 {@code blobs/{blobId}/preview.webp} 是去重后的 blob 对象。对象键不是持久化的 {@code
+ * s3://} URI。
  *
  * @author fengwk
  */

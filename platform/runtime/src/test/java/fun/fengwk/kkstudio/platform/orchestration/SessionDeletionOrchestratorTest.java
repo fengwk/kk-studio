@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.chat.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionOwnership;
 import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.SessionFileRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.time.Instant;
@@ -85,6 +86,7 @@ class SessionDeletionOrchestratorTest {
   private ThreadStore threadStore;
   private JoinStore joinStore;
   private SessionBlobRefManager refManager;
+  private SessionFileRepository sessionFileRepository;
   private SessionDeletionOrchestrator service;
 
   /** 内存模型：Session -> Thread、Thread -> 直接子 Thread，以及当前仍存在的 Session/Thread。 */
@@ -108,6 +110,7 @@ class SessionDeletionOrchestratorTest {
     threadStore = mock(ThreadStore.class);
     joinStore = mock(JoinStore.class);
     refManager = mock(SessionBlobRefManager.class);
+    sessionFileRepository = mock(SessionFileRepository.class);
 
     when(transaction.sessions()).thenReturn(sessionStore);
     when(transaction.entries()).thenReturn(entryStore);
@@ -155,7 +158,8 @@ class SessionDeletionOrchestratorTest {
                 new ChatSessionOwnership(chatRepository, chatSessionRepository),
                 issueAgentOwnership),
             runtimes,
-            refManager);
+            refManager,
+            sessionFileRepository);
   }
 
   @Test
@@ -367,10 +371,17 @@ class SessionDeletionOrchestratorTest {
     // 验证 SessionBlobRefManager 等强依赖与 owner 均不可为 null。
     assertThrows(
         NullPointerException.class,
-        () -> new SessionDeletionOrchestrator(null, runtimes, refManager));
+        () -> new SessionDeletionOrchestrator(null, runtimes, refManager, sessionFileRepository));
     assertThrows(
         NullPointerException.class,
-        () -> new SessionDeletionOrchestrator(List.of(issueAgentOwnership), runtimes, null));
+        () ->
+            new SessionDeletionOrchestrator(
+                List.of(issueAgentOwnership), runtimes, null, sessionFileRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new SessionDeletionOrchestrator(
+                List.of(issueAgentOwnership), runtimes, refManager, null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 
@@ -384,7 +395,7 @@ class SessionDeletionOrchestratorTest {
     when(duplicate.kind()).thenReturn("ISSUE_AGENT");
     SessionDeletionOrchestrator ambiguous =
         new SessionDeletionOrchestrator(
-            List.of(issueAgentOwnership, duplicate), runtimes, refManager);
+            List.of(issueAgentOwnership, duplicate), runtimes, refManager, sessionFileRepository);
     assertThrows(
         IllegalArgumentException.class, () -> ambiguous.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
     verify(issueAgentOwnership, never()).lockForDeletion(any());

@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -500,7 +499,7 @@ class PluginRuntimeToolCatalogSourceTest {
         new ToolBinding(
             pluginTool.definition(),
             new ContributorBinding("plugin.contributor.demo", "echo-tool", List.of()),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             null,
             null);
 
@@ -510,40 +509,6 @@ class PluginRuntimeToolCatalogSourceTest {
     assertTrue(
         ex.getMessage()
             .contains("Frozen tool environment requirement does not match catalog requirements"));
-  }
-
-  @Test
-  void require_mismatch_requiredEnvironmentId_failsWithRequirementsReason() {
-    // 意图：验证 requiredEnvironmentId 与 binding environmentId 不匹配时拒绝并报告 REQUIREMENTS mismatch
-    ToolContribution envBoundTool =
-        createContribution(
-            PLUGIN_CONTRIBUTOR_ID,
-            "env-tool",
-            "env-tool",
-            "Env bound tool",
-            ToolVisibility.SELECTABLE,
-            new ToolRequirements(
-                EnvironmentSupport.REQUIRED, new EnvironmentId(ENV_UUID_1), List.of()));
-
-    when(currentHarnessCatalog.tools()).thenReturn(List.of(envBoundTool));
-    when(currentHarnessCatalog.selectableTools()).thenReturn(List.of(envBoundTool));
-
-    PluginRuntimeToolCatalogSource source = new PluginRuntimeToolCatalogSource(runtime, mcpCatalog);
-    RuntimeToolCatalogSource.Lease lease = source.acquire();
-
-    // binding 绑定了另一个环境 ENV_UUID_2
-    ToolBinding binding =
-        new ToolBinding(
-            envBoundTool.definition(),
-            new ContributorBinding("plugin.contributor.demo", "env-tool", List.of()),
-            EnvironmentSupport.REQUIRED,
-            new EnvironmentId(ENV_UUID_2),
-            "different-env");
-
-    ToolBindingMismatchException ex =
-        assertThrows(ToolBindingMismatchException.class, () -> lease.require(binding));
-    assertEquals(ToolBindingMismatchException.Reason.REQUIREMENTS, ex.reason());
-    assertTrue(ex.getMessage().contains("does not match catalog required environment"));
   }
 
   @Test
@@ -558,7 +523,6 @@ class PluginRuntimeToolCatalogSourceTest {
             ToolVisibility.SELECTABLE,
             new ToolRequirements(
                 EnvironmentSupport.NONE,
-                null,
                 List.of(new StateDeclaration("custom-state", StateMode.READ))));
 
     when(currentHarnessCatalog.tools()).thenReturn(List.of(stateTool));

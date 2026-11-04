@@ -52,8 +52,8 @@ public final class HistoryPayloadMapper {
 
   /**
    * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射稳定的 Text/JSON/Resource 内容（Resource
-   * 必须是 Session 已持有的 {@code kkstudio} 引用）；空结果回退空 text。FAILED / CANCELLED / UNKNOWN 使用 error message
-   * + codec 详情且 error=true。metadata 精确映射 invocation terminal status。
+   * 必须是 Session 已持有的 {@code vfs} 引用）；空结果回退空 text。FAILED / CANCELLED / UNKNOWN 使用 error message +
+   * codec 详情且 error=true。metadata 精确映射 invocation terminal status。
    */
   public MessagePayload toolResultPayload(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");

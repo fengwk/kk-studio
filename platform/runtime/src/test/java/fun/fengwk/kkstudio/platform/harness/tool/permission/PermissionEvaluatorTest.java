@@ -98,7 +98,7 @@ class PermissionEvaluatorTest {
     // 非绝对形态不是路径坐标：相对文本、URI scheme、drive-relative 都返回 false 并拒绝描述。
     assertFalse(LexicalTargetPath.isAbsolute("src/Main.java"));
     assertFalse(LexicalTargetPath.isAbsolute("C:foo"));
-    assertFalse(LexicalTargetPath.isAbsolute("kkstudio:/resources/abc"));
+    assertFalse(LexicalTargetPath.isAbsolute("s3:/bucket/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("file:///srv/a.txt"));
     assertFalse(LexicalTargetPath.isAbsolute("https://example.com/a.txt"));
     assertThrows(
@@ -122,6 +122,33 @@ class PermissionEvaluatorTest {
     assertEquals(
         PermissionAction.DENY,
         evaluateRaw(WRITE, "{\"path\":\"//other/share/a.txt\"}", settings).action());
+  }
+
+  /** VFS 路径保留 scheme，精确规则可覆盖通配规则且不影响同名宿主路径。 */
+  @Test
+  void matchesVfsPathsWithoutConflatingHostPaths() {
+    ToolSettings settings =
+        settings(
+            Map.of(
+                WRITE,
+                List.of(
+                    new PermissionRule("*", PermissionAction.ASK),
+                    new PermissionRule("vfs:/sessions/id/private/**", PermissionAction.DENY),
+                    new PermissionRule("vfs:/sessions/id/public/**", PermissionAction.ALLOW))));
+
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateRaw(WRITE, "{\"path\":\"vfs:/sessions/id/private/a.txt\"}", settings).action());
+    assertEquals(
+        PermissionAction.DENY,
+        evaluateRaw(WRITE, "{\"path\":\"vfs:/sessions/id/public/../private/a.txt\"}", settings)
+            .action());
+    assertEquals(
+        PermissionAction.ALLOW,
+        evaluateRaw(WRITE, "{\"path\":\"vfs:/sessions/id/public/a.txt\"}", settings).action());
+    assertEquals(
+        PermissionAction.ASK,
+        evaluateRaw(WRITE, "{\"path\":\"/sessions/id/private/a.txt\"}", settings).action());
   }
 
   /** 绝对 target 以 filesystem root 为锚：只有 root-relative 坐标命中，使用其它锚点的规则不命中。 */
@@ -171,7 +198,7 @@ class PermissionEvaluatorTest {
             .action());
     assertEquals(
         PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"kkstudio:/resources/abc\"}", settings).action());
+        evaluateRaw(WRITE, "{\"path\":\"vfs:/resources/abc\"}", settings).action());
     assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings).action());
   }
 

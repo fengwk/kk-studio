@@ -336,7 +336,7 @@ describe('projectsApi', () => {
     vi.mocked(mockClient.post).mockResolvedValueOnce({
       issueId: mockIssue.id,
       blobId: 'blob-1',
-      uri: 'kkstudio:/resources/blob-1',
+      uri: 'vfs:/resources/blob-1',
       name: 'report.txt',
       actorAgentName: null,
       runId: null,

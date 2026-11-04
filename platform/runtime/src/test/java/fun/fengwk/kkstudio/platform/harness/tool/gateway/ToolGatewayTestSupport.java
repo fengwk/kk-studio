@@ -23,8 +23,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
@@ -47,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
+import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionAction;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
@@ -129,8 +128,8 @@ final class ToolGatewayTestSupport {
 
   private ToolGatewayTestSupport() {}
 
-  static ReadTool dummyReadTool() {
-    return new ReadTool(mock(ReadToolExecutor.class));
+  static List<Tool> dummyFileTools() {
+    return BuiltinFileToolsTestSupport.fileTools();
   }
 
   static Tool dummyTaskTool() {
@@ -138,7 +137,7 @@ final class ToolGatewayTestSupport {
   }
 
   static BuiltinHarnessContributor builtinContributor() {
-    return new BuiltinHarnessContributor(dummyReadTool(), dummyTaskTool());
+    return new BuiltinHarnessContributor(dummyFileTools(), dummyTaskTool());
   }
 
   static HarnessCatalog defaultCatalog(Tool... tools) {
@@ -239,6 +238,23 @@ final class ToolGatewayTestSupport {
         request,
         ToolApproval.notRequired(),
         remoteExecutions);
+  }
+
+  /** 使用调用方提供的权限求值器与设置提供者装配网关：用于证明门禁先于权限评估。 */
+  static ToolExecutionGateway gatewayWith(
+      HarnessCatalog catalog,
+      PermissionEvaluator evaluator,
+      ToolSettingsProvider settingsProvider) {
+    return new ToolExecutionGateway(
+        TestRuntimeToolCatalogSource.of(catalog),
+        new FakeTransport(),
+        evaluator,
+        settingsProvider,
+        new FakeResourceStager(),
+        RESOURCE_MAX_BYTES,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK,
+        new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
   static ToolExecutionGateway gateway(

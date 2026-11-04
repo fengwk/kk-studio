@@ -989,12 +989,12 @@ export interface EnvironmentRuntimeStatusDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
   | 'NONE'
-  | 'OPTIONAL'
+  | 'ROUTED'
   | 'REQUIRED'
 
 export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = [
   'NONE',
-  'OPTIONAL',
+  'ROUTED',
   'REQUIRED',
 ]
 
@@ -1218,7 +1218,6 @@ export interface HarnessModelRequestDebugToolDTO {
   description: string
   inputSchemaJson: string
   environmentSupport: EnvironmentSupportDTO
-  requiredEnvironmentId: string | null
   provenance: string
   state: string
   filterReason: string | null
@@ -1263,6 +1262,33 @@ export interface HarnessSessionEntryDTO {
   payloadJson: string
   createTime: number
   usageCost: HarnessUsageCostDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileContentDTO */
+export interface HarnessSessionFileContentDTO {
+  sessionId: string
+  path: string
+  sizeBytes: string
+  revision: number
+  updatedAt: string
+  text: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileEntryDTO */
+export interface HarnessSessionFileEntryDTO {
+  name: string
+  path: string
+  directory: boolean
+  sizeBytes?: string | null
+  revision?: number | null
+  updatedAt?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionFileListDTO */
+export interface HarnessSessionFileListDTO {
+  sessionId: string
+  path: string
+  entries: HarnessSessionFileEntryDTO[]
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO */
@@ -2174,7 +2200,6 @@ export interface ToolCatalogEntryDTO {
   name: string
   description: string
   environmentSupport?: EnvironmentSupportDTO | null
-  requiredEnvironmentId?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO */

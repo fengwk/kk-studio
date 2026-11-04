@@ -297,7 +297,7 @@ export interface ThreadModelRequestDebugTool {
   name: string
   description: string
   inputSchemaJson: string
-  environmentSupport: 'NONE' | 'OPTIONAL' | 'REQUIRED'
+  environmentSupport: 'NONE' | 'ROUTED' | 'REQUIRED'
   requiredEnvironmentId: string | null
   provenance: string
   state: string

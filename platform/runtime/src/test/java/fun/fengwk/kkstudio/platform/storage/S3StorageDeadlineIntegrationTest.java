@@ -22,7 +22,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import fun.fengwk.kkstudio.platform.harness.read.PlatformReadException;
-import fun.fengwk.kkstudio.platform.harness.read.ReadTextWindow;
+import fun.fengwk.kkstudio.platform.harness.read.TextReadWindow;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -246,14 +246,8 @@ class S3StorageDeadlineIntegrationTest {
         blobId,
         deadline,
         stream ->
-            ReadTextWindow.format(
-                stream,
-                null,
-                null,
-                null,
-                "kkstudio:/resources/" + blobId,
-                "unsupported",
-                deadline));
+            TextReadWindow.format(
+                stream, null, null, null, "vfs:/resources/" + blobId, "unsupported", deadline));
   }
 
   private static boolean awaitTrue(AtomicBoolean flag, long timeoutMillis) {

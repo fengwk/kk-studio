@@ -77,10 +77,6 @@ public class HarnessModelRequestDebugDTO {
     /** Tool 与 Environment 的关系，与 Tool catalog 共用同一个枚举。 */
     private EnvironmentSupportDTO environmentSupport;
 
-    /** 精确要求的目标 Environment UUID（canonical UUID 文本）；不限定环境时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    private @Nullable String requiredEnvironmentId;
-
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
     private String provenance;
 
@@ -105,7 +101,7 @@ public class HarnessModelRequestDebugDTO {
     /** manifest 中的 Skill 描述。 */
     private String description;
 
-    /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code kkstudio:/skills/...}）。 */
+    /** 实际 Prompt 使用的稳定 path（本地绝对路径或 {@code vfs:/skills/...}）。 */
     private String path;
 
     /** 交付方式：{@code LOCAL}（Daemon 已安装该 commit）或 {@code PLATFORM}（读取 Platform cache）。 */

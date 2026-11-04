@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 
@@ -89,7 +88,6 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
    * @param description 工具描述
    * @param inputSchemaJson 最终 Provider definition 的 input schema 原文
    * @param environmentSupport 与 Environment 的关系
-   * @param requiredEnvironmentId 贡献固定要求的目标 Environment；不限定时为 null
    * @param provenance Contributor 归属身份（{@code contributorId:localName}）
    * @param state 是否进入最终模型工具面
    * @param filterReason 被过滤的稳定原因；{@code SENT} 时为 null
@@ -99,7 +97,6 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       String description,
       String inputSchemaJson,
       EnvironmentSupport environmentSupport,
-      EnvironmentId requiredEnvironmentId,
       String provenance,
       ToolState state,
       FilterReason filterReason) {

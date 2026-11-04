@@ -1,8 +1,15 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -10,7 +17,7 @@ import java.util.Objects;
 /**
  * 文本读取窗口核心：把已解码字符流单遍投影为有界窗口，并渲染标记文本之外的 header 与正文。
  *
- * <p>本地 {@code fs.read} 与受管文本读取共用这一份状态机，两侧适配器只负责解码、BOM 与失败映射。契约要点：
+ * <p>本地 {@code fs.read} 与受管文本读取共用这一份状态机。契约要点：
  *
  * <ul>
  *   <li>{@code offset}（默认 1）与 {@code column_offset}（默认 1）都从 1 开始；{@code limit} 默认且最大 {@link
@@ -24,8 +31,8 @@ import java.util.Objects;
  *   <li>行号与列号内部用 {@code long} 计数；超出参数协议 {@code int} 范围的位置显式拒绝，不伪造越界元数据。
  * </ul>
  *
- * <p>核心按调用方提供的字符流工作，不自行判定编码、不自行剥离 BOM、不关闭流：BOM 剥离必须由调用方严格只作用于首个字符，否则会吞掉正文里的 {@code
- * \uFEFF}；参数合法性也由调用方校验，核心只负责扫描与渲染。
+ * <p>{@link #read} 使用调用方已解码、校验的字符流，不自行剥离 BOM 或关闭流。{@code format} 对受管文本执行严格 UTF-8 解码、首字符 BOM
+ * 剥离和参数校验；调用方负责关闭输入流。IO 和非法内容映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
  */
 public final class TextReadWindow {
 
@@ -44,6 +51,96 @@ public final class TextReadWindow {
   private static final String BINARY_MESSAGE = "file appears to be binary";
 
   private TextReadWindow() {}
+
+  /** 按默认 LSP 状态（{@code unsupported}）格式化原始 UTF-8 字节。 */
+  public static String format(
+      byte[] bytes,
+      Integer offset,
+      Integer limit,
+      Integer columnOffset,
+      String displayPath,
+      ReadDeadline deadline) {
+    return format(bytes, offset, limit, columnOffset, displayPath, "unsupported", deadline);
+  }
+
+  /** 格式化原始 UTF-8 字节；{@code bytes} 为空数组时表示空资源。 */
+  public static String format(
+      byte[] bytes,
+      Integer offset,
+      Integer limit,
+      Integer columnOffset,
+      String displayPath,
+      String lspStatus,
+      ReadDeadline deadline) {
+    Objects.requireNonNull(bytes, "bytes");
+    return format(
+        new ByteArrayInputStream(bytes),
+        offset,
+        limit,
+        columnOffset,
+        displayPath,
+        lspStatus,
+        deadline);
+  }
+
+  /** 消费但不关闭输入流；调用方负责在解析成功或失败后关闭资源。 */
+  public static String format(
+      InputStream stream,
+      Integer offset,
+      Integer limit,
+      Integer columnOffset,
+      String displayPath,
+      String lspStatus,
+      ReadDeadline deadline) {
+    Objects.requireNonNull(stream, "stream");
+    Objects.requireNonNull(displayPath, "displayPath");
+    Objects.requireNonNull(lspStatus, "lspStatus");
+    Objects.requireNonNull(deadline, "deadline");
+
+    if (offset != null && offset < 1) {
+      throw new PlatformReadException("offset must be a positive integer");
+    }
+    if (columnOffset != null && columnOffset < 1) {
+      throw new PlatformReadException("column_offset must be a positive integer");
+    }
+    int resolvedOffset = offset == null ? 1 : offset;
+    int resolvedLimit = limit == null ? DEFAULT_LIMIT : limit;
+    if (resolvedLimit < 1 || resolvedLimit > MAX_LIMIT) {
+      throw new PlatformReadException("limit must be a positive integer <= " + MAX_LIMIT);
+    }
+
+    Runnable checkpoint =
+        () -> {
+          if (Thread.currentThread().isInterrupted() || deadline.isExpired()) {
+            throw new PlatformReadException(
+                "resource read interrupted or timed out: " + displayPath);
+          }
+        };
+    try {
+      return read(
+          withoutLeadingBom(strictUtf8Reader(stream)),
+          resolvedOffset,
+          resolvedLimit,
+          columnOffset,
+          displayPath,
+          lspStatus,
+          checkpoint);
+    } catch (IOException error) {
+      throw new PlatformReadException(
+          "file appears to be binary or cannot be read: " + displayPath, error);
+    } catch (IllegalArgumentException error) {
+      throw new PlatformReadException(error.getMessage(), error);
+    }
+  }
+
+  private static Reader strictUtf8Reader(InputStream stream) {
+    return new InputStreamReader(
+        stream,
+        StandardCharsets.UTF_8
+            .newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT));
+  }
 
   /**
    * 在已解码字符流上投影一个窗口。

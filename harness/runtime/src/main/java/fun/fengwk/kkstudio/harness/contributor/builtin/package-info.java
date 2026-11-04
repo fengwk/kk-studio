@@ -3,7 +3,7 @@
  *
  * <p>本模块承载唯一的 {@link BuiltinHarnessContributor} 贡献者入口，集中注册系统 内置的 13 个统一工具（统一 {@code read}、8 个
  * Environment capability 工具、1 个内部工具 {@code task}、 2 个 Goal 管理工具、1 个人工输入工具 {@code ask_user}）与 {@code
- * goal.progress} 自定义 Entry ownership。 其中 {@code read} 声明 OPTIONAL 环境关系，8 个宿主工具声明 REQUIRED
+ * goal.progress} 自定义 Entry ownership。 其中 5 个文件工具声明 ROUTED 环境关系，{@code bash} 与 3 个 LSP 工具声明 REQUIRED
  * 环境关系，{@code task}、Goal 工具与 {@code ask_user} 声明 NONE。
  *
  * <p>依赖与边界：

@@ -33,7 +33,7 @@ class ToolBindingJsonCodecTest {
   private final ToolBindingJsonCodec codec = new ToolBindingJsonCodec();
   private final AgentToolDefinitionJsonCodec definitionCodec = new AgentToolDefinitionJsonCodec();
 
-  /** 精确 JSON 证明字段顺序 deterministic，并在 round-trip 时保证 NONE/OPTIONAL/REQUIRED 状态无损。 */
+  /** 精确 JSON 证明字段顺序 deterministic，并在 round-trip 时保证 NONE/ROUTED/REQUIRED 状态无损。 */
   @Test
   void roundTripsEveryBindingShapeWithCanonicalJson() {
     ToolBinding environment = binding(EnvironmentSupport.REQUIRED);
@@ -67,20 +67,20 @@ class ToolBindingJsonCodecTest {
     assertNull(codec.decode(hostJson).environmentId());
     assertNull(codec.decode(hostJson).environmentName());
 
-    ToolBinding optionalWithoutEnv = binding(EnvironmentSupport.OPTIONAL);
+    ToolBinding optionalWithoutEnv = binding(EnvironmentSupport.ROUTED);
     String optionalWithoutEnvJson =
         "{\"definition\":"
             + definitionCodec.encode(optionalWithoutEnv.definition())
             + ",\"contributor\":"
             + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
-            + ",\"environmentSupport\":\"OPTIONAL\""
+            + ",\"environmentSupport\":\"ROUTED\""
             + ",\"environmentId\":null"
             + ",\"environmentName\":null"
             + "}";
     assertEquals(optionalWithoutEnvJson, codec.encode(optionalWithoutEnv));
     assertEquals(optionalWithoutEnv, codec.decode(optionalWithoutEnvJson));
     assertEquals(
-        EnvironmentSupport.OPTIONAL, codec.decode(optionalWithoutEnvJson).environmentSupport());
+        EnvironmentSupport.ROUTED, codec.decode(optionalWithoutEnvJson).environmentSupport());
     assertNull(codec.decode(optionalWithoutEnvJson).environmentId());
     assertNull(codec.decode(optionalWithoutEnvJson).environmentName());
 
@@ -88,7 +88,7 @@ class ToolBindingJsonCodecTest {
         new ToolBinding(
             environment.definition(),
             environment.contributor(),
-            EnvironmentSupport.OPTIONAL,
+            EnvironmentSupport.ROUTED,
             ENVIRONMENT_ID,
             "dev");
     String optionalWithEnvJson =
@@ -96,15 +96,14 @@ class ToolBindingJsonCodecTest {
             + definitionCodec.encode(optionalWithEnv.definition())
             + ",\"contributor\":"
             + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
-            + ",\"environmentSupport\":\"OPTIONAL\""
+            + ",\"environmentSupport\":\"ROUTED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
             + "}";
     assertEquals(optionalWithEnvJson, codec.encode(optionalWithEnv));
     assertEquals(optionalWithEnv, codec.decode(optionalWithEnvJson));
-    assertEquals(
-        EnvironmentSupport.OPTIONAL, codec.decode(optionalWithEnvJson).environmentSupport());
+    assertEquals(EnvironmentSupport.ROUTED, codec.decode(optionalWithEnvJson).environmentSupport());
     assertEquals(ENVIRONMENT_ID, codec.decode(optionalWithEnvJson).environmentId());
     assertEquals("dev", codec.decode(optionalWithEnvJson).environmentName());
 
@@ -363,25 +362,25 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentName\":\"dev\""
                     + suffix));
 
-    // OPTIONAL 只提供 id 不提供 name 被拒绝
+    // ROUTED 只提供 id 不提供 name 被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 prefix
-                    + ",\"environmentSupport\":\"OPTIONAL\""
+                    + ",\"environmentSupport\":\"ROUTED\""
                     + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
                     + ",\"environmentName\":null"
                     + suffix));
 
-    // OPTIONAL 只提供 name 不提供 id 被拒绝
+    // ROUTED 只提供 name 不提供 id 被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 prefix
-                    + ",\"environmentSupport\":\"OPTIONAL\""
+                    + ",\"environmentSupport\":\"ROUTED\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":\"dev\""
                     + suffix));

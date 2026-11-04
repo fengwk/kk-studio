@@ -54,16 +54,6 @@ final class FrozenToolBindingVerifier {
           ToolBindingMismatchException.Reason.REQUIREMENTS,
           "Frozen tool environment requirement does not match catalog requirements: " + toolName);
     }
-    if (requirements.requiredEnvironmentId() != null
-        && binding.environmentId() != null
-        && !requirements.requiredEnvironmentId().equals(binding.environmentId())) {
-      throw new ToolBindingMismatchException(
-          ToolBindingMismatchException.Reason.REQUIREMENTS,
-          "Frozen tool bound environment "
-              + binding.environmentId()
-              + " does not match catalog required environment: "
-              + requirements.requiredEnvironmentId());
-    }
     if (!stateAccessesMatch(frozenContributor, requirements)) {
       throw new ToolBindingMismatchException(
           ToolBindingMismatchException.Reason.REQUIREMENTS,

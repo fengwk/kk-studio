@@ -25,8 +25,8 @@ import java.util.regex.Pattern;
 /**
  * 媒体输入解析与生成结果暂存。
  *
- * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code kkstudio:/resources/<blobId>}」。公开 URL 原样交给
- * Provider；{@code kkstudio:} 资源必须经 {@link PluginResourceGateway} 解析成受控短期 HTTPS 地址，因此 Plugin 自己从不读取
+ * <p>模型参数的资源约定是「公开 HTTP(S) URL 或当前 Session 有权访问的 {@code vfs:/resources/<blobId>}」。公开 URL 原样交给
+ * Provider；{@code vfs:} 资源必须经 {@link PluginResourceGateway} 解析成受控短期 HTTPS 地址，因此 Plugin 自己从不读取
  * Resource 字节，也不会把 Session 凭据或本地路径交给第三方。
  *
  * <p>生成类与下载类能力的响应里只有第三方临时地址：这些地址会被 {@link #stageOutputs} 逐个流式暂存为全局 Blob 上传引用 （{@code
@@ -39,9 +39,9 @@ public final class MiniMaxMavisResourceAccess {
   /** 会话 Resource URI 的严格形态：scheme + 固定 path + 规范小写 UUID。 */
   private static final Pattern SESSION_RESOURCE =
       Pattern.compile(
-          "kkstudio:/resources/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
+          "vfs:/resources/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
 
-  private static final String SESSION_RESOURCE_SCHEME = "kkstudio:";
+  private static final String SESSION_RESOURCE_SCHEME = "vfs:";
 
   /** 单次调用最多暂存的媒体数量；超出的响应视为对静态 Tool 契约的违背。 */
   private static final int MAX_STAGED_MEDIA = 8;
@@ -60,9 +60,9 @@ public final class MiniMaxMavisResourceAccess {
   }
 
   /**
-   * 把参数里的 {@code kkstudio:} 资源就地解析为受控短期 URL，其余取值原样保留。
+   * 把参数里的 {@code vfs:} 资源就地解析为受控短期 URL，其余取值原样保留。
    *
-   * @param sessionId 本次调用所属会话 id（来自 Tool invocation context）；它是资源鉴权的唯一身份来源，因此缺失时 {@code kkstudio:}
+   * @param sessionId 本次调用所属会话 id（来自 Tool invocation context）；它是资源鉴权的唯一身份来源，因此缺失时 {@code vfs:}
    *     资源必须确定性失败而不是退化为未鉴权访问
    * @throws PluginResourceUnavailableException 需要资源但没有网关、拿不到调用上下文，或资源无法在契约内解析
    */

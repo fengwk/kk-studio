@@ -6,7 +6,7 @@
     "properties": {
       "image": {
         "type": "string",
-        "description": "Image to search for: a public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+        "description": "Image to search for: a public HTTP(S) image URL or a vfs:/resources/<blobId> image resource of the current session."
       }
     },
     "required": ["image"],

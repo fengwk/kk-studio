@@ -43,10 +43,6 @@ public class ToolCatalogQueryService {
         requirements == null
             ? EnvironmentSupportDTO.NONE
             : EnvironmentSupportDTO.valueOf(requirements.environmentSupport().name()));
-    dto.setRequiredEnvironmentId(
-        requirements != null && requirements.requiredEnvironmentId() != null
-            ? requirements.requiredEnvironmentId().value().toString()
-            : null);
     return dto;
   }
 }

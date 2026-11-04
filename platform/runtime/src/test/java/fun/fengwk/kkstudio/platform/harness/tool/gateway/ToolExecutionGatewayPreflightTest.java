@@ -341,7 +341,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolBinding(
                 contribution.definition(),
                 contributor,
-                EnvironmentSupport.OPTIONAL,
+                EnvironmentSupport.ROUTED,
                 environmentId,
                 "test-env"));
     return gateway.preflight(request);

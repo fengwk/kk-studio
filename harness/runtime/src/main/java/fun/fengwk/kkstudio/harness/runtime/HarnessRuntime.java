@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -992,7 +993,12 @@ public final class HarnessRuntime {
     tx.tools().update(List.of(updated));
     tx.threads().update(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
-      EnvironmentId environmentId = tool.binding() == null ? null : tool.binding().environmentId();
+      // 批准后重建 Work 时同样只要求环境专用工具：逐调用路由的工具不得因为 vfs: 路径等待环境。
+      EnvironmentId environmentId =
+          tool.binding() != null
+                  && tool.binding().environmentSupport() == EnvironmentSupport.REQUIRED
+              ? tool.binding().environmentId()
+              : null;
       tx.work().request(new WorkTarget(WorkTargetType.TOOL, tool.id()), environmentId);
     } else {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));

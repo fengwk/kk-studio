@@ -18,8 +18,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.contributor.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -30,6 +28,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.harness.tool.BuiltinFileToolsTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -39,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Consumer;
 
 /** Agent 配置的校验：工具名必须来自运行时目录的当前 epoch 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
@@ -53,12 +51,10 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void acceptsEnvironmentToolsAndAgentConfigWithNoEnvironment() {
-    // Agent 与 Environment 解耦：没有 Agent environment 也能保存 environment-required 工具，
-    // 也可保存绑定固定 Environment 的动态工具；这些约束在执行期按 branch 选择判定。
+    // Agent 与 Environment 解耦：没有 Agent environment 也能保存只能在环境执行的工具，
+    // 具体环境由执行期按 branch 选择判定。
     Tool fixedEnvironmentTool =
-        tool(
-            hostDescriptor(CUSTOM_TOOL_NAME),
-            ToolRequirements.environment(EnvironmentId.of(UUID.randomUUID())));
+        tool(hostDescriptor(CUSTOM_TOOL_NAME), ToolRequirements.environment());
     try (Fixture fixture = new Fixture(List.of(hostTool("host_tool"), fixedEnvironmentTool))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME, "host_tool", CUSTOM_TOOL_NAME));
@@ -246,11 +242,11 @@ class AgentDefinitionConfigValidatorTest {
 
     private Fixture(List<Tool> tools) {
       List<HarnessContributor> contributors = new ArrayList<>();
-      ReadTool dummyRead = new ReadTool((request, listener) -> null);
       Tool dummyTask = mock(Tool.class);
       when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
       when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-      contributors.add(new BuiltinHarnessContributor(dummyRead, dummyTask));
+      contributors.add(
+          new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask));
 
       if (!tools.isEmpty()) {
         contributors.add(
