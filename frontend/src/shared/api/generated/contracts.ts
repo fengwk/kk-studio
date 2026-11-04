@@ -2252,7 +2252,6 @@ export interface SystemSettingsStorageMediaDTO {
 export interface SystemSettingsToolDTO {
   permission: Record<string, SystemSettingsToolPermissionRuleDTO[]>
   modelGatewayBusyRetryMillis: string
-  toolGatewayBusyRetryMillis: string
   toolGatewayOverloadRetryMillis: string
 }
 

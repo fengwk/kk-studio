@@ -40,7 +40,6 @@ class ProjectToolConfigurationTest {
           assertEquals(1, context.getBeanNamesForType(IssueTransitionService.class).length);
           assertEquals(1, context.getBeanNamesForType(IssueTransitionTool.class).length);
           assertEquals(1, context.getBeanNamesForType(ProjectHarnessContributor.class).length);
-          assertEquals(1, context.getBeanNamesForType(ProjectThreadOwnerResolver.class).length);
         });
   }
 

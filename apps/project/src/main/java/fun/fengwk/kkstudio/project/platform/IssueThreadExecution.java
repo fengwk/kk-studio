@@ -54,11 +54,6 @@ public class IssueThreadExecution {
         snapshot.executionFacts());
   }
 
-  /** 读取 Thread 的不可变 Session 身份；不存在时返回空。 */
-  public Optional<UUID> findThreadSessionId(UUID threadId) {
-    return requireRuntime().findThreadSessionId(threadId);
-  }
-
   /** 原子接受一批命令及其 Work（NEW_ROOT_SESSION / THREAD 单原语），返回接受结果。 */
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {

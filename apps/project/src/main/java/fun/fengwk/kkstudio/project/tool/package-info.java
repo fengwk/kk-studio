@@ -1,14 +1,8 @@
 /**
- * Project Issue Run 的交接工具与 Thread 归属组件。
+ * Project Issue Run 的交接工具。
  *
- * <p>本包承担两件事：
- *
- * <ul>
- *   <li>{@link fun.fengwk.kkstudio.project.tool.IssueTransitionTool} 是本包注册的 SELECTABLE 工具，也是 Issue
- *       Agent 唯一的业务写入口：它只把交接目标写入 {@code project_issue_run.next_state}，绝不直接改变 Issue 状态。
- *   <li>{@link fun.fengwk.kkstudio.project.tool.DatabaseProjectThreadOwnerResolver} 把 Harness
- *       Thread 解析回稳定的 Issue 归属，供平台判定会话归属。
- * </ul>
+ * <p>本包承担一件事：{@link fun.fengwk.kkstudio.project.tool.IssueTransitionTool} 是本包注册的 SELECTABLE 工具，也是
+ * Issue Agent 唯一的业务写入口：它只把交接目标写入 {@code project_issue_run.next_state}，绝不直接改变 Issue 状态。
  *
  * <p>边界约定：业务状态机与事务锁序由 {@code fun.fengwk.kkstudio.project.service} / {@code
  * fun.fengwk.kkstudio.project.repo} 拥有；本包不复制 workflow 校验规则（复用领域 {@code ProjectWorkflowJsonCodec} 与

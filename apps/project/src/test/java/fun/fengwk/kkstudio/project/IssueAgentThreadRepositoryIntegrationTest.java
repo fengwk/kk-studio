@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,12 +14,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.orchestration.OwnerTestSupport;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.tool.DatabaseProjectThreadOwnerResolver;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -132,7 +127,7 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
         "the binding cannot claim a different existing session");
   }
 
-  /** 无 Run 的稳定绑定也按 Session 覆盖兄弟分支，其他 Session 不受影响。 */
+  /** 无 Run 的稳定绑定即存在，且按 Session 而非单个 Thread 判定归属。 */
   @Test
   void sessionOwnershipExistsWithoutRuns() {
     UUID issueId = issueRow(projectRow());
@@ -142,18 +137,6 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     sessionRow(sessionId);
     sessionRow(otherSession);
     UUID threadId = threadRow(sessionId);
-    UUID sibling = uuid();
-    jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-            + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger,"
-            + " constraints, execution_control, input_through_sequence, next_command_sequence,"
-            + " version, created_at, updated_at)"
-            + " select ?, session_id, id, head_entry_id, creation_request_hash, 'sibling', id,"
-            + " false, 'MODEL_TOOL', constraints, execution_control, input_through_sequence,"
-            + " next_command_sequence, version, created_at, updated_at from harness_thread where id = ?",
-        sibling,
-        threadId);
-    UUID otherThread = threadRow(otherSession);
     assertTrue(
         write(
             () ->
@@ -161,13 +144,6 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
                     new IssueAgentThread(issueId, agentName, sessionId, threadId))));
     assertTrue(issueAgentThreadRepository.existsBySessionId(sessionId));
     assertFalse(issueAgentThreadRepository.existsBySessionId(otherSession));
-    IssueThreadExecution execution = mock(IssueThreadExecution.class);
-    when(execution.findThreadSessionId(sibling)).thenReturn(Optional.of(sessionId));
-    when(execution.findThreadSessionId(otherThread)).thenReturn(Optional.of(otherSession));
-    DatabaseProjectThreadOwnerResolver resolver =
-        new DatabaseProjectThreadOwnerResolver(issueAgentThreadRepository, execution);
-    assertTrue(resolver.isIssueAgentBranch(sibling));
-    assertFalse(resolver.isIssueAgentBranch(otherThread));
   }
 
   /** 稳定身份不可重绑：同一 (issue, agent) 只有一条绑定，同一 Thread 也只能被一个 Agent/Issue 持有。 */

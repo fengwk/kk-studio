@@ -515,8 +515,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
       HarnessRuntime deletionRuntime =
           new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT);
-      when(runtime.findThreadSessionId(any(UUID.class)))
-          .thenAnswer(invocation -> deletionRuntime.findThreadSessionId(invocation.getArgument(0)));
       doAnswer(
               invocation -> {
                 deletionRuntime.deleteSessions(

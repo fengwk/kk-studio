@@ -55,7 +55,6 @@ public record SystemSettings(
   public record Tool(
       Map<String, List<PermissionRule>> permission,
       long modelGatewayBusyRetryMillis,
-      long toolGatewayBusyRetryMillis,
       long toolGatewayOverloadRetryMillis) {
 
     /** 默认 permission：write/edit/bash 各自 {@code * -> ask}（read 保持不限制）。 */
@@ -66,15 +65,12 @@ public record SystemSettings(
                 "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
                 "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
             5_000L,
-            1_000L,
             5_000L);
 
     public Tool {
       permission = copyPermission(permission);
       SystemSettingsValidation.requirePositive(
           modelGatewayBusyRetryMillis, "tool.modelGatewayBusyRetryMillis");
-      SystemSettingsValidation.requirePositive(
-          toolGatewayBusyRetryMillis, "tool.toolGatewayBusyRetryMillis");
       SystemSettingsValidation.requirePositive(
           toolGatewayOverloadRetryMillis, "tool.toolGatewayOverloadRetryMillis");
     }

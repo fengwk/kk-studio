@@ -22,8 +22,6 @@ public class SystemSettingsToolDTO {
 
   private Long modelGatewayBusyRetryMillis;
 
-  private Long toolGatewayBusyRetryMillis;
-
   private Long toolGatewayOverloadRetryMillis;
 
   @JsonAnySetter

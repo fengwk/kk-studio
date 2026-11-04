@@ -204,7 +204,6 @@ public class SystemSettingsCodec {
     return new SystemSettings.Tool(
         toPermission(dto.getPermission()),
         requiredMillis(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
-        requiredMillis(dto.getToolGatewayBusyRetryMillis(), "tool.toolGatewayBusyRetryMillis"),
         requiredMillis(
             dto.getToolGatewayOverloadRetryMillis(), "tool.toolGatewayOverloadRetryMillis"));
   }
@@ -360,7 +359,6 @@ public class SystemSettingsCodec {
             });
     dto.setPermission(permission);
     dto.setModelGatewayBusyRetryMillis(tool.modelGatewayBusyRetryMillis());
-    dto.setToolGatewayBusyRetryMillis(tool.toolGatewayBusyRetryMillis());
     dto.setToolGatewayOverloadRetryMillis(tool.toolGatewayOverloadRetryMillis());
     return dto;
   }

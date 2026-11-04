@@ -400,10 +400,7 @@ class SystemSettingsCodecTest {
     SystemSettings.Tool base = SystemSettings.DEFAULT.tool();
     return new SystemSettings(
         new SystemSettings.Tool(
-            permission,
-            base.modelGatewayBusyRetryMillis(),
-            base.toolGatewayBusyRetryMillis(),
-            base.toolGatewayOverloadRetryMillis()),
+            permission, base.modelGatewayBusyRetryMillis(), base.toolGatewayOverloadRetryMillis()),
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
