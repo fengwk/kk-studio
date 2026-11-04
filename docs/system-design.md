@@ -1,364 +1,486 @@
 # 系统设计
 
-`kk-studio` 是面向可信单用户部署的自托管 AI 工作台。浏览器提供 Chat、Canvas 和
-Project 入口；服务端负责配置、资源授权与持久执行；Environment Daemon 把指定主机的
-文件、命令和 LSP 能力接入 Agent。
+`kk-studio` 是面向可信单用户部署的自托管 AI 工作台。浏览器是工作台前端，Studio 节点由
+[`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
+文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
 
-理解执行与恢复时，先看两类状态：PostgreSQL 保存业务事实和执行权，REST Snapshot
-提供权威读取；WebSocket 和数据库 `NOTIFY` 提供低延迟提示。连接中断、通知丢失或进程
-退出后，Worker 从持久 Work 接管执行，浏览器回读 Snapshot 对账。
+执行与恢复只依赖两类事实：PostgreSQL 保存业务事实与执行权，REST Snapshot 是权威读取；WebSocket 与数据库通知
+只提供低延迟提示。连接中断、通知丢失或进程退出后，Worker 从持久 Work 接管执行，浏览器回读 Snapshot 对账。
 
-## 系统组成与依赖
+harness 只提供执行引擎与能力契约，平台实现持久化与宿主适配，产品是自带数据、接口与页面的纵向切片。上层只通过
+开放接口或 SPI 使用下层能力，`web` 负责装配而不承载业务规则。
 
-系统的三个执行领域各自维护状态机与版本坐标：
+## 分层与模块职责
 
-| 领域 | 职责 | 核心对象 |
+| 层 | 模块 | 职责 |
 | --- | --- | --- |
-| Harness | Agent Loop、模型与工具调用、审批、问答、压缩和子 Agent | Session、Entry Tree、Thread、Invocation、Work |
-| Canvas | 图形编辑、资源引用与显式 Function 执行 | Document、Node、Resource、Function Run |
-| Project | Issue 工作阶段、执行预算、Agent 分工和交付 | Workflow、Issue、Agent Thread 绑定、Stage Budget、Run、Evidence |
+| L5 组合根 | [`web`](../web/pom.xml) | 装配全部模块与插件；平台与 harness 的 HTTP 接口、浏览器事件通道、Daemon 接入、错误映射、SPA 与链路追踪 |
+| L4 产品 | apps/chat | Chat 列表与会话归属；自带的 HTTP 接口与 DTO；拥有 `chat`、`chat_session` |
+| L4 产品 | [`apps/project`](../apps/project/pom.xml) | Project 与 Issue 工作流、调度、Issue 工具；自带的 HTTP 接口与 DTO；拥有 `project_*` |
+| L4 产品 | [`apps/canvas/spi`](../apps/canvas/spi/pom.xml) | 画布函数 SPI，插件只依赖它 |
+| L4 产品 | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | 画布领域、typed command、持久化、Function Run、HTTP 接口、DTO 与版本通知 |
+| L4 产品 | [`apps/ide`](../apps/ide/pom.xml) | IDE 视图与数据面、浏览器使用身份、跨节点路由、HTTP 接口与 DTO |
+| 插件 | [`plugins`](../plugins/pom.xml) | 构建期插件：Agent 工具与画布函数 |
+| L3 平台 | [`platform/runtime`](../platform/runtime/pom.xml) | 目录、存储与 VFS、环境、插件宿主、设置、配置同步、交互待办、独立 Agent 任务、通知、会话归属 SPI、跨节点设施，以及 harness 端口实现与引擎存储适配 |
+| L3 平台 | [`platform/daemon-server`](../platform/daemon-server/pom.xml) | Daemon 控制协议、会话与租约、调用裁决、资源票据、数据面隧道、IDE 与更新协调；实现 harness 的能力调用端口 |
+| L3 平台 | [`platform/plugin-api`](../platform/plugin-api/pom.xml) | 插件 SPI：身份、配置、凭据、资源、Harness 贡献与按类型返回的产品贡献 |
+| L2 harness | [`harness/runtime`](../harness/runtime/pom.xml) | Agent 内核：公开的命令、查询与订阅，SPI 端口，工具与贡献契约，内置工具，提示词渲染，Thread 与 Tool 处理器，执行退出账本 |
+| L2 harness | [`harness/agent-builtin`](../harness/agent-builtin/pom.xml) | 内置 Driver 的回合执行、请求冻结、流式与重试、模型组与自动压缩；只声明存储端口，不含 SQL |
+| L2 harness | [`harness/environment`](../harness/environment/pom.xml) | `EnvironmentId`、能力目录与能力调用端口 |
+| L2 harness | [`harness/model`](../harness/model/pom.xml) | 模型契约与 Provider 协议实现 |
+| L1 共享 | [`common`](../common/pom.xml) | 值契约：严格 JSON、资源引用、结果内容、输入 Schema、Work 状态 |
+| L1 共享 | [`share`](../share/pom.xml) | 平台与 harness 的 HTTP DTO |
+| L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
+| L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
+| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP、技能安装与 IDE 服务；代理由平台下发；在线更新调用官方安装器 |
+| 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
 
-Canvas 与 Project 并列存在，各自拥有领域数据。Project 使用 Harness 执行 Agent；
-Canvas 使用 Function SPI 执行具体能力。两者通过 Storage Blob 保存媒体内容。
+依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
 
-```mermaid
-flowchart LR
-    Browser["Browser<br/>frontend"]
-    Web["web<br/>HTTP / WebSocket / lifecycle"]
-    Apps["Apps<br/>Canvas / Project / IDE"]
-    Plugins["Plugins<br/>tools / functions"]
-    PlatformApi["platform-plugin-api<br/>plugin SPI contracts"]
-    PlatformRuntime["platform-runtime<br/>catalog / chat / storage / environment / gateways"]
-    Harness["Harness kernel<br/>Runtime / Provider / Environment"]
-    Common["common<br/>value contracts"]
-    PG[("PostgreSQL<br/>durable facts")]
-    S3[("S3<br/>attachment and media bytes")]
-    Provider["Model Provider"]
-    Daemon["Environment Daemon<br/>host capabilities"]
-
-    Browser -->|REST + events| Web
-    Web --> Apps
-    Web --> PlatformRuntime
-    Web -->|runtime| Plugins
-    Apps --> PlatformRuntime
-    Plugins --> PlatformApi
-    PlatformRuntime --> PlatformApi
-    PlatformApi --> Harness
-    PlatformRuntime --> Harness
-    Harness --> Common
-    Apps --> PG
-    PlatformRuntime --> PG
-    PlatformRuntime --> S3
-    Harness --> Provider
-    Web <-->|单条 WSS 上的 HTTP/2| Daemon
-    Daemon -->|presigned PUT| S3
-    Browser -->|short-lived signed URL| S3
-```
-
-[`web`](modules/web.md) 是生产 Spring Boot composition root，装配 HTTP、WebSocket、
-Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核依赖 Common、Environment 与 Model。
-Agent 执行经 Harness Runtime 的 [Agent Driver](modules/harness-runtime.md#agent-driver) SPI 接入；
-当前唯一的生产 Driver 是 Builtin（Studio 进程内调用模型），Driver 不反向依赖 Platform 或应用；平台需要应用参与的地方由平台定义 SPI、
-应用实现，平台从不依赖应用：
+1. 产品依赖平台与 harness，平台依赖 harness；`harness/runtime` 只依赖 `common`、`harness/environment` 与
+   `harness/model`，`harness/agent-builtin` 依赖 runtime 与 model。平台从不依赖产品，产品之间互不依赖，harness
+   不含 SQL、JDBC 或平台概念。
+2. 上层使用 harness 只有两种方式：开放接口 `HarnessRuntime` 的命令、查询与变更订阅；harness 定义、上层实现的
+   SPI（网关、`HarnessStore`、`AgentDriver`、`HarnessContributor`）。
+3. 平台业务服务、产品与插件不直接 SQL 访问引擎状态表，不使用 `HarnessStore`，不写只供内部使用的命令，不向
+   system prompt 注入内容。引擎状态表的 SQL 只属于平台的引擎存储适配包，并按内核与各 Driver 分包隔离。
+4. 平台需要产品参与时由平台定义 SPI、产品实现（会话归属、Agent 引用检查）；产品的扩展点由产品定义 SPI
+   （画布函数）。插件宿主只管理插件生命周期并按类型转交贡献，不解读贡献内容。
+5. 扩展点归消费它的一方：工具与 Contributor 契约在 harness，插件身份、配置与凭据在 `platform/plugin-api`，
+   画布函数 SPI 在 Canvas。
+6. 表与通知通道只由归属模块访问和定义；依赖 `work` 的模块可以只读 join `durable_work`。产品表只引用 harness
+   的公开身份（Session、Thread）。
+7. `web` 是唯一组合根，装配各层实现不算越层；SPA、错误映射、浏览器事件通道与 Daemon 传输只在这里。
 
 ```text
-frontend -> web
-web -> 应用：canvas-runtime -> canvas-spi、project、ide
-应用 -> platform-runtime -> platform-plugin-api
-web -(runtime)-> 选定插件 -> platform-plugin-api
-platform-plugin-api -> harness-runtime（Tool / Contributor 契约）
-platform-runtime -> harness-runtime -> harness-model
-platform-runtime -> harness-agent-builtin -> harness-runtime / harness-model
-platform-runtime -> harness-model
-harness-runtime -> harness-environment -> common
-platform-runtime -> work（存储、调度与通知实现）
-canvas-runtime / project -> work（共享调度邮箱）
-daemon -> harness-environment（通过 wire 协议消费共享契约）
+frontend ──REST / WebSocket──▶ web（组合根，装配下列全部模块）
+  web ──▶ apps/chat、apps/project、apps/canvas/runtime、apps/ide、plugins
+  web ──▶ platform/runtime、platform/daemon-server
+  apps/* ──▶ platform/runtime ──▶ harness/runtime ──▶ harness/environment、harness/model
+  platform/runtime ──▶ harness/agent-builtin ──▶ harness/runtime、harness/model
+  platform/runtime ──▶ platform/plugin-api
+  platform/daemon-server ──▶ harness/environment
+  daemon ──单条 WSS 上的 HTTP/2──▶ platform/daemon-server
 ```
 
-根 [`pom.xml`](../pom.xml) 聚合 `common`、`share`、`schema`、`work`、`harness`、`platform`、
-`apps`、`plugins` 和 `web`；前端是独立 Node/Vite 工程。允许的模块依赖由仓库检查
-[`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护，模块职责见
-[文档导航](README.md#按代码区域理解系统)。公共 DTO 与严格 JSON wire 见
-[Share](modules/share.md)，数据库关系与约束见 [Schema](modules/schema.md)。
+`check.mjs` 同时守护聚合 POM 的模块清单、插件只 import 插件 SPI 与产品 SPI、内核契约包不反向依赖 runtime
+内部实现、Java 包跨模块唯一。各模块的契约与实现细节见[文档导航](README.md#按代码区域理解系统)。
 
-## 配置如何进入一次 Agent 请求
+## Harness 引擎
 
-Catalog 把连接、模型能力与行为定义分开：
+### 公开面与存储端口
 
-| 配置 | 决定什么 |
+`harness/runtime` 的包按职责划分：`api` 是公开值与订阅契约，`spi` 是上层实现的窄端口，其余是内部实现。
+
+| 包 | 内容 |
 | --- | --- |
-| Provider | 上游协议、连接、凭据与超时 |
-| Model | 单个 MODEL 的上游 wire 模型 ID、能力、Variant 与价格；GROUP 的有序 Fill First 成员、降级状态码与冷却 |
-| Agent | System Prompt、Driver 与 settings、Tools、Skills 与可委派的 Agent |
-| Environment | 主机身份、Daemon 连接与能力 |
-| BranchSettings | 当前分支选择的 Agent、执行方式（Driver 与其设置）、Environment 与用户 Goal |
+| `api` | 命令、会话、线程、历史、工具、执行、压缩、交互、Join、realtime、retry 等公开值；`HarnessChangeSubscriptions` 是变更订阅入口 |
+| `spi` | `ToolGateway`、`RealtimeEventSink`、`RealtimePayloadFetcher`、`AcceptancePreflight`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`VfsGateway` |
+| `spi.store` | `HarnessStore` 与 `SessionStore`、`EntryStore`、`ThreadStore`、`CommandStore`、`ToolStore`、`WorkStore`、`JoinStore`、`StopReceiptStore`、`ExecutionExitStore` |
+| `spi.driver` | `AgentDriver`、`DriverWork`、`DriverThreadDeletion`、`LockedDriverState` 与进程外 Driver 的公共构件 |
+| `spi.work` | Work 值契约，以及 claim 后的 `ClaimedExecutionSupport`、租约与心跳 |
+| `tool`、`contributor/api` | 工具描述、输入 Schema、调用与结果内容；`HarnessContributor`、`HarnessCatalog`、`Tool` |
+| `contributor/builtin` | 内置工具与内置历史渲染 |
+| `prompt` | `PromptRenderer`：JMustache 严格模板，编译后缓存 |
+| `runtime` | `HarnessRuntime`、`DriverRegistry`、Thread 与 Tool 处理器、回合计划、压缩、Join 与执行退出账本 |
 
-普通对话的执行上下文来自 Branch 的完整设置：
+`spi.store` 只供引擎消费、平台的引擎存储适配包实现、`web` 装配；平台业务服务、产品与插件只使用其余公开面与
+`contributor.api`、`tool`，不绕过引擎读写引擎状态。
+
+`HarnessRuntime` 是唯一的同步命令、控制与查询入口：接受命令与 spawn，停止与放弃执行，提交工具输入与审批决定，
+设置 YOLO，重命名 Thread 与 Session，手动压缩，读取 Session、Thread 快照、执行树、历史与命令回执，列出待处理
+交互、环境等待候选与可执行环境，读取 Join 与工具结果。
+
+删除会话是 `deleteSessions(sessionIds, deleteRelations, releaseRefs)`：调用方必须持有产品 owner 锁，两个回调
+与删除加入同一物理事务，线程树、命令、调用、Join、执行退出与产品关系一起收敛。
+
+变更订阅由平台实现、上层只看到订阅：`threadVersions()` 携带 durable version，`executionTree()` 与
+`interactions()` 只发失效提示，`HarnessChangeSubscription` 返回建立瞬间的 cursor 与释放句柄。
+
+### Driver 与 Work
+
+内核拥有除 Driver 私有状态之外的全部公共事实：append-only Entry Tree、Thread 的 head 与命令 cursor、控制状态、
+`ToolInvocation` 与审批、`durable_work` 邮箱与执行退出账本。Driver 拥有一次回合的生成解析、自己的私有持久化、
+事务外的外部执行，以及把终态物化为公共 Entry。
+
+- `AgentDriver` 声明 `id()`、`capabilities()` 与 `validateSettings()`，实现回合生命周期（`resolveTurn`、
+  `readState`、`lockState`、`applyResponse`、`completeToolBatch`、`prepareAutomaticCompaction`、`stop`），
+  并通过 `works()` 交出 `DriverWork(type, handler)`、通过 `cancelWork()` 与 `hasActiveWork()` 参与停止与排空。
+- Work 类型由定义方声明：内核只有 `WorkTargetType.THREAD` 与 `TOOL`；Driver 用
+  `WorkTargetType.driver(value, rank)` 定义自己的类型并声明环境亲和性。`rank` 决定调度顺序与锁阶梯，Builtin 的
+  `MODEL` 位于 THREAD 与 TOOL 之间。`DriverRegistry` 拒绝内核类型与重复类型，并把各 Driver 的处理器交给平台分发。
+- 执行退出只有三种：`ExecutionExitKind.DRIVER`、`TOOL`、`REMOTE`；结果不明的外部执行收敛为未确认事实，不重放。
+- 线程深删由两阶段 Driver 生命周期完成：`DriverRegistry` 按 Driver id 顺序调用
+  `lockThreadStateForDeletion` 与 `deleteLockedThreadState`。通用 `PostgresqlThreadStore` 只负责内核锁序、Work 与
+  Tool 行和 Thread 本身，从不引用具体 Driver 的私有表。
+- 内置 Driver 是 `BuiltinAgentDriver`：`id()` 为 `builtin`，用 `MODEL` Work 在 Studio 进程内调用模型，
+  `BuiltinStore` 是它的私有持久化端口（`ModelInvocation` 的读写与按回合索引），`TurnResolver` 与
+  `ModelGateway` 是它的执行端口。模块不依赖 Spring、JDBC 或数据库；模型组成员冷却由平台模型目录持有，Builtin
+  经 `ModelGateway` 在调用方事务与数据库时间下读写。
+- Agent 的执行方式以 `execution = {driver, settings}` 保存在 Agent 定义中，Builtin 的 settings 为
+  `{modelName, variant}`。模型改名或删除时，模型目录在同一事务内更新或拒绝引用了它的 Agent。
+- 完整方法契约、锁序与新增 Driver 的步骤见 [Harness Runtime](modules/harness-runtime.md#agent-driver)，
+  Builtin 的请求冻结与流式投影见 [Harness Agent Builtin](modules/harness-agent-builtin.md)。
+
+## 平台
+
+### 引擎存储适配
+
+`platform.harness` 实现引擎端口并拥有引擎状态表的 SQL，DDL 在唯一的 V1 中按段归属，但这里不决定 Thread 的下一步动作：
+
+| 包 | 职责 |
+| --- | --- |
+| `store` | `HarnessStore` 的 PostgreSQL 实现：事务核心、九个聚合视图、行映射与锁阶梯守护 |
+| `dispatch` | 有界 Work 分发：claim 短事务、按 `rank` 轮转、合并唤醒、周期 poll 与停止生命周期 |
+| `realtime` | 本地优先的 realtime 总线与 PostgreSQL 通知通道，跨节点只传输有损 overlay |
+| `builtin`、`builtin/store` | Builtin 专属适配：模型预算、请求预览与调试、流式追帧，以及 Builtin 私有行 |
+| `thread`、`task`、`model`、`tool`、`prompt`、`read` | 与 Driver 无关的回合上下文：Agent、环境、技能、工具目录、system prompt、`TurnResolver`、`ModelGateway`、`ToolGateway`，以及技能与平台资源内容的读取 |
+
+事务与状态约束：
+
+- 每个 store 回调在 `READ_COMMITTED` 的 `PROPAGATION_REQUIRED` 事务内执行，允许加入调用方已有的外层事务，
+  禁止 `REQUIRES_NEW` 与嵌套事务，使 owner 锁与引擎写入保持同一物理事务。
+- 事务核心独占一条连接与一个线程，以数据库时间判定 due、租约与冷却，缓存 `EntryPath`，并在提交前重抛首个数据库
+  故障，避免脏状态被提交。
+- 受控行锁遵守 `SESSION → THREAD → COMMAND → DRIVER → TOOL → WORK` 的顺序；同阶与批量锁用稳定排序获取。
+- 聚合视图按表归属拆分：`harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、
+  `harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、
+  `harness_execution_exit` 分别只由对应 store 访问；`WorkStore` 的 SQL 委托 [`work`](../work/pom.xml) 的
+  `DurableWorkStore`，与业务事实共享同一事务。
+- Builtin 的私有行只在 `builtin/store` 内出现：`PostgresqlBuiltinHarnessStore` 在通用 store 之上注入 Driver
+  存储视图，`PostgresqlModelTransaction` 只访问 `builtin_model_invocation`（另读 `harness_tool_invocation`），
+  通用代码通过 `PostgresqlDriverWorkStorage` 的 `workOwner` 与 `workTargetExists` 做围栏，不认识 Builtin 概念。
+- `durable_work.target_type` 只校验大写格式，类型常量由各模块定义：内核 `THREAD`、`TOOL`，Builtin `MODEL`，
+  Project `ISSUE`，Canvas `CANVAS_RUN`。环境亲和性由 Work 类型声明，只有当前节点持有目标 Environment 的 READY
+  路由租约时该 Work 才可被 claim。
+
+### 存储与附件
+
+`storage_blob` 是全局字节事实：内容寻址的 SHA-256、大小、媒体类型、可选归档索引与引用计数，对象实体在 S3，行状态
+只有 `ACTIVE` 与 `DELETING`。
+
+- 上传是显式流程：reserve 取得预签名 PUT，complete 校验并探针临时对象后复制最终对象、去重插入 Blob 并绑定上传。
+  写对象与绑定期间持有上传操作锁，S3 的 HEAD、复制与删除绝不发生在数据库事务或行锁内。
+- 引用按行记录：Session 用 `session_blob_ref` 逐行 retain 与 release，工具与环境产生的临时资源引用在写入历史前
+  物化为 Blob，物化失败则拒绝提交历史。
+- 下载由服务端签发短期 URL，浏览器与 Daemon 都不直接持有长期凭据。
+- 回收先登记耐久清理记录，再由后台在事务外幂等删除对象；`DELETING` 是终态，迟到写入不会把它改回 `ACTIVE`。
+- 过期上传按数据库时钟的 TTL 判定，claim 后不再受 TTL 影响；清理中断由 token 围栏重试。
+
+### 会话归属 SPI
+
+平台定义 `SessionOwnership`、`SessionOwner`（不透明 `{kind, id}`）与 `SessionOwnerDisplay`
+（`{kind, id, title, link}`），产品实现归属事实。每个实现回答：类型、是否允许分叉与通用直写、接受前的锁、是否拥有
+某个 Session、创建与列举 Session、删除前的锁与清理钩子、按根线程与根会话解析展示信息、交互判定前的锁。
+
+- 消费者是平台编排，不是产品：命令接受、会话删除、交互查询与交互裁决、会话查询只调用这个 SPI，不再按产品类型
+  分支。Chat 的实现允许分叉与直写；Project 的实现不允许，删除前必须解除 Issue 与 Agent 的绑定。
+- Agent 引用检查同属这一类：`AgentReferenceCheck` 由 Project 实现（工作流阶段引用 Agent），平台删除 Agent 前
+  逐实现询问，不用 SQL 读产品表。
+- 跨模块传输只携带不透明的 `{kind, id, title?, link?}`：`HarnessCommandOwnerDTO` 与 `InteractionOwnerDTO`
+  的 title 与 link 只用于展示，不参与授权。
+
+### Daemon 连接服务
+
+`platform/daemon-server` 是不依赖 Spring 的连接服务：
+
+| 包 | 内容 |
+| --- | --- |
+| `platform.daemon` | 与 Daemon 共享的值对象：能力快照、运行时状态、更新命令、IDE 租约、官方发行信息 |
+| `protocol` | [`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 与 `ControlProtocolCodec`：二进制编解码、应用层校验、golden 夹具 |
+| `server` | `EnvironmentDaemonServer`、会话准入与租约、在途调用追踪、IDE 协调、资源票据、更新协调 |
+| `transport` | Jetty 12 上的控制通道与 HTTP/2 会话管道 |
+| `tunnel` | 传输无关的数据面隧道端口 |
+
+`EnvironmentDaemonServer` 同时实现 `DaemonSessions`、`EnvironmentTunnels` 与 harness 的
+`EnvironmentCapabilityTransport`，由组合根装配进 harness；平台环境管理经它的开放接口与租约持久化端口工作。会话以
+`(environment_id, owner_node_id, lease_token)` 围栏推进状态：READY、HEARTBEAT 与断开只接受当前租约，心跳只续租
+不发布通知，状态、宿主信息、技能投影与运维事件的围栏写与 `environment_changed` 在同一事务提交。
+
+### 插件 SPI
+
+插件是构建期 JAR，[`web`](../web/pom.xml) 的 runtime 依赖决定发行物包含哪些插件，Spring Boot
+auto-configuration 注册安装定义。`StudioPlugin` 声明身份、配置 Schema、认证形态与实例构建；`PluginInstance`
+暴露 `harnessContributors()` 与按类型读取产品贡献的 `contributions(Class<T>)`——画布函数这类贡献类型属于
+Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游失败时作废，资源经 `PluginResourceGateway`
+读取，提示词资源经 `PluginPromptContent` 提供。插件与宿主同进程、拥有相同 JVM 权限，部署者须信任其代码。完整
+契约见 [Platform Plugin API](modules/platform-plugin-api.md)。
+
+## VFS
+
+文件工具按路径路由，`vfs:` 是平台存储的统一命名空间：
 
 ```text
-BranchSettings
-├── agentName
-├── execution = ExecutionSelection(driver, settingsJson)
-│   └── Builtin: {"modelName": string, "variant": string | null}
-├── environmentName?
-└── goal? = id + text
+vfs:/
+├── skills/<包>/<技能>/…      只读   全部已发布技能
+├── resources/<资源 ID>        只读   当前对话持有的资源
+└── sessions/<会话 ID>/        读写   执行根会话的目录，父子 Agent 共享
+    ├── threads/<线程 ID>/…   读写   线程自己的文件
+    └── …                     Agent 创建的其他文件
 ```
 
-Runtime 只按 `ExecutionSelection.driver` 路由到对应 Agent Driver。模型名、Group 与
-`ModelRequestSpec` 冻结属于 Builtin Driver 的回合解析：Model 与 Model Group 共用全局唯一逻辑名称空间；
-`modelName` 只寻址该名称，单模型的可选 `variant` 来自同一资源。组没有组级 Variant：成员顺序就是
-Fill First 选择顺序，命中 `fallbackStatusCodes` 或普通重试耗尽后按组配置降级，`cooldownSeconds = 0`
-只影响本次逻辑调用。组本身没有价格，费用按实际执行的单模型计算。
+- 访问范围只按执行根会话解析：其他会话 ID 与不存在的路径一样返回「不存在」，`threads/<线程 ID>/` 只接受本对话
+  中存在的线程，`vfs:/sessions` 只列出执行根会话。子 Agent 运行在独立会话中，但 VFS 始终解析到执行根会话。
+- `skills` 与 `resources` 只读：写入在工具预检与执行两处都以固定文案拒绝并提示写入会话目录；列目录标出
+  `read-only` 与 `read-write`。技能根目录不提供列举，直接按 `vfs:/skills/<包>/<技能>/<文件>` 读取。
+- 操作只有 `read`、`write`、`edit`、`find`、`grep`：目录用 `read` 列举，`find` 只匹配路径，`grep` 在有文件
+  数、字节数、结果数与截止时间的扫描预算内执行，超出时明确返回未完成。
+- 存储是 `session_file` 与全局 `storage_blob`：`(session_id, path)` 确定一个文件版本，写入先上传新 Blob，再按
+  `revision` 条件更新，最后一个引用释放时回收旧 Blob。目录由路径推导，不单独存储；会话删除先删文件行，再释放
+  Blob 引用。
+- 并发按 `revision` 检测冲突，冲突与不存在分别返回明确错误；写权限沿用工具权限策略，只读前缀在审批前拒绝，YOLO
+  也不能绕过。
+- 限制按会话计：文件数、单文件大小与总量都有上限；目录响应、`find` 结果与 `grep` 预算各自有界。
+- `VfsGateway` 是 harness 定义、平台实现的窄端口，只回答一次文件工具调用；实现负责命名空间、只读前缀、会话
+  归属、revision 与预算，harness 只按参数路由并保留错误文案。
+- 文件工具从工具执行上下文取执行根线程、执行根会话与当前会话，平台不再为读取会话历史或资源反查引擎存储。
+- 工具层面的亲和性因此分三类：`read`、`write`、`edit`、`find`、`grep` 按每次调用的 `path` 路由；`bash` 与
+  LSP 工具只能在环境执行，没有环境时从工具声明中隐藏；`task`、`ask_user`、Goal、MCP、插件与产品工具始终在
+  Studio 执行。没有环境时传入绝对路径得到「未执行」并提示改用 `vfs:` 路径。
+- 浏览器只读：会话文件接口按产品归属校验后提供列目录、读内容与下载，编辑只由 Agent 完成。
 
-Root 保存初始设置，每个普通 TurnStart 冻结该回合设置。设置命令在下一轮归约为完整
-快照，fork 沿目标 Entry 的父链恢复当时设置。Builtin 每轮再从 Catalog 解析当前 Agent 能力和
-模型配置，冻结最终 ModelRequestSpec。设置的模型已被删除或改名时，Builtin 本回合改用 Agent 默认模型并记入
-`TURN_START.fallbackModel`；其余引用缺失或能力失效时明确拒绝规划。Environment
-以全局唯一且不可变的 name 进入历史，每轮解析为执行路由使用的内部 UUID。
+## 技能包
 
-Goal 由用户通过 typed `GOAL` 命令设置或清除。Agent 使用 `get_goal` 读取正文，通过
-`update_goal` 回报 `complete` / `blocked` 进度；进度 Entry 绑定目标 id。用户正文是
-目标事实，Agent 进度供用户判断完成情况。压缩后仍生效的 Goal 作为 USER 级历史背景恢复。
+技能包是「名称 + 当前版本」：当前版本是版本号、一份规范化归档与技能清单，每个包只保留当前版本。`skill_package`
+持有归档 Blob、`manifest`、发布时间与乐观锁版本；`skill_package_git_source` 只在 Git 渠道的包上存在，保存仓库
+地址、分支、令牌、最近一次观察到的 HEAD 与检查错误；`storage_blob.archive_index` 保存服务端从最终 ZIP 读出的条目
+索引（路径、大小、偏移、压缩长度、CRC），文件树与解压总量都从索引推导。
 
-YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的执行根 `rootThreadId`（根指向自身），
-开关只保存在执行根上。`PUT /api/threads/{threadId}/yolo`
-只更新根，不与完整 Thread version 做 CAS；同值不推进 version，变化时只推进根 version
-精确 +1，最后一次序列化写入生效。子代理在权限决定时读取其执行根的开关，
-不复制开关，也不因根切换而更新自身 version。开启时跳过普通工具 preflight；
-已等待的审批仍需人工处理，`ask_user` 始终等待回答。控制与投影规则见
-[Harness Runtime](modules/harness-runtime.md) 与 [Frontend](modules/frontend.md)。
+- 构建规则对两个渠道相同：包根是仓库根或压缩包根（唯一一级目录可作为根）；技能是根下直接包含 `SKILL.md` 的
+  一级目录，其余内容忽略并在结果中列出；拒绝符号链接、硬链接、子模块、特殊文件、绝对路径、`..` 与重复路径，报错
+  给出具体路径；包名与技能名按 Agent Skills 规范且必须与目录名一致。
+- 归档格式固定：ZIP + DEFLATE，条目按路径排序，时间与属主固定，权限 0644/0755，每个技能一个顶层目录；归档
+  大小、解压总量、条目数与单文件大小都有上限，由服务端校验而不信任客户端提交的结构信息。
+- Git 渠道只用 `ls-remote` 检查分支 HEAD，不下载内容；发布时按检查到的 commit 浅拉取并直接遍历对象树，不检出
+  工作区。上传渠道沿用预签名上传，服务端读取原始压缩包后走同一个构建器。
+- 预览与发布：构建结果作为暂存上传保留给用户预览；发布在短事务内校验乐观锁与 Agent 引用、切换当前版本并释放旧
+  归档；取消或超期的暂存对象由存储清理回收。配置导入导出只包含 Git 渠道的包，上传的包可在详情页下载归档备份。
+- 同步：平台的技能对账按环境串行执行，期望集合是全部当前归档的摘要与预签名下载地址，经控制消息下发；连接就绪、
+  发布或删除、通知重建与手动重新同步都会触发，同一环境运行期间的新触发合并为结束后再跑一次。平台不轮询，也不在
+  组装 Prompt 时等待安装。
+- Daemon 回报 `{packageName, installedSha256, localPath, error}`，平台把它写回该连接的 `skill_state` 投影。
+- Prompt 路径：执行根的环境已安装当前归档摘要时给出本地绝对路径，否则给出 `vfs:` 路径；没有环境时一律用 VFS。
 
-Project Run 接受时以显式命令提交 Agent、execution 与阶段 Environment，并以可信 Markdown
-任务消息提供 Issue 事实与阶段指令；不写产品专属 Harness 状态。
-`issue_transition` 根据真实调用 Thread、assistant 所属回合与 Project 的活动 Run，
-在业务锁内复核身份、阶段、版本及合法交接边。产品行为见 [Project](modules/project.md)，规划适配见
-[Platform](modules/platform.md)。
+## 产品纵向切片
 
-### Tools、Skills 与委派
+产品是完整的纵向切片：领域、持久化、HTTP 接口、DTO、实时通知与运行配置都在自己的模块里，页面在前端自己的功能
+目录里。产品之间不互相调用。
 
-工具以 `EnvironmentSupport` 声明执行所需上下文：
+| 产品 | 模块 | 拥有 | 实现的平台 SPI |
+| --- | --- | --- | --- |
+| Chat | apps/chat | `chat`、`chat_session`；`ChatController` 与模块内 DTO | 会话归属 `CHAT` |
+| Project | [`apps/project`](../apps/project/pom.xml) | `project_*`；`ProjectController`、`IssueController`、`ProjectErrorAdvice` 与模块内 DTO | 会话归属 `ISSUE_AGENT`、Agent 引用检查 |
+| Canvas | [`apps/canvas/runtime`](../apps/canvas/runtime/pom.xml) | `canvas_*`；三个控制器与模块内 DTO | 无（不参与会话归属） |
+| IDE | [`apps/ide`](../apps/ide/pom.xml) | 视图与数据面状态；IDE 控制器、过滤器与模块内 DTO | 无（读取平台环境与租约） |
 
-| 级别 | 未选择 Environment | 已选择 Environment |
-| --- | --- | --- |
-| `NONE` | 展示，使用 Platform 能力 | 展示，使用 Platform 能力 |
-| `ROUTED` | 展示，按 `vfs:` 路径走 Platform | 展示，按每次调用的路径决定 Platform 或 Environment |
-| `REQUIRED` | 从模型工具声明中过滤 | 展示，绑定当前 Environment |
+**Chat**：控制器以 `/api/chats` 提供列表、创建、详情、更新、删除与会话列表，DTO 在模块内，删除按预期版本校验。
+会话归属允许分叉与通用直写，`chat_session` 记录 Chat 与 Session 的关联。
 
-内置文件工具 `read`、`write`、`edit`、`grep`、`find` 使用 `ROUTED`：`vfs:` 路径走 Platform VFS 且不等待环境，
-绝对宿主路径走绑定的 Environment；命令与 LSP 使用 `REQUIRED`；Platform Tool、MCP 与 `task` 使用 `NONE`。过滤依据 Branch 的环境选择，保留声明顺序；
-Daemon 在线状态用于实际执行路由。执行入口继续校验绑定，缺失或失效时拒绝调用。
+**Project**：领域含可配置工作流与阶段、Issue、Run、Activity、阶段预算与证据，HTTP 面覆盖 `/api/projects`、
+`/api/issues` 与项目下的 Issue 创建。Run 接受只使用通用命令提交 Agent、执行方式与环境，加一条项目模板渲染的任务
+消息，不写产品专属的 harness 状态；`issue_transition` 是 SELECTABLE 工具，由 Issue Agent 的配置显式声明，工具按
+调用线程查询项目自己的 Run 记录并在业务锁内复核身份、阶段、版本与合法交接边。Issue 对账以 `ISSUE` Work 认领，只
+认本次 Run 冻结的终态收尾。归属实现按 Project 再 Issue 的锁序序列化，证据引用 `vfs:/resources/…`。
 
-`read.path` 支持当前 Daemon 的本地路径与 Platform 只读 URI：
+**Canvas**：[`apps/canvas/spi`](../apps/canvas/spi/pom.xml) 只有画布函数 SPI（adapter、冻结运行计划、执行上下
+文与严格 codec），只依赖 JDK、`common` 与 Jackson 流式 API，插件通过它贡献函数。Runtime 拥有节点模型、typed
+command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按类型从插件目录快照取出画布函数贡献。
 
-```text
-vfs:/skills/<package>/<skill>/...
-vfs:/resources/<blobId>
-```
+**IDE**：`apps/ide` 拥有视图服务与 `IdeCommandTransport` 端口、同源数据面代理（HTTP 转发与 WebSocket
+隧道）、浏览器使用身份、跨节点路由，以及 IDE 的 HTTP 接口与 DTO；`web` 只保留组合装配与全局错误映射。视图
+生命周期为打开、续租、关闭与强制关闭，目录列举只返回直接子目录，详见 [IDE](modules/ide.md)。
 
-本地文件与 LSP 路径必须是绝对路径，相对路径直接拒绝；本地读取要求绑定 Environment。`vfs:` URI
-不接受 `workdir`；只有 `process.exec`（bash）要求显式绝对 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
-Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
-按自己的地址、响应预算与凭据约束承担。
-路径与读取契约见 [内置工具与异步委派](modules/builtin-tools.md)。
-
-Skill 身份为 `(packageName, name)`。Package 保存仓库、branch、人工确认的
-`currentCommit`、最近观察到的 `observedHeadCommit` 与当前 Skill manifest；检查 branch
-用于发现更新，发布由用户确认 exact commit 后通过 CAS 原子切换。Prompt 提供 Skill 的
-name、description 与稳定 path。Daemon 已安装 commit 与当前发布 commit 一致时使用
-本地路径，否则使用 Platform URI。内容按 Package 当前安装版本读取，因此已打开的
-Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [Platform](modules/platform.md)
-与 [Environment Daemon](modules/daemon.md)。
-
-Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
-返回可读英文接受说明 `Task accepted. thread_id: <uuid>.`（异步回报、继续独立工作或让出、按 thread_id 续做；结构化元数据在 details）；父 Thread 可以继续工作，root Join 在子执行
-收敛到终态（`COMPLETED` / `ERROR`，且没有未完成的直接子 Join、未送达的子回执或待处理输入）时冻结
-`terminalEntryId` / `finalAnswerEntryId`；显式 Stop 不受收敛条件限制，以停止边界强制结算。
-结果再以 `NOTIFICATION` 交付给直接派发的父 Thread，不等待其整个永久子树进入静态 idle。
-后代审批和问卷归属人工控制根，但不会改变 Join 的直接父订阅。继续委派使用 `thread_id` 并复验父子归属；
-深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
-`inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见
-[内置工具与异步委派](modules/builtin-tools.md)与 [Harness Runtime](modules/harness-runtime.md)。
-
-### 构建期扩展
-
-[`plugins`](../plugins/pom.xml) 聚合独立 Plugin JAR，
-[`web` 的 runtime dependencies](../web/pom.xml) 决定发行物包含哪些 Plugin。
-Plugin 通过 Spring Boot auto-configuration 注册安装定义；配置实例按需提供独立的两域能力：
-
-- `StudioPlugin`：安装身份、配置 Schema、认证形态与实例构建。
-- `HarnessContributor`：工具、自定义历史类型与上下文投影，使用 Harness 的执行和结果契约。
-- `CanvasFunctionAdapter`：Function 定义与执行，由 Canvas Runtime 管理输入冻结、租约和发布。
-
-Plugin 与应用同进程，拥有相同 JVM 权限，部署者须信任其代码。
-Web 将插件实例和内置贡献一次聚合为完整 `PluginCatalogSnapshot`，校验依赖与名称后
-提供同一快照中的 HarnessCatalog / CanvasFunctionCatalog；失败候选统一释放资源。
-内置插件详见 [Plugins](modules/plugins.md)，Contributor 契约和 Plugin 装配见
-[Harness Runtime](modules/harness-runtime.md#contributor-与目录)、[Platform Plugin API](modules/platform-plugin-api.md)
-和 [Platform](modules/platform.md)。
-MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消见
+**插件**：构建期注册安装定义与配置 Schema，实例按类型交出 Harness 贡献与产品贡献；插件目录快照在启动时校验依赖
+与名称并冻结，失败候选释放资源。MCP 不通过插件接入，由平台用 Streamable HTTP 发现与执行，预算与取消见
 [Platform](modules/platform.md#mcp-client)。
 
-## 持久执行链
+## 环境与 Daemon
 
-所有执行链都围绕“先持久接受，再执行外部 I/O，最后围栏写回”组织：
+### 环境注册与对账
+
+环境身份是全局唯一且不可变的 name，运行时解析为内部 UUID。`environment_connection` 同时承载路由租约、连接状态、
+宿主信息、技能投影与运维事件窗口；`cluster_node` 记录节点身份与存活。READY、HEARTBEAT 与断开都以
+`(environment_id, owner_node_id, lease_token)` 为围栏，心跳只续租，只有状态、宿主信息、技能状态与运维事件真正
+变化时才发布 `environment_changed`。READY 会清空 `skill_state`，随后由技能对账全量重建；自然到期没有数据库写
+事件，由读取时按截止点判定。
+
+系统设置中的全局代理是 Studio 后端与所有 Daemon 共用的唯一定义。平台在 Daemon 连接就绪时下发当前设置，设置变更
+后向全部在线 Daemon 重新下发，Daemon 侧行为见下文。
+
+跨节点由 `cluster_node` 注册、单跳内部认证与路由租约协调：节点滚动发布时先停止认领、排空本机执行、向 Daemon
+发送 GOAWAY 并释放路由租约、移交在途远端工具，最后反注册。`/api/events` 的跨节点载荷与 IDE 集群接口走内部路径。
+
+### 控制面与主机能力
+
+Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：stream 1 是控制流，其他流是 IDE 数据面。控制流使用 Protobuf
+Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
+`CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
+（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
+`UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`RUNTIME_STATUS`、`ERROR`，
+以及技能对账的 `SKILL_SYNC` 与 `SKILL_STATE`。
+
+能力目录由 harness 定义、Daemon 实现：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、`PROCESS_EXEC`、
+`FS_GREP`、`FS_FIND`、三个 LSP 能力。每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
+调用契约区分「发送前一定未执行」（Busy、Unavailable）与「可能已被接受」（SendUncertain，禁止重放），成功启动后
+事件流严格是若干 partial 加一次 terminal，迟到事件静默丢弃。完整协议与租约见
+[Harness Environment](modules/harness-environment.md)。
+
+大文本落在 Daemon 本地并回传有界 tail，Agent 分页读取；资源上传由平台分配预签名 PUT，Daemon 直连 S3 上传后提交，
+重试只重放同一 transfer。
+
+### 技能安装
+
+Daemon 逐个处理期望集合内的包：摘要与本地标记一致就跳过；否则边下载边计算摘要（超过声明大小立即中止），校验后解压
+到暂存目录（校验条目数、解压总量、路径与条目类型），写入摘要标记文件，再用两次改名替换正式目录，最后删除 ZIP 与
+备份。不在集合中的包只在带标记时删除。对账单飞执行，运行期间到达的新集合合并为下一轮，同一包的操作串行。
+
+替换期间读取不会看到解压一半的内容，但两次改名之间正式路径会短暂不存在；Windows 上文件被占用时替换失败，旧版本
+保留并把失败状态上报平台。
+
+### IDE 服务
+
+Daemon 的 IDE 服务托管受管 code-server，并接受 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、
+`CLOSE_VIEW`、`LIST_VIEWS`、`LIST_DIRECTORIES`、`COLLAPSE_MOBILE`；续租走独立心跳帧，只有当前绑定的新鲜证明
+才延长视图。
+
+- 正常关闭经 bridge 触发原生关闭，用户在 IDE 内选择保存、不保存或取消；等待期间数据面保持可用，取消则视图回到
+  打开状态，只有全部关闭且清理完成才释放资源。
+- 强制关闭只在 bridge 不可达或状态未知时可用：先把未保存文档备份到恢复配额内，再关闭并清理。
+- 视图过期时不直接关闭：只有 bridge 报告没有未保存修改才自动回收，否则保留视图等待用户决定。
+- 目录列举只返回某个目录下的直接子目录名，按名称排序并有数量上限；窄屏布局由 bridge 执行收起侧栏与面板的命令，不
+  修改用户设置。
+
+### 代理与在线更新
+
+代理只来自平台下发的全局设置。Daemon 不读环境变量，也不查询操作系统代理；只支持无认证的 `http://host:port`。
+
+- 生效范围是 Daemon 的出站请求（S3、更新安装器下载）以及它启动的命令、LSP 与 code-server。子进程通过
+  `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 获得同一设置，设置变更只影响之后启动的子进程。
+- 控制连接始终直连 Studio：它使用独占的直连 Agent，不经过代理策略，否则错误的代理设置会让 Daemon 再也收不到修正。
+- 在线更新只走官方安装器：平台下发目标版本，Daemon 启动对应版本 tag 的 `install.sh` 或 `install.ps1`（带平台
+  代理），由安装器下载、校验、替换并重启；Daemon 只回执阶段与结果，不自行下载或替换制品。
+
+## 一次请求的执行链
 
 ```text
-用户操作
-  -> 短事务：写入 Command / Work / 引用
-  -> Worker：claim + lease
-  -> 事务外：Provider / Tool / Function / S3 I/O
-  -> 短事务：校验身份、attempt、lease 与 token，提交 checkpoint 或终态
-  -> REST Snapshot：读取已提交事实
-       ^
-       +-- WebSocket / NOTIFY：提示回读与短期流式展示
+产品（Chat / Project） ──▶ HarnessRuntime.acceptCommands
+  ──▶ 短事务：Session / Thread / Command CAS，命令邮箱 + THREAD Work
+  ──▶ Worker claim
+  ──▶ ThreadProcessor 选择下一项 durable action
+  ──▶ TurnResolver（平台）解析 Agent、环境、技能、工具与 system prompt
+  ──▶ Driver（Builtin 为 ModelProcessor）──▶ ModelGateway ──▶ Provider
+  ──▶ 工具调用 ──▶ ToolGateway ──▶ VfsGateway（vfs: 路径）或环境能力（绝对路径、bash、LSP）
+  ──▶ 围栏写回 checkpoint 或终态 ──▶ REST Snapshot 读取
 ```
 
-### Agent Loop
-
-```text
-创建型 POST /api/command-batches
-  或 owner-free POST /api/threads/{threadId}/command-batches
-  -> Web 校验 owner/target 或 path threadId、UUID 与 cursor
-  -> Platform 授权、附件物化与归属校验
-  -> HarnessRuntime.acceptCommands / acceptOnThread
-       Session / Thread / Command CAS
-       command mailbox + THREAD Work
-  -> HarnessWorkDispatcher claim
-  -> ThreadProcessor 选择下一项 durable action
-  -> Driver 的 Work 处理器（Builtin 为 ModelProcessor）/ ToolProcessor 执行
-  -> fenced checkpoint / terminal
-  -> ThreadProcessor 追加 Entry、推进 head 或结束 turn
-```
-
-Session 拥有 append-only Entry Tree；Thread 保存 head、命令 cursor、控制状态与单调
-version；Invocation 保存外部请求、attempt、checkpoint 与终态；Work 保存调度与执行权。
-Thread version 用于结构和控制状态 CAS。模型 checkpoint 可在同一 version 内推进，
-首次加载、重连和 resync 都需要读取完整 Snapshot。
-
-流式输出在当前 execution 内有界聚合并推送有损的 `MODEL_DELTA`；checkpoint、retry 和 terminal
-在短事务中复验 attempt 与 Work ownership，提交后才发布对应的 realtime 事件。审批和 `ask_user` 是持久等待，
-等待期间释放 Worker；人工决定按冻结调用、身份与提交约束接受后登记后续 Work。
-详细状态机见 [Harness Runtime](modules/harness-runtime.md)，Builtin 的请求冻结、MODEL Work 与流式投影见
-[Harness Agent Builtin](modules/harness-agent-builtin.md)，协议适配见
-[Harness Model](modules/harness-model.md)。
-
-模型输出把真实 `usage`（连同 stop reason 与可选流式计时）作为 durable 事实随 assistant Entry 保存，
-金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价；
-模型组按本次实际执行的成员计价。
-
-### Agent Driver
-
-Runtime 与 Driver 各自持有独立的职责与状态边界：Runtime 拥有公共的 append-only Entry Tree、Thread 状态、命令邮箱、`ToolInvocation` 与审批、`durable_work` 调度邮箱和代次退出事实；Driver 负责具体回合的 generation 解析、持有 generation 期间的私有持久化状态，并在事务外执行后把终态物化为公共 Entry。
-
-- **Builtin**：使用 `MODEL` Work 在 Studio 进程内调用模型，请求冻结、流式投影与状态机见 [Harness Agent Builtin](modules/harness-agent-builtin.md)。
-- **进程外 Agent**：使用以 Thread 为键、可带 `requiredEnvironmentId` 环境亲和的 `AGENT` Work，并经工具桥（`AssistantHistoryAppender` 追加 `WAITING_REQUEST` 槽位，外部激活为 `READY` 后由 ToolProcessor 审批与执行）复用平台的工具能力。
-
-完整契约、方法与锁序见 [Harness Runtime](modules/harness-runtime.md#agent-driver)。
-
-### Canvas Function 与 Project Run
-
-Canvas 编辑接受 typed commands、语义组前置条件与 idempotency key，在一个短事务内
-规划并提交整批 mutation，返回 patch 与 revision。Function 启动冻结配置、实际输入与
-输出计划，pin 输入后登记 READY Run；Worker claim、heartbeat、执行 adapter，再围栏发布
-完整输出。Canvas revision 用于同步排序，编辑冲突按名称、资源、Function 或布局各自判断。
-
-Project 的 `(Issue, Agent)` 绑定稳定 Thread，`(Issue, state)` 持有阶段预算。Run 接受
-原子完成额度检查、Thread 选择或创建、历史起点冻结、通用设置与任务消息提交、
-Run/Activity 写入、Harness 命令与 Work 登记。
-Issue Reconciler 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
-`finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
-交接提交时复验 Run 身份、版本、合法边与门禁。结果不明的 Issue Run 以 FAILED 和 ERROR 暂停收尾，明确标注结果未知。
-Canvas 与 Project 的使用和数据关系见 [Canvas](modules/canvas.md)、[Project](modules/project.md) 与 [Schema](modules/schema.md)。
-
-### 附件与媒体
-
-上传先建立受控 upload，将字节写入 S3，校验后生成全局 Blob。业务记录保存 `blobId`
-或内联文本，下载由服务端签发短期 URL。Tool 和 Environment 的临时 ResourceRef 在
-写入历史前物化为 Blob；物化失败则拒绝历史提交。引用与 cleanup 状态由数据库事务维护，
-对象 PUT、copy、HEAD 和 delete 在事务外执行。生命周期见
-[Platform](modules/platform.md#storageblob-与-resource)。
+- 接受阶段校验 owner 与目标，物化附件，冻结本回合设置。Session 拥有 append-only Entry Tree，Thread 保存 head、
+  命令 cursor、控制状态与单调 version，命令邮箱与 Work 在同一事务登记。
+- system prompt 由平台在回合解析时组装：Agent 正文、当前环境、可用技能与 task/subagent 说明按实际注入的工具与
+  目录快照生成，模板由 `PromptRenderer` 以严格 section 渲染；未注入的内容不出现，日期等易变信息不进入固定文案。
+- 流式输出在当前 execution 内有界聚合并推送有损 delta；checkpoint、重试与终态在短事务中复验 attempt 与 Work
+  所有权，提交后才发布 realtime 事件。
+- 审批与 `ask_user` 是持久等待：等待期间释放 Worker，人工决定按冻结调用、身份与提交约束接受后登记后续 Work。
+- 模型用量随 assistant Entry 保存为 durable 事实；金额不是 durable 事实，读取时按当前价格用精确十进制现算，压缩
+  输出按其冻结的执行模型计价，模型组按本次实际执行的成员计价。
 
 ## 执行权与恢复
 
-全部持久调度位于单一 `durable_work` 邮箱表，包括 Harness 的 `THREAD`、`MODEL`、`AGENT`、`TOOL`，
-以及 Canvas 的 `CANVAS_RUN`、Project 的 `ISSUE`。到期 Work 经 claim 获得随机
-token 与 lease，heartbeat 仅续租当前 owner；checkpoint、terminal 与 reschedule 再次
-复验执行权。绑定 Environment 的 TOOL 与 AGENT Work 同时要求该 Environment 的 READY route
-lease 属于当前节点。Canvas Function 与 Project Issue 复用该邮箱表，均采用持久调度、租约与围栏。
+全部后台调度共用单一 `durable_work` 邮箱：内核的 `THREAD` 与 `TOOL`、Builtin 的 `MODEL`、Project 的
+`ISSUE`、Canvas 的 `CANVAS_RUN`。到期 Work 经 claim 获得随机 token 与数据库时钟截止点，heartbeat 只续租当前
+owner，checkpoint、终态与 reschedule 再次复验执行权。绑定环境的 Work 还要求目标节点持有该 Environment 的 READY
+路由租约。
 
-Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provider 或发送工具请求前
-返回可重试结果。节点容量控制用于限流，PostgreSQL Work 用于恢复；Subagent 额度由
-持久 Thread/join 事实及数据库锁裁决。
+节点内另有有界 admission：模型与工具在真正发出请求前获取名额，容量不足直接返回可重试结果。节点容量只用于限流，
+恢复始终依据 PostgreSQL 中的 Work 与租约。
 
 | 场景 | 恢复依据与处理 |
 | --- | --- |
-| `NOTIFY` 丢失或监听重建 | 固定轮询发现到期 Work |
-| Worker 退出 | lease 到期后由合格节点重新 claim |
-| 节点滚动发布 | SIGTERM 后排空，依次停止认领、等待本机执行（`drain-timeout`）、向 Daemon 发送 GOAWAY 并释放路由租约、移交在途远端工具给其它节点、最后反注册节点 |
-| 节点崩溃 | 租约到期由合格节点重新认领；结果不确定的外部执行收敛为 UNKNOWN；没有退出证据的执行代次保留未确认事实，Thread 需要显式放弃才离开 RUNNING |
-| 旧 callback 晚到 | token、attempt、version 围栏使写回成为 no-op 或内部取消 |
-| 重复 Command | idempotency key、cursor 与 CAS 返回已有结果或拒绝冲突 |
-| 浏览器断线、漏帧或缓冲溢出 | 回读 REST Snapshot |
-| Daemon 连接中断 | 同实例重连按 journal 重放；在途远端工具可被认领该 TOOL Work 的节点重新挂接（attach，不重发 INVOKE），在 reattach 窗口内等待终态；跨实例由远端退出对账确认 REMOTE 退出事实 |
-| Blob 清理中断 | 持久 cleanup state 与 token 支持后台继续处理 |
-| 外部副作用结果不明 | UNKNOWN 路径保留核实所需事实，人工核查后显式处理 |
+| 通知丢失或监听重建 | 固定轮询发现到期 Work，并全量 resync 订阅 |
+| Worker 退出 | 租约到期后由合格节点重新 claim |
+| 节点滚动发布 | 排空后释放路由租约，在途远端工具移交给其它节点 |
+| 节点崩溃 | 租约到期重新认领；结果不确定的外部执行收敛为未确认事实，Thread 需显式放弃才离开运行态 |
+| 旧回调晚到 | token、attempt、version 与 wake version 围栏使写回成为 no-op |
+| 重复命令 | 幂等键与 cursor 返回已有结果或拒绝冲突 |
+| 浏览器断线或缓冲溢出 | 回读 REST Snapshot |
+| Daemon 连接中断 | 同实例重连按 journal 重放；在途远端工具由认领该 `TOOL` Work 的节点重新挂接，不重发 `INVOKE` |
+| Blob 清理中断 | 持久 cleanup 状态与 token 支持后台继续 |
 
-多 App 节点共享 PostgreSQL 与 Blob Storage，route、mailbox、Work 与通知经数据库
-协调。数据库不可达时停止依赖 ownership 的准入与写回。租约围栏保护内部状态；
-外部执行结果须由确定响应、查询或人工核实确认。实现见
-[Platform](modules/platform.md)、[Canvas](modules/canvas.md)
-与 [Project](modules/project.md)。
+多节点共享 PostgreSQL 与 Blob Storage，路由、邮箱、Work 与通知经数据库协调。数据库不可达时停止依赖 ownership
+的准入与写回；租约围栏只保护内部状态，外部执行结果必须由确定响应、查询或人工核实确认。实现见
+[Platform](modules/platform.md) 与 [Durable Work](modules/work.md)。
 
-## 浏览器读取与主机数据路径
+## 浏览器读取与前端分层
 
-浏览器先加载 Snapshot，再建立订阅；服务端的订阅握手按以下顺序封住 cursor 读取窗口：
+### 快照与订阅
+
+浏览器先加载 Snapshot，再建立订阅；服务端的订阅握手封住 cursor 读取窗口：
 
 ```text
 subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> events
 ```
 
-Thread version 与 Canvas revision 事件带 durable cursor；Thread realtime 是唯一真负载，
-Model delta、Tool partial 用于临时 overlay；交互、执行树与环境只发失效提示，客户端回读权威事实。
-事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读；Environment 的
-`statusExpiresAt` 在读取时按租约与心跳窗口派生，不做固定 poll。终态从数据库读取。
-Canvas 展示由确认快照、待确认操作和本地草稿组成，回读保留未保存
-输入。合并与恢复见 [Frontend](modules/frontend.md)，通道见 [Web](modules/web.md)。
+- 资源分四类：Thread 同时有 durable version 与 realtime 真负载；Canvas 有 revision；Projects、Interactions 与
+  Environments 只有失效提示；执行树按根线程订阅失效。
+- 事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读；终态一律从数据库读取。
+- 通知的生产方拥有 channel 与 payload 协议：Harness 的 thread version、执行树、交互，Canvas 的 revision，
+  Project 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
+  `NotificationInvalidationHub` 只做定点失效；组合根持有唯一的 LISTEN 循环并按绑定投递与 resync。
+- 通道与帧格式见 [Web](modules/web.md)，合并与恢复见 [Frontend](modules/frontend.md)。
 
-Thread Debug 区分 `NEXT_REQUEST_PREVIEW` 与 `FROZEN_INVOCATION`（后者与 Provider 请求预览属于 Builtin）：前者按当前
-Branch 重新规划，后者从冻结的 ModelRequestSpec 和 EntryPath 物化实际请求。
-Debug 展示工具声明、Skill 路径与执行事件，并对凭据和私有存储地址做保密处理。
-Provider 请求预览在同一规划/物化/编码路径上按点击瞬间（历史取该输出记录时间）只读重建请求体，不等于原始发送字节。
+### 前端分层
 
-Environment 按数据类型使用五条路径：
-
-| 路径 | 内容 |
+| 目录 | 职责 |
 | --- | --- |
-| HTTP/2 控制流（单条 WSS 连接上的 Protobuf Envelope） | stream 1 承载 INVOKE、CANCEL、heartbeat、上传票据、有界 progress 与 IDE 元数据命令 |
-| IDE 数据面：同一连接上的独立 HTTP/2 流 | code-server 静态资源与 HTTP 接口透传，WebSocket 经 RFC 8441 extended CONNECT 隧道透传 |
-| Daemon 本地文本 | 完整命令输出与大文本写入本地资源，UI 展示有界 tail，Agent 分页读取 |
-| Daemon Skill 安装 | 同步人工确认的 commit；安装一致后提供本地 Skill 路径 |
-| Blob 数据面 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3 |
+| `app` | 组合根：路由、providers、页面与弹窗贡献的组装 |
+| `platform` | 应用外壳与扩展契约：`AppShell`、`WorkbenchShell`、贡献类型 |
+| `features` | 业务特性：通用 `thread` 与 `canvas`、`catalog`、`chat`、`environment`、`extensions`、`projects`、`settings` |
+| `shared` | API 客户端与生成契约、事件通道客户端、冲突处理、国际文案、通用 UI |
 
-协议与路由租约见 [Harness Environment](modules/harness-environment.md)，主机执行见
-[Environment Daemon](modules/daemon.md)；同源 IDE 的命令通道与复用数据连接见 [IDE](modules/ide.md)。
+- 页面、弹窗与工具渲染由应用贡献在组装时冻结：重复 id 直接报错，没有运行时注册、卸载或优先级。
+- 生成契约 [`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts) 由 web 测试源码的生成器产出，
+  用 [`write.sh`](../scripts/dev/verify/generated-contracts/write.sh) 重新生成，漂移由 `TsContractArtifactTest`
+  拦截。
+- IDE 面板是外壳级分栏：iframe 常驻挂载，切换路由不重建；拖拽只改变分栏宽度并持久化，空间不足时改为全屏，页面内容
+  按容器宽度响应。
+- `shared/app-events` 是唯一的事件通道客户端：严格 codec、重连退避、按资源同步的 hook；页面只消费资源信号。
+
+## 数据模型
+
+数据库只有一个 Flyway baseline，按归属模块分段：
+
+| 段 | 内容 |
+| --- | --- |
+| 1 | 业务表：环境、目录（Provider、Model、Agent、模型组冷却、技能包、MCP）、插件配置与凭据、Canvas、Chat |
+| 1b | `environment_connection`、`cluster_node` |
+| 1c | 单行 `system_setting` |
+| 2 | harness 执行协议：Session、Entry、Thread、命令、`builtin_model_invocation`、工具调用、`durable_work`、Join、停止回执、执行退出、实时订阅 |
+| 3 | Project 与 Issue 业务事实 |
+| 4 | `chat_session` |
+| 5 | 全局 Blob：`storage_blob`（含 `archive_index`）、上传、对象清理、Session 引用边与 `session_file` |
+| 6 | Issue 发布证据 |
+| 7 | Canvas 资源到 Blob 的外键 |
+
+- 表与 SQL 只由归属模块访问：产品表由产品模块维护，目录、设置、存储、环境与插件由平台维护，`harness_*` 由平台的
+  内核存储适配包维护，`builtin_model_invocation` 由平台的 Builtin 适配包维护。
+- 引擎表的领域语义由 harness 定义，DDL 与 SQL 实现归平台；新增 Driver 只在自己的适配分包内加表，不改通用存储。
+- 产品表只引用 harness 的公开身份（Session、Thread），不复制引擎内部状态，也不 join 引擎内部表做查询。
+- 约束表达真实不变量：Agent 定义的 `execution` 形状与 USER 类型必须有执行方式、`session_file` 的路径与
+  revision、`durable_work` 的租约成对与类型格式、技能包的命名与描述长度。
+- 关系、索引与约束细节见 [Schema](modules/schema.md)。
 
 ## 部署与安全条件
 
-应用面向可信单用户，登录鉴权由外部入口承担。默认本地栈监听 `127.0.0.1`；
-局域网或公网部署必须配置 TLS 和访问控制。Daemon 继承启动用户的主机权限，
-**没有文件系统沙箱**；Plugin 与 Contributor 也须作为可信代码部署。
+应用面向可信单用户，登录鉴权由外部入口承担。默认本地栈监听 `127.0.0.1`；局域网或公网部署必须配置 TLS 与访问
+控制。Daemon 继承启动用户的主机权限，**没有文件系统沙箱**；插件与 Contributor 也是同进程的可信代码。
 
-- HTTP 边界严格校验 UUID、cursor、sealed union 和 JSON 形状，拒绝未知或重复字段及错误类型。
-- Resource 访问按业务持有关系授权；UUID、URI 与跳转地址仅用于定位。
-- Provider、MCP、Daemon 与 Plugin 凭据经受控入口写入，普通 DTO、日志和 Debug 保持脱敏；
-  它们以明文存入 PostgreSQL，保护依赖数据库访问控制与备份加密。
-- registration token 文件要求 owner-only 权限。主机 user/home 用于描述环境，
-  路径操作要求显式绝对路径；只有进程执行要求显式绝对 workdir。
-- Skill 安装内容由人工确认的 exact commit 决定，branch 检查只提供候选更新。
+- HTTP 边界严格校验 UUID、cursor、sealed union 与 JSON 形状，拒绝未知或重复字段及错误类型。
+- 资源访问按业务持有关系授权；UUID、URI 与跳转地址只用于定位。VFS 只开放执行根会话，只读前缀在预检与执行两处
+  拒绝。
+- Provider、MCP、Daemon 与插件凭据经受控入口写入，普通 DTO、日志与 Debug 保持脱敏；它们以明文存入 PostgreSQL，
+  保护依赖数据库访问控制与备份加密。技能仓库令牌不回显，也不下发给 Daemon。
+- 注册令牌文件要求 owner-only 权限；路径操作要求显式绝对路径，只有进程执行要求显式绝对 `workdir`。
+- 代理只支持无认证的 HTTP 代理，控制连接始终直连；在线更新只由官方安装器执行，Daemon 不自行替换制品。
 - 生产变更需经过审批并准备可恢复备份；备份同时覆盖 PostgreSQL 与 S3 数据及部署密钥。
 
-首次运行见 [项目 README](../README.md)，参数与生产操作见
-[部署与运行](operations/deployment.md)，开发和质量入口见
-[开发与测试](operations/development-and-testing.md)。漏洞报告见
-[Security Policy](../SECURITY.md)。
+首次运行见[项目 README](../README.md)，参数与生产操作见[部署与运行](operations/deployment.md)，开发与质量入口见
+[开发与测试](operations/development-and-testing.md)。漏洞报告见 [Security Policy](../SECURITY.md)。
