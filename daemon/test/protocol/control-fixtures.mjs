@@ -52,7 +52,7 @@ import {
 } from '../../dist/generated/control_pb.js'
 
 export const ENVIRONMENT_ID = '3f2a9c1e-7b4d-4e2a-9c6f-1a2b3c4d5e6f'
-export const INVOCATION_ID = 'invoke-0001'
+export const INVOCATION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 export const CAPABILITY_ID = 'fs.edit'
 export const ARGUMENTS_JSON =
   '{"path":"src/main/java/App.java","exponent":1e-7,"highPrecision":0.123456789012345678901234567890,"negativeZero":-0}'

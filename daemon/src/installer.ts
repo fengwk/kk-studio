@@ -201,6 +201,8 @@ export async function prepareInstaller(
     },
   }
   } catch (error) {
+    // 文件已登记到 OS job 后即使 launch 报错也不能删除 operation 目录：异步作业仍要读取安装脚本、
+    // permit 与日志。只有未登记任何作业时才安全回收该目录。
     if (!jobRegistered) {
       try {
         await rm(directory, { recursive: true, force: true })

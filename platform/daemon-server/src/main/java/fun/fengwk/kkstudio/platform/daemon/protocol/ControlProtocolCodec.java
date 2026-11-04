@@ -44,9 +44,6 @@ public final class ControlProtocolCodec {
   /** Java long 正数上界的规范十进制。 */
   public static final long MAX_POSITIVE_LONG = Long.MAX_VALUE;
 
-  /** invocationId 的字符上限。 */
-  public static final int MAX_INVOCATION_ID_CHARS = 256;
-
   /** callId 的字符上限。 */
   public static final int MAX_CALL_ID_CHARS = 256;
 
@@ -328,16 +325,11 @@ public final class ControlProtocolCodec {
       requireUuid(true, envelope.getEnvironmentId(), "environmentId");
     }
     if (INVOCATION.contains(messageType)) {
-      requireText(
-          envelope.hasInvocationId(),
-          envelope.getInvocationId(),
-          "invocationId",
-          MAX_INVOCATION_ID_CHARS,
-          true);
+      requireUuid(envelope.hasInvocationId(), envelope.getInvocationId(), "invocationId");
     } else if (NO_INVOCATION.contains(messageType) && envelope.hasInvocationId()) {
       throw new ControlProtocolException(messageType + " must not declare invocationId");
     } else if (envelope.hasInvocationId()) {
-      requireText(true, envelope.getInvocationId(), "invocationId", MAX_INVOCATION_ID_CHARS, true);
+      requireUuid(true, envelope.getInvocationId(), "invocationId");
     }
   }
 

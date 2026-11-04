@@ -737,6 +737,21 @@ class ControlProtocolCodecTest {
     assertThrows(
         ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(missingInvocation));
 
+    for (String malformedInvocationId :
+        new String[] {
+          "not-a-uuid",
+          "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+          "{" + ControlProtocolFixtures.INVOCATION_ID + "}"
+        }) {
+      Envelope invalidInvocation =
+          ControlProtocolFixtures.invokeEnvelope().toBuilder()
+              .setInvocationId(malformedInvocationId)
+              .build();
+      assertThrows(
+          ControlProtocolException.class,
+          () -> ControlProtocolCodec.encodeBinary(invalidInvocation));
+    }
+
     Envelope invalidEnvironment =
         ControlProtocolFixtures.invokeEnvelope().toBuilder().setEnvironmentId("not-a-uuid").build();
     assertThrows(

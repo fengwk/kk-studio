@@ -2775,9 +2775,9 @@ class EnvironmentDaemonServerTest {
     assertFalse(fixture.readyNotifications.contains(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：非 UUID 或非 canonical 的 call.id 与 invocationId 属于协议/调用方错误，必须在触碰 wire 之前被拒绝。 */
+  /** 测试意图：非 UUID 或非 canonical 的 call.id 属于调用方错误，必须在触碰 wire 之前被拒绝。 */
   @Test
-  void malformedUuidFieldsAreRejectedBeforeWireSend() {
+  void malformedCallIdIsRejectedBeforeWireSend() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-malformed-uuid");
 
@@ -2790,14 +2790,6 @@ class EnvironmentDaemonServerTest {
                     descriptor(), new EnvironmentCapabilityCall("  ", "{}"), Duration.ofSeconds(5)),
                 new RecordingListener()));
     assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
-
-    // 非 canonical UUID（大写/带花括号）同样被拒绝，避免同一 invocation 有多个文本形态。
-    fixture.receive(
-        channel,
-        progressEnvelope(CALL_ONE, "chunk").toBuilder()
-            .setInvocationId(CALL_ONE.toString().toUpperCase())
-            .build());
-    assertTrue(channel.closed());
   }
 
   /** 测试意图：invoke 的 binding environmentId 为空或请求为 null 属于调用方错误，必须显式拒绝而不是 NPE 或静默发送。 */
