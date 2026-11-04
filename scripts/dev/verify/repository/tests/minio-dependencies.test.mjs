@@ -18,17 +18,17 @@ const hashes = {
 
 test('all isolated stacks share the verified server pin and locally built client', () => {
   // 意图：单独更新某套栈、回退已撤下仓库、隐藏架构限制或冒用官方 mc 名字均立即失败。
-  for (const stack of ['local', 'test', 'reliability', 'distributed']) {
+  for (const stack of ['local', 'test', 'distributed']) {
     const compose = read(`deploy/${stack}/compose.yaml`)
-    const service = (name) => compose.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\S|^\\S|(?![\\s\\S]))`, 'm'))?.[1]
+    // deploy/test 的 MinIO 服务改由 YAML 锚点复用，键行因此可能带锚点名。
+    const service = (name) => compose.match(new RegExp(`^  ${name}:(?: &\\S+)?\\n([\\s\\S]*?)(?=^  \\S|^\\S|(?![\\s\\S]))`, 'm'))?.[1]
     assert.ok(service('minio'), stack)
     assert.deepEqual([...service('minio').matchAll(/^\s+image: (.+)$/gm)].map((m) => m[1]), [server])
     assert.match(service('minio'), /^    platform: linux\/amd64$/m)
     assert.match(service('minio-init'), /^    build:\n      context: \.\.\/dependencies\/minio-client$/m)
     assert.match(service('minio-init'), new RegExp(`^    image: kk-studio-minio-client:${version}$`, 'm'))
     assert.match(service('minio-init'), /^    pull_policy: build$/m)
-    assert.match(service('minio-init'), /entrypoint: \["\/bin\/sh", "-ec"\]/)
-    assert.match(service('minio-init'), /mc anonymous set none/)
+    assert.match(service('minio-init'), /entrypoint: \["\/bin\/sh", "\/usr\/local\/bin\/init-bucket\.sh"\]/)
     assert.doesNotMatch(compose, /(?:minio\/minio|(?:quay\.io\/)?minio\/mc)(?=[:@])/)
   }
 })
@@ -43,6 +43,7 @@ test('mc update guard fixes version, base index, offline checksums and licensing
   assert.match(dockerfile, /printf .+ "\$\{sha256\}" \| sha256sum -c -/)
   assert.doesNotMatch(dockerfile, /\.sha256sum/)
   assert.match(dockerfile, /COPY LICENSE NOTICE \/usr\/share\/licenses\/minio-client\//)
+  assert.match(dockerfile, /COPY init-bucket\.sh \/usr\/local\/bin\/init-bucket\.sh/)
   assert.match(dockerfile, /ENTRYPOINT \["mc"\]/)
   assert.doesNotMatch(dockerfile.split(/^FROM /m)[2], /apk add|RUN /)
   for (const [file, digest] of Object.entries({

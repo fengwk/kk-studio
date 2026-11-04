@@ -4,9 +4,11 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
+source "$SCRIPT_DIR/../../lib/test-stack.sh"
 # Compose、Dockerfile 与 mock 运行时资产属于 deploy/；本脚本只做宿主 smoke 编排。
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
-COMPOSE=(docker compose -f "$COMPOSE_FILE")
+export COMPOSE_PROFILES=canvas-test
+COMPOSE=(docker compose --project-name kk-studio-canvas-test -f "$COMPOSE_FILE")
 APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:canvas-test}
 WITH_APP=false
 
@@ -101,12 +103,10 @@ cleanup() {
   local status=$?
   if ((status != 0)); then
     step "Failure diagnostics"
-    "${COMPOSE[@]}" ps -a || true
-    "${COMPOSE[@]}" logs --no-color || true
   fi
 
   step "Cleaning isolated test stack"
-  "${COMPOSE[@]}" --profile app down --volumes --remove-orphans || true
+  cleanup_test_stack "$status"
 }
 trap cleanup EXIT
 

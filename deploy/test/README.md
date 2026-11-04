@@ -4,6 +4,9 @@
 MinIO 与 bucket 初始化、一个可配置 HTTP mock，以及可选的当前 App 镜像。它用于 Canvas
 Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat 的确定性 smoke。
 
+这个文件同时也是可靠性栈唯一的 Compose 定义，`canvas-test` / `app` profile 服务于本页的离线
+smoke，`reliability` profile 由
+[scripts/dev/verify/reliability/stack.sh](../../scripts/dev/verify/reliability/stack.sh) 启动。
 需要本地可用界面时用 [deploy/local](../local/README.md)；可靠性栈、分布式双节点和生产部署见
 [部署与运行](../../docs/operations/deployment.md)。
 
@@ -19,6 +22,36 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 MinIO server 的平台限制、mc 首次联网构建与源码许可见
 [开发栈 MinIO 依赖](../dependencies/minio-client/README.md)；ARM 宿主需要 amd64 模拟能力。
 
+## Profiles 与 project
+
+`compose.yaml` 用三个 profile 划分服务；文件顶部的 `name: kk-studio-canvas-test` 只是默认
+project 名：
+
+| profile | 服务 | 用途 |
+| --- | --- | --- |
+| `canvas-test` | `postgres`、`minio`、`minio-init`、`http-mock` | 基础 smoke 基础设施 |
+| `app` | 上述基础设施 + `app` | 基础栈加当前 App 镜像 |
+| `reliability` | `reliability-postgres`、`reliability-minio`、`reliability-minio-init`、`reliability-app`、`workspace-init`、`daemon` | 与离线 smoke 完全隔离的可靠性栈 |
+
+基础设施和 app 服务都带 profile，默认配置不会启用它们：手动命令必须显式写
+`--profile canvas-test`（只启动基础设施）或 `--profile app`（基础设施加 app）。
+
+本页所有手动命令都显式指定 `kk-studio-canvas-test` project。可靠性栈使用
+`reliability-*` 服务名和独立的 `reliability` 网络，只通过 `stack.sh` 在
+`kk-studio-reliability` project 中启动；因为这个 Compose 文件是共用的、默认 project 是
+`kk-studio-canvas-test`，手工执行可靠性 Compose 命令时必须始终同时给出
+`-p kk-studio-reliability` 与 `--profile reliability`，否则会落进离线 smoke 的 project，
+并可能被 `down --volumes` 连同 smoke 数据一起删除。可靠性栈的卷名前缀是
+`kk-studio-reliability_*`，与本页的 `kk-studio-canvas-test_*` 互不影响，两套清理命令不要混用。
+如果该 project 已有旧的 `postgres`、`minio`、`minio-init` 或 `app` 容器，
+启动前先检查并停止这些旧服务，同时保留所需卷，避免新旧服务同时访问同一份数据。
+
+```bash
+./scripts/dev/verify/reliability/stack.sh up
+./scripts/dev/verify/reliability/stack.sh status
+./scripts/dev/verify/reliability/stack.sh down --volumes
+```
+
 ## 一键验证
 
 ```bash
@@ -28,11 +61,11 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
 
 [scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 依次执行：
 
-1. `docker compose config --quiet` 校验默认与 `--profile app` 配置；
+1. 以 `canvas-test` 和 `app` profile 分别校验 Compose 配置；
 2. 无确认提示地销毁同名隔离栈及其 PostgreSQL/MinIO volumes，从空数据启动；
 3. 用显式 `docker build` 构建当前应用 Dockerfile（不委托 Compose 构建），更新本机同名镜像 tag；
 4. `docker compose build minio-init` 构建共享 MinIO client 镜像；
-5. 启动依赖并等待 healthcheck；
+5. 启动依赖并等待 healthcheck（基础设施按服务名显式启动，app 走 `--profile app`）；
 6. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的 `ffmpeg` / `ffprobe`；
 7. 执行 PostgreSQL `SELECT 1`，检查 MinIO bucket 与 HTTP mock（health、确定性 OpenAI SSE）；
 8. 无论成功或失败，都执行 `down --volumes --remove-orphans`，失败时先输出 compose 诊断。
@@ -67,18 +100,22 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
 
 ```bash
 # 仅启动常驻依赖，再单独运行一次性 bucket 初始化
-docker compose -f deploy/test/compose.yaml up -d --wait postgres minio http-mock
-docker compose -f deploy/test/compose.yaml run --rm --no-deps minio-init
+COMPOSE_PROFILES=canvas-test docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml up -d --wait postgres minio http-mock
+COMPOSE_PROFILES=canvas-test docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml run --rm --no-deps minio-init
 
 # 启动依赖和应用
-docker compose -f deploy/test/compose.yaml --profile app up -d --build --wait
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml up -d --build --wait
 
 # 停止容器和网络，保留手动验证的数据
-docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml down --remove-orphans
 
 # 确认测试数据可丢弃后才执行：额外删除 PostgreSQL 与 MinIO volumes，无确认提示
-docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
+COMPOSE_PROFILES=app docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml down -v --remove-orphans
 ```
+
+每条命令都要显式给出 profile：`COMPOSE_PROFILES=canvas-test` 只启用基础 smoke 基础设施，
+`COMPOSE_PROFILES=app` 同时启用基础设施和 app。不要在这些命令里启用 `reliability`，可靠性栈
+始终通过 `stack.sh` 在 `kk-studio-reliability` project 中运行（见上节）。
 
 没有 app 时，不要对全部服务直接 `up --wait`：成功退出的 `minio-init` 没有常驻 health 状态，
 此时也没有 app 的 `service_completed_successfully` 依赖承接它。上面的两步与 smoke 脚本一致。
@@ -127,8 +164,8 @@ upload、execute、execution detail 与 Resource download。自定义 route 从 
 才交给内置 stub 与 fake Hub。默认 [mock/routes.json](mock/routes.json) 为空。
 
 ```bash
-CANVAS_TEST_MOCK_ROUTES=/absolute/path/to/routes.json \
-  docker compose -f deploy/test/compose.yaml up -d --wait postgres minio http-mock
+CANVAS_TEST_MOCK_ROUTES=/absolute/path/to/routes.json COMPOSE_PROFILES=canvas-test \
+  docker compose -p kk-studio-canvas-test -f deploy/test/compose.yaml up -d --wait postgres minio http-mock
 ```
 
 route 文件格式：

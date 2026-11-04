@@ -6,7 +6,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/http-wait.sh"
-COMPOSE_FILE="$REPO_ROOT/deploy/reliability/compose.yaml"
+COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
 RELIABILITY_APP_PORT=${RELIABILITY_APP_PORT:-18091}
 RELIABILITY_MINIO_PORT=${RELIABILITY_MINIO_PORT:-19002}
@@ -15,6 +15,7 @@ RELIABILITY_REGISTRATION_TOKEN=${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-relia
 APP_URL="http://127.0.0.1:$RELIABILITY_APP_PORT"
 TMP_DIR=
 
+export COMPOSE_PROFILES=reliability
 export RELIABILITY_APP_PORT RELIABILITY_MINIO_PORT RELIABILITY_ENV_NAME
 export RELIABILITY_REGISTRATION_TOKEN
 
@@ -430,13 +431,15 @@ status_stack() {
 logs_stack() {
   require_cmd docker
   local service
+  local -a services=()
   for service in "$@"; do
     case "$service" in
-      postgres | app | workspace-init | daemon) ;;
+      postgres | app) services+=("reliability-$service") ;;
+      workspace-init | daemon) services+=("$service") ;;
       *) die "invalid service '$service'" ;;
     esac
   done
-  compose logs --no-color --tail "${RELIABILITY_LOG_TAIL:-200}" "$@"
+  compose logs --no-color --tail "${RELIABILITY_LOG_TAIL:-200}" "${services[@]}"
 }
 
 down_stack() {
