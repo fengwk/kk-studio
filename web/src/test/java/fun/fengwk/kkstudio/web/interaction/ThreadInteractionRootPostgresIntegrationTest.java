@@ -482,16 +482,35 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     Tree tree = buildTree();
     UUID chatId = bindChat(tree.rootSessionId());
     UUID firstInvocationId = attachEnvironmentWait(tree.c(), EnvironmentId.of(firstEnvironmentId));
-    UUID secondInvocationId = attachEnvironmentWait(tree.b(), EnvironmentId.of(firstEnvironmentId));
-    Instant firstRepresentativeCreatedAt = toolInvocation(firstInvocationId).createdAt();
-    assertTrue(
-        firstRepresentativeCreatedAt.isBefore(toolInvocation(secondInvocationId).createdAt()),
-        "the group representative is the earliest invocation of the group");
 
     // 执行根 R2：独立根，同一环境 -> 另一个分组计数 1。
     Seed second =
         seedStandaloneRoot(false, "{}", false, false, true, EnvironmentId.of(firstEnvironmentId));
     bindChat(second.sessionId());
+    // R1 的第二个调用排在 R2 后面，原始调用以 limit=1 分页会错误拆分 R1。
+    UUID secondInvocationId = attachEnvironmentWait(tree.b(), EnvironmentId.of(firstEnvironmentId));
+    jdbc.update(
+        """
+        update harness_tool_invocation
+        set created_at = statement_timestamp() - case id
+          when ?::uuid then interval '3 seconds'
+          when ?::uuid then interval '2 seconds'
+          else interval '1 second'
+        end
+        where id in (?::uuid, ?::uuid, ?::uuid)
+        """,
+        firstInvocationId,
+        second.invocationId(),
+        firstInvocationId,
+        second.invocationId(),
+        secondInvocationId);
+    Instant firstRepresentativeCreatedAt = toolInvocation(firstInvocationId).createdAt();
+    assertTrue(
+        firstRepresentativeCreatedAt.isBefore(toolInvocation(second.invocationId()).createdAt()));
+    assertTrue(
+        toolInvocation(second.invocationId())
+            .createdAt()
+            .isBefore(toolInvocation(secondInvocationId).createdAt()));
 
     StudioHarnessThreadController threadController =
         new StudioHarnessThreadController(
@@ -536,6 +555,16 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(
         Set.of(tree.root().toString(), second.threadId().toString(), third.threadId().toString()),
         all.stream().map(InteractionDTO::getRootThreadId).collect(Collectors.toSet()));
+    List<InteractionDTO> singlePages = drain(null, 1);
+    assertEquals(3, singlePages.size());
+    assertEnvironmentWait(
+        singlePages.getFirst(),
+        tree.root(),
+        firstEnvironmentId,
+        2,
+        firstRepresentativeCreatedAt,
+        "CHAT",
+        chatId.toString());
     assertFalse(
         all.stream()
             .anyMatch(item -> ownerless.threadId().toString().equals(item.getRootThreadId())));
@@ -576,6 +605,16 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         queryService.listInteractions(null, null, 10).getFreshnessAt());
     assertTrue(
         runtime.listEnvironmentToolWaits(List.of(firstInvocationId)).getFirst().workAvailable());
+
+    // CONNECTING 即使持有未到期租约也不算 READY，恢复 READY 后再次隐藏。
+    jdbc.update(
+        "update environment_connection set status = 'CONNECTING' where environment_id = ?",
+        firstEnvironmentId);
+    assertEquals(3, queryService.listInteractions(null, null, 1).getTotal());
+    jdbc.update(
+        "update environment_connection set status = 'READY' where environment_id = ?",
+        firstEnvironmentId);
+    assertEquals(1, queryService.listInteractions(null, null, 1).getTotal());
 
     // 模拟已过期的租约：不写任何等待行，分组按原始事实重新出现。
     markEnvironmentOffline(firstEnvironmentId);

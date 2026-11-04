@@ -158,6 +158,26 @@ public class InteractionQueryService {
         }
       }
     }
+    // 引擎候选包含在线环境；页满后排除尾部在线候选，避免为不存在的后续等待项产生空游标页。
+    while (items.size() == limit) {
+      if (environmentQueue.isEmpty() && environmentHasMore) {
+        PendingEnvironmentWaitPage page =
+            runtime.listEnvironmentWaitCandidates(
+                environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
+        environmentHasMore = page.hasMore();
+        if (!page.waits().isEmpty()) {
+          environmentQueue.addAll(page.waits());
+          PendingEnvironmentWait last = page.waits().getLast();
+          environmentCursorCreatedAt = last.representativeCreatedAt();
+          environmentCursorId = last.representativeInvocationId();
+        }
+      }
+      PendingEnvironmentWait candidate = environmentQueue.peek();
+      if (candidate == null || context.readyLease(candidate.environmentId()).isEmpty()) {
+        break;
+      }
+      environmentQueue.poll();
+    }
     boolean moreRemaining =
         !manualQueue.isEmpty()
             || !environmentQueue.isEmpty()

@@ -679,6 +679,33 @@ class InteractionQueryServiceTest {
     assertEquals(1, secondEnvironmentItem.getWaitingCount().intValue());
   }
 
+  /** 在线候选不能让人工等待末页出现多余的空游标页，total 同样不计在线环境。 */
+  @Test
+  void onlineCandidatesDoNotCreateAnEmptyCursorPage() {
+    UUID root = id(11);
+    UUID session = id(12);
+    Instant manualTime = Instant.parse("2026-03-01T10:00:00Z");
+    PendingInteraction manual = waitingInput(id(101), root, session, manualTime);
+    PendingEnvironmentWait online =
+        environmentWait(root, WAITING_ENVIRONMENT_ID, manualTime.plusSeconds(1), id(102), 1);
+    stubRoot(root);
+    when(chatSessionRepository.findBySessionId(session))
+        .thenReturn(new ChatSession(session, id(13)));
+    when(environmentService.findReadyLeaseUntil(EnvironmentId.parse(WAITING_ENVIRONMENT_ID)))
+        .thenReturn(Optional.of(manualTime.plusSeconds(100)));
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
+        .thenReturn(new PendingInteractionPage(List.of(manual), false));
+    stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 1, List.of(online), false);
+    stubCountPage(List.of(manual), false);
+    stubEnvironmentCountPage(List.of(online));
+
+    InteractionPageDTO page = service.listInteractions(null, null, 1);
+
+    assertEquals(1, page.getTotal());
+    assertEquals(id(101).toString(), page.getItems().getFirst().getInteractionId());
+    assertNull(page.getNextCursor());
+  }
+
   /** 测试意图：环境等待条目的游标是组内最早调用的 {@code (createdAt, id)}；按该游标翻页只跳过已消费分组，不漏项、不重复。 */
   @Test
   void environmentWaitKeepsStableCursorAcrossPages() {
@@ -701,6 +728,8 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(firstCreatedAt, id(901), 1))
         .thenReturn(new PendingInteractionPage(List.of(), false));
     stubEnvironmentPage(firstCreatedAt, id(901), 1, List.of(second), false);
+    stubEnvironmentPage(
+        firstCreatedAt, id(901), InteractionQueryService.COUNT_PAGE_SIZE, List.of(second), false);
     stubCountPage(List.of(), false);
     stubEnvironmentCountPage(List.of(first, second));
 
