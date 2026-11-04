@@ -40,7 +40,8 @@ project 名：
 `reliability-*` 服务名和独立的 `reliability` 网络，只通过 `stack.sh` 在
 `kk-studio-reliability` project 中启动；因为这个 Compose 文件是共用的、默认 project 是
 `kk-studio-canvas-test`，手工执行可靠性 Compose 命令时必须始终同时给出
-`-p kk-studio-reliability` 与 `--profile reliability`，否则会落进离线 smoke 的 project，
+`-p kk-studio-reliability` 与 `COMPOSE_PROFILES=reliability`，覆盖可能继承的其他 profile；
+否则会落进离线 smoke 的 project 或混入不属于可靠性栈的服务，
 并可能被 `down --volumes` 连同 smoke 数据一起删除。可靠性栈的卷名前缀是
 `kk-studio-reliability_*`，与本页的 `kk-studio-canvas-test_*` 互不影响，两套清理命令不要混用。
 如果该 project 已有旧的 `postgres`、`minio`、`minio-init` 或 `app` 容器，
