@@ -255,10 +255,12 @@ final class ConfigSyncFixtures {
   }
 
   static AgentDefinition agent(String name, String modelName, AgentDefinitionConfigDTO config) {
+    // 未配置的内置 Agent 没有执行选择；只有绑定了模型的 Agent 才构造 ModelSelection。
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(name)
-            .execution(BuiltinExecution.of(new ModelSelection(modelName, null)))
+            .execution(
+                modelName == null ? null : BuiltinExecution.of(new ModelSelection(modelName, null)))
             .configJson(AGENT_CONFIG_CODEC.encode(config))
             .version(0L)
             .build();

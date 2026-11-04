@@ -338,7 +338,7 @@ class IssueRunServiceTest {
   void missingHarnessRuntimeRejectsAcceptance() {
     Issue issue = issue();
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project());
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
     when(stageBudgetRepository.insert(any(), any())).thenReturn(true);
     when(agentBranchSettings.materialize("worker"))
