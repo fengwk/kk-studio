@@ -56,7 +56,7 @@ public final class AgentSpawner {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(preflight, "preflight");
     // 统一创建路径复用 accept 的 batch 形状规则，且在任何写入之前拒绝非法请求（含 settings-only / 多输入 / SET 乱序）。
-    AcceptCommandsControl.validateBatchShape("SpawnRequest", request.commands(), true);
+    AcceptCommandsValidation.validateBatchShape("SpawnRequest", request.commands(), true);
     return request.continuation() == null
         ? spawnNew(tx, request, preflight)
         : spawnOnExisting(tx, request, preflight);
@@ -89,7 +89,7 @@ public final class AgentSpawner {
     if (existing != null) {
       return SpawnTickets.attach(
           tx,
-          AcceptCommandsControl.replayInitial(
+          AcceptCommandsReplay.replayInitial(
               tx,
               request.sessionId(),
               request.threadId(),

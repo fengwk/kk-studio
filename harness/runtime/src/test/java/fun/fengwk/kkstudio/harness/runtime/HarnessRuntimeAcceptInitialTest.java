@@ -53,10 +53,15 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
@@ -330,6 +335,118 @@ class HarnessRuntimeAcceptInitialTest {
             HarnessRuntimeConflictException.class,
             () -> runtime.acceptCommands(otherSession, AcceptancePreflight.IDENTITY));
     assertEquals(Reason.THREAD_ID_REUSED, error.reason());
+  }
+
+  /**
+   * 测试意图：initial creation replay 对 durable 初始命令做 fail-closed 校验——缺失、hash 不同或 sequence 不连续都拒绝，
+   * 绝不返回不完整的接受事实。
+   */
+  @Test
+  void initialReplayRejectsCorruptedDurableCommands() {
+    List<NewThreadCommand> requests =
+        List.of(setAgent(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hello"));
+
+    AcceptCommandsCommand partial = newSession(TestIds.id(160), TestIds.id(161), requests);
+    seedInitialThread(partial, List.of(durable(TestIds.id(161), 1, requests.getFirst())));
+    HarnessRuntimeConflictException missing =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.acceptCommands(partial, AcceptancePreflight.IDENTITY));
+    assertEquals(Reason.PARTIAL_COMMAND_REPLAY, missing.reason());
+
+    AcceptCommandsCommand mismatched = newSession(TestIds.id(162), TestIds.id(163), requests);
+    seedInitialThread(
+        mismatched,
+        List.of(
+            durable(TestIds.id(163), 1, requests.getFirst()),
+            durable(TestIds.id(163), 2, requests.getLast(), "f".repeat(64))));
+    HarnessRuntimeConflictException hash =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.acceptCommands(mismatched, AcceptancePreflight.IDENTITY));
+    assertEquals(Reason.IDEMPOTENCY_KEY_REUSED, hash.reason());
+
+    AcceptCommandsCommand nonContiguous = newSession(TestIds.id(164), TestIds.id(165), requests);
+    seedInitialThread(
+        nonContiguous,
+        List.of(
+            durable(TestIds.id(165), 2, requests.getFirst()),
+            durable(TestIds.id(165), 3, requests.getLast())));
+    HarnessRuntimeConflictException order =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.acceptCommands(nonContiguous, AcceptancePreflight.IDENTITY));
+    assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, order.reason());
+  }
+
+  /** 测试意图：fork 只允许来源 Driver 支持 fork 且保持同一 Driver；同 Driver 的 SET_EXECUTION 仍被接受。 */
+  @Test
+  void forkRequiresSourceDriverCapabilityAndKeepsItsDriver() {
+    AcceptedCommands root =
+        runtime.acceptCommands(
+            newSession(
+                TestIds.id(170),
+                TestIds.id(171),
+                List.of(userMessageCommand(TestIds.id(1), "root"))),
+            AcceptancePreflight.IDENTITY);
+
+    IllegalArgumentException changed =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                runtime.acceptCommands(
+                    entry(
+                        TestIds.id(170),
+                        root.rootEntry().id(),
+                        TestIds.id(172),
+                        List.of(
+                            new NewThreadCommand(
+                                new SetExecutionCommandPayload(
+                                    new ExecutionSelection("builtin", "{}")),
+                                TestIds.id(2)),
+                            userMessageCommand(TestIds.id(3), "branch"))),
+                    AcceptancePreflight.IDENTITY));
+    assertTrue(changed.getMessage().contains("driver cannot be changed in fork"));
+
+    AcceptedCommands sameDriver =
+        runtime.acceptCommands(
+            entry(
+                TestIds.id(170),
+                root.rootEntry().id(),
+                TestIds.id(173),
+                List.of(
+                    new NewThreadCommand(
+                        new SetExecutionCommandPayload(new ExecutionSelection("fake", "{}")),
+                        TestIds.id(4)),
+                    userMessageCommand(TestIds.id(5), "branch"))),
+            AcceptancePreflight.IDENTITY);
+    assertEquals(TestIds.id(173), sameDriver.thread().id());
+
+    HarnessRuntime noForkRuntime =
+        HarnessRuntimeTestSupport.runtime(
+            store,
+            Clock.fixed(T0, ZoneOffset.UTC),
+            new FakeAgentDriver("fake").withCapabilities(new DriverCapabilities(false, true)),
+            HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER);
+    AcceptedCommands noForkRoot =
+        noForkRuntime.acceptCommands(
+            newSession(
+                TestIds.id(174),
+                TestIds.id(175),
+                List.of(userMessageCommand(TestIds.id(6), "root"))),
+            AcceptancePreflight.IDENTITY);
+    IllegalArgumentException unsupported =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                noForkRuntime.acceptCommands(
+                    entry(
+                        TestIds.id(174),
+                        noForkRoot.rootEntry().id(),
+                        TestIds.id(176),
+                        List.of(userMessageCommand(TestIds.id(7), "branch"))),
+                    AcceptancePreflight.IDENTITY));
+    assertTrue(unsupported.getMessage().contains("fork is unsupported"));
   }
 
   /**
@@ -786,6 +903,74 @@ class HarnessRuntimeAcceptInitialTest {
                       T0));
           return List.of(turnStartId, barrierId, turnEndId);
         });
+  }
+
+  private void seedInitialThread(AcceptCommandsCommand command, List<ThreadCommand> commands) {
+    AcceptCommandsTarget.NewRootSession target =
+        (AcceptCommandsTarget.NewRootSession) command.target();
+    String creationRequestHash =
+        ThreadCreationRequestHash.forNewSession(
+            target.sessionId(),
+            target.threadId(),
+            target.rootSettings(),
+            null,
+            target.yoloEnabled(),
+            SpawnTrigger.USER,
+            ThreadConstraints.NONE,
+            command.commands());
+    store.transaction(
+        tx -> {
+          UUID rootEntryId = tx.nextId();
+          tx.sessions().insert(new Session(target.sessionId(), "session", T0));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId,
+                      target.sessionId(),
+                      null,
+                      new RootPayload(target.rootSettings()),
+                      T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      target.threadId(),
+                      target.sessionId(),
+                      null,
+                      rootEntryId,
+                      creationRequestHash,
+                      "main",
+                      target.threadId(),
+                      target.yoloEnabled(),
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0,
+                      T0,
+                      T0));
+          tx.threads().lock(target.threadId());
+          tx.commands().insert(commands);
+          return null;
+        });
+  }
+
+  private static ThreadCommand durable(UUID threadId, long sequence, NewThreadCommand request) {
+    return durable(threadId, sequence, request, request.requestHash());
+  }
+
+  private static ThreadCommand durable(
+      UUID threadId, long sequence, NewThreadCommand request, String requestHash) {
+    return new ThreadCommand(
+        threadId,
+        sequence,
+        request.payload(),
+        request.idempotencyKey(),
+        requestHash,
+        null,
+        null,
+        null,
+        T0);
   }
 
   private void assertNoNewThreadFacts(UUID threadId) {

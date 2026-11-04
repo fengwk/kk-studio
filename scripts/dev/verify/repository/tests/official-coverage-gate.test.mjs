@@ -15,7 +15,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const RUNTIME_MODULE = 'harness/runtime'
 const BUILTIN_MODULE = 'harness/agent-builtin'
 
-/** 33 个关键类按物理源码归属拆分：runtime 28 项，builtin 5 项。 */
+/** 35 个关键类按物理源码归属拆分：runtime 30 项，builtin 5 项。 */
 const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot',
@@ -26,6 +26,8 @@ const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.api.tool.ToolBinding',
   'fun.fengwk.kkstudio.harness.codec.ToolBindingJsonCodec',
   'fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl',
+  'fun.fengwk.kkstudio.harness.runtime.AcceptCommandsReplay',
+  'fun.fengwk.kkstudio.harness.runtime.AcceptCommandsValidation',
   'fun.fengwk.kkstudio.harness.runtime.AgentSpawner',
   'fun.fengwk.kkstudio.harness.api.SpawnRequest',
   'fun.fengwk.kkstudio.harness.api.SpawnRequest.Continuation',
@@ -247,18 +249,18 @@ function withFixture(options, assertions) {
   }
 }
 
-test('the 33 critical classes are split into runtime 28 and builtin 5 without overlap', () => {
-  assert.equal(RUNTIME_CRITICAL_CLASSES.length, 28)
+test('the 35 critical classes are split into runtime 30 and builtin 5 without overlap', () => {
+  assert.equal(RUNTIME_CRITICAL_CLASSES.length, 30)
   assert.equal(BUILTIN_CRITICAL_CLASSES.length, 5)
   const all = [...RUNTIME_CRITICAL_CLASSES, ...BUILTIN_CRITICAL_CLASSES]
-  assert.equal(new Set(all).size, 33)
+  assert.equal(new Set(all).size, 35)
   assert.equal(
     RUNTIME_CRITICAL_CLASSES.filter((name) => BUILTIN_CRITICAL_CLASSES.includes(name)).length,
     0,
   )
 })
 
-test('runtime native gate owns 28 runtime classes at 0.90', () => {
+test('runtime native gate owns 30 runtime classes at 0.90', () => {
   const pom = readFileSync(path.join(REPOSITORY_ROOT, RUNTIME_MODULE, 'pom.xml'), 'utf8')
   assert.deepEqual(
     analyzeNativeCoverageGate({
